@@ -4,10 +4,19 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
 
-      class CellSpaceObserver < Sketchup::EntityObserver
+      class CellSpaceObserver < Sketchup::InstanceObserver
         def initialize(indoor_model)
           super()
           @indoor_model = indoor_model
+        end
+
+        def onOpen(instance)
+          log_event('onOpen', instance)
+        end
+
+        def onClose(instance)
+          log_event('onClose', instance)
+          @indoor_model.cell_space_changed(instance)
         end
 
         def onChangeEntity(entity)
