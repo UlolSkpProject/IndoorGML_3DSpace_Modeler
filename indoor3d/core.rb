@@ -7,9 +7,6 @@ module ULOL
 
     load File.join(__dir__, 'classes', 'Gml', 'gml.rb')
     load File.join(__dir__, 'classes', 'IndoorCore', 'IndoorCore.rb')
-    # load File.join(__dir__, 'classes', '', 'floor.rb')
-    # load File.join(__dir__, 'classes', '', 'cell.rb')
-    # load File.join(__dir__, 'services', '', 'node.rb')
 
     def self.convert_selected_solid_groups_to_cell_spaces
       model = Sketchup.active_model
@@ -33,21 +30,22 @@ module ULOL
       cell_type = IndoorCore::CellSpaceType.from_label(result.first)
       indoor_model = IndoorCore::IndoorModel.current
       converted_count = 0
-      failed_count = 0
+      errors = []
 
       model.start_operation('Convert Solid Groups to CellSpace', true)
       solid_groups.each do |group|
         begin
           indoor_model.convert_group_to_cell_space(group, cell_type)
           converted_count += 1
-        rescue StandardError
-          failed_count += 1
+        rescue StandardError => e
+          puts "[IndoorGML] CellSpace conversion failed: #{e.class}: #{e.message}"
+          errors << "#{e.class}: #{e.message}"
         end
       end
       model.commit_operation
 
       message = "Converted #{converted_count} CellSpace(s)."
-      message += "\nFailed #{failed_count} group(s)." if failed_count.positive?
+      message += "\nFailed #{errors.length} group(s):\n#{errors.join("\n")}" if errors.any?
       UI.messagebox(message)
     rescue StandardError => e
       model.abort_operation if model
