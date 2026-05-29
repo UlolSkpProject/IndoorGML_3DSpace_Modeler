@@ -10,18 +10,18 @@ module ULOL
     module IndoorCore
 
       module CellSpaceType
-        GENERAL    = 0 unless const_defined?(:GENERAL, false)    # Room
-        TRANSFER   = 1 unless const_defined?(:TRANSFER, false)   # Stair / ES / EV
-        TRANSITION = 2 unless const_defined?(:TRANSITION, false) # Door / Gate
-        CONNECTION = 3 unless const_defined?(:CONNECTION, false) # Corridor
-        ANCHOR     = 4 unless const_defined?(:ANCHOR, false)     # Entrance
+        GENERAL    = 0 unless const_defined?(:GENERAL, false)
+        TRANSFER   = 1 unless const_defined?(:TRANSFER, false)
+        TRANSITION = 2 unless const_defined?(:TRANSITION, false)
+        CONNECTION = 3 unless const_defined?(:CONNECTION, false)
+        ANCHOR     = 4 unless const_defined?(:ANCHOR, false)
 
         LABELS = {
-          GENERAL => 'General',
-          TRANSFER => 'Transfer',
-          TRANSITION => 'Transition',
-          CONNECTION => 'Connection',
-          ANCHOR => 'Anchor'
+          GENERAL => 'GeneralSpace',
+          TRANSFER => 'TransferSpace',
+          TRANSITION => 'TransitionSpace',
+          CONNECTION => 'ConnectionSpace',
+          ANCHOR => 'AnchorSpace'
         }.freeze unless const_defined?(:LABELS, false)
 
         def self.label(value)
@@ -145,26 +145,40 @@ module ULOL
       class Transition < GML::AbstractFeature
         attr_reader :state1
         attr_reader :state2
+        attr_reader :cell1
+        attr_reader :cell2
         attr_reader :edge
 
-        def initialize(state1 = nil, state2 = nil, parent_entities = nil)
+        TRANSITION_RADIUS = State::STATE_NODE_RADIUS * 0.5 unless const_defined?(:TRANSITION_RADIUS, false)
+        TRANSITION_BASE_HEIGHT = 1.0 unless const_defined?(:TRANSITION_BASE_HEIGHT, false)
+
+        @@sketchup_component_definition = nil
+
+        def initialize(state1 = nil, state2 = nil, parent_entities = nil, cell1: nil, cell2: nil)
           super()
 
           @state1 = state1
           @state2 = state2
+          @cell1 = cell1
+          @cell2 = cell2
           @parent_entities = parent_entities
           @edge = nil
         end
 
         def update(point1, point2)
-          erase_edge
-
           return false unless valid_states?
-
           return false if point1.nil? || point2.nil?
 
-          entities = @parent_entities || Sketchup.active_model.active_entities
-          @edge = entities.add_cline(point1, point2)
+          transformation = cylinder_transformation(point1, point2)
+          return false if transformation.nil?
+
+          if @edge&.valid?
+            @edge.transformation = transformation
+          else
+            entities = @parent_entities || Sketchup.active_model.active_entities
+            @edge = entities.add_instance(self.class.sketchup_component_definition, transformation)
+            @edge.name = "[Transition]-#{@id}"
+          end
           @edge.material = Utils::Materials.transition if @edge.respond_to?(:material=)
 
           true
@@ -189,6 +203,51 @@ module ULOL
           @edge = nil
         end
 
+        def cylinder_transformation(point1, point2)
+          direction = point1.vector_to(point2)
+          length = direction.length
+          return nil if length <= 0.001
+
+          z_axis = direction
+          z_axis.normalize!
+          x_axis = perpendicular_axis(z_axis)
+          y_axis = z_axis.cross(x_axis)
+          y_axis.normalize!
+
+          midpoint = Geom::Point3d.new(
+            (point1.x + point2.x) / 2.0,
+            (point1.y + point2.y) / 2.0,
+            (point1.z + point2.z) / 2.0
+          )
+
+          scaled_z_axis = Geom::Vector3d.new(
+            z_axis.x * length,
+            z_axis.y * length,
+            z_axis.z * length
+          )
+
+          Geom::Transformation.new(
+            [
+              x_axis.x, x_axis.y, x_axis.z, 0.0,
+              y_axis.x, y_axis.y, y_axis.z, 0.0,
+              scaled_z_axis.x, scaled_z_axis.y, scaled_z_axis.z, 0.0,
+              midpoint.x, midpoint.y, midpoint.z, 1.0
+            ]
+          )
+        end
+
+        def perpendicular_axis(z_axis)
+          seed =
+            if z_axis.parallel?(Z_AXIS)
+              X_AXIS
+            else
+              Z_AXIS
+            end
+          x_axis = seed.cross(z_axis)
+          x_axis.normalize!
+          x_axis
+        end
+
         def valid_states?
           return false if @state1.nil? || @state2.nil?
           return false if @state1 == @state2
@@ -198,6 +257,23 @@ module ULOL
           return false unless @state2.valid?
 
           true
+        end
+
+        def self.sketchup_component_definition
+          return @@sketchup_component_definition if @@sketchup_component_definition&.valid?
+
+          model = Sketchup.active_model
+          @@sketchup_component_definition = model.definitions.add('IndoorGML_Transition')
+
+          entities = @@sketchup_component_definition.entities
+          faces = Utils::Geometry.add_cylinder(
+            entities,
+            TRANSITION_RADIUS,
+            TRANSITION_BASE_HEIGHT
+          )
+          faces.each { |face| face.material = Utils::Materials.transition }
+
+          @@sketchup_component_definition
         end
       end
 

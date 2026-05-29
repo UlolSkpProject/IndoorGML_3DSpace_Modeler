@@ -52,10 +52,56 @@ module ULOL
       UI.messagebox("CellSpace conversion failed:\n#{e.message}")
     end
 
+    def self.change_selected_cell_space_type
+      model = Sketchup.active_model
+      groups = model.selection.grep(Sketchup::Group)
+
+      if groups.empty?
+        UI.messagebox('Select one or more CellSpace groups to change type.')
+        return
+      end
+
+      labels = IndoorCore::CellSpaceType::LABELS.values
+      result = UI.inputbox(
+        ['CellSpace Type'],
+        [labels.first],
+        [labels.join('|')],
+        'Change CellSpace Type'
+      )
+      return unless result
+
+      cell_type = IndoorCore::CellSpaceType.from_label(result.first)
+      indoor_model = IndoorCore::IndoorModel.current
+      changed_count = 0
+      errors = []
+
+      model.start_operation('Change CellSpace Type', true)
+      groups.each do |group|
+        begin
+          indoor_model.change_cell_space_type(group, cell_type)
+          changed_count += 1
+        rescue StandardError => e
+          puts "[IndoorGML] CellSpace type change failed: #{e.class}: #{e.message}"
+          errors << "#{group.name}: #{e.message}"
+        end
+      end
+      model.commit_operation
+
+      message = "Changed #{changed_count} CellSpace type(s)."
+      message += "\nFailed #{errors.length} group(s):\n#{errors.join("\n")}" if errors.any?
+      UI.messagebox(message)
+    rescue StandardError => e
+      model.abort_operation if model
+      UI.messagebox("CellSpace type change failed:\n#{e.message}")
+    end
+
     unless file_loaded?(__FILE__)
       menu = UI.menu('Extensions').add_submenu('Indoor3DGML Modeler')
       menu.add_item('Convert Solid Groups to CellSpace') do
         convert_selected_solid_groups_to_cell_spaces
+      end
+      menu.add_item('Change CellSpace Type') do
+        change_selected_cell_space_type
       end
       file_loaded(__FILE__)
     end

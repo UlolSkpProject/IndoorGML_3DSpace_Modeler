@@ -28,6 +28,8 @@ module ULOL
           @cell_spaces_by_entity_id = {}
           @states_by_entity = {}
           @states_by_entity_id = {}
+          @adjacent_cell_space_pairs = {}
+          @transitions_by_cell_pair = {}
           @cell_space_observer = CellSpaceObserver.new(self)
           @state_observer = StateObserver.new(self)
           @space_features_observer = SpaceFeaturesObserver.new(self)
@@ -54,6 +56,7 @@ module ULOL
           register_cell_space(cell_space)
           register_state(state)
           write_attributes(cell_space)
+          synchronize_adjacency_and_transitions_for_cell_space(cell_space)
 
           cell_space
         end
@@ -61,12 +64,27 @@ module ULOL
         def connect_states(state1, state2)
           ensure_space_features_groups
 
-          transition = Transition.new(state1, state2, @dual_group.entities)
-          return nil unless update_transition(transition)
+          cell1 = state1&.duality_cell
+          cell2 = state2&.duality_cell
+          return nil if cell1.nil? || cell2.nil?
 
-          @transitions << transition
-          write_transition_attributes(transition)
-          transition
+          create_or_update_transition_for_pair(cell1, cell2)
+        end
+
+        def change_cell_space_type(sketchup_group, cell_type)
+          cell_space = find_cell_space_for_entity(sketchup_group)
+          raise ArgumentError, 'Selected entity is not a registered CellSpace' if cell_space.nil?
+          raise ArgumentError, 'CellSpace is no longer valid' unless cell_space.valid?
+
+          sync do
+            cell_space.cell_type = cell_type
+            name_cell_space_entity(cell_space)
+            apply_cell_space_material(cell_space)
+            write_cell_space_attributes(cell_space)
+            synchronize_adjacency_and_transitions_for_cell_space(cell_space)
+          end
+
+          cell_space
         end
 
         def cell_space_changed(entity)
@@ -78,7 +96,7 @@ module ULOL
           sync do
             state = cell_space.duality_state
             move_state_to_local_position(state, cell_space_local_origin(cell_space)) if state&.valid?
-            update_transitions_for_state(state)
+            synchronize_adjacency_and_transitions_for_cell_space(cell_space)
           end
         end
 
@@ -91,7 +109,7 @@ module ULOL
           sync do
             cell_space = state.duality_cell
             move_cell_space_to_local_position(cell_space, state_local_position(state)) if cell_space&.valid?
-            update_transitions_for_state(state)
+            synchronize_adjacency_and_transitions_for_cell_space(cell_space) if cell_space&.valid?
           end
         end
 
@@ -119,6 +137,7 @@ module ULOL
             unregister_state(state)
             cell_space.erase! if erase_sketchup_group && cell_space.valid?
             unregister_cell_space(cell_space)
+            erase_adjacency_for_cell_space(cell_space)
           end
         end
 
@@ -132,6 +151,7 @@ module ULOL
             state.erase! if erase_sketchup_instance && state.valid?
             unregister_cell_space(cell_space)
             unregister_state(state)
+            erase_adjacency_for_cell_space(cell_space)
           end
         end
 
@@ -360,7 +380,11 @@ module ULOL
         end
 
         def apply_cell_space_material(cell_space)
-          cell_space.sketchup_group.material = Utils::Materials.cell_space(cell_space.cell_type)
+          material = Utils::Materials.cell_space(cell_space.cell_type)
+          cell_space.sketchup_group.material = material
+          cell_space.sketchup_group.entities.each do |entity|
+            entity.material = material if entity.is_a?(Sketchup::Face)
+          end
         end
 
         def register_state(state)
@@ -386,12 +410,89 @@ module ULOL
           @states_by_entity_id.delete(state.sketchup_component_instance_id)
         end
 
+        def synchronize_adjacency_and_transitions_for_cell_space(cell_space)
+          return if cell_space.nil? || !cell_space.valid? || !cell_space.duality_state&.valid?
+
+          @cell_spaces.each do |other_cell_space|
+            next if other_cell_space.nil? || other_cell_space == cell_space
+            next unless other_cell_space.valid? && other_cell_space.duality_state&.valid?
+
+            pair_key = cell_pair_key(cell_space, other_cell_space)
+            if transition_allowed_between?(cell_space, other_cell_space) &&
+               Utils::Geometry.adjacent_solids?(cell_space.sketchup_group, other_cell_space.sketchup_group)
+              @adjacent_cell_space_pairs[pair_key] = [cell_space, other_cell_space]
+              create_or_update_transition_for_pair(cell_space, other_cell_space)
+            else
+              erase_transition_for_pair_key(pair_key)
+            end
+          end
+        end
+
+        def erase_adjacency_for_cell_space(cell_space)
+          return if cell_space.nil?
+
+          @adjacent_cell_space_pairs.keys.each do |pair_key|
+            erase_transition_for_pair_key(pair_key) if pair_key.split(':').include?(cell_space.id)
+          end
+
+          @transitions_by_cell_pair.keys.each do |pair_key|
+            erase_transition_for_pair_key(pair_key) if pair_key.split(':').include?(cell_space.id)
+          end
+        end
+
+        def create_or_update_transition_for_pair(cell1, cell2)
+          return nil if cell1.nil? || cell2.nil?
+          return nil if cell1 == cell2
+          return nil unless cell1.valid? && cell2.valid?
+          return nil unless cell1.duality_state&.valid? && cell2.duality_state&.valid?
+
+          pair_key = cell_pair_key(cell1, cell2)
+          transition = @transitions_by_cell_pair[pair_key]
+          unless transition&.valid?
+            transition = Transition.new(
+              cell1.duality_state,
+              cell2.duality_state,
+              @dual_group.entities,
+              cell1: cell1,
+              cell2: cell2
+            )
+            @transitions << transition
+            @transitions_by_cell_pair[pair_key] = transition
+          end
+
+          return nil unless update_transition(transition)
+
+          write_transition_attributes(transition)
+          transition
+        end
+
+        def erase_transition_for_pair_key(pair_key)
+          transition = @transitions_by_cell_pair.delete(pair_key)
+          return if transition.nil?
+
+          transition.erase!
+          @transitions.delete(transition)
+          @adjacent_cell_space_pairs.delete(pair_key)
+        end
+
+        def cell_pair_key(cell1, cell2)
+          [cell1.id, cell2.id].sort.join(':')
+        end
+
+        def transition_allowed_between?(cell1, cell2)
+          return false if cell1.cell_type == CellSpaceType::GENERAL && cell2.cell_type == CellSpaceType::GENERAL
+
+          true
+        end
+
         def erase_transitions_for_state(state)
           return if state.nil?
 
           @transitions.delete_if do |transition|
             next false unless transition.connected_to?(state)
 
+            @transitions_by_cell_pair.delete(cell_pair_key(transition.cell1, transition.cell2)) if transition.cell1 && transition.cell2
+            @adjacent_cell_space_pairs.delete(cell_pair_key(transition.cell1, transition.cell2)) if transition.cell1 && transition.cell2
             transition.erase!
             true
           end
@@ -403,7 +504,7 @@ module ULOL
 
           group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'feature', 'CellSpace')
           group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'id', cell_space.id)
-          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'name', cell_space.name)
+          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'name', group.name)
           group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'cell_type', CellSpaceType.label(cell_space.cell_type))
           group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'duality_state_id', cell_space.duality_state.id)
           group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'indoor_gml_version', INDOOR_GML_VERSION)
@@ -415,6 +516,17 @@ module ULOL
           state.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'indoor_gml_version', INDOOR_GML_VERSION)
         end
 
+        def write_cell_space_attributes(cell_space)
+          group = cell_space.sketchup_group
+
+          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'feature', 'CellSpace')
+          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'id', cell_space.id)
+          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'name', group.name)
+          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'cell_type', CellSpaceType.label(cell_space.cell_type))
+          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'duality_state_id', cell_space.duality_state.id) if cell_space.duality_state
+          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'indoor_gml_version', INDOOR_GML_VERSION)
+        end
+
         def write_transition_attributes(transition)
           return unless transition.edge&.valid?
 
@@ -423,6 +535,8 @@ module ULOL
           transition.edge.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'name', transition.name)
           transition.edge.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'state1_id', transition.state1.id)
           transition.edge.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'state2_id', transition.state2.id)
+          transition.edge.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'cell1_id', transition.cell1.id) if transition.cell1
+          transition.edge.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'cell2_id', transition.cell2.id) if transition.cell2
           transition.edge.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'indoor_gml_version', INDOOR_GML_VERSION)
         end
 
