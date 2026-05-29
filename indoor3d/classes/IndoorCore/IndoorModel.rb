@@ -48,6 +48,7 @@ module ULOL
           cell_group = place_cell_group(sketchup_group)
           cell_space = CellSpace.new(cell_group, cell_type)
           name_cell_space_entity(cell_space)
+          apply_cell_space_material(cell_space)
           state = cell_space.create_duality_state(@dual_group.entities, cell_space_local_origin(cell_space))
 
           register_cell_space(cell_space)
@@ -167,6 +168,8 @@ module ULOL
         private
 
         def ensure_space_features_groups
+          Utils::Materials.ensure_all
+
           model = Sketchup.active_model
           entities = model.active_entities
 
@@ -354,6 +357,10 @@ module ULOL
 
         def name_cell_space_entity(cell_space)
           cell_space.sketchup_group.name = "[#{CellSpaceType.label(cell_space.cell_type)}]-#{cell_space.id}"
+        end
+
+        def apply_cell_space_material(cell_space)
+          cell_space.sketchup_group.material = Utils::Materials.cell_space(cell_space.cell_type)
         end
 
         def register_state(state)

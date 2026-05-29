@@ -33,6 +33,8 @@ module ULOL
         end
       end
 
+      require_relative '../../utils/materials.rb'
+
       class State < GML::AbstractFeature
         attr_reader :sketchup_component_instance
         attr_reader :sketchup_component_instance_id
@@ -88,21 +90,9 @@ module ULOL
 
           entities = @@sketchup_component_definition.entities
           faces = Utils::Geometry.add_sphere(entities, ORIGIN, STATE_NODE_RADIUS)
-          faces.each { |face| face.material = state_material }
+          faces.each { |face| face.material = Utils::Materials.state }
 
           @@sketchup_component_definition
-        end
-
-        def self.state_material
-          model = Sketchup.active_model
-          material = model.materials['IndoorGML_State']
-
-          unless material
-            material = model.materials.add('IndoorGML_State')
-            material.color = Sketchup::Color.new(0, 0, 255)
-          end
-
-          material
         end
       end
 
@@ -175,6 +165,7 @@ module ULOL
 
           entities = @parent_entities || Sketchup.active_model.active_entities
           @edge = entities.add_cline(point1, point2)
+          @edge.material = Utils::Materials.transition if @edge.respond_to?(:material=)
 
           true
         end
