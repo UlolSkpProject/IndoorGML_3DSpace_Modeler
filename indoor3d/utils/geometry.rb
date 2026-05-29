@@ -73,16 +73,26 @@ module ULOL
         end
 
         def self.adjacent_solids?(entity1, entity2, tolerance: 1.mm)
-          return false unless entity1&.valid? && entity2&.valid?
-          return false unless touching_bounds?(entity1.bounds, entity2.bounds, tolerance)
+          !adjacency_axis(entity1, entity2, tolerance: tolerance).nil?
+        end
 
-          faces1 = world_faces(entity1)
-          faces2 = world_faces(entity2)
-          return false if faces1.empty? || faces2.empty?
+        def self.horizontal_adjacency?(entity1, entity2, tolerance: 1.mm)
+          axis = adjacency_axis(entity1, entity2, tolerance: tolerance)
+          axis == :x || axis == :y
+        end
 
-          faces1.any? do |face1|
-            faces2.any? { |face2| coplanar_touching_faces?(face1, face2, tolerance) }
-          end || touching_bounds_faces?(entity1.bounds, entity2.bounds, tolerance)
+        def self.vertical_adjacency?(entity1, entity2, tolerance: 1.mm)
+          adjacency_axis(entity1, entity2, tolerance: tolerance) == :z
+        end
+
+        def self.adjacency_axis(entity1, entity2, tolerance: 1.mm)
+          return nil unless entity1&.valid? && entity2&.valid?
+          return nil unless touching_bounds?(entity1.bounds, entity2.bounds, tolerance)
+
+          face_axis = adjacent_face_axis(entity1, entity2, tolerance)
+          return face_axis unless face_axis.nil?
+
+          touching_bounds_face_axis(entity1.bounds, entity2.bounds, tolerance)
         end
 
         def self.sphere_points(center, radius, segments, rings)
@@ -126,6 +136,23 @@ module ULOL
         end
         private_class_method :world_faces
 
+        def self.adjacent_face_axis(entity1, entity2, tolerance)
+          faces1 = world_faces(entity1)
+          faces2 = world_faces(entity2)
+          return nil if faces1.empty? || faces2.empty?
+
+          faces1.each do |face1|
+            faces2.each do |face2|
+              next unless coplanar_touching_faces?(face1, face2, tolerance)
+
+              return dominant_axis(face1[:normal])
+            end
+          end
+
+          nil
+        end
+        private_class_method :adjacent_face_axis
+
         def self.touching_bounds?(bounds1, bounds2, tolerance)
           axis_overlap_or_touch?(bounds1.min.x, bounds1.max.x, bounds2.min.x, bounds2.max.x, tolerance) &&
             axis_overlap_or_touch?(bounds1.min.y, bounds1.max.y, bounds2.min.y, bounds2.max.y, tolerance) &&
@@ -133,14 +160,18 @@ module ULOL
         end
         private_class_method :touching_bounds?
 
-        def self.touching_bounds_faces?(bounds1, bounds2, tolerance)
-          bounds_face_contact?(bounds1.min.x, bounds1.max.x, bounds2.min.x, bounds2.max.x, bounds1, bounds2, :x, tolerance) ||
-            bounds_face_contact?(bounds1.min.y, bounds1.max.y, bounds2.min.y, bounds2.max.y, bounds1, bounds2, :y, tolerance) ||
-            bounds_face_contact?(bounds1.min.z, bounds1.max.z, bounds2.min.z, bounds2.max.z, bounds1, bounds2, :z, tolerance)
+        def self.touching_bounds_face_axis(bounds1, bounds2, tolerance)
+          [:x, :y, :z].find do |axis|
+            bounds_face_contact_on_axis?(bounds1, bounds2, axis, tolerance)
+          end
         end
-        private_class_method :touching_bounds_faces?
+        private_class_method :touching_bounds_face_axis
 
-        def self.bounds_face_contact?(min1, max1, min2, max2, bounds1, bounds2, axis, tolerance)
+        def self.bounds_face_contact_on_axis?(bounds1, bounds2, axis, tolerance)
+          min1 = bounds1.min.public_send(axis)
+          max1 = bounds1.max.public_send(axis)
+          min2 = bounds2.min.public_send(axis)
+          max2 = bounds2.max.public_send(axis)
           return false unless (max1 - min2).abs <= tolerance || (max2 - min1).abs <= tolerance
 
           axes = [:x, :y, :z] - [axis]
@@ -153,7 +184,13 @@ module ULOL
             ) > tolerance
           end
         end
-        private_class_method :bounds_face_contact?
+        private_class_method :bounds_face_contact_on_axis?
+
+        def self.dominant_axis(vector)
+          values = { x: vector.x.abs, y: vector.y.abs, z: vector.z.abs }
+          values.max_by { |_axis, value| value }.first
+        end
+        private_class_method :dominant_axis
 
         def self.axis_overlap_or_touch?(min1, max1, min2, max2, tolerance)
           [min1, min2].max <= [max1, max2].min + tolerance
