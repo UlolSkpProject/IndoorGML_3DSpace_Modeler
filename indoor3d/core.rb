@@ -8,6 +8,14 @@ module ULOL
     load File.join(__dir__, 'classes', 'Gml', 'gml.rb')
     load File.join(__dir__, 'classes', 'IndoorCore', 'IndoorCore.rb')
 
+    def self.attach_model_observer
+      @app_observer ||= IndoorCore::Indoor3DGmlAppObserver.new
+      Sketchup.add_observer(@app_observer)
+      IndoorCore::IndoorModel.current.refresh_runtime_data
+    rescue StandardError => e
+      puts "[IndoorGML] Model observer setup failed: #{e.class}: #{e.message}"
+    end
+
     def self.convert_selected_solid_groups_to_cell_spaces
       model = Sketchup.active_model
       groups = model.selection.grep(Sketchup::Group)
@@ -95,13 +103,24 @@ module ULOL
       UI.messagebox("CellSpace type change failed:\n#{e.message}")
     end
 
+    def self.refresh_runtime_data
+      IndoorCore::IndoorModel.current.refresh_runtime_data
+      UI.messagebox('IndoorGML runtime data refreshed.')
+    rescue StandardError => e
+      UI.messagebox("Runtime refresh failed:\n#{e.message}")
+    end
+
     unless file_loaded?(__FILE__)
+      attach_model_observer
       menu = UI.menu('Extensions').add_submenu('Indoor3DGML Modeler')
       menu.add_item('Convert Solid Groups to CellSpace') do
         convert_selected_solid_groups_to_cell_spaces
       end
       menu.add_item('Change CellSpace Type') do
         change_selected_cell_space_type
+      end
+      menu.add_item('Refresh Runtime Data') do
+        refresh_runtime_data
       end
       file_loaded(__FILE__)
     end

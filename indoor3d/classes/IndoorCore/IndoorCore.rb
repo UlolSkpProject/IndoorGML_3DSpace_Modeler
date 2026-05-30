@@ -93,7 +93,31 @@ module ULOL
           @sketchup_component_instance.erase! if valid?
         end
 
+        def self.restore(cell_space, component_instance, local_position, id: nil, name: nil)
+          unless cell_space.is_a?(CellSpace)
+            raise ArgumentError, 'IndoorCore::CellSpace expected'
+          end
+
+          unless component_instance.is_a?(Sketchup::ComponentInstance)
+            raise ArgumentError, 'Sketchup::ComponentInstance expected'
+          end
+
+          state = allocate
+          state.send(:initialize_restored, cell_space, component_instance, local_position, id, name)
+          state
+        end
+
         private
+
+        def initialize_restored(cell_space, component_instance, local_position, id, name)
+          @duality_cell = cell_space
+          @position = local_position
+          @transitions = []
+          @sketchup_component_instance = component_instance
+          @sketchup_component_instance_id = component_instance.persistent_id
+          @id = id unless id.to_s.empty?
+          @name = name.to_s
+        end
 
         def create_component_instance(position, parent_entities)
           definition = self.class.sketchup_component_definition
@@ -139,6 +163,10 @@ module ULOL
           @duality_state ||= State.new(self, parent_entities, local_position)
         end
 
+        def restore_duality_state(state)
+          @duality_state = state
+        end
+
         def valid?
           @sketchup_group&.valid? == true
         end
@@ -147,7 +175,24 @@ module ULOL
           @sketchup_group.erase! if valid?
         end
 
+        def self.restore(sketchup_group, cell_type, id: nil, name: nil)
+          validate_sketchup_group!(sketchup_group)
+
+          cell_space = allocate
+          cell_space.send(:initialize_restored, sketchup_group, cell_type, id, name)
+          cell_space
+        end
+
         private
+
+        def initialize_restored(sketchup_group, cell_type, id, name)
+          @sketchup_group = sketchup_group
+          @sketchup_group_id = sketchup_group.persistent_id
+          @cell_type = cell_type
+          @duality_state = nil
+          @id = id unless id.to_s.empty?
+          @name = name.to_s
+        end
 
         def validate_sketchup_group!(sketchup_group)
           unless sketchup_group.is_a?(Sketchup::Group) || sketchup_group.is_a?(Sketchup::ComponentInstance)
@@ -218,7 +263,28 @@ module ULOL
           erase_edge
         end
 
+        def self.restore(edge, state1, state2, cell1: nil, cell2: nil, id: nil, name: nil)
+          unless edge.is_a?(Sketchup::ComponentInstance)
+            raise ArgumentError, 'Sketchup::ComponentInstance expected'
+          end
+
+          transition = allocate
+          transition.send(:initialize_restored, edge, state1, state2, cell1, cell2, id, name)
+          transition
+        end
+
         private
+
+        def initialize_restored(edge, state1, state2, cell1, cell2, id, name)
+          @state1 = state1
+          @state2 = state2
+          @cell1 = cell1
+          @cell2 = cell2
+          @parent_entities = edge.parent.respond_to?(:entities) ? edge.parent.entities : nil
+          @edge = edge
+          @id = id unless id.to_s.empty?
+          @name = name.to_s
+        end
 
         def erase_edge
           @edge.erase! if @edge&.valid?
