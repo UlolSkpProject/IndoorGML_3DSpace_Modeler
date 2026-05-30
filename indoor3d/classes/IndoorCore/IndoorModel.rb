@@ -78,6 +78,7 @@ module ULOL
           @syncing = false
           @erasing = false
           @relocating_entity = false
+          @refreshing_runtime = false
           @constraining_space_features = false
           @primal_group = nil
           @dual_group = nil
@@ -124,10 +125,15 @@ module ULOL
           return if @syncing || @erasing
 
           cell_space = find_cell_space_for_entity(entity)
+          cell_space = refresh_and_find_cell_space(entity) if stale_cell_space_runtime?(cell_space, entity)
           return if cell_space.nil? || !cell_space.valid?
 
           sync do
             state = cell_space.duality_state
+            unless state&.valid?
+              cell_space = refresh_and_find_cell_space(entity)
+              state = cell_space&.duality_state
+            end
             if state&.valid?
               local_position = cell_space_local_origin(cell_space)
               move_state_to_local_position(state, local_position)
@@ -142,6 +148,7 @@ module ULOL
           return if @syncing || @erasing
 
           state = find_state_for_entity(entity)
+          state = refresh_and_find_state(entity) if stale_state_runtime?(state, entity)
           return if state.nil? || !state.valid?
 
           sync do
@@ -202,6 +209,9 @@ module ULOL
         end
 
         def refresh_runtime_data
+          return true if @refreshing_runtime
+
+          @refreshing_runtime = true
           sync do
             @model = Sketchup.active_model
             ensure_space_features_groups
@@ -214,6 +224,8 @@ module ULOL
           end
           puts "[IndoorGML] Runtime refreshed: cells=#{@cell_spaces.length}, states=#{@states.length}, transitions=#{@transitions.length}"
           true
+        ensure
+          @refreshing_runtime = false
         end
 
         def update_transitions_for_state(state)
@@ -272,7 +284,10 @@ module ULOL
           if indoor_feature(entity) == 'CellSpace'
             cell_space = find_cell_space_for_entity(entity)
             attach_cell_space_observer(entity)
-            if cell_space
+            if stale_cell_space_runtime?(cell_space, entity)
+              puts '[IndoorGML] CellSpace runtime stale. Refreshing runtime data.'
+              refresh_runtime_data
+            elsif cell_space
               lock_indoor_entity(entity)
             else
               puts '[IndoorGML] CellSpace runtime data missing. Refresh is required.'
@@ -301,7 +316,10 @@ module ULOL
           when 'State'
             state = find_state_for_entity(entity)
             attach_state_observer(entity)
-            if state
+            if stale_state_runtime?(state, entity)
+              puts '[IndoorGML] State runtime stale. Refreshing runtime data.'
+              refresh_runtime_data
+            elsif state
               lock_indoor_entity(entity)
             else
               puts '[IndoorGML] State runtime data missing. Refresh is required.'
@@ -506,6 +524,38 @@ module ULOL
           entities.to_a.select do |entity|
             entity&.valid? && indoor_attribute(entity, 'feature') == feature
           end
+        end
+
+        def stale_cell_space_runtime?(cell_space, entity)
+          return true if cell_space.nil?
+          return true unless cell_space.valid?
+          return true unless cell_space.sketchup_group == entity
+          return true unless cell_space.duality_state&.valid?
+
+          false
+        rescue StandardError
+          true
+        end
+
+        def stale_state_runtime?(state, entity)
+          return true if state.nil?
+          return true unless state.valid?
+          return true unless state.sketchup_component_instance == entity
+          return true unless state.duality_cell&.valid?
+
+          false
+        rescue StandardError
+          true
+        end
+
+        def refresh_and_find_cell_space(entity)
+          refresh_runtime_data
+          find_cell_space_for_entity(entity)
+        end
+
+        def refresh_and_find_state(entity)
+          refresh_runtime_data
+          find_state_for_entity(entity)
         end
 
         def find_group(entities, name)
