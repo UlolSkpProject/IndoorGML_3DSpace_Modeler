@@ -26,18 +26,30 @@ module ULOL
           @transitions = []
           @cell_spaces_by_entity = {}
           @cell_spaces_by_entity_id = {}
+          @cell_spaces_by_sketchup_entity_id = {}
           @states_by_entity = {}
           @states_by_entity_id = {}
+          @states_by_sketchup_entity_id = {}
+          @transitions_by_entity = {}
+          @transitions_by_entity_id = {}
+          @transitions_by_sketchup_entity_id = {}
           @adjacent_cell_space_pairs = {}
           @transitions_by_cell_pair = {}
           @cell_space_observer = CellSpaceObserver.new(self)
           @state_observer = StateObserver.new(self)
           @space_features_observer = SpaceFeaturesObserver.new(self)
+          @root_entities_observer = Indoor3DGmlRootEntitiesObserver.new(self)
+          @primal_entities_observer = Indoor3DGmlPrimalEntitiesObserver.new(self)
+          @dual_entities_observer = Indoor3DGmlDualEntitiesObserver.new(self)
+          @cell_space_observed_ids = {}
+          @state_observed_ids = {}
           @space_features_observed_ids = {}
+          @entities_observed_ids = {}
           @space_features_expected_names = {}
           @space_features_last_transforms = {}
           @syncing = false
           @erasing = false
+          @relocating_entity = false
           @constraining_space_features = false
           @primal_group = nil
           @dual_group = nil
@@ -91,6 +103,8 @@ module ULOL
             end
             synchronize_adjacency_and_transitions_for_cell_space(cell_space)
           end
+        ensure
+          lock_indoor_entity(entity)
         end
 
         def state_changed(entity)
@@ -106,6 +120,8 @@ module ULOL
             move_cell_space_to_local_position(cell_space, local_position) if cell_space&.valid?
             synchronize_adjacency_and_transitions_for_cell_space(cell_space) if cell_space&.valid?
           end
+        ensure
+          lock_indoor_entity(entity)
         end
 
         def cell_space_erased(entity)
@@ -128,8 +144,10 @@ module ULOL
           erase_guard do
             state = cell_space.duality_state
             erase_transitions_for_state(state)
+            unlock_indoor_entity(state.sketchup_component_instance) if state&.valid?
             state.erase! if state&.valid?
             unregister_state(state)
+            unlock_indoor_entity(cell_space.sketchup_group) if erase_sketchup_group && cell_space.valid?
             cell_space.erase! if erase_sketchup_group && cell_space.valid?
             unregister_cell_space(cell_space)
             erase_adjacency_for_cell_space(cell_space)
@@ -142,7 +160,9 @@ module ULOL
           erase_guard do
             cell_space = state.duality_cell
             erase_transitions_for_state(state)
+            unlock_indoor_entity(cell_space.sketchup_group) if cell_space&.valid?
             cell_space.erase! if cell_space&.valid?
+            unlock_indoor_entity(state.sketchup_component_instance) if erase_sketchup_instance && state.valid?
             state.erase! if erase_sketchup_instance && state.valid?
             unregister_cell_space(cell_space)
             unregister_state(state)
@@ -167,7 +187,89 @@ module ULOL
           @constraining_space_features = true
           enforce_space_features_constraints
         ensure
+          lock_indoor_entity(entity)
           @constraining_space_features = false
+        end
+
+        def root_entity_added(entity)
+          return if @relocating_entity
+          return unless indoor_gml_entity?(entity)
+
+          ensure_space_features_groups
+          case indoor_feature(entity)
+          when 'CellSpace'
+            relocate_indoor_entity(entity, @primal_group.entities, @primal_group)
+          when 'State', 'Transition'
+            relocate_indoor_entity(entity, @dual_group.entities, @dual_group)
+          else
+            lock_indoor_entity(entity)
+          end
+        end
+
+        def root_entity_removed(entity_id)
+          return if @erasing || @relocating_entity
+
+          puts "[IndoorGML] Root entity removed: entity_id=#{entity_id}"
+        end
+
+        def primal_entity_added(entity)
+          return if @relocating_entity
+          return unless indoor_gml_entity?(entity)
+
+          ensure_space_features_groups
+          if indoor_feature(entity) == 'CellSpace'
+            cell_space = find_cell_space_for_entity(entity)
+            attach_cell_space_observer(entity)
+            if cell_space
+              lock_indoor_entity(entity)
+            else
+              puts '[IndoorGML] CellSpace runtime data missing. Refresh is required.'
+            end
+          elsif dual_feature?(entity)
+            relocate_indoor_entity(entity, @dual_group.entities, @dual_group)
+          else
+            relocate_indoor_entity(entity, Sketchup.active_model.entities)
+          end
+        end
+
+        def primal_entity_removed(entity_id)
+          return if @erasing || @relocating_entity
+
+          cell_space = @cell_spaces_by_sketchup_entity_id[entity_id]
+          erase_cell_space(cell_space, erase_sketchup_group: false) if cell_space
+        end
+
+        def dual_entity_added(entity)
+          return if @relocating_entity
+          return unless indoor_gml_entity?(entity)
+
+          ensure_space_features_groups
+          case indoor_feature(entity)
+          when 'State'
+            state = find_state_for_entity(entity)
+            attach_state_observer(entity)
+            if state
+              lock_indoor_entity(entity)
+            else
+              puts '[IndoorGML] State runtime data missing. Refresh is required.'
+            end
+          when 'Transition'
+            lock_indoor_entity(entity)
+          when 'CellSpace'
+            relocate_indoor_entity(entity, @primal_group.entities, @primal_group)
+          else
+            relocate_indoor_entity(entity, Sketchup.active_model.entities)
+          end
+        end
+
+        def dual_entity_removed(entity_id)
+          return if @erasing || @relocating_entity
+
+          state = @states_by_sketchup_entity_id[entity_id]
+          erase_state(state, erase_sketchup_instance: false) if state
+
+          transition = @transitions_by_sketchup_entity_id[entity_id]
+          erase_transition(transition) if transition
         end
 
         def space_features_erased(entity)
@@ -201,6 +303,8 @@ module ULOL
             @dual_group.name = DUAL_GROUP_NAME
           end
           attach_space_features_observer(@dual_group, DUAL_GROUP_NAME)
+          attach_entities_observers
+          lock_space_features_groups
         end
 
         def find_group(entities, name)
@@ -251,13 +355,55 @@ module ULOL
 
           persistent_id = group.persistent_id
           @space_features_expected_names[persistent_id] = expected_name
-          group.name = expected_name unless group.name == expected_name
+          with_unlocked(group) { group.name = expected_name } unless group.name == expected_name
           return if @space_features_observed_ids[persistent_id]
 
           group.add_observer(@space_features_observer)
           @space_features_observed_ids[persistent_id] = true
           @space_features_last_transforms[persistent_id] = group.transformation
           synchronize_space_features_from(@primal_group) if group == @dual_group && @primal_group&.valid?
+        end
+
+        def attach_entities_observers
+          model = Sketchup.active_model
+          attach_entities_observer(:root, model.entities, @root_entities_observer)
+          attach_entities_observer(:primal, @primal_group.entities, @primal_entities_observer) if @primal_group&.valid?
+          attach_entities_observer(:dual, @dual_group.entities, @dual_entities_observer) if @dual_group&.valid?
+        end
+
+        def attach_entities_observer(scope, entities, observer)
+          return unless entities && observer
+
+          key = [scope, entities.object_id]
+          return if @entities_observed_ids[key]
+
+          entities.add_observer(observer)
+          @entities_observed_ids[key] = true
+        end
+
+        def attach_cell_space_observer(entity)
+          attach_entity_observer(entity, @cell_space_observer, @cell_space_observed_ids)
+        end
+
+        def attach_state_observer(entity)
+          attach_entity_observer(entity, @state_observer, @state_observed_ids)
+        end
+
+        def attach_entity_observer(entity, observer, observed_ids)
+          return unless entity&.valid? && observer
+
+          key = entity.persistent_id
+          return if observed_ids[key]
+
+          entity.add_observer(observer)
+          observed_ids[key] = true
+        rescue StandardError => e
+          puts "[IndoorGML] Observer attach failed: #{e.class}: #{e.message}"
+        end
+
+        def lock_space_features_groups
+          lock_indoor_entity(@primal_group)
+          lock_indoor_entity(@dual_group)
         end
 
         def enforce_space_features_constraints
@@ -283,7 +429,7 @@ module ULOL
           return if expected_name.nil? || group.name == expected_name
 
           UI.messagebox('이름을 변경할 수 없는 Group입니다.')
-          group.name = expected_name
+          with_unlocked(group) { group.name = expected_name }
         end
 
         def restore_space_features_scale(group)
@@ -314,10 +460,12 @@ module ULOL
         end
 
         def set_group_transformation(group, transformation)
-          if group.respond_to?(:transformation=)
-            group.transformation = transformation
-          else
-            group.transform!(group.transformation.inverse * transformation)
+          with_unlocked(group) do
+            if group.respond_to?(:transformation=)
+              group.transformation = transformation
+            else
+              group.transform!(group.transformation.inverse * transformation)
+            end
           end
         end
 
@@ -339,13 +487,17 @@ module ULOL
 
         def move_state_to_local_position(state, local_position)
           ensure_state_is_child_of_dual_space!(state)
-          Utils::Transformation.move_entity_origin_in_root_local_to(state.sketchup_component_instance, @dual_group, local_position)
+          with_unlocked(state.sketchup_component_instance) do
+            Utils::Transformation.move_entity_origin_in_root_local_to(state.sketchup_component_instance, @dual_group, local_position)
+          end
           update_state_position(state, local_position)
         end
 
         def move_cell_space_to_local_position(cell_space, local_position)
           ensure_cell_space_is_child_of_primal_space!(cell_space)
-          Utils::Transformation.move_entity_origin_in_root_local_to(cell_space.sketchup_group, @primal_group, local_position)
+          with_unlocked(cell_space.sketchup_group) do
+            Utils::Transformation.move_entity_origin_in_root_local_to(cell_space.sketchup_group, @primal_group, local_position)
+          end
         end
 
         def ensure_cell_space_is_child_of_primal_space!(cell_space)
@@ -368,18 +520,24 @@ module ULOL
           @cell_spaces << cell_space
           @cell_spaces_by_entity[cell_space.sketchup_group] = cell_space
           @cell_spaces_by_entity_id[cell_space.sketchup_group.persistent_id] = cell_space
-          cell_space.sketchup_group.add_observer(@cell_space_observer)
+          @cell_spaces_by_sketchup_entity_id[cell_space.sketchup_group.entityID] = cell_space
+          attach_cell_space_observer(cell_space.sketchup_group)
+          lock_indoor_entity(cell_space.sketchup_group)
         end
 
         def name_cell_space_entity(cell_space)
-          cell_space.sketchup_group.name = "[#{CellSpaceType.label(cell_space.cell_type)}]-#{cell_space.id}"
+          with_unlocked(cell_space.sketchup_group) do
+            cell_space.sketchup_group.name = "[#{CellSpaceType.label(cell_space.cell_type)}]-#{cell_space.id}"
+          end
         end
 
         def apply_cell_space_material(cell_space)
           material = Utils::Materials.cell_space(cell_space.cell_type)
-          cell_space.sketchup_group.material = material
-          cell_space.sketchup_group.entities.each do |entity|
-            entity.material = material if entity.is_a?(Sketchup::Face)
+          with_unlocked(cell_space.sketchup_group) do
+            cell_space.sketchup_group.material = material
+            cell_space.sketchup_group.entities.each do |entity|
+              entity.material = material if entity.is_a?(Sketchup::Face)
+            end
           end
         end
 
@@ -387,7 +545,9 @@ module ULOL
           @states << state
           @states_by_entity[state.sketchup_component_instance] = state
           @states_by_entity_id[state.sketchup_component_instance.persistent_id] = state
-          state.sketchup_component_instance.add_observer(@state_observer)
+          @states_by_sketchup_entity_id[state.sketchup_component_instance.entityID] = state
+          attach_state_observer(state.sketchup_component_instance)
+          lock_indoor_entity(state.sketchup_component_instance)
         end
 
         def unregister_cell_space(cell_space)
@@ -396,6 +556,8 @@ module ULOL
           @cell_spaces.delete(cell_space)
           @cell_spaces_by_entity.delete(cell_space.sketchup_group)
           @cell_spaces_by_entity_id.delete(cell_space.sketchup_group_id)
+          @cell_spaces_by_sketchup_entity_id.delete_if { |_entity_id, mapped_cell_space| mapped_cell_space == cell_space }
+          @cell_space_observed_ids.delete(cell_space.sketchup_group_id)
         end
 
         def unregister_state(state)
@@ -404,6 +566,8 @@ module ULOL
           @states.delete(state)
           @states_by_entity.delete(state.sketchup_component_instance)
           @states_by_entity_id.delete(state.sketchup_component_instance_id)
+          @states_by_sketchup_entity_id.delete_if { |_entity_id, mapped_state| mapped_state == state }
+          @state_observed_ids.delete(state.sketchup_component_instance_id)
         end
 
         def connect_states(state1, state2)
@@ -469,7 +633,9 @@ module ULOL
           return nil unless update_transition(transition)
 
           register_transition_with_states(transition)
+          register_transition_entity(transition)
           write_transition_attributes(transition)
+          lock_indoor_entity(transition.edge)
           transition
         end
 
@@ -477,10 +643,18 @@ module ULOL
           transition = @transitions_by_cell_pair.delete(pair_key)
           return if transition.nil?
 
+          erase_transition(transition)
+          @adjacent_cell_space_pairs.delete(pair_key)
+        end
+
+        def erase_transition(transition)
+          return if transition.nil?
+
+          unregister_transition_entity(transition)
           unregister_transition_from_states(transition)
+          unlock_indoor_entity(transition.edge)
           transition.erase!
           @transitions.delete(transition)
-          @adjacent_cell_space_pairs.delete(pair_key)
         end
 
         def cell_pair_key(cell1, cell2)
@@ -513,6 +687,22 @@ module ULOL
           write_state_attributes(transition.state2)
         end
 
+        def register_transition_entity(transition)
+          return unless transition&.edge&.valid?
+
+          @transitions_by_entity[transition.edge] = transition
+          @transitions_by_entity_id[transition.edge.persistent_id] = transition
+          @transitions_by_sketchup_entity_id[transition.edge.entityID] = transition
+        end
+
+        def unregister_transition_entity(transition)
+          return if transition.nil?
+
+          @transitions_by_entity.delete(transition.edge)
+          @transitions_by_entity_id.delete_if { |_persistent_id, mapped_transition| mapped_transition == transition }
+          @transitions_by_sketchup_entity_id.delete_if { |_entity_id, mapped_transition| mapped_transition == transition }
+        end
+
         def unregister_transition_from_states(transition)
           transition.state1.remove_transition(transition) if transition.state1
           transition.state2.remove_transition(transition) if transition.state2
@@ -533,8 +723,7 @@ module ULOL
 
             @transitions_by_cell_pair.delete(cell_pair_key(transition.cell1, transition.cell2)) if transition.cell1 && transition.cell2
             @adjacent_cell_space_pairs.delete(cell_pair_key(transition.cell1, transition.cell2)) if transition.cell1 && transition.cell2
-            unregister_transition_from_states(transition)
-            transition.erase!
+            erase_transition(transition)
             true
           end
         end
@@ -556,6 +745,8 @@ module ULOL
           state.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'duality_cell_id', cell_space.id)
           state.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'indoor_gml_version', INDOOR_GML_VERSION)
           write_state_attributes(cell_space.duality_state)
+          lock_indoor_entity(group)
+          lock_indoor_entity(state)
         end
 
         def write_cell_space_attributes(cell_space)
@@ -567,6 +758,7 @@ module ULOL
           group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'cell_type', CellSpaceType.label(cell_space.cell_type))
           group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'duality_state_id', cell_space.duality_state.id) if cell_space.duality_state
           group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'indoor_gml_version', INDOOR_GML_VERSION)
+          lock_indoor_entity(group)
         end
 
         def write_state_attributes(state)
@@ -582,6 +774,7 @@ module ULOL
           component.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'position_y', state.position.y.to_f)
           component.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'position_z', state.position.z.to_f)
           component.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'indoor_gml_version', INDOOR_GML_VERSION)
+          lock_indoor_entity(component)
         end
 
         def write_transition_attributes(transition)
@@ -595,13 +788,105 @@ module ULOL
           transition.edge.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'cell1_id', transition.cell1.id) if transition.cell1
           transition.edge.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'cell2_id', transition.cell2.id) if transition.cell2
           transition.edge.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'indoor_gml_version', INDOOR_GML_VERSION)
+          lock_indoor_entity(transition.edge)
         end
 
         def update_transition(transition)
-          transition.update(
-            state_local_position(transition.state1),
-            state_local_position(transition.state2)
-          )
+          with_unlocked(transition.edge) do
+            transition.update(
+              state_local_position(transition.state1),
+              state_local_position(transition.state2)
+            )
+          end
+        end
+
+        def indoor_gml_entity?(entity)
+          indoor_feature(entity).to_s.length.positive?
+        end
+
+        def indoor_feature(entity)
+          entity.get_attribute(ATTRIBUTE_DICTIONARY_NAME, 'feature')
+        rescue StandardError
+          nil
+        end
+
+        def dual_feature?(entity)
+          ['State', 'Transition'].include?(indoor_feature(entity))
+        end
+
+        def relocate_indoor_entity(entity, target_entities, target_root_group = nil)
+          return unless entity&.valid?
+          return unless target_entities
+          return if @relocating_entity
+
+          if target_root_group&.valid? && Utils::Transformation.direct_child_of_root?(entity, target_root_group)
+            lock_indoor_entity(entity)
+            return entity
+          end
+
+          @relocating_entity = true
+          copy = copy_entity_to_entities(entity, target_entities, target_root_group)
+          unlock_indoor_entity(entity)
+          entity.erase! if entity.valid?
+          lock_indoor_entity(copy)
+          copy
+        rescue StandardError => e
+          puts "[IndoorGML] Entity relocation failed: #{e.class}: #{e.message}"
+          lock_indoor_entity(entity)
+          nil
+        ensure
+          @relocating_entity = false
+        end
+
+        def copy_entity_to_entities(entity, target_entities, target_root_group)
+          unless entity.respond_to?(:definition) && entity.respond_to?(:transformation)
+            raise ArgumentError, "Unsupported IndoorGML entity type: #{entity.class}"
+          end
+
+          transformation = relocation_transformation(entity, target_root_group)
+          copy = target_entities.add_instance(entity.definition, transformation)
+          copy = copy.to_group if entity.is_a?(Sketchup::Group) && copy.respond_to?(:to_group)
+          copy.make_unique if entity.is_a?(Sketchup::Group) && copy.respond_to?(:make_unique)
+          copy.name = entity.name if copy.respond_to?(:name=) && entity.respond_to?(:name)
+          copy.material = entity.material if copy.respond_to?(:material=) && entity.respond_to?(:material)
+          copy_indoor_attributes(entity, copy)
+          copy
+        end
+
+        def relocation_transformation(entity, target_root_group)
+          world_transformation = Utils::Transformation.entity_world_transformation(entity)
+          return world_transformation unless target_root_group&.valid?
+
+          target_root_group.transformation.inverse * world_transformation
+        end
+
+        def copy_indoor_attributes(source, target)
+          dictionary = source.attribute_dictionary(ATTRIBUTE_DICTIONARY_NAME)
+          return if dictionary.nil?
+
+          dictionary.each_pair do |key, value|
+            target.set_attribute(ATTRIBUTE_DICTIONARY_NAME, key, value)
+          end
+        end
+
+        def with_unlocked(entity)
+          was_locked = entity.respond_to?(:locked?) && entity.locked?
+          unlock_indoor_entity(entity)
+          yield
+        ensure
+          lock_indoor_entity(entity) if was_locked
+        end
+
+        def lock_indoor_entity(entity)
+          entity.locked = true if entity&.valid? && entity.respond_to?(:locked=)
+        rescue StandardError
+          nil
+        end
+
+        def unlock_indoor_entity(entity)
+          entity.locked = false if entity&.valid? && entity.respond_to?(:locked=)
+        rescue StandardError
+          nil
         end
 
         def converted_group?(sketchup_group)
@@ -609,13 +894,17 @@ module ULOL
         end
 
         def find_cell_space_for_entity(entity)
-          @cell_spaces_by_entity[entity] || @cell_spaces_by_entity_id[entity.persistent_id]
+          @cell_spaces_by_entity[entity] ||
+            @cell_spaces_by_entity_id[entity.persistent_id] ||
+            @cell_spaces_by_sketchup_entity_id[entity.entityID]
         rescue StandardError
           @cell_spaces_by_entity[entity]
         end
 
         def find_state_for_entity(entity)
-          @states_by_entity[entity] || @states_by_entity_id[entity.persistent_id]
+          @states_by_entity[entity] ||
+            @states_by_entity_id[entity.persistent_id] ||
+            @states_by_sketchup_entity_id[entity.entityID]
         rescue StandardError
           @states_by_entity[entity]
         end
