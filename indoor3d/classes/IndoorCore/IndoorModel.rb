@@ -214,12 +214,12 @@ module ULOL
           @refreshing_runtime = true
           sync do
             @model = Sketchup.active_model
-            ensure_space_features_groups
+            find_existing_space_features_groups
+            attach_existing_space_features_observers
             reset_runtime_collections
             restore_cell_spaces_from_primal_group
             restore_states_from_dual_group
             restore_transitions_from_dual_group
-            @cell_spaces.each { |cell_space| synchronize_adjacency_and_transitions_for_cell_space(cell_space) }
             update_runtime_counts
           end
           puts "[IndoorGML] Runtime refreshed: cells=#{@cell_spaces.length}, states=#{@states.length}, transitions=#{@transitions.length}"
@@ -288,6 +288,7 @@ module ULOL
               puts '[IndoorGML] CellSpace runtime stale. Refreshing runtime data.'
               refresh_runtime_data
             elsif cell_space
+              synchronize_adjacency_and_transitions_for_cell_space(cell_space)
               lock_indoor_entity(entity)
             else
               puts '[IndoorGML] CellSpace runtime data missing. Refresh is required.'
@@ -384,6 +385,35 @@ module ULOL
           lock_space_features_groups
         end
 
+        def find_existing_space_features_groups
+          entities = Sketchup.active_model.entities
+          @primal_group = find_group(entities, PRIMAL_GROUP_NAME)
+          @dual_group = find_group(entities, DUAL_GROUP_NAME)
+          puts '[IndoorGML] PrimalSpaceFeatures group not found during refresh.' unless @primal_group&.valid?
+          puts '[IndoorGML] DualSpaceFeatures group not found during refresh.' unless @dual_group&.valid?
+        end
+
+        def attach_existing_space_features_observers
+          attach_entities_observer(:root, Sketchup.active_model.entities, @root_entities_observer)
+          attach_existing_space_features_observer(@primal_group, PRIMAL_GROUP_NAME)
+          attach_existing_space_features_observer(@dual_group, DUAL_GROUP_NAME)
+          attach_entities_observer(:primal, @primal_group.entities, @primal_entities_observer) if @primal_group&.valid?
+          attach_entities_observer(:dual, @dual_group.entities, @dual_entities_observer) if @dual_group&.valid?
+        end
+
+        def attach_existing_space_features_observer(group, expected_name)
+          return unless group&.valid?
+
+          persistent_id = group.persistent_id
+          observer_key = group.object_id
+          @space_features_expected_names[persistent_id] = expected_name
+          @space_features_last_transforms[persistent_id] = group.transformation
+          return if @space_features_observed_ids[observer_key]
+
+          group.add_observer(@space_features_observer)
+          @space_features_observed_ids[observer_key] = true
+        end
+
         def reset_runtime_collections
           @cell_spaces = []
           @states = []
@@ -467,7 +497,7 @@ module ULOL
             @transitions_by_cell_pair[cell_pair_key(cell1, cell2)] = transition if cell1 && cell2
             @adjacent_cell_space_pairs[cell_pair_key(cell1, cell2)] = [cell1, cell2] if cell1 && cell2
             register_transition_entity(transition)
-            register_transition_with_states(transition)
+            restore_transition_with_states(transition)
           end
         end
 
@@ -1013,6 +1043,11 @@ module ULOL
           transition.state2.add_transition(transition)
           write_state_attributes(transition.state1)
           write_state_attributes(transition.state2)
+        end
+
+        def restore_transition_with_states(transition)
+          transition.state1.add_transition(transition)
+          transition.state2.add_transition(transition)
         end
 
         def register_transition_entity(transition)
