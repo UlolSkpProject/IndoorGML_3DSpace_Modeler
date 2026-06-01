@@ -21,6 +21,10 @@ module ULOL
             @editor_session.active_path_changed(model)
           end
 
+          def cleanup_before_quit
+            @editor_session.cleanup_before_quit()
+          end
+
           private
 
           def apply_indoor_lock_policy
