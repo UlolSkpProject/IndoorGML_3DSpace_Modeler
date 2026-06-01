@@ -15,6 +15,14 @@ module ULOL
           dialog.show
         end
 
+        def update_selection(snapshot)
+          return unless @dialog&.visible?
+
+          @dialog.execute_script(selection_script(snapshot))
+        rescue StandardError => e
+          puts "[IndoorGML] Edit mode dialog selection update failed: #{e.class}: #{e.message}"
+        end
+
         def close
           @dialog&.close if @dialog&.visible?
           @dialog = nil
@@ -35,7 +43,7 @@ module ULOL
             scrollable: true,
             resizable: false,
             width: 280,
-            height: 310,
+            height: 400,
             style: UI::HtmlDialog::STYLE_DIALOG
           )
           dialog.add_action_callback('setStateRadius') do |_context, radius_mm|
@@ -54,6 +62,12 @@ module ULOL
             puts "[IndoorGML] EditModeDialog#setOverlayRadiusRange min=#{min_radius_pixels} max=#{max_radius_pixels}"
             UI.start_timer(0, false) do
               @indoor_model.set_overlay_radius_pixel_range(min_radius_pixels, max_radius_pixels)
+            end
+          end
+          dialog.add_action_callback('setSelectedCellSpaceType') do |_context, cell_type_label|
+            puts "[IndoorGML] EditModeDialog#setSelectedCellSpaceType type=#{cell_type_label}"
+            UI.start_timer(0, false) do
+              @indoor_model.set_selected_cell_space_type(cell_type_label)
             end
           end
           dialog.add_action_callback('finishEditing') do |_context|
@@ -76,6 +90,9 @@ module ULOL
           radius_mm = (@indoor_model.state_radius.to_f / 1.mm).round
           overlay_min_radius = @indoor_model.overlay_min_radius_pixels.round
           overlay_max_radius = @indoor_model.overlay_max_radius_pixels.round
+          cell_type_options = CellSpaceType::LABELS.values.map do |label|
+            "<option value=\"#{escape_html(label)}\">#{escape_html(label)}</option>"
+          end.join
           <<~HTML
             <!doctype html>
             <html>
@@ -108,6 +125,33 @@ module ULOL
                 output {
                   font-weight: 400;
                   color: #4a5867;
+                }
+                .panel {
+                  border-top: 1px solid #d8e0e8;
+                  border-bottom: 1px solid #d8e0e8;
+                  padding: 12px 0;
+                  margin: 0 0 14px;
+                }
+                .row {
+                  display: flex;
+                  justify-content: space-between;
+                  gap: 12px;
+                  font-size: 12px;
+                  margin-bottom: 6px;
+                }
+                .row span:first-child {
+                  color: #667484;
+                }
+                .row span:last-child {
+                  min-width: 0;
+                  overflow: hidden;
+                  text-overflow: ellipsis;
+                  white-space: nowrap;
+                }
+                select {
+                  width: 100%;
+                  height: 30px;
+                  margin-top: 6px;
                 }
                 input[type="range"] {
                   width: 100%;
@@ -144,6 +188,14 @@ module ULOL
             </head>
             <body>
               <div class="header">EDIT MODE · PRIMAL SPACE</div>
+              <div class="panel">
+                <div class="row"><span>Selected</span><span id="selectedFeature">None</span></div>
+                <div class="row"><span>ID</span><span id="selectedId">-</span></div>
+                <div class="row"><span>Name</span><span id="selectedName">-</span></div>
+                <select id="selectedType" disabled>
+                  #{cell_type_options}
+                </select>
+              </div>
               <label>
                 <span>State radius</span>
                 <output id="radiusValue">#{radius_mm} mm</output>
@@ -165,6 +217,28 @@ module ULOL
                 var overlayMinRadius = document.getElementById('overlayMinRadius');
                 var overlayMaxRadius = document.getElementById('overlayMaxRadius');
                 var overlayRadiusValue = document.getElementById('overlayRadiusValue');
+                var selectedFeature = document.getElementById('selectedFeature');
+                var selectedId = document.getElementById('selectedId');
+                var selectedName = document.getElementById('selectedName');
+                var selectedType = document.getElementById('selectedType');
+                var suppressTypeChange = false;
+                function updateSelectedCellSpace(snapshot) {
+                  suppressTypeChange = true;
+                  if (!snapshot || !snapshot.id) {
+                    selectedFeature.textContent = 'None';
+                    selectedId.textContent = '-';
+                    selectedName.textContent = '-';
+                    selectedType.disabled = true;
+                    selectedType.value = 'GeneralSpace';
+                  } else {
+                    selectedFeature.textContent = snapshot.feature || 'CellSpace';
+                    selectedId.textContent = snapshot.id || '-';
+                    selectedName.textContent = snapshot.name || '-';
+                    selectedType.disabled = false;
+                    selectedType.value = snapshot.cellType || 'GeneralSpace';
+                  }
+                  suppressTypeChange = false;
+                }
                 function updateOverlayRadiusRange() {
                   var minRadius = Number(overlayMinRadius.value);
                   var maxRadius = Number(overlayMaxRadius.value);
@@ -188,6 +262,11 @@ module ULOL
                 });
                 overlayMinRadius.addEventListener('input', updateOverlayRadiusRange);
                 overlayMaxRadius.addEventListener('input', updateOverlayRadiusRange);
+                selectedType.addEventListener('change', function () {
+                  if (!suppressTypeChange) {
+                    sketchup.setSelectedCellSpaceType(selectedType.value);
+                  }
+                });
                 document.getElementById('finish').addEventListener('click', function () {
                   sketchup.finishEditing();
                 });
@@ -198,6 +277,33 @@ module ULOL
             </body>
             </html>
           HTML
+        end
+
+        def selection_script(snapshot)
+          if snapshot.nil?
+            'updateSelectedCellSpace(null);'
+          else
+            <<~JS
+              updateSelectedCellSpace({
+                feature: #{js_string(snapshot[:feature])},
+                id: #{js_string(snapshot[:id])},
+                name: #{js_string(snapshot[:name])},
+                cellType: #{js_string(snapshot[:cell_type])}
+              });
+            JS
+          end
+        end
+
+        def js_string(value)
+          value.to_s.inspect
+        end
+
+        def escape_html(value)
+          value.to_s
+               .gsub('&', '&amp;')
+               .gsub('<', '&lt;')
+               .gsub('>', '&gt;')
+               .gsub('"', '&quot;')
         end
       end
 

@@ -128,6 +128,41 @@ module ULOL
             @editor_session.selection_changed()
           end
 
+          def selected_cell_space_snapshot
+            cell_space = selected_cell_space
+            return nil unless cell_space&.valid?
+
+            group = cell_space.sketchup_group
+            {
+              feature: 'CellSpace',
+              id: cell_space.id,
+              name: group&.name.to_s,
+              cell_type: CellSpaceType.label(cell_space.cell_type)
+            }
+          rescue StandardError => e
+            puts "[IndoorGML] Selected CellSpace snapshot failed: #{e.class}: #{e.message}"
+            nil
+          end
+
+          def set_selected_cell_space_type(cell_type_label)
+            cell_space = selected_cell_space
+            return false unless cell_space&.valid?
+
+            model = Sketchup.active_model()
+            operation_started = false
+            model.start_operation('Change CellSpace Type', true)
+            operation_started = true
+            change_cell_space_type(cell_space.sketchup_group, CellSpaceType.from_label(cell_type_label))
+            model.commit_operation
+            @editor_session.selection_changed()
+            model.active_view.invalidate if model&.active_view
+            true
+          rescue StandardError => e
+            model.abort_operation if operation_started
+            puts "[IndoorGML] Selected CellSpace type update failed: #{e.class}: #{e.message}"
+            false
+          end
+
           def with_active_path_enforcement_suspended
             @editor_session.with_active_path_enforcement_suspended { yield }
           end
@@ -136,6 +171,17 @@ module ULOL
 
           def apply_indoor_lock_policy
             @editor_session.apply_lock_policy()
+          end
+
+          def selected_cell_space
+            selection = Sketchup.active_model&.selection
+            return nil unless selection
+
+            selection.each do |entity|
+              cell_space = find_cell_space_for_entity(entity)
+              return cell_space if cell_space&.valid?
+            end
+            nil
           end
         end
       end

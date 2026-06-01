@@ -32,8 +32,9 @@ module ULOL
             case feature
             when 'CellSpace'
               relocate_indoor_entity(entity, @primal_group.entities, @primal_group)
-            when 'State', 'Transition'
-              relocate_indoor_entity(entity, @dual_group.entities, @dual_group)
+            # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
+            # when 'State', 'Transition'
+            #   relocate_indoor_entity(entity, @dual_group.entities, @dual_group)
             else
               lock_indoor_entity(entity)
             end
@@ -47,7 +48,10 @@ module ULOL
 
           def primal_entity_added(entity)
             return if @relocating_entity
-            return unless indoor_gml_entity?(entity)
+            unless indoor_gml_entity?(entity)
+              convert_new_edit_mode_group_to_cell_space(entity)
+              return
+            end
 
             ensure_space_features_groups
             if indoor_feature(entity) == 'CellSpace'
@@ -62,8 +66,9 @@ module ULOL
               else
                 puts '[IndoorGML] CellSpace runtime data missing. Refresh is required.'
               end
-            elsif dual_feature?(entity)
-              relocate_indoor_entity(entity, @dual_group.entities, @dual_group)
+            # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
+            # elsif dual_feature?(entity)
+            #   relocate_indoor_entity(entity, @dual_group.entities, @dual_group)
             else
               relocate_indoor_entity(entity, Sketchup.active_model.entities)
             end
@@ -118,12 +123,50 @@ module ULOL
           def space_features_erased(entity)
             begin
               @primal_group = nil if entity == @primal_group
-              @dual_group = nil if entity == @dual_group
+              # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
+              # @dual_group = nil if entity == @dual_group
               @space_features_observed_ids.delete(entity.object_id)
               @scene_group_guard.untrack(entity)
             rescue StandardError
               nil
             end
+          end
+
+          def convert_new_edit_mode_group_to_cell_space(entity)
+            return unless editing?
+            return unless convertible_new_cell_space_group?(entity)
+
+            UI.start_timer(0, false) do
+              operation_started = false
+              begin
+                next unless entity&.valid?
+                next if indoor_gml_entity?(entity)
+                next unless convertible_new_cell_space_group?(entity)
+
+                model = Sketchup.active_model()
+                model.start_operation('Convert New Group to GeneralSpace', true)
+                operation_started = true
+                convert_group_to_cell_space(entity, CellSpaceType::GENERAL)
+                model.commit_operation
+                operation_started = false
+                @editor_session.selection_changed()
+                model.active_view.invalidate if model&.active_view
+              rescue StandardError => e
+                model.abort_operation if operation_started && model
+                puts "[IndoorGML] Auto GeneralSpace conversion failed: #{e.class}: #{e.message}"
+              end
+            end
+          end
+
+          def convertible_new_cell_space_group?(entity)
+            return false unless entity&.valid?
+            return false unless entity.is_a?(Sketchup::Group) || entity.is_a?(Sketchup::ComponentInstance)
+            return false unless entity.respond_to?(:manifold?) && entity.manifold?
+            return false unless @primal_group&.valid?
+
+            Utils::Transformation.direct_child_of_root?(entity, @primal_group)
+          rescue StandardError
+            false
           end
         end
       end

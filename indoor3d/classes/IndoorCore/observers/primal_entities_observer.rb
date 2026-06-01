@@ -12,10 +12,10 @@ module ULOL
         end
 
         def onElementAdded(_entities, entity)
-          return unless indoor_gml_entity?(entity)
-
-          track_entity(entity)
-          log_event('onElementAdded', entity)
+          if indoor_gml_entity?(entity)
+            track_entity(entity)
+            log_event('onElementAdded', entity)
+          end
           @indoor_model.primal_entity_added(entity)
         end
 
