@@ -5,14 +5,13 @@ module ULOL
     module IndoorCore
 
       class EditorSession
-        PAGE_NAME = 'IndoorGML Editing'
-
         def initialize(indoor_model)
           @indoor_model = indoor_model
           @editing = false
           @editable_entity_ids = {}
-          @previous_page = nil
-          @edit_page = nil
+          @overlay = nil
+          @overlay_registered = false
+          @overlay_model = nil
         end
 
         def editing?
@@ -24,15 +23,12 @@ module ULOL
 
           @indoor_model.refresh_runtime_data()
           model = Sketchup.active_model()
-          pages = model.pages()
-          @previous_page = pages.selected_page()
-          remove_existing_edit_page(pages)
+          ensure_overlay_registered(model)
           @editing = true
           mark_editable_primal_entities()
           apply_lock_policy()
           focus_primal_group(model)
-          @edit_page = pages.add(PAGE_NAME)
-          pages.selected_page = @edit_page
+          invalidate_view(model)
           true
         end
 
@@ -40,14 +36,10 @@ module ULOL
           return false unless @editing
 
           model = Sketchup.active_model()
-          pages = model.pages()
           @editing = false
           @editable_entity_ids = {}
           apply_lock_policy()
-          restore_previous_page(pages)
-          pages.erase(@edit_page) if @edit_page&.valid?()
-          @edit_page = nil
-          @previous_page = nil
+          invalidate_view(model)
           true
         end
 
@@ -114,17 +106,22 @@ module ULOL
 
         private
 
-        def remove_existing_edit_page(pages)
-          existing_page = pages[PAGE_NAME]
-          pages.erase(existing_page) if existing_page&.valid?()
+        def ensure_overlay_registered(model)
+          begin
+            return if @overlay_registered && @overlay_model == model
+            return unless model.respond_to?(:overlays)
+
+            @overlay ||= EditModeOverlay.new(@indoor_model)
+            model.overlays().add(@overlay)
+            @overlay_registered = true
+            @overlay_model = model
+          rescue StandardError => e
+            puts "[IndoorGML] Edit mode overlay registration failed: #{e.class}: #{e.message}"
+          end
         end
 
-        def restore_previous_page(pages)
-          if @previous_page&.valid?()
-            pages.selected_page = @previous_page
-          elsif pages.length.positive?
-            pages.selected_page = pages[0]
-          end
+        def invalidate_view(model)
+          model.active_view().invalidate() if model&.active_view()
         end
 
         def focus_primal_group(model)
