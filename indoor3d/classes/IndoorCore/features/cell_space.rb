@@ -11,7 +11,7 @@ module ULOL
         attr_reader :duality_state
 
         def initialize(sketchup_group, cell_type = CellSpaceType::GENERAL)
-          validate_sketchup_group!(sketchup_group)
+          self.class.validate_sketchup_group!(sketchup_group)
 
           super()
 
@@ -45,18 +45,7 @@ module ULOL
           cell_space
         end
 
-        private
-
-        def initialize_restored(sketchup_group, cell_type, id, name)
-          @sketchup_group = sketchup_group
-          @sketchup_group_id = sketchup_group.persistent_id
-          @cell_type = cell_type
-          @duality_state = nil
-          @id = id unless id.to_s.empty?
-          @name = name.to_s
-        end
-
-        def validate_sketchup_group!(sketchup_group)
+        def self.validate_sketchup_group!(sketchup_group)
           unless sketchup_group.is_a?(Sketchup::Group) || sketchup_group.is_a?(Sketchup::ComponentInstance)
             raise ArgumentError, 'Sketchup::Group or Sketchup::ComponentInstance expected'
           end
@@ -69,6 +58,18 @@ module ULOL
             raise ArgumentError, 'Solid Group expected'
           end
         end
+
+        private
+
+        def initialize_restored(sketchup_group, cell_type, id, name)
+          @sketchup_group = sketchup_group
+          @sketchup_group_id = sketchup_group.persistent_id
+          @cell_type = cell_type
+          @duality_state = nil
+          @id = id unless id.to_s.empty?
+          @name = name.to_s
+        end
+
       end
 
     end
