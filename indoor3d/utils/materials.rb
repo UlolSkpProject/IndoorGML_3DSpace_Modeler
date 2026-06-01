@@ -15,14 +15,6 @@ module ULOL
           anchor_space: ['Indoor3DGml_AnchorSpace', [0, 200, 180], 0.8]
         }.freeze unless const_defined?(:DEFINITIONS, false)
 
-        CELL_SPACE_TYPE_KEYS = {
-          IndoorCore::CellSpaceType::GENERAL => :general_space,
-          IndoorCore::CellSpaceType::TRANSFER => :transfer_space,
-          IndoorCore::CellSpaceType::TRANSITION => :transition_space,
-          IndoorCore::CellSpaceType::CONNECTION => :connection_space,
-          IndoorCore::CellSpaceType::ANCHOR => :anchor_space
-        }.freeze unless const_defined?(:CELL_SPACE_TYPE_KEYS, false)
-
         def self.state
           fetch(:state)
         end
@@ -32,7 +24,7 @@ module ULOL
         end
 
         def self.cell_space(cell_type)
-          fetch(CELL_SPACE_TYPE_KEYS[cell_type] || :general_space)
+          fetch(cell_space_type_keys()[cell_type] || :general_space)
         end
 
         def self.ensure_all
@@ -47,6 +39,18 @@ module ULOL
           material
         end
         private_class_method :fetch
+
+        def self.cell_space_type_keys
+          cell_space_type = ::ULOL::Indoor3DGmlModeler::IndoorCore::CellSpaceType
+          {
+            cell_space_type::GENERAL => :general_space,
+            cell_space_type::TRANSFER => :transfer_space,
+            cell_space_type::TRANSITION => :transition_space,
+            cell_space_type::CONNECTION => :connection_space,
+            cell_space_type::ANCHOR => :anchor_space
+          }
+        end
+        private_class_method :cell_space_type_keys
 
       end
     end
