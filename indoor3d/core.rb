@@ -147,6 +147,19 @@ module ULOL
       end
     end
 
+    def self.toggle_indoor_gml_editing
+      begin
+        indoor_model = IndoorCore::IndoorModel.current
+        if indoor_model.editing?()
+          finish_indoor_gml_editing()
+        else
+          begin_indoor_gml_editing()
+        end
+      rescue StandardError => e
+        UI.messagebox("IndoorGML editing toggle failed:\n#{e.message}")
+      end
+    end
+
     def self.create_command(label, tooltip, &block)
       command = UI::Command.new(label) { block.call() }
       command.tooltip = tooltip
@@ -211,18 +224,13 @@ module ULOL
       menu.add_item('Refresh Runtime Data') do
         refresh_runtime_data()
       end
-      edit_command = create_command('Edit IndoorGML', 'Enter IndoorGML editing mode') do
-        begin_indoor_gml_editing()
-      end
-      finish_command = create_command('Finish IndoorGML Editing', 'Finish IndoorGML editing mode') do
-        finish_indoor_gml_editing()
+      edit_command = create_command('Edit IndoorGML', 'Toggle IndoorGML editing mode') do
+        toggle_indoor_gml_editing()
       end
       menu.add_item(edit_command)
-      menu.add_item(finish_command)
 
       toolbar = UI::Toolbar.new('Indoor3DGML Modeler')
       toolbar.add_item(edit_command)
-      toolbar.add_item(finish_command)
       toolbar.show()
       file_loaded(__FILE__)
     end
