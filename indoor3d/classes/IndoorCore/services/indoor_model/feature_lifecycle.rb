@@ -67,21 +67,23 @@ module ULOL
           end
 
           def state_changed(entity)
-            return if @syncing || @erasing
+            begin
+              return if @syncing || @erasing
 
-            state = find_state_for_entity(entity)
-            state = refresh_and_find_state(entity) if stale_state_runtime?(state, entity)
-            return if state.nil? || !state.valid?
+              state = find_state_for_entity(entity)
+              state = refresh_and_find_state(entity) if stale_state_runtime?(state, entity)
+              return if state.nil? || !state.valid?
 
-            sync do
-              cell_space = state.duality_cell
-              local_position = state_local_position(state)
-              update_state_position(state, local_position)
-              move_cell_space_to_local_position(cell_space, local_position) if cell_space&.valid?
-              synchronize_adjacency_and_transitions_for_cell_space(cell_space) if cell_space&.valid?
+              sync do
+                cell_space = state.duality_cell
+                local_position = state_local_position(state)
+                update_state_position(state, local_position)
+                move_cell_space_to_local_position(cell_space, local_position) if cell_space&.valid?
+                synchronize_adjacency_and_transitions_for_cell_space(cell_space) if cell_space&.valid?
+              end
+            ensure
+              lock_indoor_entity(entity)
             end
-          ensure
-            lock_indoor_entity(entity)
           end
 
           def cell_space_erased(entity)
@@ -196,16 +198,18 @@ module ULOL
           end
 
           def attach_entity_observer(entity, observer, observed_ids)
-            return unless entity&.valid? && observer
+            begin
+              return unless entity&.valid? && observer
 
-            key = entity.object_id
-            return if observed_ids[key]
+              key = entity.object_id
+              return if observed_ids[key]
 
-            attached = entity.add_observer(observer)
-            puts "[IndoorGML] #{observer.class} attached=#{attached} entity_id=#{entity.entityID}"
-            observed_ids[key] = true
-          rescue StandardError => e
-            puts "[IndoorGML] Observer attach failed: #{e.class}: #{e.message}"
+              attached = entity.add_observer(observer)
+              puts "[IndoorGML] #{observer.class} attached=#{attached} entity_id=#{entity.entityID}"
+              observed_ids[key] = true
+            rescue StandardError => e
+              puts "[IndoorGML] Observer attach failed: #{e.class}: #{e.message}"
+            end
           end
         end
       end

@@ -6,20 +6,22 @@ module ULOL
       class IndoorModel
         module RuntimeSupport
           def refresh_runtime_data
-            return true if @refreshing_runtime
+            begin
+              return true if @refreshing_runtime
 
-            @refreshing_runtime = true
-            sync do
-              @model = Sketchup.active_model
-              find_existing_space_features_groups
-              attach_existing_space_features_observers
-              reset_runtime_collections
-              @runtime_restorer.restore(primal_group: @primal_group, dual_group: @dual_group)
+              @refreshing_runtime = true
+              sync do
+                @model = Sketchup.active_model
+                find_existing_space_features_groups
+                attach_existing_space_features_observers
+                reset_runtime_collections
+                @runtime_restorer.restore(primal_group: @primal_group, dual_group: @dual_group)
+              end
+              puts "[IndoorGML] Runtime refreshed: cells=#{@cell_spaces.length}, states=#{@states.length}, transitions=#{@transitions.length}"
+              true
+            ensure
+              @refreshing_runtime = false
             end
-            puts "[IndoorGML] Runtime refreshed: cells=#{@cell_spaces.length}, states=#{@states.length}, transitions=#{@transitions.length}"
-            true
-          ensure
-            @refreshing_runtime = false
           end
 
           private
@@ -40,25 +42,29 @@ module ULOL
           end
 
           def stale_cell_space_runtime?(cell_space, entity)
-            return true if cell_space.nil?
-            return true unless cell_space.valid?
-            return true unless cell_space.sketchup_group == entity
-            return true unless cell_space.duality_state&.valid?
+            begin
+              return true if cell_space.nil?
+              return true unless cell_space.valid?
+              return true unless cell_space.sketchup_group == entity
+              return true unless cell_space.duality_state&.valid?
 
-            false
-          rescue StandardError
-            true
+              false
+            rescue StandardError
+              true
+            end
           end
 
           def stale_state_runtime?(state, entity)
-            return true if state.nil?
-            return true unless state.valid?
-            return true unless state.sketchup_component_instance == entity
-            return true unless state.duality_cell&.valid?
+            begin
+              return true if state.nil?
+              return true unless state.valid?
+              return true unless state.sketchup_component_instance == entity
+              return true unless state.duality_cell&.valid?
 
-            false
-          rescue StandardError
-            true
+              false
+            rescue StandardError
+              true
+            end
           end
 
           def refresh_and_find_cell_space(entity)
@@ -138,23 +144,29 @@ module ULOL
           end
 
           def unlock_indoor_entity(entity)
-            entity.locked = false if entity&.valid? && entity.respond_to?(:locked=)
-          rescue StandardError
-            true
+            begin
+              entity.locked = false if entity&.valid? && entity.respond_to?(:locked=)
+            rescue StandardError
+              true
+            end
           end
 
           def sync
-            @syncing = true
-            yield
-          ensure
-            @syncing = false
+            begin
+              @syncing = true
+              yield
+            ensure
+              @syncing = false
+            end
           end
 
           def erase_guard
-            @erasing = true
-            yield
-          ensure
-            @erasing = false
+            begin
+              @erasing = true
+              yield
+            ensure
+              @erasing = false
+            end
           end
         end
       end

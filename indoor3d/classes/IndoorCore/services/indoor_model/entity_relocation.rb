@@ -8,27 +8,29 @@ module ULOL
           private
 
           def relocate_indoor_entity(entity, target_entities, target_root_group = nil)
-            return unless entity&.valid?
-            return unless target_entities
-            return if @relocating_entity
+            begin
+              return unless entity&.valid?
+              return unless target_entities
+              return if @relocating_entity
 
-            if target_root_group&.valid? && Utils::Transformation.direct_child_of_root?(entity, target_root_group)
+              if target_root_group&.valid? && Utils::Transformation.direct_child_of_root?(entity, target_root_group)
+                lock_indoor_entity(entity)
+                return entity
+              end
+
+              @relocating_entity = true
+              copy = copy_entity_to_entities(entity, target_entities, target_root_group)
+              unlock_indoor_entity(entity)
+              entity.erase! if entity.valid?
+              lock_indoor_entity(copy)
+              copy
+            rescue StandardError => e
+              puts "[IndoorGML] Entity relocation failed: #{e.class}: #{e.message}"
               lock_indoor_entity(entity)
-              return entity
+              nil
+            ensure
+              @relocating_entity = false
             end
-
-            @relocating_entity = true
-            copy = copy_entity_to_entities(entity, target_entities, target_root_group)
-            unlock_indoor_entity(entity)
-            entity.erase! if entity.valid?
-            lock_indoor_entity(copy)
-            copy
-          rescue StandardError => e
-            puts "[IndoorGML] Entity relocation failed: #{e.class}: #{e.message}"
-            lock_indoor_entity(entity)
-            nil
-          ensure
-            @relocating_entity = false
           end
 
           def copy_entity_to_entities(entity, target_entities, target_root_group)

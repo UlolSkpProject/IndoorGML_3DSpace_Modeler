@@ -6,14 +6,16 @@ module ULOL
       class IndoorModel
         module ObserverRouting
           def space_features_changed(entity)
-            return if @constraining_space_features || @erasing
-            return unless entity&.valid?
+            begin
+              return if @constraining_space_features || @erasing
+              return unless entity&.valid?
 
-            @constraining_space_features = true
-            enforce_space_features_constraints
-          ensure
-            lock_indoor_entity(entity)
-            @constraining_space_features = false
+              @constraining_space_features = true
+              enforce_space_features_constraints
+            ensure
+              lock_indoor_entity(entity)
+              @constraining_space_features = false
+            end
           end
 
           def root_entity_added(entity)
@@ -114,12 +116,14 @@ module ULOL
           end
 
           def space_features_erased(entity)
-            @primal_group = nil if entity == @primal_group
-            @dual_group = nil if entity == @dual_group
-            @space_features_observed_ids.delete(entity.object_id)
-            @scene_group_guard.untrack(entity)
-          rescue StandardError
-            nil
+            begin
+              @primal_group = nil if entity == @primal_group
+              @dual_group = nil if entity == @dual_group
+              @space_features_observed_ids.delete(entity.object_id)
+              @scene_group_guard.untrack(entity)
+            rescue StandardError
+              nil
+            end
           end
         end
       end
