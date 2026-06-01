@@ -12,6 +12,7 @@ module ULOL
           @overlay = nil
           @overlay_registered = false
           @overlay_model = nil
+          @dialog = EditModeDialog.new(@indoor_model)
           @previous_active_path = nil
           @enforcing_active_path = false
         end
@@ -40,6 +41,7 @@ module ULOL
             return false
           end
           focus_primal_group(model, primal_group)
+          @dialog.show()
           invalidate_view(model)
           true
         end
@@ -52,6 +54,8 @@ module ULOL
           @editable_entity_ids = {}
           restore_active_path(model)
           @previous_active_path = nil
+          set_overlay_enabled(false)
+          @dialog.close()
           apply_lock_policy()
           invalidate_view(model)
           true
@@ -131,6 +135,7 @@ module ULOL
 
         def cleanup_before_quit
           begin
+            @dialog.close()
             finish() if @editing
           rescue StandardError => e
             puts "[IndoorGML] Edit shutdown cleanup failed: #{e.class}: #{e.message}"
@@ -141,15 +146,41 @@ module ULOL
 
         def ensure_overlay_registered(model)
           begin
-            return if @overlay_registered && @overlay_model == model
+            if @overlay_registered && @overlay_model == model
+              set_overlay_enabled(true)
+              return
+            end
             return unless model.respond_to?(:overlays)
 
             @overlay ||= EditModeOverlay.new(@indoor_model)
+            remove_stale_overlay_instances(model)
             model.overlays().add(@overlay)
             @overlay_registered = true
             @overlay_model = model
+            set_overlay_enabled(true)
           rescue StandardError => e
             puts "[IndoorGML] Edit mode overlay registration failed: #{e.class}: #{e.message}"
+          end
+        end
+
+        def remove_stale_overlay_instances(model)
+          stale_overlays = []
+          model.overlays().each do |overlay|
+            next unless overlay.overlay_id == EditModeOverlay::OVERLAY_ID
+            next if overlay.equal?(@overlay)
+
+            stale_overlays << overlay
+          end
+          stale_overlays.each { |overlay| model.overlays().remove(overlay) }
+        end
+
+        def set_overlay_enabled(enabled)
+          begin
+            return unless @overlay&.valid?()
+
+            @overlay.enabled = enabled
+          rescue StandardError => e
+            puts "[IndoorGML] Edit mode overlay enable failed: #{e.class}: #{e.message}"
           end
         end
 
