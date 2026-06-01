@@ -129,6 +129,14 @@ module ULOL
           end
         end
 
+        def cleanup_before_quit
+          begin
+            finish() if @editing
+          rescue StandardError => e
+            puts "[IndoorGML] Edit shutdown cleanup failed: #{e.class}: #{e.message}"
+          end
+        end
+
         private
 
         def ensure_overlay_registered(model)

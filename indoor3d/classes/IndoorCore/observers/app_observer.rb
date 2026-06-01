@@ -39,12 +39,26 @@ module ULOL
           true
         end
 
+        def onQuit
+          cleanup_before_quit()
+        end
+
         private
 
+        def cleanup_before_quit
+          begin
+            IndoorModel.current.cleanup_before_quit()
+          rescue StandardError => e
+            puts "[IndoorGML] Shutdown cleanup failed: #{e.class}: #{e.message}"
+          end
+        end
+
         def refresh_runtime_data
-          IndoorModel.current.refresh_runtime_data()
-        rescue StandardError => e
-          puts "[IndoorGML] Runtime refresh failed: #{e.class}: #{e.message}"
+          begin
+            IndoorModel.current.refresh_runtime_data()
+          rescue StandardError => e
+            puts "[IndoorGML] Runtime refresh failed: #{e.class}: #{e.message}"
+          end
         end
       end
 
