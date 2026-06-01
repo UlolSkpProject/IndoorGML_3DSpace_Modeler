@@ -16,8 +16,11 @@ module ULOL
 
         def draw(view)
           begin
-            return unless @indoor_model.editing?()
-
+            unless @indoor_model.editing?()
+              warn "[IndoorGML] is Not Editing"
+              return
+            end
+            puts "OVERLAY"
             point = Geom::Point3d.new(view.vpwidth() * 0.5, 24, 0)
             view.draw_text(point, LABEL, text_options())
           rescue StandardError => e
@@ -29,7 +32,7 @@ module ULOL
 
         def text_options
           options = {
-            size: 18,
+            size: 80,
             bold: true,
             color: Sketchup::Color.new(30, 115, 190)
           }
