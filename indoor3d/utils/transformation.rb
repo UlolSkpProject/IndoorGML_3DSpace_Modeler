@@ -10,10 +10,7 @@ module ULOL
         end
 
         def self.entity_origin_in_root_local(entity, root_group)
-          current_context_origin = entity.transformation.origin
-          return current_context_origin unless editing_root_group?(root_group)
-
-          current_context_origin.transform(Sketchup.active_model.edit_transform.inverse)
+          entity.transformation.origin
         end
 
         def self.move_entity_origin_in_root_local_to(entity, root_group, local_position)
@@ -21,7 +18,7 @@ module ULOL
           vector = current_root_local_position.vector_to(local_position)
           return true if vector.length <= 0.001
 
-          entity.transform!(Geom::Transformation.translation(vector_in_current_context(vector, root_group)))
+          entity.transform!(Geom::Transformation.translation(vector))
           true
         end
 
@@ -66,16 +63,6 @@ module ULOL
           )
         end
         private_class_method :axis_length
-
-        def self.vector_in_current_context(vector, root_group)
-          return vector unless editing_root_group?(root_group)
-
-          origin = ORIGIN
-          transformed_origin = origin.transform(Sketchup.active_model.edit_transform)
-          transformed_target = Geom::Point3d.new(vector.x, vector.y, vector.z).transform(Sketchup.active_model.edit_transform)
-          transformed_origin.vector_to(transformed_target)
-        end
-        private_class_method :vector_in_current_context
 
         def self.same_float?(value1, value2)
           (value1 - value2).abs <= 0.000001
