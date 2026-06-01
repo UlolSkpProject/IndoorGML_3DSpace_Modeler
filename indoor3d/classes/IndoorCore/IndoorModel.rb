@@ -52,9 +52,11 @@ module ULOL
           @root_entities_observer = Indoor3DGmlRootEntitiesObserver.new(self)
           @primal_entities_observer = Indoor3DGmlPrimalEntitiesObserver.new(self)
           @dual_entities_observer = Indoor3DGmlDualEntitiesObserver.new(self)
+          @selection_observer = Indoor3DGmlSelectionObserver.new(self)
           @cell_space_observed_ids = {}
           @state_observed_ids = {}
           @space_features_observed_ids = {}
+          @selection_observed_model_id = nil
           @entities_observed_ids = {}
           @syncing = false
           @erasing = false

@@ -15,6 +15,7 @@ module ULOL
           @dialog = EditModeDialog.new(@indoor_model)
           @previous_active_path = nil
           @enforcing_active_path = false
+          @active_path_enforcement_suspended = false
         end
 
         def editing?
@@ -32,15 +33,16 @@ module ULOL
           ensure_overlay_registered(model)
           @previous_active_path = active_path_snapshot(model)
           @editing = true
+          @indoor_model.attach_edit_selection_observer(model)
           mark_editable_primal_entities()
           apply_lock_policy()
           unless activate_primal_context(model, primal_group)
             @editing = false
             @editable_entity_ids = {}
+            @indoor_model.detach_edit_selection_observer(model)
             apply_lock_policy()
             return false
           end
-          focus_primal_group(model, primal_group)
           @dialog.show()
           invalidate_view(model)
           true
@@ -52,6 +54,7 @@ module ULOL
           model = Sketchup.active_model()
           @editing = false
           @editable_entity_ids = {}
+          @indoor_model.detach_edit_selection_observer(model)
           restore_active_path(model)
           @previous_active_path = nil
           set_overlay_enabled(false)
@@ -126,11 +129,24 @@ module ULOL
           begin
             return unless @editing
             return if @enforcing_active_path
+            return if @active_path_enforcement_suspended
 
             enforce_primal_context(model || Sketchup.active_model())
           rescue StandardError => e
             puts "[IndoorGML] Edit active path enforcement failed: #{e.class}: #{e.message}"
           end
+        end
+
+        def with_active_path_enforcement_suspended
+          previous = @active_path_enforcement_suspended
+          @active_path_enforcement_suspended = true
+          yield
+        ensure
+          @active_path_enforcement_suspended = previous
+        end
+
+        def selection_changed
+          return unless @editing
         end
 
         def cleanup_before_quit
@@ -240,19 +256,6 @@ module ULOL
             model.close_active() while model.active_path()
           rescue StandardError => e
             puts "[IndoorGML] Edit context restore failed: #{e.class}: #{e.message}"
-          end
-        end
-
-        def focus_primal_group(model, primal_group = nil)
-          begin
-            primal_group ||= @indoor_model.primal_group
-            return unless primal_group&.valid?()
-
-            model.selection().clear()
-            model.selection().add(primal_group)
-            model.active_view().zoom(primal_group)
-          rescue StandardError => e
-            puts "[IndoorGML] Edit focus failed: #{e.class}: #{e.message}"
           end
         end
 

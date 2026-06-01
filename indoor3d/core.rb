@@ -46,25 +46,31 @@ module ULOL
         errors = []
 
         model.start_operation('Convert Solid Groups to CellSpace', true)
-        root_solid_groups = move_groups_to_root_context(model, solid_groups)
-        activate_root_context(model)
-        root_solid_groups.each do |group|
-          begin
-            indoor_model.convert_group_to_cell_space(group, cell_type)
-            converted_count += 1
-          rescue StandardError => e
-            puts "[IndoorGML] CellSpace conversion failed: #{e.class}: #{e.message}"
-            errors << "#{e.class}: #{e.message}"
+        indoor_model.with_active_path_enforcement_suspended do
+          root_solid_groups = move_groups_to_root_context(model, solid_groups)
+          activate_root_context(model)
+          root_solid_groups.each do |group|
+            begin
+              indoor_model.convert_group_to_cell_space(group, cell_type)
+              converted_count += 1
+            rescue StandardError => e
+              puts "[IndoorGML] CellSpace conversion failed: #{e.class}: #{e.message}"
+              errors << "#{e.class}: #{e.message}"
+            end
           end
+          restore_active_path(model, original_active_path)
         end
-        restore_active_path(model, original_active_path)
         model.commit_operation()
 
         message = "Converted #{converted_count} CellSpace(s)."
         message += "\nFailed #{errors.length} group(s):\n#{errors.join("\n")}" if errors.any?()
         UI.messagebox(message)
       rescue StandardError => e
-        restore_active_path(model, original_active_path) if model && original_active_path
+        if model && original_active_path
+          IndoorCore::IndoorModel.current.with_active_path_enforcement_suspended do
+            restore_active_path(model, original_active_path)
+          end
+        end
         model.abort_operation() if model
         UI.messagebox("CellSpace conversion failed:\n#{e.message}")
       end
@@ -125,9 +131,7 @@ module ULOL
         indoor_model = IndoorCore::IndoorModel.current
         if indoor_model.editing?()
           UI.messagebox('IndoorGML editing is already active.')
-        elsif indoor_model.begin_editing()
-          UI.messagebox('IndoorGML editing started.')
-        else
+        elsif !indoor_model.begin_editing()
           UI.messagebox('IndoorGML PrimalSpaceFeatures group was not found.')
         end
       rescue StandardError => e
@@ -165,6 +169,34 @@ module ULOL
       command.tooltip = tooltip
       command.status_bar_text = tooltip
       command
+    end
+
+    def self.add_context_menu_items(menu)
+      indoor_model = IndoorCore::IndoorModel.current
+      selected_indoor_entities = selected_indoor_gml_entities()
+      selected_cell_spaces = selected_indoor_entities.select { |entity| indoor_feature(entity) == 'CellSpace' }
+
+      if !indoor_model.editing?() && selected_indoor_entities.any?()
+        menu.add_item('Edit IndoorGML') { begin_indoor_gml_editing() }
+      end
+
+      if indoor_model.editing?() && selected_cell_spaces.any?()
+        menu.add_item('Change CellSpace Type') { change_selected_cell_space_type() }
+      end
+    rescue StandardError => e
+      puts "[IndoorGML] Context menu failed: #{e.class}: #{e.message}"
+    end
+
+    def self.selected_indoor_gml_entities
+      Sketchup.active_model.selection.to_a.select do |entity|
+        entity&.valid? && indoor_feature(entity).to_s.length.positive?
+      end
+    end
+
+    def self.indoor_feature(entity)
+      entity.get_attribute(IndoorCore::IndoorModel::ATTRIBUTE_DICTIONARY_NAME, 'feature')
+    rescue StandardError
+      nil
     end
 
     def self.active_path_snapshot(model)
@@ -218,16 +250,16 @@ module ULOL
       menu.add_item('Convert Solid Groups to CellSpace') do
         convert_selected_solid_groups_to_cell_spaces()
       end
-      menu.add_item('Change CellSpace Type') do
-        change_selected_cell_space_type()
-      end
       menu.add_item('Refresh Runtime Data') do
         refresh_runtime_data()
       end
       edit_command = create_command('Edit IndoorGML', 'Toggle IndoorGML editing mode') do
         toggle_indoor_gml_editing()
       end
-      menu.add_item(edit_command)
+
+      UI.add_context_menu_handler do |context_menu|
+        add_context_menu_items(context_menu)
+      end
 
       toolbar = UI::Toolbar.new('Indoor3DGML Modeler')
       toolbar.add_item(edit_command)
