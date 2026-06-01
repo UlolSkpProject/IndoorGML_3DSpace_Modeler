@@ -13,6 +13,7 @@ module ULOL
           @overlay_registered = false
           @overlay_model = nil
           @previous_active_path = nil
+          @enforcing_active_path = false
         end
 
         def editing?
@@ -117,6 +118,17 @@ module ULOL
           end
         end
 
+        def active_path_changed(model)
+          begin
+            return unless @editing
+            return if @enforcing_active_path
+
+            enforce_primal_context(model || Sketchup.active_model())
+          rescue StandardError => e
+            puts "[IndoorGML] Edit active path enforcement failed: #{e.class}: #{e.message}"
+          end
+        end
+
         private
 
         def ensure_overlay_registered(model)
@@ -146,11 +158,33 @@ module ULOL
           begin
             return false unless model.respond_to?(:active_path=)
 
-            model.active_path = [primal_group]
+            set_primal_active_path(model, primal_group)
             true
           rescue StandardError => e
             puts "[IndoorGML] Primal edit context activation failed: #{e.class}: #{e.message}"
             false
+          end
+        end
+
+        def enforce_primal_context(model)
+          primal_group = @indoor_model.primal_group
+          return unless primal_group&.valid?()
+          return if primal_active_path?(model, primal_group)
+
+          set_primal_active_path(model, primal_group)
+        end
+
+        def primal_active_path?(model, primal_group)
+          active_path = model.active_path()
+          active_path && active_path.length == 1 && active_path.first == primal_group
+        end
+
+        def set_primal_active_path(model, primal_group)
+          begin
+            @enforcing_active_path = true
+            model.active_path = [primal_group]
+          ensure
+            @enforcing_active_path = false
           end
         end
 
