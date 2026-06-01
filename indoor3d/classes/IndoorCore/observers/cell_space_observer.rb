@@ -11,20 +11,28 @@ module ULOL
         end
 
         def onOpen(instance)
+          return unless indoor_gml_entity?(instance)
+
           log_event('onOpen', instance)
         end
 
         def onClose(instance)
+          return unless indoor_gml_entity?(instance)
+
           log_event('onClose', instance)
           @indoor_model.cell_space_changed(instance)
         end
 
         def onChangeEntity(entity)
+          return unless indoor_gml_entity?(entity)
+
           log_event('onChangeEntity', entity)
           @indoor_model.cell_space_changed(entity)
         end
 
         def onEraseEntity(entity)
+          return unless indoor_gml_entity?(entity)
+
           log_event('onEraseEntity', entity)
           @indoor_model.cell_space_erased(entity)
         end
@@ -36,9 +44,23 @@ module ULOL
         end
 
         def entity_summary(entity)
-          "class=#{entity.class} name=#{entity_name(entity)}"
-        rescue StandardError
-          "class=#{entity.class}"
+          begin
+            "class=#{entity.class} name=#{entity_name(entity)}"
+          rescue StandardError
+            "class=#{entity.class}"
+          end
+        end
+
+        def indoor_gml_entity?(entity)
+          indoor_feature(entity).to_s.length.positive?
+        end
+
+        def indoor_feature(entity)
+          begin
+            entity.get_attribute(IndoorModel::ATTRIBUTE_DICTIONARY_NAME, 'feature')
+          rescue StandardError
+            nil
+          end
         end
 
         def entity_name(entity)
