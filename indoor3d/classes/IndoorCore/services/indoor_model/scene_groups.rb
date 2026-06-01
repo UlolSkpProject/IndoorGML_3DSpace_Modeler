@@ -161,20 +161,24 @@ module ULOL
           end
 
           def ensure_space_features_origin_point(group)
-            return unless group&.valid?
-            return if origin_construction_point?(group)
+            begin
+              return unless group&.valid?
+              return if origin_construction_point?(group)
 
-            group.entities.add_cpoint(ORIGIN)
-          rescue StandardError => e
-            puts "[IndoorGML] Origin point creation failed: #{e.class}: #{e.message}"
+              group.entities.add_cpoint(ORIGIN)
+            rescue StandardError => e
+              puts "[IndoorGML] Origin point creation failed: #{e.class}: #{e.message}"
+            end
           end
 
           def origin_construction_point?(group)
-            group.entities.grep(Sketchup::ConstructionPoint).any? do |point|
-              point.valid? && point.position.distance(ORIGIN) <= 0.001
+            begin
+              group.entities.grep(Sketchup::ConstructionPoint).any? do |point|
+                point.valid? && point.position.distance(ORIGIN) <= 0.001
+              end
+            rescue StandardError
+              false
             end
-          rescue StandardError
-            false
           end
 
           def lock_space_features_groups
@@ -205,9 +209,11 @@ module ULOL
           end
 
           def inside_primal_group?(sketchup_group)
-            Utils::Transformation.direct_child_of_root?(sketchup_group, @primal_group)
-          rescue StandardError
-            false
+            begin
+              Utils::Transformation.direct_child_of_root?(sketchup_group, @primal_group)
+            rescue StandardError
+              false
+            end
           end
 
           def cell_space_local_origin(cell_space)
