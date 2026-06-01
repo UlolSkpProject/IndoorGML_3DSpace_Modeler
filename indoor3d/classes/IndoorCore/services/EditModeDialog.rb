@@ -32,16 +32,28 @@ module ULOL
           dialog = UI::HtmlDialog.new(
             dialog_title: 'IndoorGML Edit Mode',
             preferences_key: 'ULOL.Indoor3DGmlModeler.EditMode',
-            scrollable: false,
+            scrollable: true,
             resizable: false,
             width: 280,
-            height: 230,
+            height: 310,
             style: UI::HtmlDialog::STYLE_DIALOG
           )
           dialog.add_action_callback('setStateRadius') do |_context, radius_mm|
             puts "[IndoorGML] EditModeDialog#setStateRadius radius_mm=#{radius_mm}"
             UI.start_timer(0, false) do
               @indoor_model.set_state_radius(radius_mm.to_f.mm)
+            end
+          end
+          dialog.add_action_callback('setOverlayMinRadius') do |_context, radius_pixels|
+            puts "[IndoorGML] EditModeDialog#setOverlayMinRadius radius_pixels=#{radius_pixels}"
+            UI.start_timer(0, false) do
+              @indoor_model.set_overlay_min_radius_pixels(radius_pixels)
+            end
+          end
+          dialog.add_action_callback('setOverlayRadiusRange') do |_context, min_radius_pixels, max_radius_pixels|
+            puts "[IndoorGML] EditModeDialog#setOverlayRadiusRange min=#{min_radius_pixels} max=#{max_radius_pixels}"
+            UI.start_timer(0, false) do
+              @indoor_model.set_overlay_radius_pixel_range(min_radius_pixels, max_radius_pixels)
             end
           end
           dialog.add_action_callback('finishEditing') do |_context|
@@ -62,6 +74,8 @@ module ULOL
 
         def html
           radius_mm = (@indoor_model.state_radius.to_f / 1.mm).round
+          overlay_min_radius = @indoor_model.overlay_min_radius_pixels.round
+          overlay_max_radius = @indoor_model.overlay_max_radius_pixels.round
           <<~HTML
             <!doctype html>
             <html>
@@ -97,7 +111,16 @@ module ULOL
                 }
                 input[type="range"] {
                   width: 100%;
-                  margin: 0 0 18px;
+                  margin: 0 0 14px;
+                }
+                .range-row {
+                  display: grid;
+                  grid-template-columns: 1fr 1fr;
+                  gap: 8px;
+                  margin-bottom: 14px;
+                }
+                .range-row input[type="range"] {
+                  margin-bottom: 0;
                 }
                 button {
                   width: 100%;
@@ -126,24 +149,50 @@ module ULOL
                 <output id="radiusValue">#{radius_mm} mm</output>
               </label>
               <input id="radius" type="range" min="500" max="5000" step="100" value="#{radius_mm}">
+              <label>
+                <span>Overlay radius range</span>
+                <output id="overlayRadiusValue">#{overlay_min_radius}-#{overlay_max_radius} px</output>
+              </label>
+              <div class="range-row">
+                <input id="overlayMinRadius" type="range" min="4" max="128" step="1" value="#{overlay_min_radius}">
+                <input id="overlayMaxRadius" type="range" min="4" max="128" step="1" value="#{overlay_max_radius}">
+              </div>
               <button id="finish" type="button">Finish</button>
               <button id="clearAll" class="danger" type="button">Clear All IndoorGML Elements</button>
               <script>
                 var radius = document.getElementById('radius');
                 var radiusValue = document.getElementById('radiusValue');
+                var overlayMinRadius = document.getElementById('overlayMinRadius');
+                var overlayMaxRadius = document.getElementById('overlayMaxRadius');
+                var overlayRadiusValue = document.getElementById('overlayRadiusValue');
+                function updateOverlayRadiusRange() {
+                  var minRadius = Number(overlayMinRadius.value);
+                  var maxRadius = Number(overlayMaxRadius.value);
+                  if (minRadius > maxRadius) {
+                    if (document.activeElement === overlayMinRadius) {
+                      overlayMaxRadius.value = minRadius;
+                      maxRadius = minRadius;
+                    } else {
+                      overlayMinRadius.value = maxRadius;
+                      minRadius = maxRadius;
+                    }
+                  }
+                  overlayRadiusValue.textContent = `${minRadius}-${maxRadius} px`;
+                  sketchup.setOverlayRadiusRange(minRadius, maxRadius);
+                }
                 radius.addEventListener('input', function () {
                   radiusValue.textContent = `${radius.value} mm`;
                 });
                 radius.addEventListener('change', function () {
                   sketchup.setStateRadius(Number(radius.value));
                 });
+                overlayMinRadius.addEventListener('input', updateOverlayRadiusRange);
+                overlayMaxRadius.addEventListener('input', updateOverlayRadiusRange);
                 document.getElementById('finish').addEventListener('click', function () {
                   sketchup.finishEditing();
                 });
                 document.getElementById('clearAll').addEventListener('click', function () {
-                  if (confirm('Clear all IndoorGML elements?')) {
-                    sketchup.clearAllIndoorGmlElements();
-                  }
+                  sketchup.clearAllIndoorGmlElements();
                 });
               </script>
             </body>

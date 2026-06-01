@@ -10,6 +10,8 @@ module ULOL
         TITLE = 'EDIT MODE'
         CONTEXT_LABEL = 'PRIMAL SPACE'
         HINT_LABEL = 'CellSpace editing active'
+        CIRCLE_SEGMENTS = 32
+        OVERLAY_RADIUS_SCALE = 1.1
 
         def initialize(indoor_model)
           @indoor_model = indoor_model
@@ -23,6 +25,7 @@ module ULOL
             draw_screen_border(view)
             draw_banner(view)
             draw_cell_space_outlines(view)
+            draw_dual_space_overlay(view)
           rescue StandardError => e
             puts "[IndoorGML] Edit mode overlay draw failed: #{e.class}: #{e.message}"
           end
@@ -78,6 +81,155 @@ module ULOL
           end
         ensure
           view.line_width = 1 if view.respond_to?(:line_width=)
+        end
+
+        def draw_dual_space_overlay(view)
+          return unless @indoor_model.dual_group&.valid?
+
+          view.line_width = 2 if view.respond_to?(:line_width=)
+          draw_overlay_transitions(view)
+          draw_overlay_states(view)
+        ensure
+          view.line_width = 1 if view.respond_to?(:line_width=)
+        end
+
+        def draw_overlay_states(view)
+          view.drawing_color = Sketchup::Color.new(35, 120, 255, 255)
+          @indoor_model.states.each do |state|
+            next unless state&.valid?
+
+            center = overlay_entity_origin(state.sketchup_component_instance)
+            radius = overlay_state_radius(view, center, state)
+            draw_billboard_disk(view, center, radius)
+          end
+        end
+
+        def draw_overlay_transitions(view)
+          view.drawing_color = Sketchup::Color.new(35, 120, 255, 125)
+          @indoor_model.transitions.each do |transition|
+            next unless transition&.valid?
+            next unless transition.state1&.valid? && transition.state2&.valid?
+
+            point1 = overlay_entity_origin(transition.state1.sketchup_component_instance)
+            point2 = overlay_entity_origin(transition.state2.sketchup_component_instance)
+            draw_transition_billboard_quad(view, point1, point2, overlay_transition_radius(view, point1, point2, transition))
+          end
+        end
+
+        def overlay_state_radius(view, center, state)
+          model_radius = (state.radius || State.display_radius) * OVERLAY_RADIUS_SCALE
+          clamp_overlay_radius(view, center, model_radius)
+        end
+
+        def overlay_transition_radius(view, point1, point2, transition)
+          state_radius = [
+            transition.state1&.radius,
+            transition.state2&.radius
+          ].compact.first || State.display_radius
+          model_radius = state_radius * 0.5 * OVERLAY_RADIUS_SCALE
+          midpoint = Geom::Point3d.new(
+            (point1.x + point2.x) / 2.0,
+            (point1.y + point2.y) / 2.0,
+            (point1.z + point2.z) / 2.0
+          )
+          clamp_overlay_radius(view, midpoint, model_radius, pixel_scale: 0.5)
+        end
+
+        def clamp_overlay_radius(view, center, model_radius, pixel_scale: 1.0)
+          screen_min_radius = view.pixels_to_model(@indoor_model.overlay_min_radius_pixels * pixel_scale, center)
+          screen_max_radius = view.pixels_to_model(@indoor_model.overlay_max_radius_pixels * pixel_scale, center)
+          [[model_radius, screen_min_radius].max, screen_max_radius].min
+        end
+
+        def draw_state_rings(view, center, radius)
+          draw_circle(view, center, X_AXIS, Y_AXIS, radius)
+          draw_circle(view, center, X_AXIS, Z_AXIS, radius)
+          draw_circle(view, center, Y_AXIS, Z_AXIS, radius)
+        end
+
+        def draw_billboard_disk(view, center, radius)
+          right_axis, up_axis = camera_billboard_axes(view)
+          points = [center]
+          points.concat(circle_points(center, right_axis, up_axis, radius))
+          points << points[1]
+          view.draw(GL_TRIANGLE_FAN, points)
+        end
+
+        def draw_transition_billboard_quad(view, point1, point2, half_width)
+          direction = point1.vector_to(point2)
+          return if direction.length <= 0.001
+
+          direction.normalize!
+          camera_direction = view.camera.direction
+          width_axis = direction.cross(camera_direction)
+          if width_axis.length <= 0.001
+            width_axis = direction.cross(view.camera.up)
+          end
+          return if width_axis.length <= 0.001
+
+          width_axis.normalize!
+          offset = Geom::Vector3d.new(
+            width_axis.x * half_width,
+            width_axis.y * half_width,
+            width_axis.z * half_width
+          )
+          view.draw(
+            GL_QUADS,
+            [
+              point1.offset(offset),
+              point2.offset(offset),
+              point2.offset(offset.reverse),
+              point1.offset(offset.reverse)
+            ]
+          )
+        end
+
+        def draw_transition_wire(view, point1, point2, radius)
+          direction = point1.vector_to(point2)
+          return if direction.length <= 0.001
+
+          z_axis = direction.clone
+          z_axis.normalize!
+          x_axis = transition_perpendicular_axis(z_axis)
+          y_axis = z_axis.cross(x_axis)
+          y_axis.normalize!
+          view.draw(GL_LINES, [point1, point2])
+          draw_circle(view, point1, x_axis, y_axis, radius)
+          draw_circle(view, point2, x_axis, y_axis, radius)
+        end
+
+        def draw_circle(view, center, axis1, axis2, radius)
+          view.draw(GL_LINE_LOOP, circle_points(center, axis1, axis2, radius))
+        end
+
+        def circle_points(center, axis1, axis2, radius)
+          (0...CIRCLE_SEGMENTS).map do |index|
+            angle = (2.0 * Math::PI * index) / CIRCLE_SEGMENTS
+            Geom::Point3d.new(
+              center.x + (axis1.x * Math.cos(angle) * radius) + (axis2.x * Math.sin(angle) * radius),
+              center.y + (axis1.y * Math.cos(angle) * radius) + (axis2.y * Math.sin(angle) * radius),
+              center.z + (axis1.z * Math.cos(angle) * radius) + (axis2.z * Math.sin(angle) * radius)
+            )
+          end
+        end
+
+        def camera_billboard_axes(view)
+          up_axis = view.camera.up.clone
+          up_axis.normalize!
+          right_axis = view.camera.direction.cross(up_axis)
+          right_axis.normalize!
+          [right_axis, up_axis]
+        end
+
+        def overlay_entity_origin(entity)
+          entity.transformation.origin
+        end
+
+        def transition_perpendicular_axis(z_axis)
+          seed = z_axis.parallel?(Z_AXIS) ? X_AXIS : Z_AXIS
+          x_axis = seed.cross(z_axis)
+          x_axis.normalize!
+          x_axis
         end
 
         def draw_bounds(view, bounds)
