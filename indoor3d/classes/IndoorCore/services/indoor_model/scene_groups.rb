@@ -48,6 +48,8 @@ module ULOL
             @root_entities_observer.track_entity(@dual_group)
             attach_entities_observer(:primal, @primal_group.entities, @primal_entities_observer) if @primal_group&.valid?
             attach_entities_observer(:dual, @dual_group.entities, @dual_entities_observer) if @dual_group&.valid?
+            @primal_entities_observer.track_entities(@primal_group.entities) if @primal_group&.valid?
+            @dual_entities_observer.track_entities(@dual_group.entities) if @dual_group&.valid?
           end
 
           def attach_existing_space_features_observer(group, expected_name)
@@ -128,6 +130,10 @@ module ULOL
             attach_entities_observer(:root, model.entities, @root_entities_observer)
             attach_entities_observer(:primal, @primal_group.entities, @primal_entities_observer) if @primal_group&.valid?
             attach_entities_observer(:dual, @dual_group.entities, @dual_entities_observer) if @dual_group&.valid?
+            @root_entities_observer.track_entity(@primal_group)
+            @root_entities_observer.track_entity(@dual_group)
+            @primal_entities_observer.track_entities(@primal_group.entities) if @primal_group&.valid?
+            @dual_entities_observer.track_entities(@dual_group.entities) if @dual_group&.valid?
           end
 
           def attach_entities_observer(scope, entities, observer)
