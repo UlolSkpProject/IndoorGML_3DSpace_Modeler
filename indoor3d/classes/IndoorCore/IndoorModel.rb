@@ -15,16 +15,9 @@ module ULOL
         attr_reader :cell_spaces
         attr_reader :states
         attr_reader :transitions
-        attr_reader :cells
-        attr_reader :nodes
-        attr_reader :links
         attr_reader :doors
         attr_reader :transfer_spaces
-        attr_reader :pois
-        attr_reader :building
-        attr_reader :floors
         attr_reader :model
-        attr_reader :edit_mode
         attr_reader :primal_group
         attr_reader :dual_group
 
@@ -34,35 +27,8 @@ module ULOL
 
         def initialize
           @model = Sketchup.active_model
-          @cell_spaces = []
-          @states = []
-          @transitions = []
-          @cells = @cell_spaces
-          @nodes = @states
-          @links = @transitions
-          @doors = []
-          @transfer_spaces = []
-          @pois = []
-          @building = nil
-          @floors = []
-          @cell_creation_count = 0
-          @door_creation_count = 0
-          @node_creation_count = 0
-          @link_creation_count = 0
-          @poi_creation_count = 0
-          @floor_creation_count = 0
-          @edit_mode = :none
-          @cell_spaces_by_entity = {}
-          @cell_spaces_by_entity_id = {}
-          @cell_spaces_by_sketchup_entity_id = {}
-          @states_by_entity = {}
-          @states_by_entity_id = {}
-          @states_by_sketchup_entity_id = {}
-          @transitions_by_entity = {}
-          @transitions_by_entity_id = {}
-          @transitions_by_sketchup_entity_id = {}
-          @adjacent_cell_space_pairs = {}
-          @transitions_by_cell_pair = {}
+          @feature_registry = FeatureRegistry.new
+          bind_registry_collections
           @cell_space_observer = CellSpaceObserver.new(self)
           @state_observer = StateObserver.new(self)
           @space_features_observer = SpaceFeaturesObserver.new(self)
@@ -73,8 +39,6 @@ module ULOL
           @state_observed_ids = {}
           @space_features_observed_ids = {}
           @entities_observed_ids = {}
-          @space_features_expected_names = {}
-          @space_features_last_transforms = {}
           @syncing = false
           @erasing = false
           @relocating_entity = false
@@ -82,12 +46,27 @@ module ULOL
           @constraining_space_features = false
           @primal_group = nil
           @dual_group = nil
+          @attribute_serializer = AttributeSerializer.new(
+            dictionary_name: ATTRIBUTE_DICTIONARY_NAME,
+            indoor_gml_version: INDOOR_GML_VERSION
+          )
+          @adjacency_service = AdjacencyService.new(
+            @feature_registry,
+            transition_builder: method(:create_or_update_transition_for_pair),
+            transition_eraser: method(:erase_transition_for_pair_key)
+          )
+          @runtime_restorer = RuntimeRestorer.new(
+            @feature_registry,
+            @attribute_serializer,
+            cell_space_registrar: method(:register_cell_space),
+            state_registrar: method(:register_state)
+          )
+          @scene_group_guard = SceneGroupGuard.new(with_unlocked: method(:with_unlocked))
         end
 
         def convert_group_to_cell_space(sketchup_group, cell_type = CellSpaceType::GENERAL)
           raise ArgumentError, 'Group is already converted to CellSpace' if converted_group?(sketchup_group)
 
-          @cell_creation_count += 1
           ensure_space_features_groups
           cell_group = place_cell_group(sketchup_group)
           cell_space = CellSpace.new(cell_group, cell_type)
@@ -122,26 +101,28 @@ module ULOL
         end
 
         def cell_space_changed(entity)
-          return if @syncing || @erasing
+          begin
+            return if @syncing || @erasing
 
-          cell_space = find_cell_space_for_entity(entity)
-          cell_space = refresh_and_find_cell_space(entity) if stale_cell_space_runtime?(cell_space, entity)
-          return if cell_space.nil? || !cell_space.valid?
+            cell_space = find_cell_space_for_entity(entity)
+            cell_space = refresh_and_find_cell_space(entity) if stale_cell_space_runtime?(cell_space, entity)
+            return if cell_space.nil? || !cell_space.valid?
 
-          sync do
-            state = cell_space.duality_state
-            unless state&.valid?
-              cell_space = refresh_and_find_cell_space(entity)
-              state = cell_space&.duality_state
+            sync do
+              state = cell_space.duality_state
+              unless state&.valid?
+                cell_space = refresh_and_find_cell_space(entity)
+                state = cell_space&.duality_state
+              end
+              if state&.valid?
+                local_position = cell_space_local_origin(cell_space)
+                move_state_to_local_position(state, local_position)
+              end
+              synchronize_adjacency_and_transitions_for_cell_space(cell_space)
             end
-            if state&.valid?
-              local_position = cell_space_local_origin(cell_space)
-              move_state_to_local_position(state, local_position)
-            end
-            synchronize_adjacency_and_transitions_for_cell_space(cell_space)
+          ensure
+            lock_indoor_entity(entity)
           end
-        ensure
-          lock_indoor_entity(entity)
         end
 
         def state_changed(entity)
@@ -217,10 +198,7 @@ module ULOL
             find_existing_space_features_groups
             attach_existing_space_features_observers
             reset_runtime_collections
-            restore_cell_spaces_from_primal_group
-            restore_states_from_dual_group
-            restore_transitions_from_dual_group
-            update_runtime_counts
+            @runtime_restorer.restore(primal_group: @primal_group, dual_group: @dual_group)
           end
           puts "[IndoorGML] Runtime refreshed: cells=#{@cell_spaces.length}, states=#{@states.length}, transitions=#{@transitions.length}"
           true
@@ -303,7 +281,7 @@ module ULOL
         def primal_entity_removed(entity_id)
           return if @erasing || @relocating_entity
 
-          cell_space = @cell_spaces_by_sketchup_entity_id[entity_id]
+          cell_space = @feature_registry.cell_space_by_sketchup_entity_id(entity_id)
           puts "[IndoorGML] Primal entity removed: entity_id=#{entity_id} cell_space=#{cell_space&.id || 'missing'}"
           erase_cell_space(cell_space, erase_sketchup_group: false) if cell_space
         end
@@ -337,11 +315,11 @@ module ULOL
         def dual_entity_removed(entity_id)
           return if @erasing || @relocating_entity
 
-          state = @states_by_sketchup_entity_id[entity_id]
+          state = @feature_registry.state_by_sketchup_entity_id(entity_id)
           puts "[IndoorGML] Dual entity removed: entity_id=#{entity_id} state=#{state&.id || 'missing'}"
           erase_state(state, erase_sketchup_instance: false) if state
 
-          transition = @transitions_by_sketchup_entity_id[entity_id]
+          transition = @feature_registry.transition_by_sketchup_entity_id(entity_id)
           puts "[IndoorGML] Dual transition removed: entity_id=#{entity_id} transition=#{transition&.id || 'missing'}"
           erase_transition(transition) if transition
         end
@@ -350,13 +328,22 @@ module ULOL
           @primal_group = nil if entity == @primal_group
           @dual_group = nil if entity == @dual_group
           @space_features_observed_ids.delete(entity.object_id)
-          @space_features_expected_names.delete(entity.persistent_id)
-          @space_features_last_transforms.delete(entity.persistent_id)
+          @scene_group_guard.untrack(entity)
         rescue StandardError
           nil
         end
 
         private
+
+        def bind_registry_collections
+          @cell_spaces = @feature_registry.cell_spaces
+          @states = @feature_registry.states
+          @transitions = @feature_registry.transitions
+          @doors = @feature_registry.doors
+          @transfer_spaces = @feature_registry.transfer_spaces
+          @adjacent_cell_space_pairs = @feature_registry.adjacent_cell_space_pairs
+          @transitions_by_cell_pair = @feature_registry.transitions_by_cell_pair
+        end
 
         def ensure_space_features_groups
           Utils::Materials.ensure_all
@@ -404,10 +391,8 @@ module ULOL
         def attach_existing_space_features_observer(group, expected_name)
           return unless group&.valid?
 
-          persistent_id = group.persistent_id
           observer_key = group.object_id
-          @space_features_expected_names[persistent_id] = expected_name
-          @space_features_last_transforms[persistent_id] = group.transformation
+          @scene_group_guard.track(group, expected_name)
           return if @space_features_observed_ids[observer_key]
 
           group.add_observer(@space_features_observer)
@@ -415,145 +400,8 @@ module ULOL
         end
 
         def reset_runtime_collections
-          @cell_spaces = []
-          @states = []
-          @transitions = []
-          @cells = @cell_spaces
-          @nodes = @states
-          @links = @transitions
-          @doors = []
-          @transfer_spaces = []
-          @pois = []
-          @cell_spaces_by_entity = {}
-          @cell_spaces_by_entity_id = {}
-          @cell_spaces_by_sketchup_entity_id = {}
-          @states_by_entity = {}
-          @states_by_entity_id = {}
-          @states_by_sketchup_entity_id = {}
-          @transitions_by_entity = {}
-          @transitions_by_entity_id = {}
-          @transitions_by_sketchup_entity_id = {}
-          @adjacent_cell_space_pairs = {}
-          @transitions_by_cell_pair = {}
-        end
-
-        def update_runtime_counts
-          @cell_creation_count = @cell_spaces.length
-          @node_creation_count = @states.length
-          @link_creation_count = @transitions.length
-          @door_creation_count = @doors.length
-          @poi_creation_count = @pois.length
-          @floor_creation_count = @floors.length
-        end
-
-        def restore_cell_spaces_from_primal_group
-          return unless @primal_group&.valid?
-
-          indoor_children(@primal_group.entities, 'CellSpace').each do |entity|
-            cell_space = restore_cell_space(entity)
-            register_cell_space(cell_space) if cell_space
-          end
-        end
-
-        def restore_states_from_dual_group
-          return unless @dual_group&.valid?
-
-          cells_by_id = @cell_spaces.each_with_object({}) { |cell_space, hash| hash[cell_space.id] = cell_space }
-          indoor_children(@dual_group.entities, 'State').each do |entity|
-            cell_id = indoor_attribute(entity, 'duality_cell_id')
-            cell_space = cells_by_id[cell_id]
-            unless cell_space
-              puts "[IndoorGML] State restore skipped: missing CellSpace #{cell_id}"
-              next
-            end
-
-            state = restore_state(entity, cell_space)
-            next unless state
-
-            cell_space.restore_duality_state(state)
-            register_state(state)
-          end
-        end
-
-        def restore_transitions_from_dual_group
-          return unless @dual_group&.valid?
-
-          states_by_id = @states.each_with_object({}) { |state, hash| hash[state.id] = state }
-          cells_by_id = @cell_spaces.each_with_object({}) { |cell_space, hash| hash[cell_space.id] = cell_space }
-          indoor_children(@dual_group.entities, 'Transition').each do |entity|
-            state1 = states_by_id[indoor_attribute(entity, 'state1_id')]
-            state2 = states_by_id[indoor_attribute(entity, 'state2_id')]
-            unless state1 && state2
-              puts "[IndoorGML] Transition restore skipped: missing State"
-              next
-            end
-
-            cell1 = cells_by_id[indoor_attribute(entity, 'cell1_id')] || state1.duality_cell
-            cell2 = cells_by_id[indoor_attribute(entity, 'cell2_id')] || state2.duality_cell
-            transition = restore_transition(entity, state1, state2, cell1, cell2)
-            next unless transition
-
-            @transitions << transition
-            @transitions_by_cell_pair[cell_pair_key(cell1, cell2)] = transition if cell1 && cell2
-            @adjacent_cell_space_pairs[cell_pair_key(cell1, cell2)] = [cell1, cell2] if cell1 && cell2
-            register_transition_entity(transition)
-            restore_transition_with_states(transition)
-          end
-        end
-
-        def restore_cell_space(entity)
-          CellSpace.restore(
-            entity,
-            CellSpaceType.from_label(indoor_attribute(entity, 'cell_type')),
-            id: indoor_attribute(entity, 'id'),
-            name: indoor_attribute(entity, 'name')
-          )
-        rescue StandardError => e
-          puts "[IndoorGML] CellSpace restore failed: #{e.class}: #{e.message}"
-          nil
-        end
-
-        def restore_state(entity, cell_space)
-          State.restore(
-            cell_space,
-            entity,
-            restored_state_position(entity),
-            id: indoor_attribute(entity, 'id'),
-            name: indoor_attribute(entity, 'name')
-          )
-        rescue StandardError => e
-          puts "[IndoorGML] State restore failed: #{e.class}: #{e.message}"
-          nil
-        end
-
-        def restore_transition(entity, state1, state2, cell1, cell2)
-          Transition.restore(
-            entity,
-            state1,
-            state2,
-            cell1: cell1,
-            cell2: cell2,
-            id: indoor_attribute(entity, 'id'),
-            name: indoor_attribute(entity, 'name')
-          )
-        rescue StandardError => e
-          puts "[IndoorGML] Transition restore failed: #{e.class}: #{e.message}"
-          nil
-        end
-
-        def restored_state_position(entity)
-          x = indoor_attribute(entity, 'position_x')
-          y = indoor_attribute(entity, 'position_y')
-          z = indoor_attribute(entity, 'position_z')
-          return Geom::Point3d.new(x.to_f, y.to_f, z.to_f) unless x.nil? || y.nil? || z.nil?
-
-          Utils::Transformation.entity_origin_in_root_local(entity, @dual_group)
-        end
-
-        def indoor_children(entities, feature)
-          entities.to_a.select do |entity|
-            entity&.valid? && indoor_attribute(entity, 'feature') == feature
-          end
+          @feature_registry.reset!
+          bind_registry_collections
         end
 
         def stale_cell_space_runtime?(cell_space, entity)
@@ -644,15 +492,13 @@ module ULOL
         def attach_space_features_observer(group, expected_name)
           return unless group&.valid?
 
-          persistent_id = group.persistent_id
           observer_key = group.object_id
-          @space_features_expected_names[persistent_id] = expected_name
+          @scene_group_guard.track(group, expected_name)
           with_unlocked(group) { group.name = expected_name } unless group.name == expected_name
           return if @space_features_observed_ids[observer_key]
 
           group.add_observer(@space_features_observer)
           @space_features_observed_ids[observer_key] = true
-          @space_features_last_transforms[persistent_id] = group.transformation
           synchronize_space_features_from(@primal_group) if group == @dual_group && @primal_group&.valid?
         end
 
@@ -696,11 +542,7 @@ module ULOL
         end
 
         def write_space_features_attributes(group, feature)
-          return unless group&.valid?
-
-          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'feature', feature)
-          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'name', group.name)
-          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'indoor_gml_version', INDOOR_GML_VERSION)
+          @attribute_serializer.write_space_features(group, feature)
         end
 
         def ensure_space_features_origin_point(group)
@@ -747,17 +589,7 @@ module ULOL
         end
 
         def enforce_space_features_constraints
-          ordered_space_features_groups.each do |group|
-            next unless group&.valid?
-
-            restore_space_features_name(group)
-            next if restore_space_features_scale(group)
-
-            last_transform = @space_features_last_transforms[group.persistent_id]
-            next if last_transform && Utils::Transformation.same?(group.transformation, last_transform)
-
-            synchronize_space_features_from(group)
-          end
+          @scene_group_guard.enforce(ordered_space_features_groups)
         end
 
         def ordered_space_features_groups
@@ -765,7 +597,7 @@ module ULOL
         end
 
         def restore_space_features_name(group)
-          expected_name = @space_features_expected_names[group.persistent_id]
+          expected_name = nil
           return if expected_name.nil? || group.name == expected_name
 
           UI.messagebox('이름을 변경할 수 없는 Group입니다.')
@@ -776,27 +608,12 @@ module ULOL
           return false unless Utils::Transformation.scaled?(group.transformation)
 
           UI.messagebox('크기를 조절할 수 없는 Group입니다.')
-          set_group_transformation(group, @space_features_last_transforms[group.persistent_id] || Geom::Transformation.new)
+          set_group_transformation(group, Geom::Transformation.new)
           true
         end
 
         def synchronize_space_features_from(source_group)
-          return unless source_group&.valid?
-          return if Utils::Transformation.scaled?(source_group.transformation)
-
-          ordered_space_features_groups.each do |group|
-            next unless group&.valid?
-            next if group == source_group
-            next if Utils::Transformation.same?(group.transformation, source_group.transformation)
-
-            set_group_transformation(group, source_group.transformation)
-          end
-
-          ordered_space_features_groups.each do |group|
-            next unless group&.valid?
-
-            @space_features_last_transforms[group.persistent_id] = group.transformation
-          end
+          @scene_group_guard.synchronize_from(source_group, ordered_space_features_groups)
         end
 
         def set_group_transformation(group, transformation)
@@ -857,11 +674,7 @@ module ULOL
         end
 
         def register_cell_space(cell_space)
-          @cell_spaces << cell_space
-          update_cell_space_type_runtime_lists(cell_space)
-          @cell_spaces_by_entity[cell_space.sketchup_group] = cell_space
-          @cell_spaces_by_entity_id[cell_space.sketchup_group.persistent_id] = cell_space
-          @cell_spaces_by_sketchup_entity_id[cell_space.sketchup_group.entityID] = cell_space
+          @feature_registry.add_cell_space(cell_space)
           attach_cell_space_observer(cell_space.sketchup_group)
           lock_indoor_entity(cell_space.sketchup_group)
         end
@@ -883,25 +696,15 @@ module ULOL
         end
 
         def update_cell_space_type_runtime_lists(cell_space)
-          return if cell_space.nil?
-
-          @doors << cell_space if cell_space.cell_type == CellSpaceType::TRANSITION && !@doors.include?(cell_space)
-          @transfer_spaces << cell_space if cell_space.cell_type == CellSpaceType::TRANSFER && !@transfer_spaces.include?(cell_space)
+          @feature_registry.add_cell_space_type_reference(cell_space)
         end
 
         def remove_cell_space_from_type_runtime_lists(cell_space)
-          return if cell_space.nil?
-
-          @doors.delete(cell_space)
-          @transfer_spaces.delete(cell_space)
+          @feature_registry.remove_cell_space_type_reference(cell_space)
         end
 
         def register_state(state)
-          @states << state
-          @node_creation_count += 1
-          @states_by_entity[state.sketchup_component_instance] = state
-          @states_by_entity_id[state.sketchup_component_instance.persistent_id] = state
-          @states_by_sketchup_entity_id[state.sketchup_component_instance.entityID] = state
+          @feature_registry.add_state(state)
           attach_state_observer(state.sketchup_component_instance)
           lock_indoor_entity(state.sketchup_component_instance)
         end
@@ -909,21 +712,14 @@ module ULOL
         def unregister_cell_space(cell_space)
           return if cell_space.nil?
 
-          @cell_spaces.delete(cell_space)
-          remove_cell_space_from_type_runtime_lists(cell_space)
-          @cell_spaces_by_entity.delete(cell_space.sketchup_group)
-          @cell_spaces_by_entity_id.delete(cell_space.sketchup_group_id)
-          @cell_spaces_by_sketchup_entity_id.delete_if { |_entity_id, mapped_cell_space| mapped_cell_space == cell_space }
+          @feature_registry.remove_cell_space(cell_space)
           @cell_space_observed_ids.delete(cell_space.sketchup_group.object_id)
         end
 
         def unregister_state(state)
           return if state.nil?
 
-          @states.delete(state)
-          @states_by_entity.delete(state.sketchup_component_instance)
-          @states_by_entity_id.delete(state.sketchup_component_instance_id)
-          @states_by_sketchup_entity_id.delete_if { |_entity_id, mapped_state| mapped_state == state }
+          @feature_registry.remove_state(state)
           @state_observed_ids.delete(state.sketchup_component_instance.object_id)
         end
 
@@ -938,33 +734,11 @@ module ULOL
         end
 
         def synchronize_adjacency_and_transitions_for_cell_space(cell_space)
-          return if cell_space.nil? || !cell_space.valid? || !cell_space.duality_state&.valid?
-
-          @cell_spaces.each do |other_cell_space|
-            next if other_cell_space.nil? || other_cell_space == cell_space
-            next unless other_cell_space.valid? && other_cell_space.duality_state&.valid?
-
-            pair_key = cell_pair_key(cell_space, other_cell_space)
-            adjacency_axis = Utils::Geometry.adjacency_axis(cell_space.sketchup_group, other_cell_space.sketchup_group)
-            if transition_allowed_between?(cell_space, other_cell_space, adjacency_axis)
-              @adjacent_cell_space_pairs[pair_key] = [cell_space, other_cell_space]
-              create_or_update_transition_for_pair(cell_space, other_cell_space)
-            else
-              erase_transition_for_pair_key(pair_key)
-            end
-          end
+          @adjacency_service.synchronize_for(cell_space)
         end
 
         def erase_adjacency_for_cell_space(cell_space)
-          return if cell_space.nil?
-
-          @adjacent_cell_space_pairs.keys.each do |pair_key|
-            erase_transition_for_pair_key(pair_key) if pair_key.split(':').include?(cell_space.id)
-          end
-
-          @transitions_by_cell_pair.keys.each do |pair_key|
-            erase_transition_for_pair_key(pair_key) if pair_key.split(':').include?(cell_space.id)
-          end
+          @adjacency_service.erase_for(cell_space)
         end
 
         def create_or_update_transition_for_pair(cell1, cell2)
@@ -974,9 +748,8 @@ module ULOL
           return nil unless cell1.duality_state&.valid? && cell2.duality_state&.valid?
 
           pair_key = cell_pair_key(cell1, cell2)
-          transition = @transitions_by_cell_pair[pair_key]
+          transition = @feature_registry.transition_for_pair(pair_key)
           unless transition&.valid?
-            @link_creation_count += 1
             transition = Transition.new(
               cell1.duality_state,
               cell2.duality_state,
@@ -984,8 +757,7 @@ module ULOL
               cell1: cell1,
               cell2: cell2
             )
-            @transitions << transition
-            @transitions_by_cell_pair[pair_key] = transition
+            @feature_registry.add_transition(transition, pair_key: pair_key)
           end
 
           return nil unless update_transition(transition)
@@ -998,11 +770,11 @@ module ULOL
         end
 
         def erase_transition_for_pair_key(pair_key)
-          transition = @transitions_by_cell_pair.delete(pair_key)
+          transition = @feature_registry.delete_transition_for_pair(pair_key)
           return if transition.nil?
 
           erase_transition(transition)
-          @adjacent_cell_space_pairs.delete(pair_key)
+          @feature_registry.delete_adjacent_pair(pair_key)
         end
 
         def erase_transition(transition)
@@ -1012,30 +784,11 @@ module ULOL
           unregister_transition_from_states(transition)
           unlock_indoor_entity(transition.edge)
           transition.erase!
-          @transitions.delete(transition)
+          @feature_registry.remove_transition(transition)
         end
 
         def cell_pair_key(cell1, cell2)
-          [cell1.id, cell2.id].sort.join(':')
-        end
-
-        def transition_allowed_between?(cell1, cell2, adjacency_axis)
-          return false if adjacency_axis.nil?
-          return false if cell1.cell_type == CellSpaceType::GENERAL && cell2.cell_type == CellSpaceType::GENERAL
-
-          return adjacency_axis != :z if transition_space_pair?(cell1, cell2)
-
-          return false if transfer_space_pair?(cell1, cell2) && adjacency_axis != :z
-
-          true
-        end
-
-        def transition_space_pair?(cell1, cell2)
-          cell1.cell_type == CellSpaceType::TRANSITION || cell2.cell_type == CellSpaceType::TRANSITION
-        end
-
-        def transfer_space_pair?(cell1, cell2)
-          cell1.cell_type == CellSpaceType::TRANSFER || cell2.cell_type == CellSpaceType::TRANSFER
+          @adjacency_service.cell_pair_key(cell1, cell2)
         end
 
         def register_transition_with_states(transition)
@@ -1053,17 +806,13 @@ module ULOL
         def register_transition_entity(transition)
           return unless transition&.edge&.valid?
 
-          @transitions_by_entity[transition.edge] = transition
-          @transitions_by_entity_id[transition.edge.persistent_id] = transition
-          @transitions_by_sketchup_entity_id[transition.edge.entityID] = transition
+          @feature_registry.register_transition_entity(transition)
         end
 
         def unregister_transition_entity(transition)
           return if transition.nil?
 
-          @transitions_by_entity.delete(transition.edge)
-          @transitions_by_entity_id.delete_if { |_persistent_id, mapped_transition| mapped_transition == transition }
-          @transitions_by_sketchup_entity_id.delete_if { |_entity_id, mapped_transition| mapped_transition == transition }
+          @feature_registry.unregister_transition_entity(transition)
         end
 
         def unregister_transition_from_states(transition)
@@ -1084,74 +833,37 @@ module ULOL
           @transitions.delete_if do |transition|
             next false unless transition.connected_to?(state)
 
-            @transitions_by_cell_pair.delete(cell_pair_key(transition.cell1, transition.cell2)) if transition.cell1 && transition.cell2
-            @adjacent_cell_space_pairs.delete(cell_pair_key(transition.cell1, transition.cell2)) if transition.cell1 && transition.cell2
+            if transition.cell1 && transition.cell2
+              pair_key = cell_pair_key(transition.cell1, transition.cell2)
+              @feature_registry.delete_transition_for_pair(pair_key)
+              @feature_registry.delete_adjacent_pair(pair_key)
+            end
             erase_transition(transition)
             true
           end
         end
 
         def write_attributes(cell_space)
+          @attribute_serializer.write_cell_space_and_state(cell_space)
           group = cell_space.sketchup_group
           state = cell_space.duality_state.sketchup_component_instance
-
-          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'feature', 'CellSpace')
-          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'id', cell_space.id)
-          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'name', group.name)
-          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'cell_type', CellSpaceType.label(cell_space.cell_type))
-          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'duality_state_id', cell_space.duality_state.id)
-          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'indoor_gml_version', INDOOR_GML_VERSION)
-
-          state.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'feature', 'State')
-          state.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'id', cell_space.duality_state.id)
-          state.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'name', cell_space.duality_state.name)
-          state.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'duality_cell_id', cell_space.id)
-          state.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'indoor_gml_version', INDOOR_GML_VERSION)
-          write_state_attributes(cell_space.duality_state)
           lock_indoor_entity(group)
           lock_indoor_entity(state)
         end
 
         def write_cell_space_attributes(cell_space)
-          group = cell_space.sketchup_group
-
-          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'feature', 'CellSpace')
-          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'id', cell_space.id)
-          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'name', group.name)
-          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'cell_type', CellSpaceType.label(cell_space.cell_type))
-          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'duality_state_id', cell_space.duality_state.id) if cell_space.duality_state
-          group.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'indoor_gml_version', INDOOR_GML_VERSION)
-          lock_indoor_entity(group)
+          @attribute_serializer.write_cell_space(cell_space)
+          lock_indoor_entity(cell_space.sketchup_group)
         end
 
         def write_state_attributes(state)
-          return unless state&.valid?
-
-          component = state.sketchup_component_instance
-          component.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'feature', 'State')
-          component.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'id', state.id)
-          component.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'name', state.name)
-          component.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'duality_cell_id', state.duality_cell.id)
-          component.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'transition_ids', state.transition_ids)
-          component.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'position_x', state.position.x.to_f)
-          component.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'position_y', state.position.y.to_f)
-          component.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'position_z', state.position.z.to_f)
-          component.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'indoor_gml_version', INDOOR_GML_VERSION)
-          lock_indoor_entity(component)
+          @attribute_serializer.write_state(state)
+          lock_indoor_entity(state.sketchup_component_instance) if state&.valid?
         end
 
         def write_transition_attributes(transition)
-          return unless transition.edge&.valid?
-
-          transition.edge.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'feature', 'Transition')
-          transition.edge.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'id', transition.id)
-          transition.edge.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'name', transition.name)
-          transition.edge.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'state1_id', transition.state1.id)
-          transition.edge.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'state2_id', transition.state2.id)
-          transition.edge.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'cell1_id', transition.cell1.id) if transition.cell1
-          transition.edge.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'cell2_id', transition.cell2.id) if transition.cell2
-          transition.edge.set_attribute(ATTRIBUTE_DICTIONARY_NAME, 'indoor_gml_version', INDOOR_GML_VERSION)
-          lock_indoor_entity(transition.edge)
+          @attribute_serializer.write_transition(transition)
+          lock_indoor_entity(transition.edge) if transition&.edge&.valid?
         end
 
         def update_transition(transition)
@@ -1164,17 +876,15 @@ module ULOL
         end
 
         def indoor_gml_entity?(entity)
-          indoor_feature(entity).to_s.length.positive?
+          @attribute_serializer.indoor_gml_entity?(entity)
         end
 
         def indoor_attribute(entity, key)
-          entity.get_attribute(ATTRIBUTE_DICTIONARY_NAME, key)
-        rescue StandardError
-          nil
+          @attribute_serializer.attribute(entity, key)
         end
 
         def indoor_feature(entity)
-          indoor_attribute(entity, 'feature')
+          @attribute_serializer.feature(entity)
         end
 
         def dual_feature?(entity)
@@ -1232,12 +942,7 @@ module ULOL
         end
 
         def copy_indoor_attributes(source, target)
-          dictionary = source.attribute_dictionary(ATTRIBUTE_DICTIONARY_NAME)
-          return if dictionary.nil?
-
-          dictionary.each_pair do |key, value|
-            target.set_attribute(ATTRIBUTE_DICTIONARY_NAME, key, value)
-          end
+          @attribute_serializer.copy_indoor_attributes(source, target)
         end
 
         def with_unlocked(entity)
@@ -1256,23 +961,15 @@ module ULOL
         end
 
         def converted_group?(sketchup_group)
-          sketchup_group.get_attribute(ATTRIBUTE_DICTIONARY_NAME, 'feature') == 'CellSpace'
+          @attribute_serializer.converted_group?(sketchup_group)
         end
 
         def find_cell_space_for_entity(entity)
-          @cell_spaces_by_entity[entity] ||
-            @cell_spaces_by_entity_id[entity.persistent_id] ||
-            @cell_spaces_by_sketchup_entity_id[entity.entityID]
-        rescue StandardError
-          @cell_spaces_by_entity[entity]
+          @feature_registry.find_cell_space_for_entity(entity)
         end
 
         def find_state_for_entity(entity)
-          @states_by_entity[entity] ||
-            @states_by_entity_id[entity.persistent_id] ||
-            @states_by_sketchup_entity_id[entity.entityID]
-        rescue StandardError
-          @states_by_entity[entity]
+          @feature_registry.find_state_for_entity(entity)
         end
 
         def sync
