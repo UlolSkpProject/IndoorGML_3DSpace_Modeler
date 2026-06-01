@@ -111,11 +111,22 @@ module ULOL
             z_axis.y * length,
             z_axis.z * length
           )
+          radius_scale = State.display_radius / State::STATE_NODE_RADIUS
+          scaled_x_axis = Geom::Vector3d.new(
+            x_axis.x * radius_scale,
+            x_axis.y * radius_scale,
+            x_axis.z * radius_scale
+          )
+          scaled_y_axis = Geom::Vector3d.new(
+            y_axis.x * radius_scale,
+            y_axis.y * radius_scale,
+            y_axis.z * radius_scale
+          )
 
           Geom::Transformation.new(
             [
-              x_axis.x, x_axis.y, x_axis.z, 0.0,
-              y_axis.x, y_axis.y, y_axis.z, 0.0,
+              scaled_x_axis.x, scaled_x_axis.y, scaled_x_axis.z, 0.0,
+              scaled_y_axis.x, scaled_y_axis.y, scaled_y_axis.z, 0.0,
               scaled_z_axis.x, scaled_z_axis.y, scaled_z_axis.z, 0.0,
               midpoint.x, midpoint.y, midpoint.z, 1.0
             ]

@@ -9,12 +9,14 @@ module ULOL
         attr_reader :sketchup_component_instance_id
         attr_reader :duality_cell
         attr_reader :position
+        attr_reader :radius
         attr_reader :transitions
         attr_accessor :editable
 
         STATE_NODE_RADIUS = 2000.mm unless const_defined?(:STATE_NODE_RADIUS, false)
 
         @@sketchup_component_definition = nil
+        @@display_radius = STATE_NODE_RADIUS
 
         def initialize(cell_space, parent_entities, local_position)
           unless cell_space.is_a?(CellSpace)
@@ -29,11 +31,13 @@ module ULOL
 
           @duality_cell = cell_space
           @position = local_position
+          @radius = self.class.display_radius
           @transitions = []
           @editable = false
           @sketchup_component_instance = create_component_instance(@position, parent_entities)
           @sketchup_component_instance_id = @sketchup_component_instance.persistent_id
           @sketchup_component_instance.name = "[Node]-#{@id}"
+          apply_radius(@radius)
         end
 
         def update_position(local_position)
@@ -42,6 +46,24 @@ module ULOL
           end
 
           @position = local_position
+        end
+
+        def apply_radius(radius)
+          radius = radius.to_f
+          return false unless valid? && radius.positive?
+
+          @radius = radius
+          scale = @radius / STATE_NODE_RADIUS
+          origin = @sketchup_component_instance.transformation.origin
+          @sketchup_component_instance.transformation = Geom::Transformation.new(
+            [
+              scale, 0.0, 0.0, 0.0,
+              0.0, scale, 0.0, 0.0,
+              0.0, 0.0, scale, 0.0,
+              origin.x, origin.y, origin.z, 1.0
+            ]
+          )
+          true
         end
 
         def add_transition(transition)
@@ -83,12 +105,14 @@ module ULOL
         def initialize_restored(cell_space, component_instance, local_position, id, name)
           @duality_cell = cell_space
           @position = local_position
+          @radius = self.class.display_radius
           @transitions = []
           @editable = false
           @sketchup_component_instance = component_instance
           @sketchup_component_instance_id = component_instance.persistent_id
           @id = id unless id.to_s.empty?
           @name = name.to_s
+          apply_radius(@radius)
         end
 
         def create_component_instance(position, parent_entities)
@@ -111,6 +135,15 @@ module ULOL
           faces.each { |face| face.material = Utils::Materials.state }
 
           @@sketchup_component_definition
+        end
+
+        def self.display_radius
+          @@display_radius
+        end
+
+        def self.display_radius=(radius)
+          radius = radius.to_f
+          @@display_radius = radius if radius.positive?
         end
       end
 

@@ -65,6 +65,7 @@ module ULOL
           component.set_attribute(@dictionary_name, 'name', state.name)
           component.set_attribute(@dictionary_name, 'duality_cell_id', state.duality_cell.id)
           component.set_attribute(@dictionary_name, 'transition_ids', state.transition_ids)
+          component.set_attribute(@dictionary_name, 'radius', state.radius.to_f)
           component.set_attribute(@dictionary_name, 'position_x', state.position.x.to_f)
           component.set_attribute(@dictionary_name, 'position_y', state.position.y.to_f)
           component.set_attribute(@dictionary_name, 'position_z', state.position.z.to_f)
