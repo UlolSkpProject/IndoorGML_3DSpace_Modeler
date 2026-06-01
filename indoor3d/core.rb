@@ -9,55 +9,64 @@ module ULOL
     load File.join(__dir__, 'classes', 'IndoorCore', 'IndoorCore.rb')
 
     def self.attach_model_observer
-      @app_observer ||= IndoorCore::Indoor3DGmlAppObserver.new
-      Sketchup.add_observer(@app_observer)
-      IndoorCore::IndoorModel.current.refresh_runtime_data
-    rescue StandardError => e
-      puts "[IndoorGML] Model observer setup failed: #{e.class}: #{e.message}"
+      begin
+        @app_observer ||= IndoorCore::Indoor3DGmlAppObserver.new
+        Sketchup.add_observer(@app_observer)
+        IndoorCore::IndoorModel.current.refresh_runtime_data()
+      rescue StandardError => e
+        puts "[IndoorGML] Model observer setup failed: #{e.class}: #{e.message}"
+      end
     end
 
     def self.convert_selected_solid_groups_to_cell_spaces
-      model = Sketchup.active_model
-      groups = model.selection.grep(Sketchup::Group)
-      solid_groups = groups.select { |group| group.valid? && group.manifold? }
+      begin
+        model = Sketchup.active_model()
+        original_active_path = active_path_snapshot(model)
+        groups = model.selection().grep(Sketchup::Group)
+        solid_groups = groups.select { |group| group.valid?() && group.manifold?() }
 
-      if solid_groups.empty?
-        UI.messagebox('Select one or more solid groups to convert to CellSpace.')
-        return
-      end
-
-      labels = IndoorCore::CellSpaceType::LABELS.values
-      result = UI.inputbox(
-        ['CellSpace Type'],
-        [labels.first],
-        [labels.join('|')],
-        'Convert Solid Groups to CellSpace'
-      )
-      return unless result
-
-      cell_type = IndoorCore::CellSpaceType.from_label(result.first)
-      indoor_model = IndoorCore::IndoorModel.current
-      converted_count = 0
-      errors = []
-
-      model.start_operation('Convert Solid Groups to CellSpace', true)
-      solid_groups.each do |group|
-        begin
-          indoor_model.convert_group_to_cell_space(group, cell_type)
-          converted_count += 1
-        rescue StandardError => e
-          puts "[IndoorGML] CellSpace conversion failed: #{e.class}: #{e.message}"
-          errors << "#{e.class}: #{e.message}"
+        if solid_groups.empty?
+          UI.messagebox('Select one or more solid groups to convert to CellSpace.')
+          return
         end
-      end
-      model.commit_operation
 
-      message = "Converted #{converted_count} CellSpace(s)."
-      message += "\nFailed #{errors.length} group(s):\n#{errors.join("\n")}" if errors.any?
-      UI.messagebox(message)
-    rescue StandardError => e
-      model.abort_operation if model
-      UI.messagebox("CellSpace conversion failed:\n#{e.message}")
+        labels = IndoorCore::CellSpaceType::LABELS.values
+        result = UI.inputbox(
+          ['CellSpace Type'],
+          [labels.first],
+          [labels.join('|')],
+          'Convert Solid Groups to CellSpace'
+        )
+        return unless result
+
+        cell_type = IndoorCore::CellSpaceType.from_label(result.first)
+        indoor_model = IndoorCore::IndoorModel.current
+        converted_count = 0
+        errors = []
+
+        model.start_operation('Convert Solid Groups to CellSpace', true)
+        root_solid_groups = move_groups_to_root_context(model, solid_groups)
+        activate_root_context(model)
+        root_solid_groups.each do |group|
+          begin
+            indoor_model.convert_group_to_cell_space(group, cell_type)
+            converted_count += 1
+          rescue StandardError => e
+            puts "[IndoorGML] CellSpace conversion failed: #{e.class}: #{e.message}"
+            errors << "#{e.class}: #{e.message}"
+          end
+        end
+        restore_active_path(model, original_active_path)
+        model.commit_operation()
+
+        message = "Converted #{converted_count} CellSpace(s)."
+        message += "\nFailed #{errors.length} group(s):\n#{errors.join("\n")}" if errors.any?()
+        UI.messagebox(message)
+      rescue StandardError => e
+        restore_active_path(model, original_active_path) if model && original_active_path
+        model.abort_operation() if model
+        UI.messagebox("CellSpace conversion failed:\n#{e.message}")
+      end
     end
 
     def self.change_selected_cell_space_type
@@ -131,10 +140,55 @@ module ULOL
     end
 
     def self.create_command(label, tooltip, &block)
-      command = UI::Command.new(label) { block.call }
+      command = UI::Command.new(label) { block.call() }
       command.tooltip = tooltip
       command.status_bar_text = tooltip
       command
+    end
+
+    def self.active_path_snapshot(model)
+      path = model.active_path()
+      path ? path.dup : nil
+    end
+
+    def self.activate_root_context(model)
+      model.close_active() while model.active_path()
+    end
+
+    def self.restore_active_path(model, active_path)
+      begin
+        return unless active_path
+
+        valid_path = active_path.select { |entity| entity&.valid?() }
+        return if valid_path.empty?()
+
+        if model.respond_to?(:active_path=)
+          model.active_path = valid_path
+        end
+      rescue StandardError => e
+        puts "[IndoorGML] Edit context restore failed: #{e.class}: #{e.message}"
+      end
+    end
+
+    def self.move_groups_to_root_context(model, groups)
+      return groups if model.active_path().nil?
+
+      groups.map { |group| move_group_to_root_context(model, group) }.compact
+    end
+
+    def self.move_group_to_root_context(model, group)
+      return group unless group&.valid?()
+
+      transformation = Utils::Transformation.entity_world_transformation(group)
+      copy = model.entities().add_instance(group.definition, transformation)
+      copy = copy.to_group() if copy.respond_to?(:to_group)
+      copy.make_unique() if copy.respond_to?(:make_unique)
+      copy.name = group.name if copy.respond_to?(:name=)
+      copy.material = group.material if copy.respond_to?(:material=)
+      copy.layer = group.layer if copy.respond_to?(:layer=)
+      copy.visible = group.visible?() if copy.respond_to?(:visible=)
+      group.erase!() if group.valid?()
+      copy
     end
 
     unless file_loaded?(__FILE__)
