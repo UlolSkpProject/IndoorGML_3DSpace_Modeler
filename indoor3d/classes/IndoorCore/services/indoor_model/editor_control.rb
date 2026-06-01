@@ -21,6 +21,28 @@ module ULOL
             State.display_radius
           end
 
+          def set_overlay_min_radius_pixels(radius_pixels)
+            radius_pixels = radius_pixels.to_f
+            return false unless radius_pixels.positive?
+
+            set_overlay_radius_pixel_range(radius_pixels, @overlay_max_radius_pixels)
+          end
+
+          def set_overlay_radius_pixel_range(min_radius_pixels, max_radius_pixels)
+            min_radius_pixels = min_radius_pixels.to_f
+            max_radius_pixels = max_radius_pixels.to_f
+            return false unless min_radius_pixels.positive? && max_radius_pixels.positive?
+
+            min_radius_pixels, max_radius_pixels = [min_radius_pixels, max_radius_pixels].sort
+            @overlay_min_radius_pixels = min_radius_pixels
+            @overlay_max_radius_pixels = max_radius_pixels
+            Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
+            true
+          rescue StandardError => e
+            puts "[IndoorGML] Overlay radius range update failed: #{e.class}: #{e.message}"
+            false
+          end
+
           def set_state_radius(radius)
             radius = radius.to_f
             return false unless radius.positive?

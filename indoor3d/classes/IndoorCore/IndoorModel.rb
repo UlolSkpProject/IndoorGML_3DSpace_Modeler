@@ -37,6 +37,8 @@ module ULOL
         attr_reader :primal_group
         attr_reader :dual_group
         attr_reader :editor_session
+        attr_reader :overlay_min_radius_pixels
+        attr_reader :overlay_max_radius_pixels
 
         def self.current
           @current ||= new
@@ -63,6 +65,8 @@ module ULOL
           @relocating_entity = false
           @refreshing_runtime = false
           @constraining_space_features = false
+          @overlay_min_radius_pixels = 14.0
+          @overlay_max_radius_pixels = 64.0
           @primal_group = nil
           @dual_group = nil
           @attribute_serializer = AttributeSerializer.new(

@@ -10,7 +10,7 @@ module ULOL
           def ensure_space_features_groups
             Utils::Materials.ensure_all()
 
-            entities = Sketchup.active_model.active_entities
+            entities = Sketchup.active_model.entities
             @primal_group = find_group(entities, PRIMAL_GROUP_NAME)
             unless @primal_group&.valid?
               @primal_group = entities.add_group
