@@ -18,6 +18,7 @@ module ULOL
             register_cell_space(cell_space)
             register_state(state)
             write_attributes(cell_space)
+            track_cell_space_entity(cell_space.sketchup_group)
             synchronize_adjacency_and_transitions_for_cell_space(cell_space)
             apply_indoor_lock_policy()
 
@@ -219,6 +220,10 @@ module ULOL
 
           def attach_cell_space_observer(entity)
             attach_entity_observer(entity, @cell_space_observer, @cell_space_observed_ids)
+          end
+
+          def track_cell_space_entity(entity)
+            @primal_entities_observer.track_entity(entity) if @primal_entities_observer && entity&.valid?
           end
 
           def attach_state_observer(entity)
