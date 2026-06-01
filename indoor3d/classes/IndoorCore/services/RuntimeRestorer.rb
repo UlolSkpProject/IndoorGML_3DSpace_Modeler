@@ -14,8 +14,7 @@ module ULOL
 
         def restore(primal_group:, dual_group:)
           restore_cell_spaces_from_primal_group(primal_group)
-          restore_states_from_dual_group(dual_group)
-          restore_transitions_from_dual_group(dual_group)
+          restore_states_from_cell_spaces
         end
 
         private
@@ -29,48 +28,13 @@ module ULOL
           end
         end
 
-        def restore_states_from_dual_group(dual_group)
-          return unless dual_group&.valid?
-
-          cells_by_id = @registry.cell_spaces.each_with_object({}) { |cell_space, hash| hash[cell_space.id] = cell_space }
-          indoor_children(dual_group.entities, 'State').each do |entity|
-            cell_id = @serializer.attribute(entity, 'duality_cell_id')
-            cell_space = cells_by_id[cell_id]
-            unless cell_space
-              puts "[IndoorGML] State restore skipped: missing CellSpace #{cell_id}"
-              next
-            end
-
-            state = restore_state(entity, cell_space, dual_group)
+        def restore_states_from_cell_spaces
+          @registry.cell_spaces.each do |cell_space|
+            state = restore_state(cell_space)
             next unless state
 
             cell_space.restore_duality_state(state)
             @state_registrar.call(state)
-          end
-        end
-
-        def restore_transitions_from_dual_group(dual_group)
-          return unless dual_group&.valid?
-
-          states_by_id = @registry.states.each_with_object({}) { |state, hash| hash[state.id] = state }
-          cells_by_id = @registry.cell_spaces.each_with_object({}) { |cell_space, hash| hash[cell_space.id] = cell_space }
-          indoor_children(dual_group.entities, 'Transition').each do |entity|
-            state1 = states_by_id[@serializer.attribute(entity, 'state1_id')]
-            state2 = states_by_id[@serializer.attribute(entity, 'state2_id')]
-            unless state1 && state2
-              puts '[IndoorGML] Transition restore skipped: missing State'
-              next
-            end
-
-            cell1 = cells_by_id[@serializer.attribute(entity, 'cell1_id')] || state1.duality_cell
-            cell2 = cells_by_id[@serializer.attribute(entity, 'cell2_id')] || state2.duality_cell
-            transition = restore_transition(entity, state1, state2, cell1, cell2)
-            next unless transition
-
-            pair_key = cell_pair_key(cell1, cell2) if cell1 && cell2
-            @registry.add_transition(transition, pair_key: pair_key)
-            @registry.set_adjacent_pair(pair_key, cell1, cell2) if pair_key
-            restore_transition_with_states(transition)
           end
         end
 
@@ -86,41 +50,26 @@ module ULOL
           nil
         end
 
-        def restore_state(entity, cell_space, dual_group)
+        def restore_state(cell_space)
           State.restore(
             cell_space,
-            entity,
-            restored_state_position(entity, dual_group),
-            id: @serializer.attribute(entity, 'id'),
-            name: @serializer.attribute(entity, 'name')
+            restored_state_position(cell_space),
+            id: @serializer.attribute(cell_space.sketchup_group, 'duality_state_id'),
+            name: nil
           )
         rescue StandardError => e
           puts "[IndoorGML] State restore failed: #{e.class}: #{e.message}"
           nil
         end
 
-        def restore_transition(entity, state1, state2, cell1, cell2)
-          Transition.restore(
-            entity,
-            state1,
-            state2,
-            cell1: cell1,
-            cell2: cell2,
-            id: @serializer.attribute(entity, 'id'),
-            name: @serializer.attribute(entity, 'name')
-          )
-        rescue StandardError => e
-          puts "[IndoorGML] Transition restore failed: #{e.class}: #{e.message}"
-          nil
-        end
-
-        def restored_state_position(entity, dual_group)
-          x = @serializer.attribute(entity, 'position_x')
-          y = @serializer.attribute(entity, 'position_y')
-          z = @serializer.attribute(entity, 'position_z')
+        def restored_state_position(cell_space)
+          entity = cell_space.sketchup_group
+          x = @serializer.attribute(entity, 'state_position_x')
+          y = @serializer.attribute(entity, 'state_position_y')
+          z = @serializer.attribute(entity, 'state_position_z')
           return Geom::Point3d.new(x.to_f, y.to_f, z.to_f) unless x.nil? || y.nil? || z.nil?
 
-          Utils::Transformation.entity_origin_in_root_local(entity, dual_group)
+          Utils::Transformation.entity_origin_in_root_local(entity, nil)
         end
 
         def indoor_children(entities, feature)
@@ -129,14 +78,6 @@ module ULOL
           end
         end
 
-        def restore_transition_with_states(transition)
-          transition.state1.add_transition(transition)
-          transition.state2.add_transition(transition)
-        end
-
-        def cell_pair_key(cell1, cell2)
-          [cell1.id, cell2.id].sort.join(':')
-        end
       end
 
     end

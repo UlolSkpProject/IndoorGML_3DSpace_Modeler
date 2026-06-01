@@ -11,7 +11,8 @@ module ULOL
             @transitions.each do |transition|
               next unless transition.connected_to?(state)
 
-              write_transition_attributes(transition) if update_transition(transition)
+              update_transition(transition)
+              write_transition_attributes(transition)
             end
           end
 
@@ -47,7 +48,7 @@ module ULOL
               transition = Transition.new(
                 cell1.duality_state,
                 cell2.duality_state,
-                @dual_group.entities,
+                nil,
                 cell1: cell1,
                 cell2: cell2
               )
@@ -57,9 +58,7 @@ module ULOL
             return nil unless update_transition(transition)
 
             register_transition_with_states(transition)
-            register_transition_entity(transition)
             write_transition_attributes(transition)
-            lock_indoor_entity(transition.edge)
             transition
           end
 
@@ -76,7 +75,6 @@ module ULOL
 
             unregister_transition_entity(transition)
             unregister_transition_from_states(transition)
-            unlock_indoor_entity(transition.edge)
             transition.erase!
             @feature_registry.remove_transition(transition)
           end
@@ -93,8 +91,6 @@ module ULOL
           end
 
           def register_transition_entity(transition)
-            return unless transition&.edge&.valid?
-
             @feature_registry.register_transition_entity(transition)
           end
 
@@ -114,25 +110,26 @@ module ULOL
           def erase_transitions_for_state(state)
             return if state.nil?
 
-            @transitions.delete_if do |transition|
-              next false unless transition.connected_to?(state)
-
+            @transitions.select { |transition| transition.connected_to?(state) }.each do |transition|
               if transition.cell1 && transition.cell2
                 pair_key = cell_pair_key(transition.cell1, transition.cell2)
                 @feature_registry.delete_transition_for_pair(pair_key)
                 @feature_registry.delete_adjacent_pair(pair_key)
               end
               erase_transition(transition)
-              true
             end
           end
 
           def update_transition(transition)
-            with_unlocked(transition.edge) do
-              transition.update(
-                state_local_position(transition.state1),
-                state_local_position(transition.state2)
-              )
+            transition.update(
+              state_local_position(transition.state1),
+              state_local_position(transition.state2)
+            )
+          end
+
+          def rebuild_runtime_transitions_from_cell_adjacency
+            @cell_spaces.each do |cell_space|
+              synchronize_adjacency_and_transitions_for_cell_space(cell_space)
             end
           end
         end

@@ -54,13 +54,14 @@ module ULOL
               @states.each do |state|
                 next unless state&.valid?
 
-                with_unlocked(state.sketchup_component_instance) { state.apply_radius(radius) }
+                state.apply_radius(radius)
                 write_state_attributes(state)
               end
               @transitions.each do |transition|
                 next unless transition&.valid?
 
-                write_transition_attributes(transition) if update_transition(transition)
+                update_transition(transition)
+                write_transition_attributes(transition)
               end
               model.active_view.invalidate if model&.active_view
               model.commit_operation

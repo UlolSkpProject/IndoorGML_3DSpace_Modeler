@@ -98,7 +98,7 @@ module ULOL
           @indoor_model.states.each do |state|
             next unless state&.valid?
 
-            center = overlay_entity_origin(state.sketchup_component_instance)
+            center = overlay_state_point(state)
             radius = overlay_state_radius(view, center, state)
             draw_billboard_disk(view, center, radius)
           end
@@ -110,8 +110,8 @@ module ULOL
             next unless transition&.valid?
             next unless transition.state1&.valid? && transition.state2&.valid?
 
-            point1 = overlay_entity_origin(transition.state1.sketchup_component_instance)
-            point2 = overlay_entity_origin(transition.state2.sketchup_component_instance)
+            point1 = overlay_state_point(transition.state1)
+            point2 = overlay_state_point(transition.state2)
             draw_transition_billboard_quad(view, point1, point2, overlay_transition_radius(view, point1, point2, transition))
           end
         end
@@ -221,8 +221,8 @@ module ULOL
           [right_axis, up_axis]
         end
 
-        def overlay_entity_origin(entity)
-          entity.transformation.origin
+        def overlay_state_point(state)
+          @indoor_model.primal_group.transformation * state.position
         end
 
         def transition_perpendicular_axis(z_axis)
