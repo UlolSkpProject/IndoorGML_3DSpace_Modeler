@@ -12,6 +12,7 @@ module ULOL
       begin
         @app_observer ||= IndoorCore::Indoor3DGmlAppObserver.new
         Sketchup.add_observer(@app_observer)
+        @app_observer.register_model(Sketchup.active_model())
         IndoorCore::IndoorModel.current.refresh_runtime_data()
       rescue StandardError => e
         puts "[IndoorGML] Model observer setup failed: #{e.class}: #{e.message}"

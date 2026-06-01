@@ -17,6 +17,10 @@ module ULOL
             @editor_session.editing?()
           end
 
+          def active_path_changed(model)
+            @editor_session.active_path_changed(model)
+          end
+
           private
 
           def apply_indoor_lock_policy
