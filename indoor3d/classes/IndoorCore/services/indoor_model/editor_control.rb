@@ -50,12 +50,63 @@ module ULOL
             end
           end
 
+          def clear_all_indoor_gml_elements
+            model = Sketchup.active_model()
+            confirmed = UI.messagebox(
+              'Clear all IndoorGML elements?',
+              MB_YESNO
+            )
+            return false unless confirmed == IDYES
+
+            model.start_operation('Clear All IndoorGML Elements', true)
+            begin
+              @editor_session.finish() if editing?
+              clear_indoor_gml_groups()
+              reset_runtime_collections()
+              model.active_view.invalidate if model&.active_view
+              model.commit_operation
+              true
+            rescue StandardError => e
+              model.abort_operation
+              puts "[IndoorGML] Clear all failed: #{e.class}: #{e.message}"
+              false
+            end
+          end
+
           def active_path_changed(model)
             @editor_session.active_path_changed(model)
           end
 
           def cleanup_before_quit
             @editor_session.cleanup_before_quit()
+          end
+
+          def attach_edit_selection_observer(model = Sketchup.active_model)
+            return unless model&.selection
+            return if @selection_observed_model_id == model.object_id
+
+            model.selection.add_observer(@selection_observer)
+            @selection_observed_model_id = model.object_id
+          rescue StandardError => e
+            puts "[IndoorGML] Selection observer attach failed: #{e.class}: #{e.message}"
+          end
+
+          def detach_edit_selection_observer(model = Sketchup.active_model)
+            return unless model&.selection
+            return unless @selection_observed_model_id == model.object_id
+
+            model.selection.remove_observer(@selection_observer)
+            @selection_observed_model_id = nil
+          rescue StandardError => e
+            puts "[IndoorGML] Selection observer detach failed: #{e.class}: #{e.message}"
+          end
+
+          def selection_changed
+            @editor_session.selection_changed()
+          end
+
+          def with_active_path_enforcement_suspended
+            @editor_session.with_active_path_enforcement_suspended { yield }
           end
 
           private

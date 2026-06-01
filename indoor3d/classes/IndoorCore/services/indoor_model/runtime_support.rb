@@ -42,6 +42,21 @@ module ULOL
             bind_registry_collections
           end
 
+          def clear_indoor_gml_groups
+            [@primal_group, @dual_group].each do |group|
+              next unless group&.valid?
+
+              unlock_indoor_entity(group)
+              group.erase!
+            end
+            @primal_group = nil
+            @dual_group = nil
+            @cell_space_observed_ids.clear
+            @state_observed_ids.clear
+            @space_features_observed_ids.clear
+            @entities_observed_ids.clear
+          end
+
           def stale_cell_space_runtime?(cell_space, entity)
             begin
               return true if cell_space.nil?

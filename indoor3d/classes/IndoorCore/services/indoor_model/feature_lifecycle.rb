@@ -177,12 +177,94 @@ module ULOL
 
           def apply_cell_space_material(cell_space)
             material = Utils::Materials.cell_space(cell_space.cell_type)
+            text_material = Utils::Materials.cell_space_text(cell_space.cell_type)
             with_unlocked(cell_space.sketchup_group) do
               cell_space.sketchup_group.material = material
               cell_space.sketchup_group.entities.each do |entity|
-                entity.material = material if entity.is_a?(Sketchup::Face)
+                apply_cell_space_face_material(entity, text_material || material) if entity.is_a?(Sketchup::Face)
               end
             end
+          end
+
+          def apply_cell_space_face_material(face, material)
+            face.material = material
+            face.back_material = material if face.respond_to?(:back_material=)
+            position_cell_space_text_material(face, material) if material.texture
+          rescue StandardError => e
+            puts "[IndoorGML] CellSpace face material failed: #{e.class}: #{e.message}"
+          end
+
+          def position_cell_space_text_material(face, material)
+            axes = cell_space_text_axes(face)
+            return if axes.nil?
+
+            u_axis, v_axis = axes
+            origin = face.bounds.center
+            projected = face.vertices.map do |vertex|
+              vector = origin.vector_to(vertex.position)
+              [vector.dot(u_axis), vector.dot(v_axis)]
+            end
+            min_u, max_u = projected.map(&:first).minmax
+            min_v, max_v = projected.map(&:last).minmax
+            width = max_u - min_u
+            height = max_v - min_v
+            return if width <= 0.001 || height <= 0.001
+
+            corners = [
+              point_on_face_plane(origin, u_axis, v_axis, min_u, min_v),
+              point_on_face_plane(origin, u_axis, v_axis, max_u, min_v),
+              point_on_face_plane(origin, u_axis, v_axis, max_u, max_v),
+              point_on_face_plane(origin, u_axis, v_axis, min_u, max_v)
+            ]
+            uv_points = [
+              Geom::Point3d.new(0.0, 0.0, 0.0),
+              Geom::Point3d.new(1.0, 0.0, 0.0),
+              Geom::Point3d.new(1.0, 1.0, 0.0),
+              Geom::Point3d.new(0.0, 1.0, 0.0)
+            ]
+
+            face.position_material(material, corners.zip(uv_points).flatten, true)
+            face.position_material(material, corners.zip(uv_points).flatten, false)
+          end
+
+          def point_on_face_plane(origin, u_axis, v_axis, u, v)
+            Geom::Point3d.new(
+              origin.x + (u_axis.x * u) + (v_axis.x * v),
+              origin.y + (u_axis.y * u) + (v_axis.y * v),
+              origin.z + (u_axis.z * u) + (v_axis.z * v)
+            )
+          end
+
+          def cell_space_text_axes(face)
+            normal = face.normal
+            normal_projection = Z_AXIS.dot(normal)
+            v_axis = Geom::Vector3d.new(
+              Z_AXIS.x - (normal.x * normal_projection),
+              Z_AXIS.y - (normal.y * normal_projection),
+              Z_AXIS.z - (normal.z * normal_projection)
+            )
+            if v_axis.length > 0.001
+              v_axis.normalize!
+              u_axis = v_axis.cross(normal)
+              if u_axis.length > 0.001
+                u_axis.normalize!
+                return [u_axis, v_axis]
+              end
+            end
+
+            longest_edge = face.edges.max_by(&:length)
+            return nil if longest_edge.nil?
+
+            u_axis = longest_edge.start.position.vector_to(longest_edge.end.position)
+            return nil if u_axis.length <= 0.001
+
+            u_axis.normalize!
+            v_axis = normal.cross(u_axis)
+            return nil if v_axis.length <= 0.001
+
+            v_axis.normalize!
+            v_axis.reverse! if v_axis.dot(Z_AXIS) < 0.0
+            [u_axis, v_axis]
           end
 
           def update_cell_space_type_runtime_lists(cell_space)

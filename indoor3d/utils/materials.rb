@@ -15,6 +15,12 @@ module ULOL
           anchor_space: ['Indoor3DGml_AnchorSpace', [0, 200, 180], 0.8]
         }.freeze unless const_defined?(:DEFINITIONS, false)
 
+        TEXTURE_DEFINITIONS = {
+          general_space: ['Indoor3DGml_GeneralSpace_Text', 'cellspace_room.png', 0.3],
+          transition_space: ['Indoor3DGml_TransitionSpace_Text', 'cellspace_stair.png', 0.8],
+          connection_space: ['Indoor3DGml_ConnectionSpace_Text', 'cellspace_door.png', 0.3]
+        }.freeze unless const_defined?(:TEXTURE_DEFINITIONS, false)
+
         def self.state
           fetch(:state)
         end
@@ -27,8 +33,16 @@ module ULOL
           fetch(cell_space_type_keys()[cell_type] || :general_space)
         end
 
+        def self.cell_space_text(cell_type)
+          key = cell_space_type_keys()[cell_type]
+          return nil unless TEXTURE_DEFINITIONS.key?(key)
+
+          fetch_textured(key)
+        end
+
         def self.ensure_all
           DEFINITIONS.each_key { |key| fetch(key) }
+          TEXTURE_DEFINITIONS.each_key { |key| fetch_textured(key) }
         end
 
         def self.fetch(key)
@@ -39,6 +53,20 @@ module ULOL
           material
         end
         private_class_method :fetch
+
+        def self.fetch_textured(key)
+          name, texture_name, alpha = TEXTURE_DEFINITIONS.fetch(key)
+          material = Sketchup.active_model.materials[name] || Sketchup.active_model.materials.add(name)
+          material.texture = texture_path(texture_name)
+          material.alpha = alpha if alpha && material.respond_to?(:alpha=)
+          material
+        end
+        private_class_method :fetch_textured
+
+        def self.texture_path(texture_name)
+          File.expand_path("../assets/textures/#{texture_name}", __dir__)
+        end
+        private_class_method :texture_path
 
         def self.cell_space_type_keys
           cell_space_type = ::ULOL::Indoor3DGmlModeler::IndoorCore::CellSpaceType
