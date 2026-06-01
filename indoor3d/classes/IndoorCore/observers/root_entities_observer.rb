@@ -11,6 +11,8 @@ module ULOL
         end
 
         def onElementAdded(_entities, entity)
+          return unless indoor_gml_entity?(entity)
+
           log_event('onElementAdded', entity)
           @indoor_model.root_entity_added(entity)
         end
@@ -31,15 +33,23 @@ module ULOL
         end
 
         def entity_summary(entity)
-          "class=#{entity.class} entity_id=#{entity.entityID} feature=#{indoor_feature(entity)}"
-        rescue StandardError
-          "class=#{entity.class}"
+          begin
+            "class=#{entity.class} entity_id=#{entity.entityID} feature=#{indoor_feature(entity)}"
+          rescue StandardError
+            "class=#{entity.class}"
+          end
+        end
+
+        def indoor_gml_entity?(entity)
+          indoor_feature(entity).to_s.length.positive?
         end
 
         def indoor_feature(entity)
-          entity.get_attribute(IndoorModel::ATTRIBUTE_DICTIONARY_NAME, 'feature')
-        rescue StandardError
-          nil
+          begin
+            entity.get_attribute(IndoorModel::ATTRIBUTE_DICTIONARY_NAME, 'feature')
+          rescue StandardError
+            nil
+          end
         end
       end
 
