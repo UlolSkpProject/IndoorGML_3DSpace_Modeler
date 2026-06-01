@@ -120,23 +120,30 @@ module ULOL
     end
 
     def self.begin_indoor_gml_editing
-      if IndoorCore::IndoorModel.current.begin_editing
-        UI.messagebox('IndoorGML editing started.')
-      else
-        UI.messagebox('IndoorGML editing is already active.')
+      begin
+        indoor_model = IndoorCore::IndoorModel.current
+        if indoor_model.editing?()
+          UI.messagebox('IndoorGML editing is already active.')
+        elsif indoor_model.begin_editing()
+          UI.messagebox('IndoorGML editing started.')
+        else
+          UI.messagebox('IndoorGML PrimalSpaceFeatures group was not found.')
+        end
+      rescue StandardError => e
+        UI.messagebox("IndoorGML editing failed:\n#{e.message}")
       end
-    rescue StandardError => e
-      UI.messagebox("IndoorGML editing failed:\n#{e.message}")
     end
 
     def self.finish_indoor_gml_editing
-      if IndoorCore::IndoorModel.current.finish_editing
-        UI.messagebox('IndoorGML editing finished.')
-      else
-        UI.messagebox('IndoorGML editing is not active.')
+      begin
+        if IndoorCore::IndoorModel.current.finish_editing()
+          UI.messagebox('IndoorGML editing finished.')
+        else
+          UI.messagebox('IndoorGML editing is not active.')
+        end
+      rescue StandardError => e
+        UI.messagebox("IndoorGML editing finish failed:\n#{e.message}")
       end
-    rescue StandardError => e
-      UI.messagebox("IndoorGML editing finish failed:\n#{e.message}")
     end
 
     def self.create_command(label, tooltip, &block)
