@@ -20,10 +20,10 @@ module ULOL
         end
 
         def onElementRemoved(_entities, entity_id)
-          return unless untrack_entity_id(entity_id)
+          # return unless untrack_entity_id(entity_id)
 
-          log_removed('onElementRemoved', entity_id)
-          @indoor_model.root_entity_removed(entity_id)
+          # log_removed('onElementRemoved', entity_id)
+          # @indoor_model.root_entity_removed(entity_id)
         end
 
         def track_entity(entity)
