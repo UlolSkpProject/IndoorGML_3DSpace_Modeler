@@ -68,17 +68,12 @@ module ULOL
 
         def add_state(state)
           @states << state unless @states.include?(state)
-          @states_by_entity[state.sketchup_component_instance] = state
-          @states_by_entity_id[state.sketchup_component_instance.persistent_id] = state
-          @states_by_sketchup_entity_id[state.sketchup_component_instance.entityID] = state
         end
 
         def remove_state(state)
           return if state.nil?
 
           @states.delete(state)
-          @states_by_entity.delete(state.sketchup_component_instance)
-          @states_by_entity_id.delete(state.sketchup_component_instance_id)
           @states_by_sketchup_entity_id.delete_if { |_entity_id, mapped_state| mapped_state == state }
         end
 
@@ -97,13 +92,11 @@ module ULOL
         def add_transition(transition, pair_key: nil)
           @transitions << transition unless @transitions.include?(transition)
           @transitions_by_cell_pair[pair_key] = transition if pair_key
-          register_transition_entity(transition)
         end
 
         def remove_transition(transition)
           return if transition.nil?
 
-          unregister_transition_entity(transition)
           @transitions.delete(transition)
           @transitions_by_cell_pair.delete_if { |_pair_key, mapped_transition| mapped_transition == transition }
         end
@@ -155,18 +148,11 @@ module ULOL
         end
 
         def register_transition_entity(transition)
-          return unless transition&.edge&.valid?
-
-          @transitions_by_entity[transition.edge] = transition
-          @transitions_by_entity_id[transition.edge.persistent_id] = transition
-          @transitions_by_sketchup_entity_id[transition.edge.entityID] = transition
+          transition
         end
 
         def unregister_transition_entity(transition)
           return if transition.nil?
-
-          @transitions_by_entity.delete(transition.edge)
-          @transitions_by_entity_id.delete_if { |_persistent_id, mapped_transition| mapped_transition == transition }
           @transitions_by_sketchup_entity_id.delete_if { |_entity_id, mapped_transition| mapped_transition == transition }
         end
       end

@@ -13,7 +13,7 @@ module ULOL
             cell_space = CellSpace.new(cell_group, cell_type)
             name_cell_space_entity(cell_space)
             apply_cell_space_material(cell_space)
-            state = cell_space.create_duality_state(@dual_group.entities, cell_space_local_origin(cell_space))
+            state = cell_space.create_duality_state(nil, cell_space_local_origin(cell_space))
 
             register_cell_space(cell_space)
             register_state(state)
@@ -135,7 +135,6 @@ module ULOL
             erase_guard do
               state = cell_space.duality_state
               erase_transitions_for_state(state)
-              unlock_indoor_entity(state.sketchup_component_instance) if state&.valid?
               state.erase! if state&.valid?
               unregister_state(state)
               unlock_indoor_entity(cell_space.sketchup_group) if erase_sketchup_group && cell_space.valid?
@@ -153,7 +152,6 @@ module ULOL
               erase_transitions_for_state(state)
               unlock_indoor_entity(cell_space.sketchup_group) if cell_space&.valid?
               cell_space.erase! if cell_space&.valid?
-              unlock_indoor_entity(state.sketchup_component_instance) if erase_sketchup_instance && state.valid?
               state.erase! if erase_sketchup_instance && state.valid?
               unregister_cell_space(cell_space)
               unregister_state(state)
@@ -237,21 +235,6 @@ module ULOL
 
           def cell_space_text_axes(face)
             normal = face.normal
-            normal_projection = Z_AXIS.dot(normal)
-            v_axis = Geom::Vector3d.new(
-              Z_AXIS.x - (normal.x * normal_projection),
-              Z_AXIS.y - (normal.y * normal_projection),
-              Z_AXIS.z - (normal.z * normal_projection)
-            )
-            if v_axis.length > 0.001
-              v_axis.normalize!
-              u_axis = v_axis.cross(normal)
-              if u_axis.length > 0.001
-                u_axis.normalize!
-                return [u_axis, v_axis]
-              end
-            end
-
             longest_edge = face.edges.max_by(&:length)
             return nil if longest_edge.nil?
 
@@ -263,7 +246,10 @@ module ULOL
             return nil if v_axis.length <= 0.001
 
             v_axis.normalize!
-            v_axis.reverse! if v_axis.dot(Z_AXIS) < 0.0
+            if v_axis.dot(Z_AXIS) < 0.0
+              u_axis.reverse!
+              v_axis.reverse!
+            end
             [u_axis, v_axis]
           end
 
@@ -277,8 +263,6 @@ module ULOL
 
           def register_state(state)
             @feature_registry.add_state(state)
-            attach_state_observer(state.sketchup_component_instance)
-            lock_indoor_entity(state.sketchup_component_instance)
           end
 
           def unregister_cell_space(cell_space)
@@ -292,7 +276,6 @@ module ULOL
             return if state.nil?
 
             @feature_registry.remove_state(state)
-            @state_observed_ids.delete(state.sketchup_component_instance.object_id)
           end
 
           def update_state_position(state, local_position)

@@ -291,8 +291,6 @@ module ULOL
           entities << @indoor_model.primal_group
           entities << @indoor_model.dual_group
           @indoor_model.cell_spaces.each { |cell_space| entities << cell_space.sketchup_group }
-          @indoor_model.states.each { |state| entities << state.sketchup_component_instance }
-          @indoor_model.transitions.each { |transition| entities << transition.edge }
           entities.compact.select { |entity| entity&.valid?() }
         end
 

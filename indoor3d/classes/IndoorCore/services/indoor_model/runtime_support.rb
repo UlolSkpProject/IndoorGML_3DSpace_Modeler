@@ -16,6 +16,7 @@ module ULOL
                 attach_existing_space_features_observers
                 reset_runtime_collections
                 @runtime_restorer.restore(primal_group: @primal_group, dual_group: @dual_group)
+                rebuild_runtime_transitions_from_cell_adjacency
               end
               apply_indoor_lock_policy()
               puts "[IndoorGML] Runtime refreshed: cells=#{@cell_spaces.length}, states=#{@states.length}, transitions=#{@transitions.length}"
@@ -74,7 +75,6 @@ module ULOL
             begin
               return true if state.nil?
               return true unless state.valid?
-              return true unless state.sketchup_component_instance == entity
               return true unless state.duality_cell&.valid?
 
               false
@@ -100,7 +100,6 @@ module ULOL
           def write_attributes(cell_space)
             @attribute_serializer.write_cell_space_and_state(cell_space)
             lock_indoor_entity(cell_space.sketchup_group)
-            lock_indoor_entity(cell_space.duality_state.sketchup_component_instance)
           end
 
           def write_cell_space_attributes(cell_space)
@@ -110,12 +109,10 @@ module ULOL
 
           def write_state_attributes(state)
             @attribute_serializer.write_state(state)
-            lock_indoor_entity(state.sketchup_component_instance) if state&.valid?
           end
 
           def write_transition_attributes(transition)
             @attribute_serializer.write_transition(transition)
-            lock_indoor_entity(transition.edge) if transition&.edge&.valid?
           end
 
           def indoor_gml_entity?(entity)

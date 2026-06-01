@@ -237,15 +237,10 @@ module ULOL
           end
 
           def state_local_position(state)
-            ensure_state_is_child_of_dual_space!(state)
-            Utils::Transformation.entity_origin_in_root_local(state.sketchup_component_instance, @dual_group)
+            state.position
           end
 
           def move_state_to_local_position(state, local_position)
-            ensure_state_is_child_of_dual_space!(state)
-            with_unlocked(state.sketchup_component_instance) do
-              Utils::Transformation.move_entity_origin_in_root_local_to(state.sketchup_component_instance, @dual_group, local_position)
-            end
             update_state_position(state, local_position)
           end
 
@@ -265,11 +260,7 @@ module ULOL
           end
 
           def ensure_state_is_child_of_dual_space!(state)
-            Utils::Transformation.ensure_direct_child_of_root!(
-              state.sketchup_component_instance,
-              @dual_group,
-              "[IndoorGML] Coordinate warning: State #{state.sketchup_component_instance.name} is not a child of #{DUAL_GROUP_NAME}"
-            )
+            state&.valid?
           end
         end
       end
