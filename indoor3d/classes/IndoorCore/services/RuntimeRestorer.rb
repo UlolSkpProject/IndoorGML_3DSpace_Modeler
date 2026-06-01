@@ -12,7 +12,7 @@ module ULOL
           @state_registrar = state_registrar
         end
 
-        def restore(primal_group:, dual_group:)
+        def restore(primal_group:)
           restore_cell_spaces_from_primal_group(primal_group)
           restore_states_from_cell_spaces
         end

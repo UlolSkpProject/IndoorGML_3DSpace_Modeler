@@ -15,7 +15,7 @@ module ULOL
                 find_existing_space_features_groups
                 attach_existing_space_features_observers
                 reset_runtime_collections
-                @runtime_restorer.restore(primal_group: @primal_group, dual_group: @dual_group)
+                @runtime_restorer.restore(primal_group: @primal_group)
                 rebuild_runtime_transitions_from_cell_adjacency
               end
               apply_indoor_lock_policy()
@@ -44,14 +44,15 @@ module ULOL
           end
 
           def clear_indoor_gml_groups
-            [@primal_group, @dual_group].each do |group|
+            [@primal_group].each do |group|
               next unless group&.valid?
 
               unlock_indoor_entity(group)
               group.erase!
             end
             @primal_group = nil
-            @dual_group = nil
+            # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
+            # @dual_group = nil
             @cell_space_observed_ids.clear
             @state_observed_ids.clear
             @space_features_observed_ids.clear
@@ -127,12 +128,13 @@ module ULOL
             @attribute_serializer.feature(entity)
           end
 
-          def dual_feature?(entity)
-            ['State', 'Transition'].include?(indoor_feature(entity))
-          end
+          # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
+          # def dual_feature?(entity)
+          #   ['State', 'Transition'].include?(indoor_feature(entity))
+          # end
 
           def space_features_feature?(feature)
-            feature == PRIMAL_GROUP_FEATURE || feature == DUAL_GROUP_FEATURE
+            feature == PRIMAL_GROUP_FEATURE
           end
 
           def converted_group?(sketchup_group)
