@@ -112,6 +112,13 @@ module ULOL
             )
           end
 
+          def recenter_cell_space_origin(cell_space)
+            return unless cell_space&.valid?
+
+            ensure_cell_space_is_child_of_primal_space!(cell_space)
+            recenter_cell_space_geometry(cell_space.sketchup_group)
+          end
+
           def attach_space_features_observer(group, expected_name)
             return unless group&.valid?
 

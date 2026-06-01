@@ -66,6 +66,32 @@ module ULOL
             end
           end
 
+          def cell_space_closed(entity)
+            begin
+              return if @syncing || @erasing
+
+              cell_space = find_cell_space_for_entity(entity)
+              cell_space = refresh_and_find_cell_space(entity) if stale_cell_space_runtime?(cell_space, entity)
+              return if cell_space.nil? || !cell_space.valid?
+
+              sync do
+                recenter_cell_space_origin(cell_space)
+                state = cell_space.duality_state
+                unless state&.valid?
+                  cell_space = refresh_and_find_cell_space(entity)
+                  state = cell_space&.duality_state
+                end
+                if state&.valid?
+                  local_position = cell_space_local_origin(cell_space)
+                  move_state_to_local_position(state, local_position)
+                end
+                synchronize_adjacency_and_transitions_for_cell_space(cell_space)
+              end
+            ensure
+              lock_indoor_entity(entity)
+            end
+          end
+
           def state_changed(entity)
             begin
               return if @syncing || @erasing
