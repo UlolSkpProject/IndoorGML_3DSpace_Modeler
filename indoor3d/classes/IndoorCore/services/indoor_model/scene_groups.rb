@@ -44,6 +44,8 @@ module ULOL
             attach_entities_observer(:root, Sketchup.active_model.entities, @root_entities_observer)
             attach_existing_space_features_observer(@primal_group, PRIMAL_GROUP_NAME)
             attach_existing_space_features_observer(@dual_group, DUAL_GROUP_NAME)
+            @root_entities_observer.track_entity(@primal_group)
+            @root_entities_observer.track_entity(@dual_group)
             attach_entities_observer(:primal, @primal_group.entities, @primal_entities_observer) if @primal_group&.valid?
             attach_entities_observer(:dual, @dual_group.entities, @dual_entities_observer) if @dual_group&.valid?
           end
