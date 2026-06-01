@@ -8,7 +8,7 @@ module ULOL
           private
 
           def ensure_space_features_groups
-            Utils::Materials.ensure_all
+            Utils::Materials.ensure_all()
 
             entities = Sketchup.active_model.active_entities
             @primal_group = find_group(entities, PRIMAL_GROUP_NAME)
@@ -178,21 +178,21 @@ module ULOL
           def ensure_space_features_origin_point(group)
             begin
               return unless group&.valid?
-              return if origin_construction_point?(group)
 
-              group.entities.add_cpoint(ORIGIN)
+              point = origin_construction_point(group) || group.entities.add_cpoint(ORIGIN)
+              point.hidden = true if point&.valid? && point.respond_to?(:hidden=)
             rescue StandardError => e
               puts "[IndoorGML] Origin point creation failed: #{e.class}: #{e.message}"
             end
           end
 
-          def origin_construction_point?(group)
+          def origin_construction_point(group)
             begin
-              group.entities.grep(Sketchup::ConstructionPoint).any? do |point|
+              group.entities.grep(Sketchup::ConstructionPoint).find do |point|
                 point.valid? && point.position.distance(ORIGIN) <= 0.001
               end
             rescue StandardError
-              false
+              nil
             end
           end
 

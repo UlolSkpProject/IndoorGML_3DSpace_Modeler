@@ -110,18 +110,58 @@ module ULOL
       UI.messagebox("Runtime refresh failed:\n#{e.message}")
     end
 
+    def self.begin_indoor_gml_editing
+      if IndoorCore::IndoorModel.current.begin_editing
+        UI.messagebox('IndoorGML editing started.')
+      else
+        UI.messagebox('IndoorGML editing is already active.')
+      end
+    rescue StandardError => e
+      UI.messagebox("IndoorGML editing failed:\n#{e.message}")
+    end
+
+    def self.finish_indoor_gml_editing
+      if IndoorCore::IndoorModel.current.finish_editing
+        UI.messagebox('IndoorGML editing finished.')
+      else
+        UI.messagebox('IndoorGML editing is not active.')
+      end
+    rescue StandardError => e
+      UI.messagebox("IndoorGML editing finish failed:\n#{e.message}")
+    end
+
+    def self.create_command(label, tooltip, &block)
+      command = UI::Command.new(label) { block.call }
+      command.tooltip = tooltip
+      command.status_bar_text = tooltip
+      command
+    end
+
     unless file_loaded?(__FILE__)
-      attach_model_observer
+      attach_model_observer()
       menu = UI.menu('Extensions').add_submenu('Indoor3DGML Modeler')
       menu.add_item('Convert Solid Groups to CellSpace') do
-        convert_selected_solid_groups_to_cell_spaces
+        convert_selected_solid_groups_to_cell_spaces()
       end
       menu.add_item('Change CellSpace Type') do
-        change_selected_cell_space_type
+        change_selected_cell_space_type()
       end
       menu.add_item('Refresh Runtime Data') do
-        refresh_runtime_data
+        refresh_runtime_data()
       end
+      edit_command = create_command('Edit IndoorGML', 'Enter IndoorGML editing mode') do
+        begin_indoor_gml_editing()
+      end
+      finish_command = create_command('Finish IndoorGML Editing', 'Finish IndoorGML editing mode') do
+        finish_indoor_gml_editing()
+      end
+      menu.add_item(edit_command)
+      menu.add_item(finish_command)
+
+      toolbar = UI::Toolbar.new('Indoor3DGML Modeler')
+      toolbar.add_item(edit_command)
+      toolbar.add_item(finish_command)
+      toolbar.show()
       file_loaded(__FILE__)
     end
 

@@ -18,6 +18,7 @@ module ULOL
         require_relative 'services/indoor_model/topology.rb'
         require_relative 'services/indoor_model/observer_routing.rb'
         require_relative 'services/indoor_model/entity_relocation.rb'
+        require_relative 'services/indoor_model/editor_control.rb'
 
         include RuntimeSupport
         include SceneGroups
@@ -25,6 +26,7 @@ module ULOL
         include Topology
         include ObserverRouting
         include EntityRelocation
+        include EditorControl
 
         attr_reader :cell_spaces
         attr_reader :states
@@ -34,6 +36,7 @@ module ULOL
         attr_reader :model
         attr_reader :primal_group
         attr_reader :dual_group
+        attr_reader :editor_session
 
         def self.current
           @current ||= new
@@ -76,6 +79,7 @@ module ULOL
             state_registrar: method(:register_state)
           )
           @scene_group_guard = SceneGroupGuard.new(with_unlocked: method(:with_unlocked))
+          @editor_session = EditorSession.new(self)
         end
       end
 

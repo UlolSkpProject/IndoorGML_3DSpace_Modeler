@@ -8,6 +8,7 @@ module ULOL
         attr_reader :sketchup_group
         attr_reader :sketchup_group_id
         attr_accessor :cell_type
+        attr_accessor :editable
         attr_reader :duality_state
 
         def initialize(sketchup_group, cell_type = CellSpaceType::GENERAL)
@@ -18,6 +19,7 @@ module ULOL
           @sketchup_group = sketchup_group
           @sketchup_group_id = sketchup_group.persistent_id
           @cell_type = cell_type
+          @editable = false
           @duality_state = nil
         end
 
@@ -65,6 +67,7 @@ module ULOL
           @sketchup_group = sketchup_group
           @sketchup_group_id = sketchup_group.persistent_id
           @cell_type = cell_type
+          @editable = false
           @duality_state = nil
           @id = id unless id.to_s.empty?
           @name = name.to_s
