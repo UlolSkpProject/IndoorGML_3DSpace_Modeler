@@ -17,6 +17,7 @@ module ULOL
                 reset_runtime_collections
                 @runtime_restorer.restore(primal_group: @primal_group, dual_group: @dual_group)
               end
+              apply_indoor_lock_policy()
               puts "[IndoorGML] Runtime refreshed: cells=#{@cell_spaces.length}, states=#{@states.length}, transitions=#{@transitions.length}"
               true
             ensure
@@ -134,21 +135,16 @@ module ULOL
             @feature_registry.find_state_for_entity(entity)
           end
 
-          def with_unlocked(_entity)
-            yield
+          def with_unlocked(entity)
+            @editor_session.with_unlocked(entity) { yield }
           end
 
-          def lock_indoor_entity(_entity)
-            # Lock policy is intentionally deferred until observer behavior is easier to test.
-            true
+          def lock_indoor_entity(entity)
+            @editor_session.lock_entity(entity)
           end
 
           def unlock_indoor_entity(entity)
-            begin
-              entity.locked = false if entity&.valid? && entity.respond_to?(:locked=)
-            rescue StandardError
-              true
-            end
+            @editor_session.unlock_entity(entity)
           end
 
           def sync

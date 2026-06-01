@@ -10,6 +10,7 @@ module ULOL
         attr_reader :cell1
         attr_reader :cell2
         attr_reader :edge
+        attr_accessor :editable
 
         TRANSITION_RADIUS = State::STATE_NODE_RADIUS * 0.5 unless const_defined?(:TRANSITION_RADIUS, false)
         TRANSITION_BASE_HEIGHT = 1.0 unless const_defined?(:TRANSITION_BASE_HEIGHT, false)
@@ -25,6 +26,7 @@ module ULOL
           @cell2 = cell2
           @parent_entities = parent_entities
           @edge = nil
+          @editable = false
         end
 
         def update(point1, point2)
@@ -77,6 +79,7 @@ module ULOL
           @cell2 = cell2
           @parent_entities = edge.parent.respond_to?(:entities) ? edge.parent.entities : nil
           @edge = edge
+          @editable = false
           @id = id unless id.to_s.empty?
           @name = name.to_s
         end

@@ -19,6 +19,7 @@ module ULOL
             register_state(state)
             write_attributes(cell_space)
             synchronize_adjacency_and_transitions_for_cell_space(cell_space)
+            apply_indoor_lock_policy()
 
             cell_space
           end
@@ -36,6 +37,7 @@ module ULOL
               apply_cell_space_material(cell_space)
               write_cell_space_attributes(cell_space)
               synchronize_adjacency_and_transitions_for_cell_space(cell_space)
+              apply_indoor_lock_policy()
             end
 
             cell_space

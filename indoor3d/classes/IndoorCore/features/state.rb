@@ -10,6 +10,7 @@ module ULOL
         attr_reader :duality_cell
         attr_reader :position
         attr_reader :transitions
+        attr_accessor :editable
 
         STATE_NODE_RADIUS = 2000.mm unless const_defined?(:STATE_NODE_RADIUS, false)
 
@@ -29,6 +30,7 @@ module ULOL
           @duality_cell = cell_space
           @position = local_position
           @transitions = []
+          @editable = false
           @sketchup_component_instance = create_component_instance(@position, parent_entities)
           @sketchup_component_instance_id = @sketchup_component_instance.persistent_id
           @sketchup_component_instance.name = "[Node]-#{@id}"
@@ -82,6 +84,7 @@ module ULOL
           @duality_cell = cell_space
           @position = local_position
           @transitions = []
+          @editable = false
           @sketchup_component_instance = component_instance
           @sketchup_component_instance_id = component_instance.persistent_id
           @id = id unless id.to_s.empty?
