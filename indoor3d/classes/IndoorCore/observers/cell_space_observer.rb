@@ -20,7 +20,7 @@ module ULOL
           return unless indoor_gml_entity?(instance)
 
           log_event('onClose', instance)
-          @indoor_model.cell_space_changed(instance)
+          @indoor_model.cell_space_closed(instance)
         end
 
         def onChangeEntity(entity)
