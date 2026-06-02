@@ -80,6 +80,7 @@ module ULOL
 
               sync do
                 recenter_cell_space_origin(cell_space)
+                apply_cell_space_material(cell_space)
                 state = cell_space.duality_state
                 unless state&.valid?
                   cell_space = refresh_and_find_cell_space(entity)
