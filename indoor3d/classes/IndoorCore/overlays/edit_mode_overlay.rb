@@ -72,15 +72,15 @@ module ULOL
         end
 
         def draw_banner(view)
-          width = view.vpwidth()
-          banner_height = 56
+          w = view.vpwidth()
+          h = 56
           draw_2d_quad(
             view,
             [
               [0, 0, 0],
-              [width, 0, 0],
-              [width, banner_height, 0],
-              [0, banner_height, 0]
+              [w, 0, 0],
+              [w, h, 0],
+              [0, h, 0]
             ],
             PRIMARY_TRANSLUCENT_COLOR
           )
@@ -98,14 +98,14 @@ module ULOL
         end
 
         def draw_screen_border(view)
-          width = view.vpwidth()
-          height = view.vpheight()
-          color = PRIMARY_COLOR
-          thickness = 4
-          draw_2d_quad(view, [[0, 0, 0], [width, 0, 0], [width, thickness, 0], [0, thickness, 0]], color)
-          draw_2d_quad(view, [[0, height - thickness, 0], [width, height - thickness, 0], [width, height, 0], [0, height, 0]], color)
-          draw_2d_quad(view, [[0, 0, 0], [thickness, 0, 0], [thickness, height, 0], [0, height, 0]], color)
-          draw_2d_quad(view, [[width - thickness, 0, 0], [width, 0, 0], [width, height, 0], [width - thickness, height, 0]], color)
+          w = view.vpwidth()
+          h = view.vpheight()
+          t = 4
+          c = PRIMARY_COLOR
+          draw_2d_quad(view, [[0, 0, 0], [w, 0, 0], [w, t, 0], [0, t, 0]], c)
+          draw_2d_quad(view, [[0, h - t, 0], [w, h - t, 0], [w, h, 0], [0, h, 0]], c)
+          draw_2d_quad(view, [[0, 0, 0], [t, 0, 0], [t, h, 0], [0, h, 0]], c)
+          draw_2d_quad(view, [[w - t, 0, 0], [w, 0, 0], [w, h, 0], [w - t, h, 0]], c)
         end
 
         def draw_cell_space_outlines(view)
