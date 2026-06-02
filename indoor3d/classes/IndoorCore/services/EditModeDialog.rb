@@ -5,6 +5,13 @@ module ULOL
     module IndoorCore
 
       class EditModeDialog
+        DIALOG_WIDTH = 280
+        INITIAL_DIALOG_HEIGHT = 260
+        MIN_DIALOG_HEIGHT = 280
+        MAX_DIALOG_HEIGHT = 620
+        CONTENT_PADDING_HEIGHT = 24
+        DIALOG_WINDOW_CHROME_HEIGHT = 96
+
         def initialize(indoor_model)
           @indoor_model = indoor_model
           @dialog = nil
@@ -46,8 +53,8 @@ module ULOL
             preferences_key: 'ULOL.Indoor3DGmlModeler.EditMode',
             scrollable: true,
             resizable: false,
-            width: 280,
-            height: 260,
+            width: DIALOG_WIDTH,
+            height: INITIAL_DIALOG_HEIGHT,
             style: UI::HtmlDialog::STYLE_DIALOG
           )
           dialog.add_action_callback('fitContentHeight') do |_context, content_height|
@@ -89,8 +96,9 @@ module ULOL
           begin
             return unless @dialog
 
-            height = [[content_height.to_i + 18, 220].max, 520].min
-            @dialog.set_size(280, height)
+            requested_height = content_height.to_i + CONTENT_PADDING_HEIGHT + DIALOG_WINDOW_CHROME_HEIGHT
+            height = [[requested_height, MIN_DIALOG_HEIGHT].max, MAX_DIALOG_HEIGHT].min
+            @dialog.set_size(DIALOG_WIDTH, height)
           rescue StandardError => e
             puts "[IndoorGML] Edit mode dialog resize failed: #{e.class}: #{e.message}"
           end
