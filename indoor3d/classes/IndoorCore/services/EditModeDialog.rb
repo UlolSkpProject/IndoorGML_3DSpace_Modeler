@@ -16,18 +16,22 @@ module ULOL
         end
 
         def update_selection(snapshot)
-          return unless @dialog&.visible?
+          begin
+            return unless @dialog&.visible?
 
-          @dialog.execute_script(selection_script(snapshot))
-        rescue StandardError => e
-          puts "[IndoorGML] Edit mode dialog selection update failed: #{e.class}: #{e.message}"
+            @dialog.execute_script(selection_script(snapshot))
+          rescue StandardError => e
+            puts "[IndoorGML] Edit mode dialog selection update failed: #{e.class}: #{e.message}"
+          end
         end
 
         def close
-          @dialog&.close if @dialog&.visible?
-          @dialog = nil
-        rescue StandardError => e
-          puts "[IndoorGML] Edit mode dialog close failed: #{e.class}: #{e.message}"
+          begin
+            @dialog&.close if @dialog&.visible?
+            @dialog = nil
+          rescue StandardError => e
+            puts "[IndoorGML] Edit mode dialog close failed: #{e.class}: #{e.message}"
+          end
         end
 
         private
@@ -53,13 +57,11 @@ module ULOL
             end
           end
           dialog.add_action_callback('setOverlayMinRadius') do |_context, radius_pixels|
-            puts "[IndoorGML] EditModeDialog#setOverlayMinRadius radius_pixels=#{radius_pixels}"
             UI.start_timer(0, false) do
               @indoor_model.set_overlay_min_radius_pixels(radius_pixels)
             end
           end
           dialog.add_action_callback('setOverlayRadiusRange') do |_context, min_radius_pixels, max_radius_pixels|
-            puts "[IndoorGML] EditModeDialog#setOverlayRadiusRange min=#{min_radius_pixels} max=#{max_radius_pixels}"
             UI.start_timer(0, false) do
               @indoor_model.set_overlay_radius_pixel_range(min_radius_pixels, max_radius_pixels)
             end
@@ -139,9 +141,7 @@ module ULOL
                   font-size: 12px;
                   margin-bottom: 6px;
                 }
-                .row span:first-child {
-                  color: #667484;
-                }
+                .row span:first-child { color: #667484; }
                 .row span:last-child {
                   min-width: 0;
                   overflow: hidden;
@@ -163,9 +163,7 @@ module ULOL
                   gap: 8px;
                   margin-bottom: 14px;
                 }
-                .range-row input[type="range"] {
-                  margin-bottom: 0;
-                }
+                .range-row input[type="range"] { margin-bottom: 0; }
                 button {
                   width: 100%;
                   height: 34px;
@@ -178,16 +176,12 @@ module ULOL
                   cursor: pointer;
                 }
                 button:hover { background: #0f4275; }
-                button.danger {
-                  background: #a43838;
-                }
-                button.danger:hover {
-                  background: #842d2d;
-                }
+                button.danger { background: #a43838; }
+                button.danger:hover { background: #842d2d; }
               </style>
             </head>
             <body>
-              <div class="header">EDIT MODE · PRIMAL SPACE</div>
+              <div class="header">EDIT MODE - PRIMAL SPACE</div>
               <div class="panel">
                 <div class="row"><span>Selected</span><span id="selectedFeature">None</span></div>
                 <div class="row"><span>ID</span><span id="selectedId">-</span></div>
@@ -222,6 +216,7 @@ module ULOL
                 var selectedName = document.getElementById('selectedName');
                 var selectedType = document.getElementById('selectedType');
                 var suppressTypeChange = false;
+
                 function updateSelectedCellSpace(snapshot) {
                   suppressTypeChange = true;
                   if (!snapshot || !snapshot.id) {
@@ -239,7 +234,8 @@ module ULOL
                   }
                   suppressTypeChange = false;
                 }
-                function updateOverlayRadiusRange() {
+
+                function normalizedOverlayRadiusRange() {
                   var minRadius = Number(overlayMinRadius.value);
                   var maxRadius = Number(overlayMaxRadius.value);
                   if (minRadius > maxRadius) {
@@ -252,16 +248,28 @@ module ULOL
                     }
                   }
                   overlayRadiusValue.textContent = `${minRadius}-${maxRadius} px`;
-                  sketchup.setOverlayRadiusRange(minRadius, maxRadius);
+                  return [minRadius, maxRadius];
                 }
+
+                function previewOverlayRadiusRange() {
+                  normalizedOverlayRadiusRange();
+                }
+
+                function commitOverlayRadiusRange() {
+                  var range = normalizedOverlayRadiusRange();
+                  sketchup.setOverlayRadiusRange(range[0], range[1]);
+                }
+
                 radius.addEventListener('input', function () {
                   radiusValue.textContent = `${radius.value} mm`;
                 });
                 radius.addEventListener('change', function () {
                   sketchup.setStateRadius(Number(radius.value));
                 });
-                overlayMinRadius.addEventListener('input', updateOverlayRadiusRange);
-                overlayMaxRadius.addEventListener('input', updateOverlayRadiusRange);
+                overlayMinRadius.addEventListener('input', previewOverlayRadiusRange);
+                overlayMaxRadius.addEventListener('input', previewOverlayRadiusRange);
+                overlayMinRadius.addEventListener('change', commitOverlayRadiusRange);
+                overlayMaxRadius.addEventListener('change', commitOverlayRadiusRange);
                 selectedType.addEventListener('change', function () {
                   if (!suppressTypeChange) {
                     sketchup.setSelectedCellSpaceType(selectedType.value);
