@@ -6,11 +6,7 @@ module ULOL
 
       class IndoorModel
         PRIMAL_GROUP_NAME = 'IndoorGML_PrimalSpaceFeatures'
-        # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
-        # DUAL_GROUP_NAME = 'IndoorGML_DualSpaceFeatures'
         PRIMAL_GROUP_FEATURE = 'primalspace'
-        # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
-        # DUAL_GROUP_FEATURE = 'dualspace'
         ATTRIBUTE_DICTIONARY_NAME = 'IndoorGml'
         INDOOR_GML_VERSION = '1.1'
 
@@ -36,8 +32,6 @@ module ULOL
         attr_reader :doors
         attr_reader :model
         attr_reader :primal_group
-        # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
-        # attr_reader :dual_group
         attr_reader :editor_session
         attr_reader :overlay_min_radius_pixels
         attr_reader :overlay_max_radius_pixels
@@ -51,15 +45,11 @@ module ULOL
           @feature_registry = FeatureRegistry.new
           bind_registry_collections
           @cell_space_observer = CellSpaceObserver.new(self)
-          @state_observer = StateObserver.new(self)
           @space_features_observer = SpaceFeaturesObserver.new(self)
           @root_entities_observer = Indoor3DGmlRootEntitiesObserver.new(self)
           @primal_entities_observer = Indoor3DGmlPrimalEntitiesObserver.new(self)
-          # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
-          # @dual_entities_observer = Indoor3DGmlDualEntitiesObserver.new(self)
           @selection_observer = Indoor3DGmlSelectionObserver.new(self)
           @cell_space_observed_ids = {}
-          @state_observed_ids = {}
           @space_features_observed_ids = {}
           @selection_observed_model_id = nil
           @entities_observed_ids = {}
@@ -71,8 +61,6 @@ module ULOL
           @overlay_min_radius_pixels = 4.0
           @overlay_max_radius_pixels = 12.0
           @primal_group = nil
-          # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
-          # @dual_group = nil
           @attribute_serializer = AttributeSerializer.new(
             dictionary_name: ATTRIBUTE_DICTIONARY_NAME,
             indoor_gml_version: INDOOR_GML_VERSION

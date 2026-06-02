@@ -2,9 +2,9 @@
 
 ## Cleanup
 
-- Review whether `DualentitiesObserver` is still needed, then remove it if obsolete.
-- Review whether `StateObserver` is still needed, then remove it if obsolete.
-- Remove other deprecated code paths.
+- [x] Review whether `DualentitiesObserver` is still needed, then remove it if obsolete.
+- [x] Review whether `StateObserver` is still needed, then remove it if obsolete.
+- [x] Remove other deprecated code paths.
 - Check and document the responsibilities of the `IndoorModel` mixins:
   - `RuntimeSupport`
   - `SceneGroups`

@@ -50,10 +50,7 @@ module ULOL
               group.erase!
             end
             @primal_group = nil
-            # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
-            # @dual_group = nil
             @cell_space_observed_ids.clear
-            @state_observed_ids.clear
             @space_features_observed_ids.clear
             @entities_observed_ids.clear
           end
@@ -71,26 +68,9 @@ module ULOL
             end
           end
 
-          def stale_state_runtime?(state, entity)
-            begin
-              return true if state.nil?
-              return true unless state.valid?
-              return true unless state.duality_cell&.valid?
-
-              false
-            rescue StandardError
-              true
-            end
-          end
-
           def refresh_and_find_cell_space(entity)
             refresh_runtime_data
             find_cell_space_for_entity(entity)
-          end
-
-          def refresh_and_find_state(entity)
-            refresh_runtime_data
-            find_state_for_entity(entity)
           end
 
           def write_space_features_attributes(group, feature)
@@ -127,11 +107,6 @@ module ULOL
             @attribute_serializer.feature(entity)
           end
 
-          # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
-          # def dual_feature?(entity)
-          #   ['State', 'Transition'].include?(indoor_feature(entity))
-          # end
-
           def space_features_feature?(feature)
             feature == PRIMAL_GROUP_FEATURE
           end
@@ -142,10 +117,6 @@ module ULOL
 
           def find_cell_space_for_entity(entity)
             @feature_registry.find_cell_space_for_entity(entity)
-          end
-
-          def find_state_for_entity(entity)
-            @feature_registry.find_state_for_entity(entity)
           end
 
           def with_unlocked(entity)
