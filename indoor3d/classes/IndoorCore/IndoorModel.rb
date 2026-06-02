@@ -69,8 +69,8 @@ module ULOL
           @relocating_entity = false
           @refreshing_runtime = false
           @constraining_space_features = false
-          @overlay_min_radius_pixels = 14.0
-          @overlay_max_radius_pixels = 64.0
+          @overlay_min_radius_pixels = 4.0
+          @overlay_max_radius_pixels = 12.0
           @primal_group = nil
           # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
           # @dual_group = nil
