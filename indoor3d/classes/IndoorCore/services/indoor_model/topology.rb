@@ -73,7 +73,6 @@ module ULOL
           def erase_transition(transition)
             return if transition.nil?
 
-            unregister_transition_entity(transition)
             unregister_transition_from_states(transition)
             transition.erase!
             @feature_registry.remove_transition(transition)
@@ -88,16 +87,6 @@ module ULOL
             transition.state2.add_transition(transition)
             write_state_attributes(transition.state1)
             write_state_attributes(transition.state2)
-          end
-
-          def register_transition_entity(transition)
-            @feature_registry.register_transition_entity(transition)
-          end
-
-          def unregister_transition_entity(transition)
-            return if transition.nil?
-
-            @feature_registry.unregister_transition_entity(transition)
           end
 
           def unregister_transition_from_states(transition)
