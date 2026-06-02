@@ -217,11 +217,12 @@ module ULOL
               point_on_face_plane(origin, u_axis, v_axis, max_u, max_v),
               point_on_face_plane(origin, u_axis, v_axis, min_u, max_v)
             ]
+            # The source text texture advances along its V axis, so map V to the face's longest edge.
             uv_points = [
               Geom::Point3d.new(0.0, 0.0, 0.0),
-              Geom::Point3d.new(1.0, 0.0, 0.0),
+              Geom::Point3d.new(0.0, 1.0, 0.0),
               Geom::Point3d.new(1.0, 1.0, 0.0),
-              Geom::Point3d.new(0.0, 1.0, 0.0)
+              Geom::Point3d.new(1.0, 0.0, 0.0)
             ]
 
             face.position_material(material, corners.zip(uv_points).flatten, true)
