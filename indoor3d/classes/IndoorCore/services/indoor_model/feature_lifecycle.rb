@@ -32,10 +32,8 @@ module ULOL
             raise ArgumentError, 'CellSpace is no longer valid' unless cell_space.valid?
 
             sync do
-              remove_cell_space_from_type_runtime_lists(cell_space)
               cell_space.cell_type = cell_type
               cell_space.set_category(category_code)
-              update_cell_space_type_runtime_lists(cell_space)
               name_cell_space_entity(cell_space)
               apply_cell_space_material(cell_space)
               write_cell_space_attributes(cell_space)
@@ -275,14 +273,6 @@ module ULOL
               v_axis.reverse!
             end
             [u_axis, v_axis]
-          end
-
-          def update_cell_space_type_runtime_lists(cell_space)
-            @feature_registry.add_cell_space_type_reference(cell_space)
-          end
-
-          def remove_cell_space_from_type_runtime_lists(cell_space)
-            @feature_registry.remove_cell_space_type_reference(cell_space)
           end
 
           def register_state(state)

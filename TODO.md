@@ -13,8 +13,8 @@
   - `ObserverRouting`
   - `EntityRelocation`
   - `EditorControl`
-- Re-check any remaining `restore_name`/message text encoding issues.
-- Remove unnecessary attributes from `FeatureRegistry`.
+- [x] Re-check any remaining `restore_name`/message text encoding issues.
+- [x] Remove unnecessary attributes from `FeatureRegistry`.
 
 ## Export
 

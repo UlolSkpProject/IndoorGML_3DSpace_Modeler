@@ -29,7 +29,6 @@ module ULOL
         attr_reader :cell_spaces
         attr_reader :states
         attr_reader :transitions
-        attr_reader :doors
         attr_reader :model
         attr_reader :primal_group
         attr_reader :editor_session
