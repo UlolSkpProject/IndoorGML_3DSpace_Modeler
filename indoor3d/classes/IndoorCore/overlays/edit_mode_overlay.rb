@@ -9,6 +9,7 @@ module ULOL
         OVERLAY_NAME = 'IndoorGML Edit Mode'
         TITLE = 'EDIT MODE'
         CONTEXT_LABEL = 'PRIMAL SPACE'
+        HEADER_LABEL = "#{TITLE} - #{CONTEXT_LABEL}"
         HINT_LABEL = 'CellSpace editing active'
         CIRCLE_SEGMENTS = 32
         OVERLAY_RADIUS_SCALE = 1.1
@@ -31,7 +32,43 @@ module ULOL
           end
         end
 
+        def getExtents
+          begin
+            bounds = Geom::BoundingBox.new
+            add_cell_space_bounds(bounds)
+            add_dual_overlay_bounds(bounds)
+            bounds
+          rescue StandardError => e
+            puts "[IndoorGML] Edit mode overlay extents failed: #{e.class}: #{e.message}"
+            Geom::BoundingBox.new
+          end
+        end
+
         private
+
+        def add_cell_space_bounds(bounds)
+          @indoor_model.cell_spaces.each do |cell_space|
+            group = cell_space.sketchup_group
+            add_bounds(bounds, group.bounds) if group&.valid?()
+          end
+        end
+
+        def add_bounds(target_bounds, source_bounds)
+          (0..7).each { |index| target_bounds.add(source_bounds.corner(index)) }
+        end
+
+        def add_dual_overlay_bounds(bounds)
+          @indoor_model.states.each do |state|
+            next unless state&.valid?()
+
+            point = overlay_state_point(state)
+            radius = (state.radius || State.display_radius) * OVERLAY_RADIUS_SCALE
+            bounds.add(
+              Geom::Point3d.new(point.x - radius, point.y - radius, point.z - radius),
+              Geom::Point3d.new(point.x + radius, point.y + radius, point.z + radius)
+            )
+          end
+        end
 
         def draw_banner(view)
           width = view.vpwidth()
@@ -49,7 +86,7 @@ module ULOL
 
           view.draw_text(
             Geom::Point3d.new(18, 13, 0),
-            "#{TITLE} · #{CONTEXT_LABEL}",
+            HEADER_LABEL,
             text_options(size: 18, bold: true, color: Sketchup::Color.new(255, 255, 255))
           )
           view.draw_text(
@@ -71,30 +108,34 @@ module ULOL
         end
 
         def draw_cell_space_outlines(view)
-          view.line_width = 3 if view.respond_to?(:line_width=)
-          view.drawing_color = Sketchup::Color.new(20, 82, 145, 210)
-          @indoor_model.cell_spaces.each do |cell_space|
-            group = cell_space.sketchup_group
-            next unless group&.valid?
+          begin
+            view.line_width = 3 if view.respond_to?(:line_width=)
+            view.drawing_color = Sketchup::Color.new(20, 82, 145, 210)
+            @indoor_model.cell_spaces.each do |cell_space|
+              group = cell_space.sketchup_group
+              next unless group&.valid?()
 
-            draw_bounds(view, group.bounds)
+              draw_bounds(view, group.bounds)
+            end
+          ensure
+            view.line_width = 1 if view.respond_to?(:line_width=)
           end
-        ensure
-          view.line_width = 1 if view.respond_to?(:line_width=)
         end
 
         def draw_dual_space_overlay(view)
-          view.line_width = 2 if view.respond_to?(:line_width=)
-          draw_overlay_transitions(view)
-          draw_overlay_states(view)
-        ensure
-          view.line_width = 1 if view.respond_to?(:line_width=)
+          begin
+            view.line_width = 2 if view.respond_to?(:line_width=)
+            draw_overlay_transitions(view)
+            draw_overlay_states(view)
+          ensure
+            view.line_width = 1 if view.respond_to?(:line_width=)
+          end
         end
 
         def draw_overlay_states(view)
           view.drawing_color = Sketchup::Color.new(35, 120, 255, 255)
           @indoor_model.states.each do |state|
-            next unless state&.valid?
+            next unless state&.valid?()
 
             center = overlay_state_point(state)
             radius = overlay_state_radius(view, center, state)
@@ -105,8 +146,8 @@ module ULOL
         def draw_overlay_transitions(view)
           view.drawing_color = Sketchup::Color.new(35, 120, 255, 125)
           @indoor_model.transitions.each do |transition|
-            next unless transition&.valid?
-            next unless transition.state1&.valid? && transition.state2&.valid?
+            next unless transition&.valid?()
+            next unless transition.state1&.valid?() && transition.state2&.valid?()
 
             point1 = overlay_state_point(transition.state1)
             point2 = overlay_state_point(transition.state2)
@@ -139,12 +180,6 @@ module ULOL
           [[model_radius, screen_min_radius].max, screen_max_radius].min
         end
 
-        def draw_state_rings(view, center, radius)
-          draw_circle(view, center, X_AXIS, Y_AXIS, radius)
-          draw_circle(view, center, X_AXIS, Z_AXIS, radius)
-          draw_circle(view, center, Y_AXIS, Z_AXIS, radius)
-        end
-
         def draw_billboard_disk(view, center, radius)
           right_axis, up_axis = camera_billboard_axes(view)
           points = [center]
@@ -160,9 +195,7 @@ module ULOL
           direction.normalize!
           camera_direction = view.camera.direction
           width_axis = direction.cross(camera_direction)
-          if width_axis.length <= 0.001
-            width_axis = direction.cross(view.camera.up)
-          end
+          width_axis = direction.cross(view.camera.up) if width_axis.length <= 0.001
           return if width_axis.length <= 0.001
 
           width_axis.normalize!
@@ -180,24 +213,6 @@ module ULOL
               point1.offset(offset.reverse)
             ]
           )
-        end
-
-        def draw_transition_wire(view, point1, point2, radius)
-          direction = point1.vector_to(point2)
-          return if direction.length <= 0.001
-
-          z_axis = direction.clone
-          z_axis.normalize!
-          x_axis = transition_perpendicular_axis(z_axis)
-          y_axis = z_axis.cross(x_axis)
-          y_axis.normalize!
-          view.draw(GL_LINES, [point1, point2])
-          draw_circle(view, point1, x_axis, y_axis, radius)
-          draw_circle(view, point2, x_axis, y_axis, radius)
-        end
-
-        def draw_circle(view, center, axis1, axis2, radius)
-          view.draw(GL_LINE_LOOP, circle_points(center, axis1, axis2, radius))
         end
 
         def circle_points(center, axis1, axis2, radius)
@@ -223,13 +238,6 @@ module ULOL
           @indoor_model.primal_group.transformation * state.position
         end
 
-        def transition_perpendicular_axis(z_axis)
-          seed = z_axis.parallel?(Z_AXIS) ? X_AXIS : Z_AXIS
-          x_axis = seed.cross(z_axis)
-          x_axis.normalize!
-          x_axis
-        end
-
         def draw_bounds(view, bounds)
           points = (0..7).map { |index| bounds.corner(index) }
           loops = [
@@ -251,9 +259,9 @@ module ULOL
         def text_options(size:, bold:, color:)
           {
             size: size,
-            bold: true,
+            bold: bold,
             color: color
-          }.merge(bold: bold)
+          }
         end
       end
 

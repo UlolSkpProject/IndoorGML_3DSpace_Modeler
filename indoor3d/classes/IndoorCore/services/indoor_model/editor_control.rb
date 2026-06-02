@@ -29,18 +29,20 @@ module ULOL
           end
 
           def set_overlay_radius_pixel_range(min_radius_pixels, max_radius_pixels)
-            min_radius_pixels = min_radius_pixels.to_f
-            max_radius_pixels = max_radius_pixels.to_f
-            return false unless min_radius_pixels.positive? && max_radius_pixels.positive?
+            begin
+              min_radius_pixels = min_radius_pixels.to_f
+              max_radius_pixels = max_radius_pixels.to_f
+              return false unless min_radius_pixels.positive? && max_radius_pixels.positive?
 
-            min_radius_pixels, max_radius_pixels = [min_radius_pixels, max_radius_pixels].sort
-            @overlay_min_radius_pixels = min_radius_pixels
-            @overlay_max_radius_pixels = max_radius_pixels
-            Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
-            true
-          rescue StandardError => e
-            puts "[IndoorGML] Overlay radius range update failed: #{e.class}: #{e.message}"
-            false
+              min_radius_pixels, max_radius_pixels = [min_radius_pixels, max_radius_pixels].sort
+              @overlay_min_radius_pixels = min_radius_pixels
+              @overlay_max_radius_pixels = max_radius_pixels
+              Sketchup.active_model().active_view().invalidate() if Sketchup.active_model&.active_view
+              true
+            rescue StandardError => e
+              puts "[IndoorGML] Overlay radius range update failed: #{e.class}: #{e.message}"
+              false
+            end
           end
 
           def set_state_radius(radius)
@@ -105,23 +107,27 @@ module ULOL
           end
 
           def attach_edit_selection_observer(model = Sketchup.active_model)
-            return unless model&.selection
-            return if @selection_observed_model_id == model.object_id
+            begin
+              return unless model&.selection
+              return if @selection_observed_model_id == model.object_id
 
-            model.selection.add_observer(@selection_observer)
-            @selection_observed_model_id = model.object_id
-          rescue StandardError => e
-            puts "[IndoorGML] Selection observer attach failed: #{e.class}: #{e.message}"
+              model.selection.add_observer(@selection_observer)
+              @selection_observed_model_id = model.object_id
+            rescue StandardError => e
+              puts "[IndoorGML] Selection observer attach failed: #{e.class}: #{e.message}"
+            end
           end
 
           def detach_edit_selection_observer(model = Sketchup.active_model)
-            return unless model&.selection
-            return unless @selection_observed_model_id == model.object_id
+            begin
+              return unless model&.selection
+              return unless @selection_observed_model_id == model.object_id
 
-            model.selection.remove_observer(@selection_observer)
-            @selection_observed_model_id = nil
-          rescue StandardError => e
-            puts "[IndoorGML] Selection observer detach failed: #{e.class}: #{e.message}"
+              model.selection.remove_observer(@selection_observer)
+              @selection_observed_model_id = nil
+            rescue StandardError => e
+              puts "[IndoorGML] Selection observer detach failed: #{e.class}: #{e.message}"
+            end
           end
 
           def selection_changed
@@ -129,38 +135,42 @@ module ULOL
           end
 
           def selected_cell_space_snapshot
-            cell_space = selected_cell_space
-            return nil unless cell_space&.valid?
+            begin
+              cell_space = selected_cell_space
+              return nil unless cell_space&.valid?
 
-            group = cell_space.sketchup_group
-            {
-              feature: 'CellSpace',
-              id: cell_space.id,
-              name: group&.name.to_s,
-              cell_type: CellSpaceType.label(cell_space.cell_type)
-            }
-          rescue StandardError => e
-            puts "[IndoorGML] Selected CellSpace snapshot failed: #{e.class}: #{e.message}"
-            nil
+              group = cell_space.sketchup_group
+              {
+                feature: 'CellSpace',
+                id: cell_space.id,
+                name: group&.name.to_s,
+                cell_type: CellSpaceType.label(cell_space.cell_type)
+              }
+            rescue StandardError => e
+              puts "[IndoorGML] Selected CellSpace snapshot failed: #{e.class}: #{e.message}"
+              nil
+            end
           end
 
           def set_selected_cell_space_type(cell_type_label)
-            cell_space = selected_cell_space
-            return false unless cell_space&.valid?
+            begin
+              cell_space = selected_cell_space
+              return false unless cell_space&.valid?
 
-            model = Sketchup.active_model()
-            operation_started = false
-            model.start_operation('Change CellSpace Type', true)
-            operation_started = true
-            change_cell_space_type(cell_space.sketchup_group, CellSpaceType.from_label(cell_type_label))
-            model.commit_operation
-            @editor_session.selection_changed()
-            model.active_view.invalidate if model&.active_view
-            true
-          rescue StandardError => e
-            model.abort_operation if operation_started
-            puts "[IndoorGML] Selected CellSpace type update failed: #{e.class}: #{e.message}"
-            false
+              model = Sketchup.active_model()
+              operation_started = false
+              model.start_operation('Change CellSpace Type', true)
+              operation_started = true
+              change_cell_space_type(cell_space.sketchup_group, CellSpaceType.from_label(cell_type_label))
+              model.commit_operation()
+              @editor_session.selection_changed()
+              model.active_view().invalidate() if model&.active_view
+              true
+            rescue StandardError => e
+              model.abort_operation() if operation_started
+              puts "[IndoorGML] Selected CellSpace type update failed: #{e.class}: #{e.message}"
+              false
+            end
           end
 
           def with_active_path_enforcement_suspended

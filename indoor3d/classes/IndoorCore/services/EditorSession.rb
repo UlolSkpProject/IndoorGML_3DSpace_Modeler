@@ -139,11 +139,13 @@ module ULOL
         end
 
         def with_active_path_enforcement_suspended
-          previous = @active_path_enforcement_suspended
-          @active_path_enforcement_suspended = true
-          yield
-        ensure
-          @active_path_enforcement_suspended = previous
+          begin
+            previous = @active_path_enforcement_suspended
+            @active_path_enforcement_suspended = true
+            yield
+          ensure
+            @active_path_enforcement_suspended = previous
+          end
         end
 
         def selection_changed
