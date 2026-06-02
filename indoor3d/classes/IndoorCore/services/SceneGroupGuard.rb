@@ -64,14 +64,14 @@ module ULOL
           expected_name = @expected_names[group.persistent_id]
           return if expected_name.nil? || group.name == expected_name
 
-          UI.messagebox('?대쫫??蹂寃쏀븷 ???녿뒗 Group?낅땲??')
+          UI.messagebox('This group name is managed by IndoorGML and cannot be changed.')
           @with_unlocked.call(group) { group.name = expected_name }
         end
 
         def restore_scale(group)
           return false unless Utils::Transformation.scaled?(group.transformation)
 
-          UI.messagebox('?ш린瑜?議곗젅?????녿뒗 Group?낅땲??')
+          UI.messagebox('This group scale is managed by IndoorGML and cannot be changed.')
           set_group_transformation(group, @last_transforms[group.persistent_id] || Geom::Transformation.new)
           true
         end

@@ -1,4 +1,5 @@
 require 'sketchup.rb'
+require 'fileutils'
 
 module ULOL
   include Sketchup
@@ -112,6 +113,85 @@ module ULOL
       UI.messagebox("Runtime refresh failed:\n#{e.message}")
     end
 
+    def self.create_temp_indoorgml
+      begin
+        coordinate_system = prompt_export_coordinate_system
+        return if coordinate_system.nil?
+
+        output_path = IndoorCore::IndoorGmlConverter::TempExporter.new(
+          IndoorCore::IndoorModel.current,
+          coordinate_system: coordinate_system
+        ).export
+        UI.messagebox("IndoorGML temp.gml created:\n#{output_path}")
+      rescue StandardError => e
+        UI.messagebox("IndoorGML temp.gml creation failed:\n#{e.message}")
+      end
+    end
+
+    def self.export_indoorgml
+      coordinate_system = prompt_export_coordinate_system
+      return if coordinate_system.nil?
+
+      progress = IndoorCore::IndoorGmlConverter::ExportProgressDialog.new
+      progress.show
+      UI.start_timer(0.1, false) do
+        perform_export_indoorgml(progress, coordinate_system)
+      end
+    rescue StandardError => e
+      progress&.close
+      UI.messagebox("IndoorGML export failed:\n#{e.message}")
+    end
+
+    def self.perform_export_indoorgml(progress, coordinate_system)
+      current_step = :runtime
+      begin
+        indoor_model = IndoorCore::IndoorModel.current
+        current_step = :runtime
+        progress.running(:runtime)
+        indoor_model.refresh_runtime_data
+        progress.complete(:runtime)
+
+        current_step = :temp_file
+        progress.running(:temp_file)
+        temp_path = IndoorCore::IndoorGmlConverter::TempExporter.new(
+          indoor_model,
+          refresh_runtime_data: false,
+          coordinate_system: coordinate_system
+        ).export
+        progress.complete(:temp_file)
+        validator = IndoorCore::IndoorGmlConverter::Val3dityRunner.new(temp_path)
+
+        current_step = :val3dity
+        if validator.validate(progress: progress)
+          progress&.close
+          path = UI.savepanel('Export IndoorGML', '~', 'IndoorGML Files|*.gml;||')
+          return if path.to_s.empty?
+
+          path = "#{path}.gml" unless File.extname(path).downcase == '.gml'
+          FileUtils.mkdir_p(File.dirname(path))
+          FileUtils.cp(temp_path, path)
+          UI.messagebox("IndoorGML exported:\n#{path}")
+        else
+          progress&.close
+          if UI.messagebox("IndoorGML validation failed.\nOpen validation report?", MB_YESNO) == IDYES
+            open_local_file(validator.report_html_path)
+          end
+          if UI.messagebox('Open temporary GML file?', MB_YESNO) == IDYES
+            open_local_file(temp_path)
+          end
+        end
+      rescue StandardError => e
+        progress&.fail(current_step)
+        UI.messagebox("IndoorGML export failed:\n#{e.message}")
+      ensure
+        progress&.close
+      end
+    end
+
+    def self.open_local_file(path)
+      UI.openURL("file:///#{File.expand_path(path).tr('\\', '/')}")
+    end
+
     def self.begin_indoor_gml_editing
       begin
         indoor_model = IndoorCore::IndoorModel.current
@@ -170,6 +250,22 @@ module ULOL
 
       option = options.find { |candidate| candidate[:label] == result.first } || options.first
       [option[:cell_type], option[:category_code]]
+    end
+
+    def self.prompt_export_coordinate_system
+      labels = [
+        'Z-up RH (IndoorGML Standard)',
+        'Y-up LH (Unity / InViewerDesktop)'
+      ]
+      result = UI.inputbox(
+        ['Coordinate System'],
+        [labels.first],
+        [labels.join('|')],
+        'Export IndoorGML'
+      )
+      return nil unless result
+
+      result.first == labels.last ? :y_up_lh : :z_up_rh
     end
 
     def self.add_context_menu_items(menu)
@@ -254,8 +350,17 @@ module ULOL
       menu.add_item('Refresh Runtime Data') do
         refresh_runtime_data()
       end
+      menu.add_item('Create temp.gml') do
+        create_temp_indoorgml()
+      end
+      menu.add_item('Export IndoorGML') do
+        export_indoorgml()
+      end
       edit_command = create_command('Edit IndoorGML', 'Toggle IndoorGML editing mode') do
         toggle_indoor_gml_editing()
+      end
+      export_command = create_command('Export IndoorGML', 'Export the current model to IndoorGML') do
+        export_indoorgml()
       end
 
       UI.add_context_menu_handler do |context_menu|
@@ -264,6 +369,7 @@ module ULOL
 
       toolbar = UI::Toolbar.new('Indoor3DGML Modeler')
       toolbar.add_item(edit_command)
+      toolbar.add_item(export_command)
       toolbar.show()
       file_loaded(__FILE__)
     end
