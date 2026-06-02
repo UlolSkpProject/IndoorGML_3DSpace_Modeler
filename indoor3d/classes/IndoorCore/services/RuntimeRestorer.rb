@@ -43,7 +43,11 @@ module ULOL
             entity,
             CellSpaceType.from_label(@serializer.attribute(entity, 'cell_type')),
             id: @serializer.attribute(entity, 'id'),
-            name: @serializer.attribute(entity, 'name')
+            name: @serializer.attribute(entity, 'name'),
+            category_code: @serializer.attribute(entity, 'category_code'),
+            category_label: @serializer.attribute(entity, 'category_label'),
+            category_code_space: @serializer.attribute(entity, 'category_code_space'),
+            category_standard: @serializer.attribute(entity, 'category_standard')
           )
         rescue StandardError => e
           puts "[IndoorGML] CellSpace restore failed: #{e.class}: #{e.message}"

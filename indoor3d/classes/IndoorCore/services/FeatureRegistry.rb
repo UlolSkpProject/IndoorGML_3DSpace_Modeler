@@ -9,7 +9,6 @@ module ULOL
         attr_reader :states
         attr_reader :transitions
         attr_reader :doors
-        attr_reader :transfer_spaces
         attr_reader :adjacent_cell_space_pairs
         attr_reader :transitions_by_cell_pair
 
@@ -22,7 +21,6 @@ module ULOL
           @states = []
           @transitions = []
           @doors = []
-          @transfer_spaces = []
           @cell_spaces_by_entity = {}
           @cell_spaces_by_entity_id = {}
           @cell_spaces_by_sketchup_entity_id = {}
@@ -136,15 +134,13 @@ module ULOL
         def add_cell_space_type_reference(cell_space)
           return if cell_space.nil?
 
-          @doors << cell_space if cell_space.cell_type == CellSpaceType::TRANSITION && !@doors.include?(cell_space)
-          @transfer_spaces << cell_space if cell_space.cell_type == CellSpaceType::TRANSFER && !@transfer_spaces.include?(cell_space)
+          @doors << cell_space if cell_space.cell_type == CellSpaceType::CONNECTION && !@doors.include?(cell_space)
         end
 
         def remove_cell_space_type_reference(cell_space)
           return if cell_space.nil?
 
           @doors.delete(cell_space)
-          @transfer_spaces.delete(cell_space)
         end
 
         def register_transition_entity(transition)

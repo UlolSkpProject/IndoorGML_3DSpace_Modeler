@@ -33,7 +33,6 @@ module ULOL
             @states = @feature_registry.states
             @transitions = @feature_registry.transitions
             @doors = @feature_registry.doors
-            @transfer_spaces = @feature_registry.transfer_spaces
             @adjacent_cell_space_pairs = @feature_registry.adjacent_cell_space_pairs
             @transitions_by_cell_pair = @feature_registry.transitions_by_cell_pair
           end

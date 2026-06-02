@@ -31,16 +31,9 @@ module ULOL
           return
         end
 
-        labels = IndoorCore::CellSpaceType::LABELS.values
-        result = UI.inputbox(
-          ['CellSpace Type'],
-          [labels.first],
-          [labels.join('|')],
-          'Convert Solid Groups to CellSpace'
-        )
-        return unless result
+        cell_type, category_code = prompt_cell_space_type_and_category('Convert Solid Groups to CellSpace')
+        return if cell_type.nil?
 
-        cell_type = IndoorCore::CellSpaceType.from_label(result.first)
         indoor_model = IndoorCore::IndoorModel.current
         converted_count = 0
         errors = []
@@ -51,7 +44,7 @@ module ULOL
           activate_root_context(model)
           root_solid_groups.each do |group|
             begin
-              indoor_model.convert_group_to_cell_space(group, cell_type)
+              indoor_model.convert_group_to_cell_space(group, cell_type, category_code)
               converted_count += 1
             rescue StandardError => e
               puts "[IndoorGML] CellSpace conversion failed: #{e.class}: #{e.message}"
@@ -85,16 +78,9 @@ module ULOL
         return
       end
 
-      labels = IndoorCore::CellSpaceType::LABELS.values
-      result = UI.inputbox(
-        ['CellSpace Type'],
-        [labels.first],
-        [labels.join('|')],
-        'Change CellSpace Type'
-      )
-      return unless result
+      cell_type, category_code = prompt_cell_space_type_and_category('Change CellSpace Type')
+      return if cell_type.nil?
 
-      cell_type = IndoorCore::CellSpaceType.from_label(result.first)
       indoor_model = IndoorCore::IndoorModel.current
       changed_count = 0
       errors = []
@@ -102,7 +88,7 @@ module ULOL
       model.start_operation('Change CellSpace Type', true)
       groups.each do |group|
         begin
-          indoor_model.change_cell_space_type(group, cell_type)
+          indoor_model.change_cell_space_type(group, cell_type, category_code)
           changed_count += 1
         rescue StandardError => e
           puts "[IndoorGML] CellSpace type change failed: #{e.class}: #{e.message}"
@@ -169,6 +155,21 @@ module ULOL
       command.tooltip = tooltip
       command.status_bar_text = tooltip
       command
+    end
+
+    def self.prompt_cell_space_type_and_category(title)
+      options = IndoorCore::CellSpaceCategory.selection_options
+      labels = options.map { |option| option[:label] }
+      result = UI.inputbox(
+        ['CellSpace'],
+        [labels.first],
+        [labels.join('|')],
+        title
+      )
+      return nil unless result
+
+      option = options.find { |candidate| candidate[:label] == result.first } || options.first
+      [option[:cell_type], option[:category_code]]
     end
 
     def self.add_context_menu_items(menu)
