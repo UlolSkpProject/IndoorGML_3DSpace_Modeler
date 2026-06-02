@@ -294,29 +294,13 @@ module ULOL
         def indoor_entities
           entities = []
           entities << @indoor_model.primal_group
-          # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
-          # entities << @indoor_model.dual_group
           @indoor_model.cell_spaces.each { |cell_space| entities << cell_space.sketchup_group }
           entities.compact.select { |entity| entity&.valid?() }
         end
 
         def temporary_unlock_entities(entity)
-          entities = []
-          # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
-          # entities << @indoor_model.dual_group if dual_feature_entity?(entity)
-          entities << entity
-          entities.compact.select { |target| target&.valid?() }
+          [entity].compact.select { |target| target&.valid?() }
         end
-
-        # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
-        # def dual_feature_entity?(entity)
-        #   begin
-        #     feature = entity.get_attribute(IndoorModel::ATTRIBUTE_DICTIONARY_NAME, 'feature')
-        #     feature == 'State' || feature == 'Transition'
-        #   rescue StandardError
-        #     false
-        #   end
-        # end
 
         def lockable?(entity)
           begin

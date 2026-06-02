@@ -98,38 +98,11 @@ module ULOL
             end
           end
 
-          def state_changed(entity)
-            begin
-              return if @syncing || @erasing
-
-              state = find_state_for_entity(entity)
-              state = refresh_and_find_state(entity) if stale_state_runtime?(state, entity)
-              return if state.nil? || !state.valid?
-
-              sync do
-                cell_space = state.duality_cell
-                local_position = state_local_position(state)
-                update_state_position(state, local_position)
-                move_cell_space_to_local_position(cell_space, local_position) if cell_space&.valid?
-                synchronize_adjacency_and_transitions_for_cell_space(cell_space) if cell_space&.valid?
-              end
-            ensure
-              lock_indoor_entity(entity)
-            end
-          end
-
           def cell_space_erased(entity)
             return if @erasing
 
             cell_space = find_cell_space_for_entity(entity)
             erase_cell_space(cell_space, erase_sketchup_group: false)
-          end
-
-          def state_erased(entity)
-            return if @erasing
-
-            state = find_state_for_entity(entity)
-            erase_state(state, erase_sketchup_instance: false)
           end
 
           def erase_cell_space(cell_space, erase_sketchup_group: true)
@@ -340,10 +313,6 @@ module ULOL
 
           def track_cell_space_entity(entity)
             @primal_entities_observer.track_entity(entity) if @primal_entities_observer && entity&.valid?
-          end
-
-          def attach_state_observer(entity)
-            attach_entity_observer(entity, @state_observer, @state_observed_ids)
           end
 
           def attach_entity_observer(entity, observer, observed_ids)

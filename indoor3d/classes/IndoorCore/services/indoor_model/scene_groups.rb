@@ -19,16 +19,6 @@ module ULOL
             attach_space_features_observer(@primal_group, PRIMAL_GROUP_NAME)
             write_space_features_attributes(@primal_group, PRIMAL_GROUP_FEATURE)
             ensure_space_features_origin_point(@primal_group)
-
-            # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
-            # @dual_group = find_group(entities, DUAL_GROUP_NAME)
-            # unless @dual_group&.valid?
-            #   @dual_group = entities.add_group
-            #   @dual_group.name = DUAL_GROUP_NAME
-            # end
-            # attach_space_features_observer(@dual_group, DUAL_GROUP_NAME)
-            # write_space_features_attributes(@dual_group, DUAL_GROUP_FEATURE)
-            # ensure_space_features_origin_point(@dual_group)
             attach_entities_observers
             lock_space_features_groups
           end
@@ -36,8 +26,6 @@ module ULOL
           def find_existing_space_features_groups
             entities = Sketchup.active_model.entities
             @primal_group = find_group(entities, PRIMAL_GROUP_NAME)
-            # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
-            # @dual_group = find_group(entities, DUAL_GROUP_NAME)
             puts '[IndoorGML] PrimalSpaceFeatures group not found during refresh.' unless @primal_group&.valid?
           end
 
@@ -69,8 +57,6 @@ module ULOL
 
           def space_features_feature_for_name(name)
             return PRIMAL_GROUP_FEATURE if name == PRIMAL_GROUP_NAME
-            # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
-            # return DUAL_GROUP_FEATURE if name == DUAL_GROUP_NAME
 
             nil
           end
@@ -127,8 +113,6 @@ module ULOL
 
             group.add_observer(@space_features_observer)
             @space_features_observed_ids[observer_key] = true
-            # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
-            # synchronize_space_features_from(@primal_group) if group == @dual_group && @primal_group&.valid?
           end
 
           def attach_entities_observers
@@ -162,13 +146,6 @@ module ULOL
               write_space_features_attributes(@primal_group, PRIMAL_GROUP_FEATURE)
               ensure_space_features_origin_point(@primal_group)
               attach_entities_observer(:primal, @primal_group.entities, @primal_entities_observer)
-            # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
-            # when DUAL_GROUP_FEATURE
-            #   @dual_group = entity
-            #   attach_space_features_observer(@dual_group, DUAL_GROUP_NAME)
-            #   write_space_features_attributes(@dual_group, DUAL_GROUP_FEATURE)
-            #   ensure_space_features_origin_point(@dual_group)
-            #   attach_entities_observer(:dual, @dual_group.entities, @dual_entities_observer)
             end
           end
 
@@ -195,8 +172,6 @@ module ULOL
 
           def lock_space_features_groups
             lock_indoor_entity(@primal_group)
-            # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
-            # lock_indoor_entity(@dual_group)
           end
 
           def enforce_space_features_constraints
@@ -205,10 +180,6 @@ module ULOL
 
           def ordered_space_features_groups
             [@primal_group].compact
-          end
-
-          def synchronize_space_features_from(source_group)
-            @scene_group_guard.synchronize_from(source_group, ordered_space_features_groups)
           end
 
           def set_group_transformation(group, transformation)
@@ -257,9 +228,6 @@ module ULOL
             )
           end
 
-          def ensure_state_is_child_of_dual_space!(state)
-            state&.valid?
-          end
         end
       end
     end
