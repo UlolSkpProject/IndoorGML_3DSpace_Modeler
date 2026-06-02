@@ -17,10 +17,6 @@ module ULOL
             @editor_session.editing?()
           end
 
-          def state_radius
-            State.display_radius
-          end
-
           def set_overlay_min_radius_pixels(radius_pixels)
             radius_pixels = radius_pixels.to_f
             return false unless radius_pixels.positive?
@@ -41,36 +37,6 @@ module ULOL
               true
             rescue StandardError => e
               puts "[IndoorGML] Overlay radius range update failed: #{e.class}: #{e.message}"
-              false
-            end
-          end
-
-          def set_state_radius(radius)
-            radius = radius.to_f
-            return false unless radius.positive?
-
-            model = Sketchup.active_model()
-            model.start_operation('Set IndoorGML State Radius', true)
-            begin
-              State.display_radius = radius
-              @states.each do |state|
-                next unless state&.valid?
-
-                state.apply_radius(radius)
-                write_state_attributes(state)
-              end
-              @transitions.each do |transition|
-                next unless transition&.valid?
-
-                update_transition(transition)
-                write_transition_attributes(transition)
-              end
-              model.active_view.invalidate if model&.active_view
-              model.commit_operation
-              true
-            rescue StandardError => e
-              model.abort_operation
-              puts "[IndoorGML] State radius update failed: #{e.class}: #{e.message}"
               false
             end
           end

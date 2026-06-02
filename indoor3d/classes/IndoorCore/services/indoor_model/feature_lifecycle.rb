@@ -10,6 +10,7 @@ module ULOL
 
             ensure_space_features_groups
             cell_group = place_cell_group(sketchup_group)
+            recenter_cell_space_geometry(cell_group)
             cell_space = CellSpace.new(cell_group, cell_type)
             name_cell_space_entity(cell_space)
             apply_cell_space_material(cell_space)
@@ -185,11 +186,13 @@ module ULOL
           end
 
           def apply_cell_space_face_material(face, material)
-            face.material = material
-            face.back_material = material if face.respond_to?(:back_material=)
-            position_cell_space_text_material(face, material) if material.texture
-          rescue StandardError => e
-            puts "[IndoorGML] CellSpace face material failed: #{e.class}: #{e.message}"
+            begin
+              face.material = material
+              face.back_material = material if face.respond_to?(:back_material=)
+              position_cell_space_text_material(face, material) if material.texture
+            rescue StandardError => e
+              puts "[IndoorGML] CellSpace face material failed: #{e.class}: #{e.message}"
+            end
           end
 
           def position_cell_space_text_material(face, material)
