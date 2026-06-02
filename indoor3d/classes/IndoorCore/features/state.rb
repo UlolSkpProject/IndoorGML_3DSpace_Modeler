@@ -41,14 +41,6 @@ module ULOL
           @position = local_position
         end
 
-        def apply_radius(radius)
-          radius = radius.to_f
-          return false unless radius.positive?
-
-          @radius = radius
-          true
-        end
-
         def add_transition(transition)
           @transitions << transition unless @transitions.include?(transition)
         end
@@ -101,11 +93,6 @@ module ULOL
 
         def self.display_radius
           @@display_radius
-        end
-
-        def self.display_radius=(radius)
-          radius = radius.to_f
-          @@display_radius = radius if radius.positive?
         end
       end
 
