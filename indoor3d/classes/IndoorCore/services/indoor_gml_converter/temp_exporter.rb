@@ -13,6 +13,17 @@ module ULOL
           ROOT_ID = 'IF_001'
           COORDINATE_SYSTEM_Z_UP_RH = :z_up_rh
           COORDINATE_SYSTEM_Y_UP_LH = :y_up_lh
+          CORE_NAMESPACE = 'http://www.opengis.net/indoorgml/1.0/core'
+          NAVIGATION_NAMESPACE = 'http://www.opengis.net/indoorgml/1.0/navigation'
+          CORE_SCHEMA_LOCATION = 'http://schemas.opengis.net/indoorgml/1.0/indoorgmlcore.xsd'
+          NAVIGATION_SCHEMA_LOCATION = 'http://schemas.opengis.net/indoorgml/1.0/indoorgmlnavi.xsd'
+          CELL_SPACE_TAGS = {
+            CellSpaceType::GENERAL => 'navi:GeneralSpace',
+            CellSpaceType::TRANSFER => 'navi:TransferSpace',
+            CellSpaceType::TRANSITION => 'navi:TransitionSpace',
+            CellSpaceType::CONNECTION => 'navi:ConnectionSpace',
+            CellSpaceType::ANCHOR => 'navi:AnchorSpace'
+          }.freeze
 
           def initialize(indoor_model, refresh_runtime_data: true, coordinate_system: COORDINATE_SYSTEM_Z_UP_RH)
             @indoor_model = indoor_model
@@ -42,15 +53,15 @@ module ULOL
             doc = REXML::Document.new
             doc << REXML::XMLDecl.new('1.0', "UTF-8")
             root = doc.add_element('core:IndoorFeatures')
-            root.add_namespace('http://www.opengis.net/indoorgml/1.0/core')
-            root.add_namespace('core', 'http://www.opengis.net/indoorgml/1.0/core')
-            root.add_namespace('navi', 'http://www.opengis.net/indoorgml/1.0/navigation')
+            root.add_namespace(CORE_NAMESPACE)
+            root.add_namespace('core', CORE_NAMESPACE)
+            root.add_namespace('navi', NAVIGATION_NAMESPACE)
             root.add_namespace('gml', 'http://www.opengis.net/gml/3.2')
             root.add_namespace('xsi', 'http://www.w3.org/2001/XMLSchema-instance')
             root.add_namespace('xlink', 'http://www.w3.org/1999/xlink')
             root.add_attribute(
               'xsi:schemaLocation',
-              'http://www.opengis.net/indoorgml/1.0/core http://www.opengis.net/indoorgml/1.0/core/indoorgmlcore.xsd http://www.opengis.net/indoorgml/1.0/navigation http://www.opengis.net/indoorgml/1.0/navigation/indoorgmlnavi.xsd'
+              "#{CORE_NAMESPACE} #{CORE_SCHEMA_LOCATION} #{NAVIGATION_NAMESPACE} #{NAVIGATION_SCHEMA_LOCATION}"
             )
             root.add_attribute('gml:id', ROOT_ID)
             append_primal_space_features(root)
@@ -91,11 +102,9 @@ module ULOL
           def append_cell_space(parent, cell_space)
             cell_id = cell_gml_id(cell_space)
             member = parent.add_element('core:cellSpaceMember')
-            cell = member.add_element('core:CellSpace')
+            cell = member.add_element(cell_space_tag(cell_space))
             cell.add_attribute('gml:id', cell_id)
             cell.add_element('gml:name').text = cell_space.category_code
-            duality = cell.add_element('core:duality')
-            duality.add_attribute('xlink:href', state_gml_id(cell_space.duality_state))
             geometry = cell.add_element('core:cellSpaceGeometry')
             geometry_3d = geometry.add_element('core:Geometry3D')
             solid = geometry_3d.add_element('gml:Solid')
@@ -104,6 +113,9 @@ module ULOL
             shell = exterior.add_element('gml:Shell')
             shell.add_attribute('gml:id', "shell_#{cell_id}")
             append_cell_surfaces(shell, cell_space, cell_id)
+            duality = cell.add_element('core:duality')
+            duality.add_attribute('xlink:href', state_gml_id(cell_space.duality_state))
+            append_navigable_space_codes(cell, cell_space)
           end
 
           def append_cell_surfaces(shell, cell_space, cell_id)
@@ -271,6 +283,22 @@ module ULOL
 
           def safe_id(value)
             value.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')
+          end
+
+          def cell_space_tag(cell_space)
+            CELL_SPACE_TAGS[cell_space.cell_type] || 'core:CellSpace'
+          end
+
+          def append_navigable_space_codes(cell, cell_space)
+            append_code(cell, 'navi:class', CellSpaceType.label(cell_space.cell_type), cell_space.category_code_space)
+            append_code(cell, 'navi:function', cell_space.category_code, cell_space.category_code_space)
+            append_code(cell, 'navi:usage', cell_space.category_code, cell_space.category_code_space)
+          end
+
+          def append_code(parent, tag, value, code_space)
+            element = parent.add_element(tag)
+            element.add_attribute('codeSpace', code_space) unless code_space.to_s.empty?
+            element.text = value.to_s
           end
 
           def state_connected_transition_ids(state)

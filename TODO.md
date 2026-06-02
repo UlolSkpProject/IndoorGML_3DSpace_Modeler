@@ -18,6 +18,6 @@
 
 ## Export
 
-- Decide and implement whether exported XML should use concrete IndoorGML space tags instead of always using `core:CellSpace`.
+- [x] Decide and implement whether exported XML should use concrete IndoorGML space tags instead of always using `core:CellSpace`.
   - Current behavior: all spaces are exported as `<core:CellSpace>`.
   - Required direction: map internal `cell_type` to XML element names such as `GeneralSpace`, `TransitionSpace`, `AnchorSpace`, and `ConnectionSpace` where supported by the target IndoorGML schema/profile.
