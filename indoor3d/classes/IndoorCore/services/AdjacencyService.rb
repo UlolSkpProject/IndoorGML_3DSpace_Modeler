@@ -53,17 +53,11 @@ module ULOL
 
           return adjacency_axis != :z if transition_space_pair?(cell1, cell2)
 
-          return false if transfer_space_pair?(cell1, cell2) && adjacency_axis != :z
-
           true
         end
 
         def transition_space_pair?(cell1, cell2)
           cell1.cell_type == CellSpaceType::TRANSITION || cell2.cell_type == CellSpaceType::TRANSITION
-        end
-
-        def transfer_space_pair?(cell1, cell2)
-          cell1.cell_type == CellSpaceType::TRANSFER || cell2.cell_type == CellSpaceType::TRANSFER
         end
       end
 

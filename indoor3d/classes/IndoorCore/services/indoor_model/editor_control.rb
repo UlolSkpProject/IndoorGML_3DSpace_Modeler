@@ -110,7 +110,9 @@ module ULOL
                 feature: 'CellSpace',
                 id: cell_space.id,
                 name: group&.name.to_s,
-                cell_type: CellSpaceType.label(cell_space.cell_type)
+                cell_type: CellSpaceType.label(cell_space.cell_type),
+                category_code: cell_space.category_code,
+                classification: CellSpaceCategory.selection_value(cell_space.cell_type, cell_space.category_code)
               }
             rescue StandardError => e
               puts "[IndoorGML] Selected CellSpace snapshot failed: #{e.class}: #{e.message}"
@@ -118,16 +120,18 @@ module ULOL
             end
           end
 
-          def set_selected_cell_space_type(cell_type_label)
+          def set_selected_cell_space_type(cell_type_label, category_code = nil)
             begin
               cell_space = selected_cell_space
               return false unless cell_space&.valid?
 
               model = Sketchup.active_model()
               operation_started = false
-              model.start_operation('Change CellSpace Type', true)
+              model.start_operation('Change CellSpace Type and Category', true)
               operation_started = true
-              change_cell_space_type(cell_space.sketchup_group, CellSpaceType.from_label(cell_type_label))
+              cell_type = CellSpaceType.from_label(cell_type_label)
+              category_code = nil unless CellSpaceCategory.valid_for_type?(cell_type, category_code)
+              change_cell_space_type(cell_space.sketchup_group, cell_type, category_code)
               model.commit_operation()
               @editor_session.selection_changed()
               model.active_view().invalidate() if model&.active_view
@@ -137,6 +141,11 @@ module ULOL
               puts "[IndoorGML] Selected CellSpace type update failed: #{e.class}: #{e.message}"
               false
             end
+          end
+
+          def set_selected_cell_space_classification(selection_value)
+            cell_type, category_code = CellSpaceCategory.parse_selection_value(selection_value)
+            set_selected_cell_space_type(CellSpaceType.label(cell_type), category_code)
           end
 
           def with_active_path_enforcement_suspended

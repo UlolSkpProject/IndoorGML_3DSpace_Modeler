@@ -50,6 +50,10 @@ module ULOL
           group.set_attribute(@dictionary_name, 'id', cell_space.id)
           group.set_attribute(@dictionary_name, 'name', group.name)
           group.set_attribute(@dictionary_name, 'cell_type', CellSpaceType.label(cell_space.cell_type))
+          group.set_attribute(@dictionary_name, 'category_code', cell_space.category_code)
+          group.set_attribute(@dictionary_name, 'category_label', cell_space.category_label)
+          group.set_attribute(@dictionary_name, 'category_code_space', cell_space.category_code_space)
+          group.set_attribute(@dictionary_name, 'category_standard', cell_space.category_standard)
           group.set_attribute(@dictionary_name, 'duality_state_id', cell_space.duality_state.id) if cell_space.duality_state
           if cell_space.duality_state
             group.set_attribute(@dictionary_name, 'state_position_x', cell_space.duality_state.position.x.to_f)

@@ -70,10 +70,10 @@ module ULOL
               @indoor_model.set_overlay_radius_pixel_range(min_radius_pixels, max_radius_pixels)
             end
           end
-          dialog.add_action_callback('setSelectedCellSpaceType') do |_context, cell_type_label|
-            puts "[IndoorGML] EditModeDialog#setSelectedCellSpaceType type=#{cell_type_label}"
+          dialog.add_action_callback('setSelectedCellSpaceClassification') do |_context, selection_value|
+            puts "[IndoorGML] EditModeDialog#setSelectedCellSpaceClassification value=#{selection_value}"
             UI.start_timer(0, false) do
-              @indoor_model.set_selected_cell_space_type(cell_type_label)
+              @indoor_model.set_selected_cell_space_classification(selection_value)
             end
           end
           dialog.add_action_callback('finishEditing') do |_context|
@@ -107,8 +107,8 @@ module ULOL
         def html
           overlay_min_radius = @indoor_model.overlay_min_radius_pixels.round
           overlay_max_radius = @indoor_model.overlay_max_radius_pixels.round
-          cell_type_options = CellSpaceType::LABELS.values.map do |label|
-            "<option value=\"#{escape_html(label)}\">#{escape_html(label)}</option>"
+          classification_options = CellSpaceCategory.selection_options.map do |option|
+            "<option value=\"#{escape_html(option[:value])}\">#{escape_html(option[:label])}</option>"
           end.join
           <<~HTML
             <!doctype html>
@@ -201,8 +201,8 @@ module ULOL
                 <div class="row"><span>Selected</span><span id="selectedFeature">None</span></div>
                 <div class="row"><span>ID</span><span id="selectedId">-</span></div>
                 <div class="row"><span>Name</span><span id="selectedName">-</span></div>
-                <select id="selectedType" disabled>
-                  #{cell_type_options}
+                <select id="selectedClassification" disabled>
+                  #{classification_options}
                 </select>
               </div>
               <label>
@@ -222,7 +222,7 @@ module ULOL
                 var selectedFeature = document.getElementById('selectedFeature');
                 var selectedId = document.getElementById('selectedId');
                 var selectedName = document.getElementById('selectedName');
-                var selectedType = document.getElementById('selectedType');
+                var selectedClassification = document.getElementById('selectedClassification');
                 var suppressTypeChange = false;
 
                 function updateSelectedCellSpace(snapshot) {
@@ -231,14 +231,14 @@ module ULOL
                     selectedFeature.textContent = 'None';
                     selectedId.textContent = '-';
                     selectedName.textContent = '-';
-                    selectedType.disabled = true;
-                    selectedType.value = 'GeneralSpace';
+                    selectedClassification.disabled = true;
+                    selectedClassification.value = 'GeneralSpace|Room';
                   } else {
                     selectedFeature.textContent = snapshot.feature || 'CellSpace';
                     selectedId.textContent = snapshot.id || '-';
                     selectedName.textContent = snapshot.name || '-';
-                    selectedType.disabled = false;
-                    selectedType.value = snapshot.cellType || 'GeneralSpace';
+                    selectedClassification.disabled = false;
+                    selectedClassification.value = snapshot.classification || 'GeneralSpace|Room';
                   }
                   suppressTypeChange = false;
                 }
@@ -271,9 +271,9 @@ module ULOL
                 overlayMaxRadius.addEventListener('input', previewOverlayRadiusRange);
                 overlayMinRadius.addEventListener('change', commitOverlayRadiusRange);
                 overlayMaxRadius.addEventListener('change', commitOverlayRadiusRange);
-                selectedType.addEventListener('change', function () {
+                selectedClassification.addEventListener('change', function () {
                   if (!suppressTypeChange) {
-                    sketchup.setSelectedCellSpaceType(selectedType.value);
+                    sketchup.setSelectedCellSpaceClassification(selectedClassification.value);
                   }
                 });
                 document.getElementById('finish').addEventListener('click', function () {
@@ -299,7 +299,9 @@ module ULOL
                 feature: #{js_string(snapshot[:feature])},
                 id: #{js_string(snapshot[:id])},
                 name: #{js_string(snapshot[:name])},
-                cellType: #{js_string(snapshot[:cell_type])}
+                cellType: #{js_string(snapshot[:cell_type])},
+                categoryCode: #{js_string(snapshot[:category_code])},
+                classification: #{js_string(snapshot[:classification])}
               });
             JS
           end

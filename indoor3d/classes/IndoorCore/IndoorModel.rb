@@ -34,7 +34,6 @@ module ULOL
         attr_reader :states
         attr_reader :transitions
         attr_reader :doors
-        attr_reader :transfer_spaces
         attr_reader :model
         attr_reader :primal_group
         # Deprecated: State/Transition are runtime-only overlays and no longer use DualSpaceFeatures.
