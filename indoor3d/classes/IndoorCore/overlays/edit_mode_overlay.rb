@@ -7,10 +7,11 @@ module ULOL
       class EditModeOverlay < Sketchup::Overlay
         OVERLAY_ID = 'ulol.indoor3dgml_modeler.edit_mode_overlay'
         OVERLAY_NAME = 'IndoorGML Edit Mode'
-        TITLE = 'EDIT MODE'
-        CONTEXT_LABEL = 'PRIMAL SPACE'
-        HEADER_LABEL = "#{TITLE} - #{CONTEXT_LABEL}"
-        HINT_LABEL = 'CellSpace editing active'
+        TITLE = 'EDIT MODE - INDOOR GML'
+        HINT_LABEL = 'Cellspace editing active'
+        PRIMARY_COLOR = Sketchup::Color.new(22, 130, 82, 255)
+        PRIMARY_TRANSLUCENT_COLOR = Sketchup::Color.new(22, 130, 82, 210)
+        HINT_COLOR = Sketchup::Color.new(214, 245, 229)
         CIRCLE_SEGMENTS = 32
         OVERLAY_RADIUS_SCALE = 1.1
 
@@ -81,25 +82,25 @@ module ULOL
               [width, banner_height, 0],
               [0, banner_height, 0]
             ],
-            Sketchup::Color.new(20, 82, 145, 210)
+            PRIMARY_TRANSLUCENT_COLOR
           )
 
           view.draw_text(
             Geom::Point3d.new(18, 13, 0),
-            HEADER_LABEL,
+            TITLE,
             text_options(size: 18, bold: true, color: Sketchup::Color.new(255, 255, 255))
           )
           view.draw_text(
             Geom::Point3d.new(18, 34, 0),
             HINT_LABEL,
-            text_options(size: 11, bold: false, color: Sketchup::Color.new(214, 231, 248))
+            text_options(size: 11, bold: false, color: HINT_COLOR)
           )
         end
 
         def draw_screen_border(view)
           width = view.vpwidth()
           height = view.vpheight()
-          color = Sketchup::Color.new(20, 82, 145, 255)
+          color = PRIMARY_COLOR
           thickness = 4
           draw_2d_quad(view, [[0, 0, 0], [width, 0, 0], [width, thickness, 0], [0, thickness, 0]], color)
           draw_2d_quad(view, [[0, height - thickness, 0], [width, height - thickness, 0], [width, height, 0], [0, height, 0]], color)
@@ -110,7 +111,7 @@ module ULOL
         def draw_cell_space_outlines(view)
           begin
             view.line_width = 3 if view.respond_to?(:line_width=)
-            view.drawing_color = Sketchup::Color.new(20, 82, 145, 210)
+            view.drawing_color = PRIMARY_TRANSLUCENT_COLOR
             @indoor_model.cell_spaces.each do |cell_space|
               group = cell_space.sketchup_group
               next unless group&.valid?()

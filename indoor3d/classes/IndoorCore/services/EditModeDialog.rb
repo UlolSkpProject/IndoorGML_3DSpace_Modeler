@@ -47,9 +47,12 @@ module ULOL
             scrollable: true,
             resizable: false,
             width: 280,
-            height: 330,
+            height: 260,
             style: UI::HtmlDialog::STYLE_DIALOG
           )
+          dialog.add_action_callback('fitContentHeight') do |_context, content_height|
+            fit_content_height(content_height)
+          end
           dialog.add_action_callback('setOverlayMinRadius') do |_context, radius_pixels|
             UI.start_timer(0, false) do
               @indoor_model.set_overlay_min_radius_pixels(radius_pixels)
@@ -80,6 +83,17 @@ module ULOL
           end
           dialog.set_on_closed { @dialog = nil } if dialog.respond_to?(:set_on_closed)
           dialog
+        end
+
+        def fit_content_height(content_height)
+          begin
+            return unless @dialog
+
+            height = [[content_height.to_i + 18, 220].max, 520].min
+            @dialog.set_size(280, height)
+          rescue StandardError => e
+            puts "[IndoorGML] Edit mode dialog resize failed: #{e.class}: #{e.message}"
+          end
         end
 
         def html
@@ -246,6 +260,14 @@ module ULOL
                   sketchup.setOverlayRadiusRange(range[0], range[1]);
                 }
 
+                function fitDialogToContent() {
+                  var contentHeight = Math.max(
+                    document.body.scrollHeight,
+                    document.documentElement.scrollHeight
+                  );
+                  sketchup.fitContentHeight(contentHeight);
+                }
+
                 overlayMinRadius.addEventListener('input', previewOverlayRadiusRange);
                 overlayMaxRadius.addEventListener('input', previewOverlayRadiusRange);
                 overlayMinRadius.addEventListener('change', commitOverlayRadiusRange);
@@ -261,6 +283,8 @@ module ULOL
                 document.getElementById('clearAll').addEventListener('click', function () {
                   sketchup.clearAllIndoorGmlElements();
                 });
+                window.addEventListener('load', fitDialogToContent);
+                window.addEventListener('resize', fitDialogToContent);
               </script>
             </body>
             </html>
