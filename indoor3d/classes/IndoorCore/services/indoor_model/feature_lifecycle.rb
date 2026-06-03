@@ -54,6 +54,7 @@ module ULOL
 
               sync do
                 state = cell_space.duality_state
+                name_cell_space_entity(cell_space)
                 unless state&.valid?
                   cell_space = refresh_and_find_cell_space(entity)
                   state = cell_space&.duality_state
@@ -79,6 +80,7 @@ module ULOL
 
               sync do
                 recenter_cell_space_origin(cell_space)
+                name_cell_space_entity(cell_space)
                 apply_cell_space_material(cell_space)
                 state = cell_space.duality_state
                 unless state&.valid?
@@ -139,12 +141,16 @@ module ULOL
             @feature_registry.add_cell_space(cell_space)
             attach_cell_space_observer(cell_space.sketchup_group)
             lock_indoor_entity(cell_space.sketchup_group)
+            @scene_group_guard.track(cell_space.sketchup_group, cell_space.sketchup_group.name)
           end
 
           def name_cell_space_entity(cell_space)
+            expected_name = "[#{CellSpaceType.label(cell_space.cell_type)}:#{cell_space.category_code}]-#{cell_space.id}"
+            return if cell_space.sketchup_group.name == expected_name
             with_unlocked(cell_space.sketchup_group) do
-              cell_space.sketchup_group.name = "[#{CellSpaceType.label(cell_space.cell_type)}:#{cell_space.category_code}]-#{cell_space.id}"
+              cell_space.sketchup_group.name = expected_name
             end
+            @scene_group_guard.track(cell_space.sketchup_group, expected_name)
           end
 
           def apply_cell_space_material(cell_space)
