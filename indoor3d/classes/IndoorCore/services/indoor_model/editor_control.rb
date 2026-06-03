@@ -156,6 +156,18 @@ module ULOL
             set_selected_cell_space_type(CellSpaceType.label(cell_type), category_code)
           end
 
+          def edit_selected_cell_space_geometry
+            begin
+              cell_space = selected_cell_space
+              return false unless cell_space&.valid?
+
+              @editor_session.edit_cell_space_geometry(cell_space)
+            rescue StandardError => e
+              puts "[IndoorGML] Selected CellSpace geometry edit failed: #{e.class}: #{e.message}"
+              false
+            end
+          end
+
           def with_active_path_enforcement_suspended
             @editor_session.with_active_path_enforcement_suspended { yield }
           end
