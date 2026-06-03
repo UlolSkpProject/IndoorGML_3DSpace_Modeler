@@ -109,7 +109,6 @@ module ULOL
             erase_guard do
               state = cell_space.duality_state
               erase_transitions_for_state(state)
-              erase_cell_space_category_text_for(cell_space)
               state.erase! if state&.valid?
               unregister_state(state)
               unlock_indoor_entity(cell_space.sketchup_group) if erase_sketchup_group && cell_space.valid?
@@ -156,52 +155,7 @@ module ULOL
               cell_space.sketchup_group.entities.each do |entity|
                 apply_cell_space_face_material(entity, text_material || material) if entity.is_a?(Sketchup::Face)
               end
-              synchronize_cell_space_category_text(cell_space)
             end
-          end
-
-          def synchronize_cell_space_category_text(cell_space)
-            return unless @primal_group&.valid?
-
-            with_unlocked(@primal_group) do
-              erase_cell_space_category_text_for(cell_space, already_unlocked: true)
-              text_position = cell_space_category_text_position(cell_space.sketchup_group)
-              text = @primal_group.entities.add_text(cell_space.category_code.to_s, text_position)
-              if text.respond_to?(:set_attribute)
-                text.set_attribute(IndoorModel::ATTRIBUTE_DICTIONARY_NAME, 'feature', 'CellSpaceCategoryText')
-                text.set_attribute(IndoorModel::ATTRIBUTE_DICTIONARY_NAME, 'cell_space_id', cell_space.id)
-              end
-            end
-          rescue StandardError => e
-            puts "[IndoorGML] CellSpace category text failed: #{e.class}: #{e.message}"
-          end
-
-          def erase_cell_space_category_text_for(cell_space, already_unlocked: false)
-            return unless @primal_group&.valid?
-
-            erase_text = proc do
-              @primal_group.entities.to_a.each do |entity|
-                next unless entity&.valid?
-                next unless entity.respond_to?(:get_attribute)
-                next unless entity.get_attribute(IndoorModel::ATTRIBUTE_DICTIONARY_NAME, 'feature') == 'CellSpaceCategoryText'
-                next unless entity.get_attribute(IndoorModel::ATTRIBUTE_DICTIONARY_NAME, 'cell_space_id') == cell_space.id
-
-                entity.erase!
-              end
-            end
-
-            if already_unlocked
-              erase_text.call
-            else
-              with_unlocked(@primal_group) { erase_text.call }
-            end
-          end
-
-          def cell_space_category_text_position(group)
-            bounds = group.definition.bounds
-            center = bounds.center
-            local_point = Geom::Point3d.new(center.x, center.y, bounds.max.z + 100.mm)
-            local_point.transform(group.transformation)
           end
 
           def apply_cell_space_face_material(face, material)
