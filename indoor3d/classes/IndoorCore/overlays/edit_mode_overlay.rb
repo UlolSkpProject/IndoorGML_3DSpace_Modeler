@@ -22,11 +22,13 @@ module ULOL
 
         def draw(view)
           begin
-            return unless @indoor_model.editing?()
+            return unless @indoor_model.editing?() || @indoor_model.dual_overlay_visible?()
 
-            draw_screen_border(view)
-            draw_banner(view)
-            draw_cell_space_outlines(view)
+            if @indoor_model.editing?()
+              draw_screen_border(view)
+              draw_banner(view)
+              draw_cell_space_outlines(view)
+            end
             draw_dual_space_overlay(view)
           rescue StandardError => e
             puts "[IndoorGML] Edit mode overlay draw failed: #{e.class}: #{e.message}"

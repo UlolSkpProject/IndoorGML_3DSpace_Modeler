@@ -22,6 +22,23 @@ module ULOL
           @editing
         end
 
+        def dual_overlay_visible?
+          @dual_overlay_visible == true
+        end
+
+        def toggle_dual_overlay_visible
+          set_dual_overlay_visible(!dual_overlay_visible?)
+        end
+
+        def set_dual_overlay_visible(visible)
+          @dual_overlay_visible = visible == true
+          model = Sketchup.active_model()
+          ensure_overlay_registered(model) if @dual_overlay_visible
+          set_overlay_enabled(@editing || @dual_overlay_visible)
+          invalidate_view(model)
+          @dual_overlay_visible
+        end
+
         def begin_editing
           return false if @editing
 
@@ -58,7 +75,7 @@ module ULOL
           @indoor_model.detach_edit_selection_observer(model)
           restore_active_path(model)
           @previous_active_path = nil
-          set_overlay_enabled(false)
+          set_overlay_enabled(@dual_overlay_visible == true)
           @dialog.close()
           apply_lock_policy()
           invalidate_view(model)
