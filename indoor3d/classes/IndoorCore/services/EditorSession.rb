@@ -14,6 +14,7 @@ module ULOL
           @overlay_model = nil
           @dialog = EditModeDialog.new(@indoor_model)
           @previous_active_path = nil
+          @editing_active_path_target = nil
           @enforcing_active_path = false
           @active_path_enforcement_suspended = false
         end
@@ -53,9 +54,10 @@ module ULOL
           @indoor_model.attach_edit_selection_observer(model)
           mark_editable_primal_entities()
           apply_lock_policy()
-          unless activate_primal_context(model, primal_group)
+          unless activate_edit_context(model, [primal_group])
             @editing = false
             @editable_entity_ids = {}
+            @editing_active_path_target = nil
             @indoor_model.detach_edit_selection_observer(model)
             apply_lock_policy()
             return false
@@ -72,6 +74,7 @@ module ULOL
           model = Sketchup.active_model()
           @editing = false
           @editable_entity_ids = {}
+          @editing_active_path_target = nil
           @indoor_model.detach_edit_selection_observer(model)
           restore_active_path(model)
           @previous_active_path = nil
@@ -89,6 +92,29 @@ module ULOL
 
             @editable_entity_ids[entity.entityID] == true
           rescue StandardError
+            false
+          end
+        end
+
+        def edit_cell_space_geometry(cell_space)
+          begin
+            return false unless @editing
+            return false unless cell_space&.valid?
+
+            primal_group = @indoor_model.primal_group
+            group = cell_space.sketchup_group
+            return false unless primal_group&.valid? && group&.valid?
+
+            model = Sketchup.active_model()
+            target_path = [primal_group, group]
+            @editing_active_path_target = target_path
+            mark_editable_primal_entities()
+            apply_lock_policy()
+            set_active_path(model, target_path)
+            invalidate_view(model)
+            true
+          rescue StandardError => e
+            puts "[IndoorGML] CellSpace geometry edit activation failed: #{e.class}: #{e.message}"
             false
           end
         end
@@ -149,7 +175,7 @@ module ULOL
             return if @enforcing_active_path
             return if @active_path_enforcement_suspended
 
-            enforce_primal_context(model || Sketchup.active_model())
+            enforce_edit_context(model || Sketchup.active_model())
           rescue StandardError => e
             puts "[IndoorGML] Edit active path enforcement failed: #{e.class}: #{e.message}"
           end
@@ -231,35 +257,46 @@ module ULOL
           path ? path.dup : nil
         end
 
-        def activate_primal_context(model, primal_group)
+        def activate_edit_context(model, target_path)
           begin
             return false unless model.respond_to?(:active_path=)
 
-            set_primal_active_path(model, primal_group)
+            @editing_active_path_target = target_path
+            set_active_path(model, target_path)
             true
           rescue StandardError => e
-            puts "[IndoorGML] Primal edit context activation failed: #{e.class}: #{e.message}"
+            puts "[IndoorGML] Edit context activation failed: #{e.class}: #{e.message}"
             false
           end
         end
 
-        def enforce_primal_context(model)
+        def enforce_edit_context(model)
+          target_path = valid_editing_active_path_target()
+          return if target_path.empty?
+          return if active_path_matches?(model, target_path)
+
+          set_active_path(model, target_path)
+        end
+
+        def valid_editing_active_path_target
+          target_path = Array(@editing_active_path_target).select { |entity| entity&.valid?() }
+          return target_path unless target_path.empty?
+
           primal_group = @indoor_model.primal_group
-          return unless primal_group&.valid?()
-          return if primal_active_path?(model, primal_group)
-
-          set_primal_active_path(model, primal_group)
+          primal_group&.valid?() ? [primal_group] : []
         end
 
-        def primal_active_path?(model, primal_group)
+        def active_path_matches?(model, target_path)
           active_path = model.active_path()
-          active_path && active_path.length == 1 && active_path.first == primal_group
+          return false unless active_path && active_path.length == target_path.length
+
+          active_path.each_with_index.all? { |entity, index| entity == target_path[index] }
         end
 
-        def set_primal_active_path(model, primal_group)
+        def set_active_path(model, target_path)
           begin
             @enforcing_active_path = true
-            model.active_path = [primal_group]
+            model.active_path = target_path
           ensure
             @enforcing_active_path = false
           end

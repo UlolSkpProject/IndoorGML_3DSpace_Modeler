@@ -76,6 +76,12 @@ module ULOL
               @indoor_model.set_selected_cell_space_classification(selection_value)
             end
           end
+          dialog.add_action_callback('editSelectedCellSpace') do |_context|
+            puts '[IndoorGML] EditModeDialog#editSelectedCellSpace'
+            UI.start_timer(0, false) do
+              @indoor_model.edit_selected_cell_space_geometry()
+            end
+          end
           dialog.add_action_callback('finishEditing') do |_context|
             puts '[IndoorGML] EditModeDialog#finishEditing'
             UI.start_timer(0, false) do
@@ -204,6 +210,7 @@ module ULOL
                 <select id="selectedClassification" disabled>
                   #{classification_options}
                 </select>
+                <button id="editSelectedCell" type="button" disabled>Edit</button>
               </div>
               <label>
                 <span>Overlay radius range</span>
@@ -223,6 +230,7 @@ module ULOL
                 var selectedId = document.getElementById('selectedId');
                 var selectedName = document.getElementById('selectedName');
                 var selectedClassification = document.getElementById('selectedClassification');
+                var editSelectedCell = document.getElementById('editSelectedCell');
                 var suppressTypeChange = false;
 
                 function updateSelectedCellSpace(snapshot) {
@@ -233,12 +241,14 @@ module ULOL
                     selectedName.textContent = '-';
                     selectedClassification.disabled = true;
                     selectedClassification.value = 'GeneralSpace|Room';
+                    editSelectedCell.disabled = true;
                   } else {
                     selectedFeature.textContent = snapshot.feature || 'CellSpace';
                     selectedId.textContent = snapshot.id || '-';
                     selectedName.textContent = snapshot.name || '-';
                     selectedClassification.disabled = false;
                     selectedClassification.value = snapshot.classification || 'GeneralSpace|Room';
+                    editSelectedCell.disabled = false;
                   }
                   suppressTypeChange = false;
                 }
@@ -275,6 +285,9 @@ module ULOL
                   if (!suppressTypeChange) {
                     sketchup.setSelectedCellSpaceClassification(selectedClassification.value);
                   }
+                });
+                editSelectedCell.addEventListener('click', function () {
+                  sketchup.editSelectedCellSpace();
                 });
                 document.getElementById('finish').addEventListener('click', function () {
                   sketchup.finishEditing();
