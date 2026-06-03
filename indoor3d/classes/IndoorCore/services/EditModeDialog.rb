@@ -222,8 +222,8 @@ module ULOL
                 <output id="overlayRadiusValue">#{overlay_min_radius}-#{overlay_max_radius} px</output>
               </label>
               <div class="range-row">
-                <input id="overlayMinRadius" type="range" min="1" max="5" step="1" value="#{overlay_min_radius}">
-                <input id="overlayMaxRadius" type="range" min="7" max="15" step="1" value="#{overlay_max_radius}">
+                <input id="overlayMinRadius" type="range" min="1" max="15" step="1" value="#{overlay_min_radius}">
+                <input id="overlayMaxRadius" type="range" min="7" max="25" step="1" value="#{overlay_max_radius}">
               </div>
               <button id="finish" type="button">Finish</button>
               <button id="clearAll" class="danger" type="button">Clear All IndoorGML Elements</button>

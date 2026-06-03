@@ -8,7 +8,7 @@ module ULOL
         PRIMAL_GROUP_NAME = 'IndoorGML_PrimalSpaceFeatures'
         PRIMAL_GROUP_FEATURE = 'primalspace'
         ATTRIBUTE_DICTIONARY_NAME = 'IndoorGml'
-        INDOOR_GML_VERSION = '1.1'
+        INDOOR_GML_VERSION = '1.0'
 
         require_relative 'services/indoor_model/runtime_support.rb'
         require_relative 'services/indoor_model/scene_groups.rb'
