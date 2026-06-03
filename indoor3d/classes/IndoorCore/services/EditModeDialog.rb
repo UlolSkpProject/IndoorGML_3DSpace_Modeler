@@ -85,7 +85,7 @@ module ULOL
           dialog.add_action_callback('finishEditing') do |_context|
             puts '[IndoorGML] EditModeDialog#finishEditing'
             UI.start_timer(0, false) do
-              @indoor_model.finish_editing()
+              @indoor_model.request_finish_editing()
             end
           end
           dialog.add_action_callback('clearAllIndoorGmlElements') do |_context|
@@ -94,8 +94,13 @@ module ULOL
               @indoor_model.clear_all_indoor_gml_elements()
             end
           end
-          dialog.set_on_closed { @dialog = nil } if dialog.respond_to?(:set_on_closed)
-          dialog
+          dialog.set_on_closed do
+            puts "[IndoorGML] set_on_closed called, editing=#{@indoor_model.editing?}"
+            @indoor_model.finish_editing()
+            @dialog = nil
+          end if dialog.respond_to?(:set_on_closed)
+
+          return dialog
         end
 
         def fit_content_height(content_height)

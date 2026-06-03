@@ -13,6 +13,14 @@ module ULOL
             @editor_session.finish()
           end
 
+          def request_finish_editing
+            result = UI.messagebox("CellSpace 편집을 종료하시겠습니까?", MB_YESNO)
+            return false unless result == IDYES
+
+            finish_editing
+            return true
+          end
+
           def editing?
             @editor_session.editing?()
           end
