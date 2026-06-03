@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <path d="M12 3.5 L20 8 L12 12.5 L4 8 Z" fill="#e3f2fd" stroke="#1f2937" stroke-width="1.3" stroke-linejoin="round"/>
+  <path d="M4 8 L4 16 L12 20.5 L12 12.5 Z" fill="#90caf9" stroke="#1f2937" stroke-width="1.3" stroke-linejoin="round"/>
+  <path d="M12 12.5 L12 20.5 L20 16 L20 8 Z" fill="#bbdefb" stroke="#1f2937" stroke-width="1.3" stroke-linejoin="round"/>
+  <rect x="3.25" y="6.26" width="17.5" height="11.48" rx="1.7" fill="#e03131" opacity="0.75" stroke="#1f2937" stroke-width="0.55"/>
+  <text x="12" y="14.7" font-family="Arial, sans-serif" font-size="7.06" font-weight="bold" fill="#1f2937" text-anchor="middle">RM</text>
+  <circle cx="18.5" cy="18" r="3.5" fill="#2f9e44"/>
+  <path d="M18.5 16.5 L18.5 19.5 M17 18 L20 18" stroke="#ffffff" stroke-width="1.3" stroke-linecap="round"/>
+</svg>

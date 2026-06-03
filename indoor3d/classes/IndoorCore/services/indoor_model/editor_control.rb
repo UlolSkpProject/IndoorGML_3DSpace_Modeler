@@ -17,6 +17,14 @@ module ULOL
             @editor_session.editing?()
           end
 
+          def dual_overlay_visible?
+            @editor_session.dual_overlay_visible?()
+          end
+
+          def toggle_dual_overlay_visible
+            @editor_session.toggle_dual_overlay_visible()
+          end
+
           def set_overlay_min_radius_pixels(radius_pixels)
             radius_pixels = radius_pixels.to_f
             return false unless radius_pixels.positive?

@@ -128,21 +128,47 @@ module ULOL
       end
     end
 
-    def self.export_indoorgml
+    def self.export_gml
+      coordinate_system = prompt_export_coordinate_system
+      return if coordinate_system.nil?
+
+      path = UI.savepanel('Export GML', '~', 'IndoorGML Files|*.gml;||')
+      return if path.to_s.empty?
+
+      path = "#{path}.gml" unless File.extname(path).downcase == '.gml'
+      FileUtils.mkdir_p(File.dirname(path))
+      IndoorCore::IndoorGmlConverter::TempExporter.new(
+        IndoorCore::IndoorModel.current,
+        coordinate_system: coordinate_system
+      ).export(output_path: path)
+      UI.messagebox("GML exported:\n#{path}")
+    rescue StandardError => e
+      UI.messagebox("GML export failed:\n#{e.message}")
+    end
+
+    def self.check_validity
       coordinate_system = prompt_export_coordinate_system
       return if coordinate_system.nil?
 
       progress = IndoorCore::IndoorGmlConverter::ExportProgressDialog.new
       progress.show
       UI.start_timer(0.1, false) do
-        perform_export_indoorgml(progress, coordinate_system)
+        perform_check_validity(progress, coordinate_system)
       end
     rescue StandardError => e
       progress&.close
-      UI.messagebox("IndoorGML export failed:\n#{e.message}")
+      UI.messagebox("IndoorGML validity check failed:\n#{e.message}")
     end
 
-    def self.perform_export_indoorgml(progress, coordinate_system)
+    def self.raw_export_indoorgml
+      export_gml()
+    end
+
+    def self.export_indoorgml
+      check_validity()
+    end
+
+    def self.perform_check_validity(progress, coordinate_system)
       current_step = :runtime
       begin
         indoor_model = IndoorCore::IndoorModel.current
@@ -164,13 +190,17 @@ module ULOL
         current_step = :val3dity
         if validator.validate(progress: progress)
           progress&.close
-          path = UI.savepanel('Export IndoorGML', '~', 'IndoorGML Files|*.gml;||')
+          unless UI.messagebox("IndoorGML validation succeeded.\nExport GML now?", MB_YESNO) == IDYES
+            return
+          end
+
+          path = UI.savepanel('Export GML', '~', 'IndoorGML Files|*.gml;||')
           return if path.to_s.empty?
 
           path = "#{path}.gml" unless File.extname(path).downcase == '.gml'
           FileUtils.mkdir_p(File.dirname(path))
           FileUtils.cp(temp_path, path)
-          UI.messagebox("IndoorGML exported:\n#{path}")
+          UI.messagebox("GML exported:\n#{path}")
         else
           progress&.close
           if UI.messagebox("IndoorGML validation failed.\nOpen validation report?", MB_YESNO) == IDYES
@@ -182,7 +212,7 @@ module ULOL
         end
       rescue StandardError => e
         progress&.fail(current_step)
-        UI.messagebox("IndoorGML export failed:\n#{e.message}")
+        UI.messagebox("IndoorGML validity check failed:\n#{e.message}")
       ensure
         progress&.close
       end
@@ -200,6 +230,7 @@ module ULOL
         elsif !indoor_model.begin_editing()
           UI.messagebox('IndoorGML PrimalSpaceFeatures group was not found.')
         end
+        update_edit_property_command()
       rescue StandardError => e
         UI.messagebox("IndoorGML editing failed:\n#{e.message}")
       end
@@ -212,6 +243,7 @@ module ULOL
         else
           UI.messagebox('IndoorGML editing is not active.')
         end
+        update_edit_property_command()
       rescue StandardError => e
         UI.messagebox("IndoorGML editing finish failed:\n#{e.message}")
       end
@@ -230,11 +262,57 @@ module ULOL
       end
     end
 
-    def self.create_command(label, tooltip, &block)
+    def self.create_command(label, tooltip, icon: nil, &block)
       command = UI::Command.new(label) { block.call() }
       command.tooltip = tooltip
       command.status_bar_text = tooltip
+      assign_command_icon(command, icon) if icon
       command
+    end
+
+    def self.assign_command_icon(command, icon)
+      path = icon_path(icon)
+      return unless File.exist?(path)
+
+      command.small_icon = path
+      command.large_icon = path
+    rescue StandardError => e
+      puts "[IndoorGML] Command icon failed: #{e.class}: #{e.message}"
+    end
+
+    def self.icon_path(filename)
+      File.join(__dir__, 'assets', 'icons', filename)
+    end
+
+    def self.update_edit_property_command
+      # SketchUp does not reliably repaint toolbar command icons after add_item.
+      # Edit/Finish are separate commands; validation procs switch availability.
+      nil
+    rescue StandardError => e
+      puts "[IndoorGML] Edit command update failed: #{e.class}: #{e.message}"
+    end
+
+    def self.update_dual_overlay_command
+      return unless @dual_overlay_command
+
+      if IndoorCore::IndoorModel.current.dual_overlay_visible?
+        @dual_overlay_command.menu_text = 'Hide State/Link Overlay'
+        @dual_overlay_command.tooltip = 'Hide State and Transition overlay'
+        @dual_overlay_command.status_bar_text = 'Hide State and Transition overlay'
+      else
+        @dual_overlay_command.menu_text = 'Show State/Link Overlay'
+        @dual_overlay_command.tooltip = 'Show State and Transition overlay'
+        @dual_overlay_command.status_bar_text = 'Show State and Transition overlay'
+      end
+    rescue StandardError => e
+      puts "[IndoorGML] Dual overlay command update failed: #{e.class}: #{e.message}"
+    end
+
+    def self.toggle_dual_overlay
+      IndoorCore::IndoorModel.current.toggle_dual_overlay_visible()
+      update_dual_overlay_command()
+    rescue StandardError => e
+      UI.messagebox("State/Link overlay toggle failed:\n#{e.message}")
     end
 
     def self.prompt_cell_space_type_and_category(title)
@@ -344,32 +422,89 @@ module ULOL
     unless file_loaded?(__FILE__)
       attach_model_observer()
       menu = UI.menu('Extensions').add_submenu('Indoor3DGML Modeler')
-      menu.add_item('Convert Solid Groups to CellSpace') do
+
+      create_cell_space_command = create_command(
+        'Create CellSpace',
+        'Convert selected solid groups to CellSpace',
+        icon: 'create_cellspace.png'
+      ) do
         convert_selected_solid_groups_to_cell_spaces()
       end
-      menu.add_item('Refresh Runtime Data') do
-        refresh_runtime_data()
+      change_type_command = create_command(
+        'Change CellSpace Type',
+        'Change selected CellSpace type',
+        icon: 'change_cellspace_type.png'
+      ) do
+        change_selected_cell_space_type()
       end
-      menu.add_item('Create temp.gml') do
-        create_temp_indoorgml()
+      @edit_property_command = create_command(
+        'Edit CellSpace Property',
+        'Edit CellSpace properties',
+        icon: 'edit_cellspace_property.png'
+      ) do
+        begin_indoor_gml_editing()
       end
-      menu.add_item('Export IndoorGML') do
-        export_indoorgml()
+      @edit_property_command.set_validation_proc do
+        IndoorCore::IndoorModel.current.editing? ? MF_GRAYED : MF_ENABLED
       end
-      edit_command = create_command('Edit IndoorGML', 'Toggle IndoorGML editing mode') do
-        toggle_indoor_gml_editing()
+      finish_editing_command = create_command(
+        'Finish Editing',
+        'Finish IndoorGML editing',
+        icon: 'finish_editing.png'
+      ) do
+        finish_indoor_gml_editing()
       end
-      export_command = create_command('Export IndoorGML', 'Export the current model to IndoorGML') do
-        export_indoorgml()
+      finish_editing_command.set_validation_proc do
+        IndoorCore::IndoorModel.current.editing? ? MF_ENABLED : MF_GRAYED
       end
+      @dual_overlay_command = create_command(
+        'Show State/Link Overlay',
+        'Show State and Transition overlay',
+        icon: 'toggle_dual_overlay.png'
+      ) do
+        toggle_dual_overlay()
+      end
+      @dual_overlay_command.set_validation_proc do
+        update_dual_overlay_command()
+        MF_ENABLED
+      end
+      export_command = create_command(
+        'Export GML',
+        'Export GML without validity check',
+        icon: 'export_gml.png'
+      ) do
+        export_gml()
+      end
+      check_validity_command = create_command(
+        'Check Validity',
+        'Create temp GML and run validity check',
+        icon: 'check_validity.png'
+      ) do
+        check_validity()
+      end
+      update_edit_property_command()
+      update_dual_overlay_command()
+
+      menu.add_item(create_cell_space_command)
+      menu.add_item(change_type_command)
+      menu.add_item(@edit_property_command)
+      menu.add_item(finish_editing_command)
+      menu.add_item(@dual_overlay_command)
+      menu.add_item(export_command)
+      menu.add_item(check_validity_command)
 
       UI.add_context_menu_handler do |context_menu|
         add_context_menu_items(context_menu)
       end
 
       toolbar = UI::Toolbar.new('Indoor3DGML Modeler')
-      toolbar.add_item(edit_command)
+      toolbar.add_item(create_cell_space_command)
+      toolbar.add_item(change_type_command)
+      toolbar.add_item(@edit_property_command)
+      toolbar.add_item(finish_editing_command)
+      toolbar.add_item(@dual_overlay_command)
       toolbar.add_item(export_command)
+      toolbar.add_item(check_validity_command)
       toolbar.show()
       file_loaded(__FILE__)
     end
