@@ -145,7 +145,7 @@ module ULOL
               member = nodes.add_element('core:stateMember')
               state_element = member.add_element('core:State')
               state_element.add_attribute('gml:id', state_gml_id(state))
-              state_element.add_element('gml:name').text = cell_space_export_name(cell_space)
+              state_element.add_element('gml:name').text = state_export_name(state)
               duality = state_element.add_element('core:duality')
               duality.add_attribute('xlink:href', cell_gml_id(cell_space))
               state_connected_transition_ids(state).each do |transition_id|
@@ -293,13 +293,11 @@ module ULOL
           end
 
           def cell_space_export_name(cell_space)
-            group_name = cell_space.sketchup_group.respond_to?(:name) ? cell_space.sketchup_group.name.to_s.strip : ''
-            return group_name unless group_name.empty?
+            "Cell-#{safe_id(cell_space.id)}"
+          end
 
-            feature_name = cell_space.name.to_s.strip
-            return feature_name unless feature_name.empty?
-
-            cell_gml_id(cell_space)
+          def state_export_name(state)
+            "State-#{safe_id(state.id)}"
           end
 
           def cell_space_description(cell_space)
@@ -307,13 +305,23 @@ module ULOL
           end
 
           def indoor_description_type(cell_space)
+            category = cell_space.category_code.to_s.downcase
+            return 'room' if category.include?('room')
+            return 'door' if category.include?('door')
+            return 'stairs' if category.include?('stair')
+            return 'elevator' if category.include?('elevator')
+            return 'corridor' if category.include?('corridor')
+            return 'entrance' if category.include?('entrance') || category.include?('enterance')
+
             case effective_cell_space_type(cell_space)
             when CellSpaceType::GENERAL
               'room'
             when CellSpaceType::CONNECTION
               'door'
             when CellSpaceType::TRANSITION
-              'stairs'
+              'transition'
+            when CellSpaceType::ANCHOR
+              'entrance'
             else
               'space'
             end
