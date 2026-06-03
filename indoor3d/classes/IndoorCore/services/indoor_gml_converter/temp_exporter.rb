@@ -19,7 +19,7 @@ module ULOL
           NAVIGATION_SCHEMA_LOCATION = 'http://schemas.opengis.net/indoorgml/1.0/indoorgmlnavi.xsd'
           CELL_SPACE_TAGS = {
             CellSpaceType::GENERAL => 'navi:GeneralSpace',
-            CellSpaceType::TRANSFER => 'navi:TransferSpace',
+            CellSpaceType::TRANSFER => 'navi:TransitionSpace',
             CellSpaceType::TRANSITION => 'navi:TransitionSpace',
             CellSpaceType::CONNECTION => 'navi:ConnectionSpace',
             CellSpaceType::ANCHOR => 'navi:AnchorSpace'
@@ -64,6 +64,7 @@ module ULOL
               "#{CORE_NAMESPACE} #{CORE_SCHEMA_LOCATION} #{NAVIGATION_NAMESPACE} #{NAVIGATION_SCHEMA_LOCATION}"
             )
             root.add_attribute('gml:id', ROOT_ID)
+            append_nil_bounded_by(root)
             append_primal_space_features(root)
             append_multi_layered_graph(root)
             pretty_xml(doc)
@@ -104,7 +105,9 @@ module ULOL
             member = parent.add_element('core:cellSpaceMember')
             cell = member.add_element(cell_space_tag(cell_space))
             cell.add_attribute('gml:id', cell_id)
-            cell.add_element('gml:name').text = cell_space.category_code
+            cell.add_element('gml:description').text = cell_space_description(cell_space)
+            cell.add_element('gml:name').text = cell_space_export_name(cell_space)
+            append_nil_bounded_by(cell)
             geometry = cell.add_element('core:cellSpaceGeometry')
             geometry_3d = geometry.add_element('core:Geometry3D')
             solid = geometry_3d.add_element('gml:Solid')
@@ -142,7 +145,7 @@ module ULOL
               member = nodes.add_element('core:stateMember')
               state_element = member.add_element('core:State')
               state_element.add_attribute('gml:id', state_gml_id(state))
-              state_element.add_element('gml:name').text = cell_space.category_code
+              state_element.add_element('gml:name').text = cell_space_export_name(cell_space)
               duality = state_element.add_element('core:duality')
               duality.add_attribute('xlink:href', cell_gml_id(cell_space))
               state_connected_transition_ids(state).each do |transition_id|
@@ -256,9 +259,9 @@ module ULOL
 
           def export_point(point)
             if @coordinate_system == COORDINATE_SYSTEM_Y_UP_LH
-              Geom::Point3d.new(point.x, point.y, point.z)
+              Geom::Point3d.new(point.x, point.z, -point.y)
             else
-              Geom::Point3d.new(point.x, point.z, point.y)
+              Geom::Point3d.new(point.x, point.y, point.z)
             end
           end
 
@@ -286,13 +289,49 @@ module ULOL
           end
 
           def cell_space_tag(cell_space)
-            CELL_SPACE_TAGS[cell_space.cell_type] || 'core:CellSpace'
+            CELL_SPACE_TAGS[effective_cell_space_type(cell_space)] || 'core:CellSpace'
+          end
+
+          def cell_space_export_name(cell_space)
+            group_name = cell_space.sketchup_group.respond_to?(:name) ? cell_space.sketchup_group.name.to_s.strip : ''
+            return group_name unless group_name.empty?
+
+            feature_name = cell_space.name.to_s.strip
+            return feature_name unless feature_name.empty?
+
+            cell_gml_id(cell_space)
+          end
+
+          def cell_space_description(cell_space)
+            %(storey="floor_1":indoor=#{indoor_description_type(cell_space)})
+          end
+
+          def indoor_description_type(cell_space)
+            case effective_cell_space_type(cell_space)
+            when CellSpaceType::GENERAL
+              'room'
+            when CellSpaceType::CONNECTION
+              'door'
+            when CellSpaceType::TRANSITION
+              'stairs'
+            else
+              'space'
+            end
+          end
+
+          def append_nil_bounded_by(parent)
+            bounded_by = parent.add_element('gml:boundedBy')
+            bounded_by.add_attribute('xsi:nil', 'true')
           end
 
           def append_navigable_space_codes(cell, cell_space)
-            append_code(cell, 'navi:class', CellSpaceType.label(cell_space.cell_type), cell_space.category_code_space)
+            append_code(cell, 'navi:class', CellSpaceType.label(effective_cell_space_type(cell_space)), cell_space.category_code_space)
             append_code(cell, 'navi:function', cell_space.category_code, cell_space.category_code_space)
             append_code(cell, 'navi:usage', cell_space.category_code, cell_space.category_code_space)
+          end
+
+          def effective_cell_space_type(cell_space)
+            cell_space.cell_type == CellSpaceType::TRANSFER ? CellSpaceType::TRANSITION : cell_space.cell_type
           end
 
           def append_code(parent, tag, value, code_space)

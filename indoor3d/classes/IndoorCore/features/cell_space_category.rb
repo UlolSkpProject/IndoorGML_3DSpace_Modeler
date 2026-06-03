@@ -13,7 +13,8 @@ module ULOL
           ],
           CellSpaceType::TRANSITION => [
             { code: 'Stair', label: 'Stair', code_space: DEFAULT_CODE_SPACE, standard: true },
-            { code: 'Elevator', label: 'Elevator', code_space: DEFAULT_CODE_SPACE, standard: true }
+            { code: 'Elevator', label: 'Elevator', code_space: DEFAULT_CODE_SPACE, standard: true },
+            { code: 'Corridor', label: 'Corridor', code_space: DEFAULT_CODE_SPACE, standard: true }
           ],
           CellSpaceType::CONNECTION => [
             { code: 'Door', label: 'Door', code_space: DEFAULT_CODE_SPACE, standard: true }
