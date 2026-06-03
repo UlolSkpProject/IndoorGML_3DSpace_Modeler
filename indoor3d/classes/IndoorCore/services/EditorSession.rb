@@ -275,6 +275,25 @@ module ULOL
           return if target_path.empty?
           return if active_path_matches?(model, target_path)
 
+          current_path = model.active_path
+
+          # # root 탈출 시 → 종료 확인 : viewport의 빈 곳을 클릭해도 root로 나가지는 issue가 있어서 일단 제외하는 목적으로 주석처리.
+          # if current_path.nil? && target_path == [@indoor_model.primal_group]
+          #   if @indoor_model.request_finish_editing()
+          #     return
+          #   else
+          #     set_active_path(model, target_path)
+          #     return
+          #   end
+          # end
+
+          # cell 편집 중 primal_group으로 돌아오는 경우 → 허용
+          primal_group = @indoor_model.primal_group
+          if current_path == [primal_group] && target_path.length > 1 && target_path.first == primal_group
+            @editing_active_path_target = [primal_group]
+            return
+          end
+
           set_active_path(model, target_path)
         end
 
