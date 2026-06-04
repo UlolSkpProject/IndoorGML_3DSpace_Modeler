@@ -19,7 +19,6 @@ module ULOL
           NAVIGATION_SCHEMA_LOCATION = 'http://schemas.opengis.net/indoorgml/1.0/indoorgmlnavi.xsd'
           CELL_SPACE_TAGS = {
             CellSpaceType::GENERAL => 'navi:GeneralSpace',
-            CellSpaceType::TRANSFER => 'navi:TransitionSpace',
             CellSpaceType::TRANSITION => 'navi:TransitionSpace',
             CellSpaceType::CONNECTION => 'navi:ConnectionSpace',
             CellSpaceType::ANCHOR => 'navi:AnchorSpace'
@@ -289,7 +288,7 @@ module ULOL
           end
 
           def cell_space_tag(cell_space)
-            CELL_SPACE_TAGS[effective_cell_space_type(cell_space)] || 'core:CellSpace'
+            CELL_SPACE_TAGS[cell_space.cell_type] || 'core:CellSpace'
           end
 
           def cell_space_export_name(cell_space)
@@ -313,7 +312,7 @@ module ULOL
             return 'corridor' if category.include?('corridor')
             return 'entrance' if category.include?('entrance') || category.include?('enterance')
 
-            case effective_cell_space_type(cell_space)
+            case cell_space.cell_type
             when CellSpaceType::GENERAL
               'room'
             when CellSpaceType::CONNECTION
@@ -333,13 +332,9 @@ module ULOL
           end
 
           def append_navigable_space_codes(cell, cell_space)
-            append_code(cell, 'navi:class', CellSpaceType.label(effective_cell_space_type(cell_space)), cell_space.category_code_space)
+            append_code(cell, 'navi:class', CellSpaceType.label(cell_space.cell_type), cell_space.category_code_space)
             append_code(cell, 'navi:function', cell_space.category_code, cell_space.category_code_space)
             append_code(cell, 'navi:usage', cell_space.category_code, cell_space.category_code_space)
-          end
-
-          def effective_cell_space_type(cell_space)
-            cell_space.cell_type == CellSpaceType::TRANSFER ? CellSpaceType::TRANSITION : cell_space.cell_type
           end
 
           def append_code(parent, tag, value, code_space)
