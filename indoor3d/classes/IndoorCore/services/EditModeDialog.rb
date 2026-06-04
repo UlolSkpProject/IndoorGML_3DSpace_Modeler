@@ -5,6 +5,8 @@ module ULOL
     module IndoorCore
 
       class EditModeDialog
+        include Utils::HtmlHelpers
+        
         DIALOG_WIDTH = 280
         INITIAL_DIALOG_HEIGHT = 260
         MIN_DIALOG_HEIGHT = 280
@@ -327,16 +329,7 @@ module ULOL
         def js_string(value)
           value.to_s.inspect
         end
-
-        def escape_html(value)
-          value.to_s
-               .gsub('&', '&amp;')
-               .gsub('<', '&lt;')
-               .gsub('>', '&gt;')
-               .gsub('"', '&quot;')
-        end
       end
-
     end
   end
 end

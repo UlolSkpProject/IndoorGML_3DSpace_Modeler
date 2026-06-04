@@ -6,6 +6,8 @@ module ULOL
       module IndoorGmlConverter
 
         class ExportProgressDialog
+          include Utils::HtmlHelpers
+
           STEPS = [
             [:runtime, 'runtime data refresh'],
             [:temp_file, "\uC784\uC2DC\uD30C\uC77C \uC0DD\uC131"],
@@ -145,16 +147,7 @@ module ULOL
               </html>
             HTML
           end
-
-          def escape_html(value)
-            value.to_s
-                 .gsub('&', '&amp;')
-                 .gsub('<', '&lt;')
-                 .gsub('>', '&gt;')
-                 .gsub('"', '&quot;')
-          end
         end
-
       end
     end
   end
