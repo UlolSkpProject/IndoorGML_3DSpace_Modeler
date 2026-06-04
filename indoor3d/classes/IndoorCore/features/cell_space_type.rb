@@ -6,14 +6,12 @@ module ULOL
 
       module CellSpaceType
         GENERAL    = 0 unless const_defined?(:GENERAL, false)
-        TRANSFER   = 1 unless const_defined?(:TRANSFER, false)
-        TRANSITION = 2 unless const_defined?(:TRANSITION, false)
-        CONNECTION = 3 unless const_defined?(:CONNECTION, false)
-        ANCHOR     = 4 unless const_defined?(:ANCHOR, false)
+        TRANSITION = 1 unless const_defined?(:TRANSITION, false)
+        CONNECTION = 2 unless const_defined?(:CONNECTION, false)
+        ANCHOR     = 3 unless const_defined?(:ANCHOR, false)
 
         LABELS = {
           GENERAL => 'GeneralSpace',
-          TRANSFER => 'TransferSpace',
           TRANSITION => 'TransitionSpace',
           CONNECTION => 'ConnectionSpace',
           ANCHOR => 'AnchorSpace'
