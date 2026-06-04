@@ -232,7 +232,7 @@ module ULOL
             return if cell_space.nil?
 
             @feature_registry.remove_cell_space(cell_space)
-            @cell_space_observed_ids.delete(cell_space.sketchup_group.object_id)
+            delete_entity_observer_key(@cell_space_observed_ids, cell_space.sketchup_group)
           end
 
           def unregister_state(state)
@@ -258,7 +258,7 @@ module ULOL
             begin
               return unless entity&.valid? && observer
 
-              key = entity.object_id
+              key = entity_observer_key(entity)
               return if observed_ids[key]
 
               attached = entity.add_observer(observer)

@@ -211,13 +211,15 @@ attach_entities_observer
 
 ## 수정해야 하는 이유
 
-현재 observer attach 중복 방지 기준이 `object_id` 중심이면 같은 SketchUp entity를 다른 Ruby wrapper로 다시 만났을 때 중복 attach 가능성이 있다.
+검토 초기에는 observer attach 중복 방지 기준을 `persistent_id` 중심으로 바꾸는 방향을 고려했다. 그러나 3단계 테스트 중 생성 → Undo → Redo 이후 CellSpace observer가 다시 붙지 않는 문제가 확인되었다.
+
+이 프로젝트에서 observer attach registry는 영속 데이터가 아니라 현재 Ruby runtime에서 "이 Ruby wrapper에 observer를 붙였는가"를 추적하는 상태다. 따라서 observer attach key는 기존 동작처럼 `object_id` 기준을 유지한다. `persistent_id`는 FeatureRegistry/CellSpace lookup처럼 SketchUp entity의 영속 정체성을 추적하는 곳에서 다루고, observer attach 여부 판단에는 사용하지 않는다.
 
 ## Codex 작업 내용
 
 - [ ] entity observer attach key를 만드는 helper를 추가한다.
-- [ ] entity가 `persistent_id`를 지원하면 `persistent_id`를 우선 사용한다.
-- [ ] `persistent_id`를 사용할 수 없는 객체는 기존처럼 `object_id`를 사용한다.
+- [ ] entity observer attach key는 기존 동작처럼 `object_id` 기준을 유지한다.
+- [ ] `persistent_id` 기반 observer attach key 전환은 Undo/Redo 재attach를 막을 수 있으므로 이 단계에서 적용하지 않는다.
 - [ ] Entities collection observer는 기존처럼 collection object 기준을 유지한다.
 - [ ] observer attach 관련 코드가 같은 helper를 사용하도록 정리한다.
 - [ ] 기존 observer 종류와 attach 시점은 변경하지 않는다.
@@ -232,8 +234,8 @@ attach_entities_observer
 
 ## 단계 완료 조건
 
-- [ ] Codex 작업 완료
-- [ ] 실제 SketchUp 테스트 완료 - 사용자만 체크
+- [x] Codex 작업 완료
+- [x] 실제 SketchUp 테스트 완료 - 사용자만 체크
 
 > 다음 단계 진행 금지 조건: `실제 SketchUp 테스트 완료`가 체크되지 않았다면 4단계로 넘어가지 않는다.
 
@@ -1000,7 +1002,7 @@ Codex는 이 표에서 `Codex 작업 완료`만 체크할 수 있다. `실제 Sk
 | 0 | 리팩토링 전 기준 동작 고정 | [x] | [ ] |
 | 1 | Observer 내부 modal UI 제거 | [x] | [ ] |
 | 2 | Observer 재진입 guard 명확화 | [x] | [ ] |
-| 3 | Observer attach 로직 통일 | [ ] | [ ] |
+| 3 | Observer attach 로직 통일 | [x] | [ ] |
 | 4 | FeatureRegistry key 이름 정리 | [ ] | [ ] |
 | 5 | Feature 객체 valid accessor 추가 | [ ] | [ ] |
 | 6 | AttributeSerializer write 방어 강화 | [ ] | [ ] |

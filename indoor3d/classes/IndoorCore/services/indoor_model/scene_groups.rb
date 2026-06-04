@@ -40,7 +40,7 @@ module ULOL
           def attach_existing_space_features_observer(group, expected_name)
             return unless group&.valid?
 
-            observer_key = group.object_id
+            observer_key = entity_observer_key(group)
             @scene_group_guard.track(group, expected_name)
             return if @space_features_observed_ids[observer_key]
 
@@ -107,7 +107,7 @@ module ULOL
           def attach_space_features_observer(group, expected_name)
             return unless group&.valid?
 
-            observer_key = group.object_id
+            observer_key = entity_observer_key(group)
             @scene_group_guard.track(group, expected_name)
             with_unlocked(group) { group.name = expected_name } unless group.name == expected_name
             return if @space_features_observed_ids[observer_key]
