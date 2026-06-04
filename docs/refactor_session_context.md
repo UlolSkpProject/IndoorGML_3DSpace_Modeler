@@ -123,6 +123,29 @@ These were observed during refactor testing and recorded in `docs/RefactorTODO.m
   - `primal_group.locked?`
   - active-path and transaction observer callback logs
 
+### Primal group move corrupts child CellSpace transforms
+
+- Root cause analysis was added on 2026-06-05 after inspecting `SceneGroupGuard` usage.
+- `SceneGroupGuard#synchronize_from` is only reached through this path:
+  - `SpaceFeaturesObserver#onChangeEntity`
+  - `IndoorModel#space_features_changed`
+  - `IndoorModel#enforce_space_features_constraints`
+  - `@scene_group_guard.enforce(ordered_space_features_groups)`
+  - `SceneGroupGuard#synchronize_from`
+- Current `ordered_space_features_groups` returns:
+  - `@primal_group`
+  - every valid `CellSpace` SketchUp group
+- This mixes a parent group (`IndoorGML_PrimalSpaceFeatures`) with child CellSpace groups in the same transform synchronization set.
+- `primal_group.transformation` is root-space, while each CellSpace group `transformation` is local to `primal_group.entities`.
+- When `primal_group` is moved, child CellSpaces already move in world space through the parent transform. `synchronize_from` then also writes the parent transform into each child group local transform, effectively applying the movement a second time and corrupting CellSpace positions/topology.
+- This logic likely came from, or only made sense for, an older sibling-root setup such as `PrimalSpaceFeatures` plus deprecated `DualSpaceFeatures`, where two root-level groups could reasonably share a transform.
+- It is not valid for the current structure where `DualSpaceFeatures` is deprecated and CellSpaces live under `PrimalSpaceFeatures`.
+- Recommended fix direction:
+  - Remove transform synchronization between `primal_group` and CellSpace child groups.
+  - Treat `primal_group` transform changes as invalid and restore/reject them.
+  - Keep CellSpace transform handling per-cell through normal CellSpace lifecycle logic.
+  - Do not use one shared `synchronize_from(group, groups)` policy across parent and child groups.
+
 ## Recommended Next Step
 
 Do not jump directly into step 7 if the goal is stable future testing.
