@@ -84,6 +84,7 @@ module ULOL
 
           def recenter_cell_space_geometry(cell_space_entity)
             center = cell_space_entity.definition.bounds.center
+            puts "[IndoorGML] recenter_cell_space_geometry center=#{center} distance=#{center.distance(ORIGIN)}"
             return if center.distance(ORIGIN) <= 0.001
 
             set_group_transformation(

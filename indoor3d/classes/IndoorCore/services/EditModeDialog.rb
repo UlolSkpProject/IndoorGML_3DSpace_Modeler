@@ -83,7 +83,6 @@ module ULOL
             end
           end
           dialog.add_action_callback('finishEditing') do |_context|
-            puts '[IndoorGML] EditModeDialog#finishEditing'
             UI.start_timer(0, false) do
               @indoor_model.request_finish_editing()
             end

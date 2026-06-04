@@ -15,9 +15,12 @@ module ULOL
         }.freeze unless const_defined?(:DEFINITIONS, false)
 
         TEXTURE_DEFINITIONS = {
-          general_space:    ['Indoor3DGml_GeneralSpace_Text',     'cellspace_room.png',   0.3],
-          transition_space: ['Indoor3DGml_TransitionSpace_Text',  'cellspace_stair.png',  0.8],
-          connection_space: ['Indoor3DGml_ConnectionSpace_Text',  'cellspace_door.png',   0.3]
+          'GeneralSpace|Room' => ['Indoor3DGml_GeneralSpace_Text', 'cellspace_room.png', 1.0],
+          'TransitionSpace|Stair' => ['Indoor3DGml_TransitionSpace_Stair_Text', 'cellspace_stair.png', 1.0],
+          'TransitionSpace|Escalator' => ['Indoor3DGml_TransitionSpace_Escalator_Text', 'cellspace_escalator.png', 1.0],
+          'TransitionSpace|Elevator' => ['Indoor3DGml_TransitionSpace_Elevator_Text', 'cellspace_elevator.png', 1.0],
+          'ConnectionSpace|Door' => ['Indoor3DGml_ConnectionSpace_Text', 'cellspace_door.png', 1.0],
+          'AnchorSpace|Anchor' => ['Indoor3DGml_AnchorSpace_Text', 'cellspace_anchor.png', 1.0]
         }.freeze unless const_defined?(:TEXTURE_DEFINITIONS, false)
 
         def self.state
@@ -33,8 +36,8 @@ module ULOL
           fetch(cell_space_type_keys()[cell_type] || :general_space)
         end
 
-        def self.cell_space_text(cell_type)
-          key = cell_space_type_keys()[cell_type]
+        def self.cell_space_text(cell_type, category_code)
+          key = "#{::ULOL::Indoor3DGmlModeler::IndoorCore::CellSpaceType.label(cell_type)}|#{category_code}"
           return nil unless TEXTURE_DEFINITIONS.key?(key)
 
           fetch_textured(key)
@@ -71,10 +74,10 @@ module ULOL
         def self.cell_space_type_keys
           cell_space_type = ::ULOL::Indoor3DGmlModeler::IndoorCore::CellSpaceType
           {
-            cell_space_type::GENERAL => :general_space,
+            cell_space_type::GENERAL    => :general_space,
             cell_space_type::TRANSITION => :transition_space,
             cell_space_type::CONNECTION => :connection_space,
-            cell_space_type::ANCHOR => :anchor_space
+            cell_space_type::ANCHOR     => :anchor_space
           }
         end
         private_class_method :cell_space_type_keys

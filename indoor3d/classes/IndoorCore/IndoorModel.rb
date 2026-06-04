@@ -77,6 +77,7 @@ module ULOL
           )
           @scene_group_guard = SceneGroupGuard.new(with_unlocked: method(:with_unlocked))
           @editor_session = EditorSession.new(self)
+          @finishing_editing = false
         end
       end
 
