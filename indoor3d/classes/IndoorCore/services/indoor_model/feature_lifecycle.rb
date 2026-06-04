@@ -46,11 +46,11 @@ module ULOL
 
           def cell_space_changed(entity)
             begin
-              return if @syncing || @erasing
+              return false if guard_active?(:@syncing) || guard_active?(:@erasing)
 
               cell_space = find_cell_space_for_entity(entity)
               cell_space = refresh_and_find_cell_space(entity) if stale_cell_space_runtime?(cell_space, entity)
-              return if cell_space.nil? || !cell_space.valid?
+              return false if cell_space.nil? || !cell_space.valid?
 
               sync do
                 state = cell_space.duality_state
@@ -65,6 +65,7 @@ module ULOL
                 end
                 synchronize_adjacency_and_transitions_for_cell_space(cell_space)
               end
+              true
             ensure
               lock_indoor_entity(entity)
             end

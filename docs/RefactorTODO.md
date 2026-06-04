@@ -177,8 +177,8 @@ Observer 콜백 안에서 이름 복구, transform 복구, lock 복구 같은 mu
 
 ## 단계 완료 조건
 
-- [ ] Codex 작업 완료
-- [ ] 실제 SketchUp 테스트 완료 - 사용자만 체크
+- [x] Codex 작업 완료
+- [x] 실제 SketchUp 테스트 완료 - 사용자만 체크
 
 > 다음 단계 진행 금지 조건: `실제 SketchUp 테스트 완료`가 체크되지 않았다면 3단계로 넘어가지 않는다.
 
@@ -664,6 +664,11 @@ RuntimeRestorer.new(
 
 Undo/Redo 이후 SketchUp model 상태와 Ruby runtime registry 상태를 다시 동기화한다.
 
+## 이전 단계에서 미룬 이슈
+
+- 2단계 테스트 중 확인: `primal_group` 내부 CellSpace를 이동/scale/rotate 한 뒤 Undo가 되지 않는 문제가 있다.
+- 이 문제는 Observer 재진입 guard 명확화 범위를 벗어나므로, Undo/Redo 후 runtime refresh schedule을 다루는 이 단계에서 확인한다.
+
 ## 수정해야 할 부분
 
 주요 파일:
@@ -994,7 +999,7 @@ Codex는 이 표에서 `Codex 작업 완료`만 체크할 수 있다. `실제 Sk
 |---:|---|---|---|
 | 0 | 리팩토링 전 기준 동작 고정 | [x] | [ ] |
 | 1 | Observer 내부 modal UI 제거 | [x] | [ ] |
-| 2 | Observer 재진입 guard 명확화 | [ ] | [ ] |
+| 2 | Observer 재진입 guard 명확화 | [x] | [ ] |
 | 3 | Observer attach 로직 통일 | [ ] | [ ] |
 | 4 | FeatureRegistry key 이름 정리 | [ ] | [ ] |
 | 5 | Feature 객체 valid accessor 추가 | [ ] | [ ] |
