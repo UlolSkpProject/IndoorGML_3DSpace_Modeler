@@ -3,8 +3,10 @@
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
-
+      
       class SpaceFeaturesObserver < Sketchup::EntityObserver
+        include ObserverHelpers
+        
         def initialize(indoor_model)
           super()
           @indoor_model = indoor_model
@@ -38,24 +40,7 @@ module ULOL
           end
         end
 
-        def indoor_gml_entity?(entity)
-          indoor_feature(entity).to_s.length.positive?
-        end
-
-        def indoor_feature(entity)
-          begin
-            entity.get_attribute(IndoorModel::ATTRIBUTE_DICTIONARY_NAME, 'feature')
-          rescue StandardError
-            nil
-          end
-        end
-
-        def entity_name(entity)
-          name = entity.respond_to?(:name) ? entity.name.to_s : ''
-          name.empty? ? '(unnamed)' : name
-        end
       end
-
     end
   end
 end

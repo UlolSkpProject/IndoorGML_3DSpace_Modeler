@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative 'observers/observer_helpers.rb'
 require_relative 'observers/cell_space_observer.rb'
 require_relative 'observers/space_features_observer.rb'
 require_relative 'observers/root_entities_observer.rb'

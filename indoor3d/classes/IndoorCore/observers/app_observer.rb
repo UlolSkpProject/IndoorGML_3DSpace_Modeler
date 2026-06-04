@@ -3,7 +3,6 @@
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
-
       class Indoor3DGmlAppObserver < Sketchup::AppObserver
         def initialize
           super()
