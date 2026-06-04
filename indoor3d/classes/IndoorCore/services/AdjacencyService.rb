@@ -49,10 +49,9 @@ module ULOL
 
         def transition_allowed_between?(cell1, cell2, adjacency_axis)
           return false if adjacency_axis.nil?
-          return false if cell1.cell_type == CellSpaceType::GENERAL && cell2.cell_type == CellSpaceType::GENERAL
-
+          # IndoorGMLv1.1에선 Transition이 생기기 위해 ConnectionSpace가 필수적이지만 v1.0에선 그렇지 않다.
+          # return false if cell1.cell_type == CellSpaceType::GENERAL && cell2.cell_type == CellSpaceType::GENERAL
           return adjacency_axis != :z if transition_space_pair?(cell1, cell2)
-
           true
         end
 
