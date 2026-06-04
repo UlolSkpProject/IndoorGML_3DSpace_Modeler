@@ -10,10 +10,14 @@ module ULOL
           end
 
           def finish_editing
+            @finishing_editing = true
             @editor_session.finish()
+          ensure
+            @finishing_editing = false
           end
 
           def request_finish_editing
+            puts '[IndoorGML] EditModeDialog#RequestfinishEditing'
             result = UI.messagebox("CellSpace 편집을 종료하시겠습니까?", MB_YESNO)
             return false unless result == IDYES
 

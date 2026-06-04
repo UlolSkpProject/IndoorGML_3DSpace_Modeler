@@ -7,9 +7,9 @@ module ULOL
         module ObserverRouting
           def space_features_changed(entity)
             begin
-              return if @constraining_space_features || @erasing
+              return if @constraining_space_features || @erasing || @finishing_editing
               return unless entity&.valid?
-
+          
               @constraining_space_features = true
               enforce_space_features_constraints
             ensure
