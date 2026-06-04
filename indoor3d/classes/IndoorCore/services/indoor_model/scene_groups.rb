@@ -211,17 +211,6 @@ module ULOL
             state.position
           end
 
-          def move_state_to_local_position(state, local_position)
-            update_state_position(state, local_position)
-          end
-
-          def move_cell_space_to_local_position(cell_space, local_position)
-            ensure_cell_space_is_child_of_primal_space!(cell_space)
-            with_unlocked(cell_space.sketchup_group) do
-              Utils::Transformation.move_entity_origin_in_root_local_to(cell_space.sketchup_group, @primal_group, local_position)
-            end
-          end
-
           def ensure_cell_space_is_child_of_primal_space!(cell_space)
             Utils::Transformation.ensure_direct_child_of_root!(
               cell_space.sketchup_group,

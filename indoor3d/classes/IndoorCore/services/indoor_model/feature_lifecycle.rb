@@ -61,7 +61,7 @@ module ULOL
                 end
                 if state&.valid?
                   local_position = cell_space_local_origin(cell_space)
-                  move_state_to_local_position(state, local_position)
+                  update_state_position(state, local_position)
                 end
                 synchronize_adjacency_and_transitions_for_cell_space(cell_space)
               end
@@ -89,7 +89,7 @@ module ULOL
                 end
                 if state&.valid?
                   local_position = cell_space_local_origin(cell_space)
-                  move_state_to_local_position(state, local_position)
+                  update_state_position(state, local_position)
                 end
                 synchronize_adjacency_and_transitions_for_cell_space(cell_space)
               end
@@ -116,21 +116,6 @@ module ULOL
               unlock_indoor_entity(cell_space.sketchup_group) if erase_sketchup_group && cell_space.valid?
               cell_space.erase! if erase_sketchup_group && cell_space.valid?
               unregister_cell_space(cell_space)
-              erase_adjacency_for_cell_space(cell_space)
-            end
-          end
-
-          def erase_state(state, erase_sketchup_instance: true)
-            return if state.nil?
-
-            erase_guard do
-              cell_space = state.duality_cell
-              erase_transitions_for_state(state)
-              unlock_indoor_entity(cell_space.sketchup_group) if cell_space&.valid?
-              cell_space.erase! if cell_space&.valid?
-              state.erase! if erase_sketchup_instance && state.valid?
-              unregister_cell_space(cell_space)
-              unregister_state(state)
               erase_adjacency_for_cell_space(cell_space)
             end
           end

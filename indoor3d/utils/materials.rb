@@ -82,45 +82,6 @@ module ULOL
         end
         private_class_method :cell_space_type_keys
 
-
-        def self.generate_label_png(text, bg_color, text_color, width, height, output_path)
-          dialog = UI::HtmlDialog.new({
-            dialog_title: "PNG Generator",
-            width: 200, height: 200,          # 1x1 피함
-            style: UI::HtmlDialog::STYLE_UTILITY
-          })
-        
-          html = <<~HTML
-            <html><body style="margin:0">
-            <canvas id="c" width="#{width}" height="#{height}"></canvas>
-            <script>
-              const c = document.getElementById('c');
-              const ctx = c.getContext('2d');
-              ctx.fillStyle = '#{bg_color}';
-              ctx.fillRect(0, 0, #{width}, #{height});
-              ctx.fillStyle = '#{text_color}';
-              ctx.font = 'bold #{height / 3}px Arial';
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'middle';
-              ctx.fillText('#{text}', #{width / 2}, #{height / 2});
-              sketchup.png_ready(c.toDataURL('image/png'));
-            </script>
-            </body></html>
-          HTML
-        
-          dialog.set_html(html)
-        
-          dialog.add_action_callback("png_ready") do |_, data_url|
-            base64 = data_url.split(',', 2)[1]
-            png_bytes = base64.unpack1('m')
-            File.binwrite(output_path, png_bytes)
-            dialog.close
-          end
-        
-          dialog.show
-        end
-        private_class_method :generate_label_png
-  
       end
     end
   end
