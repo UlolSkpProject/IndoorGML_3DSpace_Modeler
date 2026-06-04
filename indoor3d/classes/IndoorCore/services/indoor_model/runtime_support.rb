@@ -157,6 +157,22 @@ module ULOL
           ensure
             instance_variable_set(flag, previous_value)
           end
+
+          def entity_observer_key(entity)
+            return nil unless entity
+
+            entity.object_id
+          rescue StandardError
+            nil
+          end
+
+          def delete_entity_observer_key(observed_ids, entity)
+            return unless observed_ids && entity
+
+            observed_ids.delete(entity_observer_key(entity))
+          rescue StandardError
+            nil
+          end
         end
       end
     end

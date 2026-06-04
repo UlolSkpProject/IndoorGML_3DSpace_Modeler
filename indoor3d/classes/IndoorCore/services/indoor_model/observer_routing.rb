@@ -78,7 +78,7 @@ module ULOL
           def space_features_erased(entity)
             begin
               @primal_group = nil if entity == @primal_group
-              @space_features_observed_ids.delete(entity.object_id)
+              delete_entity_observer_key(@space_features_observed_ids, entity)
               @scene_group_guard.untrack(entity)
             rescue StandardError
               nil
