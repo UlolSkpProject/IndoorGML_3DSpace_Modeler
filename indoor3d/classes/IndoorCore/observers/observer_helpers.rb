@@ -17,7 +17,21 @@ module ULOL
           name = entity.respond_to?(:name) ? entity.name.to_s : ''
           name.empty? ? '(unnamed)' : name
         end
+
+        def entity_summary(entity)
+          "class=#{entity.class} entity_id=#{entity.entityID} name=#{entity_name(entity)} feature=#{indoor_feature(entity)}"
+        rescue StandardError
+          "class=#{entity.class}"
+        end
+
+        def log_event(event_name, entity)
+          puts "[IndoorGML] #{self.class.name.split('::').last}##{event_name} #{entity_summary(entity)}"
+        end
         
+        def log_removed(event_name, entity_id)
+          puts "[IndoorGML] #{self.class.name.split('::').last}##{event_name} entity_id=#{entity_id}"
+        end
+
       end
     end
   end
