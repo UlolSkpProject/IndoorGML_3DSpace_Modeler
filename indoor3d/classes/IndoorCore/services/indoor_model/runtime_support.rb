@@ -135,21 +135,27 @@ module ULOL
           end
 
           def sync
-            begin
-              @syncing = true
+            with_guard_flag(:@syncing) do
               yield
-            ensure
-              @syncing = false
             end
           end
 
           def erase_guard
-            begin
-              @erasing = true
+            with_guard_flag(:@erasing) do
               yield
-            ensure
-              @erasing = false
             end
+          end
+
+          def guard_active?(flag)
+            instance_variable_get(flag)
+          end
+
+          def with_guard_flag(flag)
+            previous_value = instance_variable_get(flag)
+            instance_variable_set(flag, true)
+            yield
+          ensure
+            instance_variable_set(flag, previous_value)
           end
         end
       end

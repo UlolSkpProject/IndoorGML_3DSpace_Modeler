@@ -6,16 +6,15 @@ module ULOL
       class IndoorModel
         module ObserverRouting
           def space_features_changed(entity)
-            begin
-              return if @constraining_space_features || @erasing || @finishing_editing
-              return unless entity&.valid?
-          
-              @constraining_space_features = true
+            return false if guard_active?(:@constraining_space_features) || guard_active?(:@erasing) || @finishing_editing
+            return false unless entity&.valid?
+
+            with_guard_flag(:@constraining_space_features) do
               enforce_space_features_constraints
-            ensure
-              lock_indoor_entity(entity)
-              @constraining_space_features = false
             end
+            true
+          ensure
+            lock_indoor_entity(entity) if entity&.valid?
           end
 
           def root_entity_added(entity)
