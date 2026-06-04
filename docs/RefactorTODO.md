@@ -368,8 +368,8 @@ end
 
 ## 단계 완료 조건
 
-- [ ] Codex 작업 완료
-- [ ] 실제 SketchUp 테스트 완료 - 사용자만 체크
+- [x] Codex 작업 완료
+- [x] 실제 SketchUp 테스트 완료 - 사용자만 체크
 
 > 다음 단계 진행 금지 조건: `실제 SketchUp 테스트 완료`가 체크되지 않았다면 6단계로 넘어가지 않는다.
 
@@ -993,6 +993,45 @@ end
 
 ---
 
+# 마지막 단계. 치명적 버그 수정 - EditMode CellSpace 복붙 중복
+
+## 목표
+
+EditMode 안에서 CellSpace entity를 복사/붙여넣기 했을 때 기존 CellSpace와 완전히 동일한 IndoorGML attribute/id/runtime 의미를 가진 복제본이 생기지 않도록 한다.
+
+## 현재 확인된 문제
+
+EditMode에서 CellSpace entity를 복사/붙여넣기 하면 원본 CellSpace의 IndoorGML attribute가 그대로 복사된다. 그 결과 복제본이 원본과 같은 CellSpace id, feature metadata, duality/state 연결 정보를 가진 것처럼 보일 수 있다.
+
+## 수정해야 하는 이유
+
+CellSpace는 IndoorGML feature identity를 가져야 하며, 복사본이 원본과 같은 id/duality 정보를 유지하면 runtime registry, State/Transition 연결, Export GML 결과가 손상될 수 있다. 이 문제는 리팩토링 단계 중 발견된 치명적 기능 버그이므로, 단계별 리팩토링을 마친 뒤 별도 마지막 단계에서 수정한다.
+
+## Codex 작업 내용
+
+- [ ] EditMode에서 CellSpace 복사/붙여넣기 시 어떤 observer callback이 발생하는지 확인한다.
+- [ ] 복사된 entity가 기존 IndoorGML attribute를 그대로 가진 상태로 들어오는지 확인한다.
+- [ ] 복사본을 새 CellSpace로 취급할지, 복사 자체를 막을지 정책을 결정한다.
+- [ ] 새 CellSpace로 취급하는 경우 기존 id/duality/transition 관련 attribute를 재생성한다.
+- [ ] 복사를 막는 경우 사용자에게 안전하게 되돌리거나 원본 외 복제본을 제거한다.
+- [ ] Export GML에 중복 CellSpace id가 나오지 않도록 한다.
+
+## 테스트할 내용
+
+- [ ] EditMode에서 CellSpace를 복사/붙여넣기 한다.
+- [ ] 원본과 복사본의 CellSpace id가 중복되지 않는다.
+- [ ] 복사본의 State/Transition이 원본과 섞이지 않는다.
+- [ ] Undo/Redo 후 원본과 복사본의 runtime 상태가 유지된다.
+- [ ] Export GML에 중복 `gml:id`가 없다.
+- [ ] 기존 CellSpace 생성/이동/삭제 동작이 유지된다.
+
+## 단계 완료 조건
+
+- [ ] Codex 작업 완료
+- [ ] 실제 SketchUp 테스트 완료 - 사용자만 체크
+
+---
+
 # 단계별 진행 현황 요약
 
 Codex는 이 표에서 `Codex 작업 완료`만 체크할 수 있다. `실제 SketchUp 테스트 완료`는 사용자만 체크한다.
@@ -1004,7 +1043,7 @@ Codex는 이 표에서 `Codex 작업 완료`만 체크할 수 있다. `실제 Sk
 | 2 | Observer 재진입 guard 명확화 | [x] | [ ] |
 | 3 | Observer attach 로직 통일 | [x] | [ ] |
 | 4 | FeatureRegistry key 이름 정리 | [x] | [ ] |
-| 5 | Feature 객체 valid accessor 추가 | [ ] | [ ] |
+| 5 | Feature 객체 valid accessor 추가 | [x] | [ ] |
 | 6 | AttributeSerializer write 방어 강화 | [ ] | [ ] |
 | 7 | Transformation 유틸 이름과 의미 정리 | [ ] | [ ] |
 | 8 | direct_child_of_root? 판정 명확화 | [ ] | [ ] |
@@ -1015,6 +1054,7 @@ Codex는 이 표에서 `Codex 작업 완료`만 체크할 수 있다. `실제 Sk
 | 13 | FeatureRegistry를 persistent_id 중심으로 전환 | [ ] | [ ] |
 | 14 | Transition 순환 참조 완화 준비 | [ ] | [ ] |
 | 15 | IndoorModel.current 호환 유지하며 모델별 인스턴스 준비 | [ ] | [ ] |
+| 마지막 | 치명적 버그 수정 - EditMode CellSpace 복붙 중복 | [ ] | [ ] |
 
 ---
 
