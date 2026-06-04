@@ -75,7 +75,10 @@ module ULOL
             cell_space_registrar: method(:register_cell_space),
             state_registrar: method(:register_state)
           )
-          @scene_group_guard = SceneGroupGuard.new(with_unlocked: method(:with_unlocked))
+          @scene_group_guard = SceneGroupGuard.new(
+            with_unlocked: method(:with_unlocked),
+            notifier: method(:defer_ui_message)
+          )
           @editor_session = EditorSession.new(self)
           @finishing_editing = false
         end
