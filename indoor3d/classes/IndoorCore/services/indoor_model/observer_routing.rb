@@ -70,7 +70,7 @@ module ULOL
           def primal_entity_removed(entity_id)
             return if @erasing || @relocating_entity
 
-            cell_space = @feature_registry.cell_space_by_sketchup_entity_id(entity_id)
+            cell_space = @feature_registry.find_cell_space_by_removed_entity_id(entity_id)
             puts "[IndoorGML] Primal entity removed: entity_id=#{entity_id} cell_space=#{cell_space&.id || 'missing'}"
             erase_cell_space(cell_space, erase_sketchup_group: false) if cell_space
           end
