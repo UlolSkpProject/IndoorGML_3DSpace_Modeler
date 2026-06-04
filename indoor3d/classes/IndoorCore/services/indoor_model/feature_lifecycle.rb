@@ -154,12 +154,15 @@ module ULOL
           end
 
           def apply_cell_space_material(cell_space)
+            group = cell_space.sketchup_group
             material = Utils::Materials.cell_space(cell_space.cell_type)
             text_material = Utils::Materials.cell_space_text(cell_space.cell_type)
+
             with_unlocked(cell_space.sketchup_group) do
-              cell_space.sketchup_group.material = material
-              cell_space.sketchup_group.entities.each do |entity|
-                apply_cell_space_face_material(entity, text_material || material) if entity.is_a?(Sketchup::Face)
+              group.material = material
+              return if text_material.nil?
+              group.entities.grep(Sketchup::Face) do |face|
+                apply_cell_space_face_material(face, text_material)
               end
             end
           end
