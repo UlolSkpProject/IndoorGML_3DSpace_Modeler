@@ -302,8 +302,8 @@ find_cell_space_by_removed_entity_id(entity_id)
 
 ## 단계 완료 조건
 
-- [ ] Codex 작업 완료
-- [ ] 실제 SketchUp 테스트 완료 - 사용자만 체크
+- [x] Codex 작업 완료
+- [x] 실제 SketchUp 테스트 완료 - 사용자만 체크
 
 > 다음 단계 진행 금지 조건: `실제 SketchUp 테스트 완료`가 체크되지 않았다면 5단계로 넘어가지 않는다.
 
@@ -1003,7 +1003,7 @@ Codex는 이 표에서 `Codex 작업 완료`만 체크할 수 있다. `실제 Sk
 | 1 | Observer 내부 modal UI 제거 | [x] | [ ] |
 | 2 | Observer 재진입 guard 명확화 | [x] | [ ] |
 | 3 | Observer attach 로직 통일 | [x] | [ ] |
-| 4 | FeatureRegistry key 이름 정리 | [ ] | [ ] |
+| 4 | FeatureRegistry key 이름 정리 | [x] | [ ] |
 | 5 | Feature 객체 valid accessor 추가 | [ ] | [ ] |
 | 6 | AttributeSerializer write 방어 강화 | [ ] | [ ] |
 | 7 | Transformation 유틸 이름과 의미 정리 | [ ] | [ ] |
