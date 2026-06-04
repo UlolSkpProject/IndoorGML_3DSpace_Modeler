@@ -54,6 +54,14 @@ module ULOL
           @sketchup_group&.valid? == true
         end
 
+        def valid_sketchup_group
+          return nil unless @sketchup_group&.valid?
+
+          @sketchup_group
+        rescue StandardError
+          nil
+        end
+
         def erase!
           @sketchup_group.erase! if valid?
         end

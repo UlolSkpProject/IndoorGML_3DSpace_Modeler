@@ -55,6 +55,15 @@ module ULOL
           nil
         end
 
+        def valid_edge
+          entity = edge
+          return nil unless entity&.valid?
+
+          entity
+        rescue StandardError
+          nil
+        end
+
         private
 
         def initialize_restored(state1, state2, cell1, cell2, id, name)

@@ -51,8 +51,8 @@ module ULOL
 
         def add_cell_space_bounds(bounds)
           @indoor_model.cell_spaces.each do |cell_space|
-            group = cell_space.sketchup_group
-            add_bounds(bounds, group.bounds) if group&.valid?()
+            group = cell_space.valid_sketchup_group
+            add_bounds(bounds, group.bounds) if group
           end
         end
 
@@ -115,8 +115,8 @@ module ULOL
             view.line_width = 3 if view.respond_to?(:line_width=)
             view.drawing_color = PRIMARY_TRANSLUCENT_COLOR
             @indoor_model.cell_spaces.each do |cell_space|
-              group = cell_space.sketchup_group
-              next unless group&.valid?()
+              group = cell_space.valid_sketchup_group
+              next unless group
 
               draw_bounds(view, group.bounds)
             end

@@ -75,6 +75,15 @@ module ULOL
           nil
         end
 
+        def valid_component_instance
+          entity = sketchup_component_instance
+          return nil unless entity&.valid?
+
+          entity
+        rescue StandardError
+          nil
+        end
+
         def sketchup_component_instance_id
           nil
         end

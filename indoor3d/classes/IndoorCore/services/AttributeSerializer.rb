@@ -44,7 +44,8 @@ module ULOL
         end
 
         def write_cell_space(cell_space)
-          group = cell_space.sketchup_group
+          group = cell_space.valid_sketchup_group
+          return unless group
 
           group.set_attribute(@dictionary_name, 'feature', 'CellSpace')
           group.set_attribute(@dictionary_name, 'id', cell_space.id)

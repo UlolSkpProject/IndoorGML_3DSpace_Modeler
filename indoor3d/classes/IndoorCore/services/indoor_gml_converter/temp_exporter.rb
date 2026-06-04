@@ -121,9 +121,12 @@ module ULOL
           end
 
           def append_cell_surfaces(shell, cell_space, cell_id)
-            world_transform = Utils::Transformation.entity_world_transformation(cell_space.sketchup_group)
-            solid_center = export_point(cell_space.sketchup_group.definition.bounds.center.transform(world_transform))
-            faces = cell_space.sketchup_group.definition.entities.grep(Sketchup::Face)
+            group = cell_space.valid_sketchup_group
+            return unless group
+
+            world_transform = Utils::Transformation.entity_world_transformation(group)
+            solid_center = export_point(group.definition.bounds.center.transform(world_transform))
+            faces = group.definition.entities.grep(Sketchup::Face)
             faces.each_with_index do |face, index|
               surface_member = shell.add_element('gml:surfaceMember')
               polygon = surface_member.add_element('gml:Polygon')
@@ -179,7 +182,7 @@ module ULOL
 
           def exportable_cell_spaces
             @exportable_cell_spaces ||= @indoor_model.cell_spaces.select do |cell_space|
-              cell_space&.valid? && cell_space.duality_state&.valid?
+              cell_space&.valid_sketchup_group && cell_space.duality_state&.valid?
             end
           end
 
