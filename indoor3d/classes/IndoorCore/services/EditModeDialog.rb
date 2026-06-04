@@ -84,6 +84,12 @@ module ULOL
               @indoor_model.edit_selected_cell_space_geometry()
             end
           end
+          dialog.add_action_callback('finishCellSpaceEditing') do |_context|
+            puts '[IndoorGML] EditModeDialog#finishCellSpaceEditing'
+            UI.start_timer(0, false) do
+              @indoor_model.finish_cell_space_geometry_editing()
+            end
+          end
           dialog.add_action_callback('finishEditing') do |_context|
             UI.start_timer(0, false) do
               @indoor_model.request_finish_editing()
@@ -216,7 +222,7 @@ module ULOL
                 <select id="selectedClassification" disabled>
                   #{classification_options}
                 </select>
-                <button id="editSelectedCell" type="button" disabled>Edit</button>
+                <button id="editSelectedCell" type="button" style="display: none;">Edit</button>
               </div>
               <label>
                 <span>Overlay radius range</span>
@@ -248,6 +254,9 @@ module ULOL
                     selectedClassification.disabled = true;
                     selectedClassification.value = 'GeneralSpace|Room';
                     editSelectedCell.disabled = true;
+                    editSelectedCell.style.display = 'none';
+                    editSelectedCell.textContent = 'Edit';
+                    editSelectedCell.setAttribute('data-mode', 'edit');
                   } else {
                     selectedFeature.textContent = snapshot.feature || 'CellSpace';
                     selectedId.textContent = snapshot.id || '-';
@@ -255,6 +264,14 @@ module ULOL
                     selectedClassification.disabled = false;
                     selectedClassification.value = snapshot.classification || 'GeneralSpace|Room';
                     editSelectedCell.disabled = false;
+                    editSelectedCell.style.display = 'block';
+                    if (snapshot.cellGeometryEditing) {
+                      editSelectedCell.textContent = 'Finish Cell Editing';
+                      editSelectedCell.setAttribute('data-mode', 'finish-cell');
+                    } else {
+                      editSelectedCell.textContent = 'Edit';
+                      editSelectedCell.setAttribute('data-mode', 'edit');
+                    }
                   }
                   suppressTypeChange = false;
                 }
@@ -293,7 +310,11 @@ module ULOL
                   }
                 });
                 editSelectedCell.addEventListener('click', function () {
-                  sketchup.editSelectedCellSpace();
+                  if (editSelectedCell.getAttribute('data-mode') === 'finish-cell') {
+                    sketchup.finishCellSpaceEditing();
+                  } else {
+                    sketchup.editSelectedCellSpace();
+                  }
                 });
                 document.getElementById('finish').addEventListener('click', function () {
                   sketchup.finishEditing();
@@ -320,7 +341,8 @@ module ULOL
                 name: #{js_string(snapshot[:name])},
                 cellType: #{js_string(snapshot[:cell_type])},
                 categoryCode: #{js_string(snapshot[:category_code])},
-                classification: #{js_string(snapshot[:classification])}
+                classification: #{js_string(snapshot[:classification])},
+                cellGeometryEditing: #{snapshot[:cell_geometry_editing] ? 'true' : 'false'}
               });
             JS
           end

@@ -122,7 +122,7 @@ module ULOL
 
           def selected_cell_space_snapshot
             begin
-              cell_space = selected_cell_space
+              cell_space = selected_cell_space || @editor_session.editing_cell_space
               return nil unless cell_space&.valid?
 
               group = cell_space.sketchup_group
@@ -132,7 +132,8 @@ module ULOL
                 name: group&.name.to_s,
                 cell_type: CellSpaceType.label(cell_space.cell_type),
                 category_code: cell_space.category_code,
-                classification: CellSpaceCategory.selection_value(cell_space.cell_type, cell_space.category_code)
+                classification: CellSpaceCategory.selection_value(cell_space.cell_type, cell_space.category_code),
+                cell_geometry_editing: @editor_session.cell_space_geometry_editing?
               }
             rescue StandardError => e
               puts "[IndoorGML] Selected CellSpace snapshot failed: #{e.class}: #{e.message}"
@@ -178,6 +179,10 @@ module ULOL
               puts "[IndoorGML] Selected CellSpace geometry edit failed: #{e.class}: #{e.message}"
               false
             end
+          end
+
+          def finish_cell_space_geometry_editing
+            @editor_session.finish_cell_space_geometry_editing()
           end
 
           def with_active_path_enforcement_suspended

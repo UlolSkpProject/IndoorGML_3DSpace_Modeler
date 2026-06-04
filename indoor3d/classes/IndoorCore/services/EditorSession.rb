@@ -96,6 +96,24 @@ module ULOL
           end
         end
 
+        def cell_space_geometry_editing?
+          @editing && valid_editing_active_path_target().length > 1
+        end
+
+        def editing_cell_space
+          begin
+            target_path = valid_editing_active_path_target()
+            return nil unless target_path.length > 1
+
+            target_group = target_path[1]
+            @indoor_model.cell_spaces.find do |cell_space|
+              cell_space&.valid? && cell_space.sketchup_group == target_group
+            end
+          rescue StandardError
+            nil
+          end
+        end
+
         def edit_cell_space_geometry(cell_space)
           begin
             return false unless @editing
@@ -111,10 +129,31 @@ module ULOL
             mark_editable_primal_entities()
             apply_lock_policy()
             set_active_path(model, target_path)
+            selection_changed()
             invalidate_view(model)
             true
           rescue StandardError => e
             puts "[IndoorGML] CellSpace geometry edit activation failed: #{e.class}: #{e.message}"
+            false
+          end
+        end
+
+        def finish_cell_space_geometry_editing
+          begin
+            return false unless @editing
+            return false unless cell_space_geometry_editing?
+
+            primal_group = @indoor_model.primal_group
+            return false unless primal_group&.valid?
+
+            model = Sketchup.active_model()
+            @editing_active_path_target = [primal_group]
+            set_active_path(model, [primal_group])
+            selection_changed()
+            invalidate_view(model)
+            true
+          rescue StandardError => e
+            puts "[IndoorGML] CellSpace geometry edit finish failed: #{e.class}: #{e.message}"
             false
           end
         end
@@ -291,6 +330,7 @@ module ULOL
           primal_group = @indoor_model.primal_group
           if current_path == [primal_group] && target_path.length > 1 && target_path.first == primal_group
             @editing_active_path_target = [primal_group]
+            selection_changed()
             return
           end
 
