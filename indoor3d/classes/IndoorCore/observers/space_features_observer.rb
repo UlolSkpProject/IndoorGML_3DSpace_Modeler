@@ -25,21 +25,6 @@ module ULOL
           log_event('onEraseEntity', entity)
           @indoor_model.space_features_erased(entity)
         end
-
-        private
-
-        def log_event(event_name, entity)
-          puts "[IndoorGML] SpaceFeaturesObserver##{event_name} #{entity_summary(entity)}"
-        end
-
-        def entity_summary(entity)
-          begin
-            "class=#{entity.class} name=#{entity_name(entity)}"
-          rescue StandardError
-            "class=#{entity.class}"
-          end
-        end
-
       end
     end
   end

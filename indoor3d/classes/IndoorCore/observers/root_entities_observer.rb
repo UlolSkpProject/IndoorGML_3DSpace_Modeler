@@ -32,22 +32,6 @@ module ULOL
           @indoor_entity_ids.delete(entity_id)
         end
 
-        def log_event(event_name, entity)
-          puts "[IndoorGML] RootEntitiesObserver##{event_name} #{entity_summary(entity)}"
-        end
-
-        def log_removed(event_name, entity_id)
-          puts "[IndoorGML] RootEntitiesObserver##{event_name} entity_id=#{entity_id}"
-        end
-
-        def entity_summary(entity)
-          begin
-            "class=#{entity.class} entity_id=#{entity.entityID} feature=#{indoor_feature(entity)}"
-          rescue StandardError
-            "class=#{entity.class}"
-          end
-        end
-
       end
     end
   end

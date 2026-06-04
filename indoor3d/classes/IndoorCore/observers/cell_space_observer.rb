@@ -37,25 +37,6 @@ module ULOL
           log_event('onEraseEntity', entity)
           @indoor_model.cell_space_erased(entity)
         end
-
-        private
-
-        def log_event(event_name, entity)
-          puts "[IndoorGML] CellSpaceObserver##{event_name} #{entity_summary(entity)}"
-        end
-
-        def entity_summary(entity)
-          begin
-            "class=#{entity.class} name=#{entity_name(entity)}"
-          rescue StandardError
-            "class=#{entity.class}"
-          end
-        end
-
-        def indoor_gml_entity?(entity)
-          indoor_feature(entity).to_s.length.positive?
-        end
-        
       end
     end
   end
