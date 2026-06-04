@@ -32,8 +32,6 @@ module ULOL
             @cell_spaces = @feature_registry.cell_spaces
             @states = @feature_registry.states
             @transitions = @feature_registry.transitions
-            @adjacent_cell_space_pairs = @feature_registry.adjacent_cell_space_pairs
-            @transitions_by_cell_pair = @feature_registry.transitions_by_cell_pair
           end
 
           def reset_runtime_collections
