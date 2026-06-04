@@ -3,8 +3,9 @@
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
-
+      
       class Indoor3DGmlRootEntitiesObserver < Sketchup::EntitiesObserver
+        include ObserverHelpers
         def initialize(indoor_model)
           super()
           @indoor_model = indoor_model
@@ -17,13 +18,6 @@ module ULOL
           track_entity(entity)
           log_event('onElementAdded', entity)
           @indoor_model.root_entity_added(entity)
-        end
-
-        def onElementRemoved(_entities, entity_id)
-          # return unless untrack_entity_id(entity_id)
-
-          # log_removed('onElementRemoved', entity_id)
-          # @indoor_model.root_entity_removed(entity_id)
         end
 
         def track_entity(entity)
@@ -54,19 +48,7 @@ module ULOL
           end
         end
 
-        def indoor_gml_entity?(entity)
-          indoor_feature(entity).to_s.length.positive?
-        end
-
-        def indoor_feature(entity)
-          begin
-            entity.get_attribute(IndoorModel::ATTRIBUTE_DICTIONARY_NAME, 'feature')
-          rescue StandardError
-            nil
-          end
-        end
       end
-
     end
   end
 end
