@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../Gml/gml.rb'
+require_relative '../../utils/html_helpers.rb'
 require_relative '../../utils/geometry.rb'
 require_relative '../../utils/transformation.rb'
 require_relative '../../utils/materials.rb'
