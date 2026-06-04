@@ -70,6 +70,12 @@ module ULOL
             find_cell_space_for_entity(entity)
           end
 
+          def defer_ui_message(message)
+            UI.start_timer(0, false) do
+              UI.messagebox(message)
+            end
+          end
+
           def write_space_features_attributes(group, feature)
             @attribute_serializer.write_space_features(group, feature)
           end
