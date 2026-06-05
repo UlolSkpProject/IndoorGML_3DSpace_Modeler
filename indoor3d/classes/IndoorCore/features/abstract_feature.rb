@@ -1,3 +1,4 @@
+# frozen_string_literal: true
 
 module ULOL
   module Indoor3DGmlModeler
@@ -11,6 +12,6 @@ module ULOL
           @id = rand(36**8).to_s(36)
         end
       end
-    end 
+    end
   end
 end

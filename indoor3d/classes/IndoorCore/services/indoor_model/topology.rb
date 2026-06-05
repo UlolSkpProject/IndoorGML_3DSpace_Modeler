@@ -19,7 +19,7 @@ module ULOL
           private
 
           def connect_states(state1, state2)
-            ensure_space_features_groups
+            ensure_space_features_groups(transparent: true)
 
             cell1 = state1&.duality_cell
             cell2 = state2&.duality_cell

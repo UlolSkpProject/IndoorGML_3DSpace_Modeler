@@ -6,42 +6,46 @@ module ULOL
       class IndoorModel
         module FeatureLifecycle
           def convert_group_to_cell_space(sketchup_group, cell_type = CellSpaceType::GENERAL, category_code = nil)
-            raise ArgumentError, 'Group is already converted to CellSpace' if converted_group?(sketchup_group)
+            with_indoor_model_operation('IndoorGML Convert Group to CellSpace') do
+              raise ArgumentError, 'Group is already converted to CellSpace' if converted_group?(sketchup_group)
 
-            ensure_space_features_groups
-            cell_group = place_cell_group(sketchup_group)
-            recenter_cell_space_geometry(cell_group)
-            cell_space = CellSpace.new(cell_group, cell_type, category_code)
-            name_cell_space_entity(cell_space)
-            apply_cell_space_material(cell_space)
-            state = cell_space.create_duality_state(nil, cell_space_local_origin(cell_space))
+              ensure_space_features_groups
+              cell_group = place_cell_group(sketchup_group)
+              recenter_cell_space_geometry(cell_group)
+              cell_space = CellSpace.new(cell_group, cell_type, category_code)
+              name_cell_space_entity(cell_space)
+              apply_cell_space_material(cell_space)
+              state = cell_space.create_duality_state(nil, cell_space_local_origin(cell_space))
 
-            register_cell_space(cell_space)
-            register_state(state)
-            write_attributes(cell_space)
-            track_cell_space_entity(cell_space.sketchup_group)
-            synchronize_adjacency_and_transitions_for_cell_space(cell_space)
-            apply_indoor_lock_policy()
+              register_cell_space(cell_space)
+              register_state(state)
+              write_attributes(cell_space)
+              track_cell_space_entity(cell_space.sketchup_group)
+              synchronize_adjacency_and_transitions_for_cell_space(cell_space)
+              apply_indoor_lock_policy()
 
-            cell_space
+              cell_space
+            end
           end
 
           def change_cell_space_type(sketchup_group, cell_type, category_code = nil)
-            cell_space = find_cell_space_for_entity(sketchup_group)
-            raise ArgumentError, 'Selected entity is not a registered CellSpace' if cell_space.nil?
-            raise ArgumentError, 'CellSpace is no longer valid' unless cell_space.valid?
+            with_indoor_model_operation('IndoorGML Change CellSpace Type') do
+              cell_space = find_cell_space_for_entity(sketchup_group)
+              raise ArgumentError, 'Selected entity is not a registered CellSpace' if cell_space.nil?
+              raise ArgumentError, 'CellSpace is no longer valid' unless cell_space.valid?
 
-            sync do
-              cell_space.cell_type = cell_type
-              cell_space.set_category(category_code)
-              name_cell_space_entity(cell_space)
-              apply_cell_space_material(cell_space)
-              write_cell_space_attributes(cell_space)
-              synchronize_adjacency_and_transitions_for_cell_space(cell_space)
-              apply_indoor_lock_policy()
+              sync do
+                cell_space.cell_type = cell_type
+                cell_space.set_category(category_code)
+                name_cell_space_entity(cell_space)
+                apply_cell_space_material(cell_space)
+                write_cell_space_attributes(cell_space)
+                synchronize_adjacency_and_transitions_for_cell_space(cell_space)
+                apply_indoor_lock_policy()
+              end
+
+              cell_space
             end
-
-            cell_space
           end
 
           def cell_space_changed(entity)
@@ -75,28 +79,33 @@ module ULOL
             cell_space = refresh_and_find_cell_space(entity) if stale_cell_space_runtime?(cell_space, entity)
             return if cell_space.nil? || !cell_space.valid?
 
-            sync do
-              recenter_cell_space_origin(cell_space)
-              name_cell_space_entity(cell_space)
-              apply_cell_space_material(cell_space)
-              state = cell_space.duality_state
-              unless state&.valid?
-                cell_space = refresh_and_find_cell_space(entity)
-                state = cell_space&.duality_state
+            with_transparent_cell_space_operation('IndoorGML CellSpace Geometry Close') do
+              sync do
+                recenter_cell_space_origin(cell_space)
+                name_cell_space_entity(cell_space)
+                apply_cell_space_material(cell_space)
+                state = cell_space.duality_state
+                unless state&.valid?
+                  cell_space = refresh_and_find_cell_space(entity)
+                  state = cell_space&.duality_state
+                end
+                if state&.valid?
+                  local_position = cell_space_local_origin(cell_space)
+                  update_state_position(state, local_position)
+                end
+                synchronize_adjacency_and_transitions_for_cell_space(cell_space)
               end
-              if state&.valid?
-                local_position = cell_space_local_origin(cell_space)
-                update_state_position(state, local_position)
-              end
-              synchronize_adjacency_and_transitions_for_cell_space(cell_space)
             end
+            remember_cell_space_change_snapshot(cell_space.sketchup_group)
           end
 
           def cell_space_erased(entity)
             return if @erasing
 
             cell_space = find_cell_space_for_entity(entity)
-            erase_cell_space(cell_space, erase_sketchup_group: false)
+            with_transparent_cell_space_operation('IndoorGML CellSpace Erased') do
+              erase_cell_space(cell_space, erase_sketchup_group: false)
+            end
           end
 
           def erase_cell_space(cell_space, erase_sketchup_group: true)
@@ -298,14 +307,7 @@ module ULOL
           end
 
           def with_transparent_cell_space_operation(name)
-            model = Sketchup.active_model
-            operation_started = false
-            begin
-              operation_started = model.start_operation(name, true, false, true) if model
-              yield
-            ensure
-              model.commit_operation if operation_started
-            end
+            with_indoor_model_operation(name, transparent: true) { yield }
           end
 
           def remember_cell_space_change_snapshot(entity, snapshot = nil)

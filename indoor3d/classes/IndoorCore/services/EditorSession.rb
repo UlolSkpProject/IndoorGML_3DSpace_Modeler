@@ -162,6 +162,7 @@ module ULOL
           begin
             return true unless lockable?(entity)
             return true if editable_entity?(entity)
+            return true if entity.respond_to?(:locked?) && entity.locked?
 
             entity.locked = true
             true
@@ -173,6 +174,7 @@ module ULOL
         def unlock_entity(entity)
           begin
             return true unless lockable?(entity)
+            return true if entity.respond_to?(:locked?) && !entity.locked?
 
             entity.locked = false
             true
@@ -184,10 +186,13 @@ module ULOL
         def with_unlocked(entity)
           begin
             entities = temporary_unlock_entities(entity)
-            entities.each { |target| unlock_entity(target) }
+            lock_states = entities.to_h do |target|
+              [target, target.respond_to?(:locked?) && target.locked?]
+            end
+            entities.each { |target| unlock_entity(target) if lock_states[target] }
             yield
           ensure
-            entities&.reverse_each { |target| lock_entity(target) }
+            entities&.reverse_each { |target| lock_entity(target) if lock_states&.[](target) }
           end
         end
 
@@ -319,9 +324,20 @@ module ULOL
 
           # cell 편집 중 primal_group으로 돌아오는 경우 → 허용
           primal_group = @indoor_model.primal_group
+          if editing_cell_space_path?(current_path, primal_group)
+            @editing_active_path_target = current_path
+            mark_editable_primal_entities()
+            apply_lock_policy()
+            selection_changed()
+            invalidate_view(model)
+            return
+          end
+
           if current_path == [primal_group] && target_path.length > 1 && target_path.first == primal_group
             @editing_active_path_target = [primal_group]
+            apply_lock_policy()
             selection_changed()
+            invalidate_view(model)
             return
           end
 
@@ -341,6 +357,18 @@ module ULOL
           return false unless active_path && active_path.length == target_path.length
 
           active_path.each_with_index.all? { |entity, index| entity == target_path[index] }
+        end
+
+        def editing_cell_space_path?(path, primal_group)
+          return false unless path&.length == 2
+          return false unless path.first == primal_group
+
+          cell_group = path.last
+          @indoor_model.cell_spaces.any? do |cell_space|
+            cell_space&.valid? && cell_space.sketchup_group == cell_group
+          end
+        rescue StandardError
+          false
         end
 
         def set_active_path(model, target_path)

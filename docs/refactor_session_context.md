@@ -96,6 +96,27 @@ Commit: `ee80a92 Refactor step 6 guard attribute writes`
 
 These were observed during refactor testing and recorded in `docs/RefactorTODO.md` under the final critical bug section.
 
+### CellSpace face material reapply and Undo stack
+
+- Observed while editing CellSpace geometry in EditMode.
+- Scenario:
+  1. Enter CellSpace edit context.
+  2. Pull one face.
+  3. Finish/close the CellSpace edit context so active_path returns to the primal group.
+  4. Undo sequence can become:
+     - Undo material reapply / close-time correction.
+     - Undo the face pull.
+     - Undo active_path or overlay-visible edit-context state.
+- Current code intentionally reapplies CellSpace PNG face material on `CellSpaceObserver#onClose`.
+- That reapply is wrapped in the transparent `IndoorGML CellSpace Geometry Close` operation.
+- However, `onClose` fires after the modeling operation and around active_path closing. Because SketchUp records active_path changes in the Undo stack, the transparent material operation may attach to the close/edit-context history instead of the original face-pull operation.
+- This means transparent operation alone does not guarantee that close-time material correction disappears into the face-pull Undo item.
+- If we need material correction to belong more naturally to the geometry edit itself, `InstanceObserver#onClose` is probably too late.
+- Future direction:
+  - Investigate an `EntitiesObserver` on the CellSpace group's definition/entities to detect added/changed faces closer to the actual geometry operation.
+  - Reapply or queue face material correction from that entity-level change path instead of only from `InstanceObserver#onClose`.
+  - Keep `onClose` as a final safety pass if needed, but expect it may affect Undo stack shape.
+
 ### EditMode CellSpace copy/paste duplicates identity
 
 - In EditMode, copying and pasting a CellSpace can duplicate IndoorGML attributes.

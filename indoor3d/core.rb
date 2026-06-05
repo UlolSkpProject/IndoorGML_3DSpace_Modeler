@@ -6,7 +6,6 @@ module ULOL
   include Geom
   module Indoor3DGmlModeler
 
-    load File.join(__dir__, 'classes', 'Gml', 'gml.rb')
     load File.join(__dir__, 'classes', 'IndoorCore', 'IndoorCore.rb')
 
     def self.attach_model_observer

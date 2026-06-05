@@ -7,7 +7,13 @@ module ULOL
         module EntityRelocation
           private
 
-          def relocate_indoor_entity(entity, target_entities, target_root_group = nil)
+          def relocate_indoor_entity(entity, target_entities, target_root_group = nil, transparent: false)
+            with_indoor_model_operation('IndoorGML Relocate Entity', transparent: transparent) do
+              relocate_indoor_entity_without_operation(entity, target_entities, target_root_group)
+            end
+          end
+
+          def relocate_indoor_entity_without_operation(entity, target_entities, target_root_group)
             begin
               return unless entity&.valid?
               return unless target_entities

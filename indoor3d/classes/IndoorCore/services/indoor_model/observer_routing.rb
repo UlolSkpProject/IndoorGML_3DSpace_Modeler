@@ -44,7 +44,9 @@ module ULOL
             remember_space_features_change_snapshot(entity)
             true
           ensure
-            lock_indoor_entity(entity) if entity&.valid?
+            with_indoor_model_operation('IndoorGML SpaceFeatures Lock', transparent: true) do
+              apply_indoor_lock_policy if entity&.valid?
+            end
           end
 
           def handle_space_features_etc_changed(entity)
@@ -52,18 +54,13 @@ module ULOL
             remember_space_features_change_snapshot(entity)
             false
           ensure
-            lock_indoor_entity(entity) if entity&.valid?
+            with_indoor_model_operation('IndoorGML SpaceFeatures Lock', transparent: true) do
+              apply_indoor_lock_policy if entity&.valid?
+            end
           end
 
           def with_transparent_space_features_operation(name)
-            model = Sketchup.active_model
-            operation_started = false
-            begin
-              operation_started = model.start_operation(name, true, false, true) if model
-              yield
-            ensure
-              model.commit_operation if operation_started
-            end
+            with_indoor_model_operation(name, transparent: true) { yield }
           end
 
           def remember_space_features_change_snapshot(entity, snapshot = nil)
@@ -132,16 +129,20 @@ module ULOL
 
             feature = indoor_feature(entity)
             if space_features_feature?(feature)
-              register_space_features_entity(entity, feature)
+              with_indoor_model_operation('IndoorGML SpaceFeatures Restore', transparent: true) do
+                register_space_features_entity(entity, feature)
+              end
               return
             end
 
-            ensure_space_features_groups
+            ensure_space_features_groups(transparent: true)
             case feature
             when 'CellSpace'
-              relocate_indoor_entity(entity, @primal_group.entities, @primal_group)
+              relocate_indoor_entity(entity, @primal_group.entities, @primal_group, transparent: true)
             else
-              lock_indoor_entity(entity)
+              with_indoor_model_operation('IndoorGML Lock Indoor Entity', transparent: true) do
+                lock_indoor_entity(entity)
+              end
             end
           end
 
@@ -158,26 +159,28 @@ module ULOL
               return
             end
 
-            ensure_space_features_groups
+            ensure_space_features_groups(transparent: true)
             if indoor_feature(entity) == 'CellSpace'
-              if duplicate_cell_space_identity?(entity)
-                return if make_cell_space_copy_independent(entity)
+              with_indoor_model_operation('IndoorGML Primal CellSpace Added', transparent: true) do
+                if duplicate_cell_space_identity?(entity)
+                  next if make_cell_space_copy_independent(entity)
 
-                puts '[IndoorGML] CellSpace copy independence failed. Falling back to normal add handling.'
-              end
+                  puts '[IndoorGML] CellSpace copy independence failed. Falling back to normal add handling.'
+                end
 
-              cell_space = find_cell_space_for_entity(entity)
-              attach_cell_space_observer(entity)
-              if stale_cell_space_runtime?(cell_space, entity)
-                puts '[IndoorGML] CellSpace runtime stale. Refreshing runtime data.'
-                refresh_runtime_data
-              elsif cell_space
-                synchronize_adjacency_and_transitions_for_cell_space(cell_space)
-              else
-                puts '[IndoorGML] CellSpace runtime data missing. Refresh is required.'
+                cell_space = find_cell_space_for_entity(entity)
+                attach_cell_space_observer(entity)
+                if stale_cell_space_runtime?(cell_space, entity)
+                  puts '[IndoorGML] CellSpace runtime stale. Refreshing runtime data.'
+                  refresh_runtime_data
+                elsif cell_space
+                  synchronize_adjacency_and_transitions_for_cell_space(cell_space)
+                else
+                  puts '[IndoorGML] CellSpace runtime data missing. Refresh is required.'
+                end
               end
             else
-              relocate_indoor_entity(entity, Sketchup.active_model.entities)
+              relocate_indoor_entity(entity, Sketchup.active_model.entities, transparent: true)
             end
           end
 
@@ -186,7 +189,9 @@ module ULOL
 
             cell_space = @feature_registry.find_cell_space_by_removed_entity_id(entity_id)
             puts "[IndoorGML] Primal entity removed: entity_id=#{entity_id} cell_space=#{cell_space&.id || 'missing'}"
-            erase_cell_space(cell_space, erase_sketchup_group: false) if cell_space
+            with_indoor_model_operation('IndoorGML Primal CellSpace Removed', transparent: true) do
+              erase_cell_space(cell_space, erase_sketchup_group: false) if cell_space
+            end
           end
 
           def space_features_erased(entity)

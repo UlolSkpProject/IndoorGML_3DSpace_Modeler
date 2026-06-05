@@ -7,20 +7,22 @@ module ULOL
         module SceneGroups
           private
 
-          def ensure_space_features_groups
-            Utils::Materials.ensure_all()
+          def ensure_space_features_groups(transparent: false)
+            with_indoor_model_operation('IndoorGML Ensure SpaceFeatures Groups', transparent: transparent) do
+              Utils::Materials.ensure_all()
 
-            entities = Sketchup.active_model.entities
-            @primal_group = find_group(entities, PRIMAL_GROUP_NAME)
-            unless @primal_group&.valid?
-              @primal_group = entities.add_group
-              @primal_group.name = PRIMAL_GROUP_NAME
+              entities = Sketchup.active_model.entities
+              @primal_group = find_group(entities, PRIMAL_GROUP_NAME)
+              unless @primal_group&.valid?
+                @primal_group = entities.add_group
+                @primal_group.name = PRIMAL_GROUP_NAME
+              end
+              attach_space_features_observer(@primal_group, PRIMAL_GROUP_NAME)
+              write_space_features_attributes(@primal_group, PRIMAL_GROUP_FEATURE)
+              ensure_space_features_origin_point(@primal_group)
+              attach_entities_observers
+              lock_space_features_groups
             end
-            attach_space_features_observer(@primal_group, PRIMAL_GROUP_NAME)
-            write_space_features_attributes(@primal_group, PRIMAL_GROUP_FEATURE)
-            ensure_space_features_origin_point(@primal_group)
-            attach_entities_observers
-            lock_space_features_groups
           end
 
           def find_existing_space_features_groups
@@ -84,18 +86,20 @@ module ULOL
           end
 
           def recenter_cell_space_geometry(cell_space_entity)
-            center = cell_space_entity.definition.bounds.center
-            puts "[IndoorGML] recenter_cell_space_geometry center=#{center} distance=#{center.distance(ORIGIN)}"
-            return if center.distance(ORIGIN) <= 0.001
+            with_indoor_model_operation('IndoorGML Recenter CellSpace Geometry', transparent: true) do
+              center = cell_space_entity.definition.bounds.center
+              puts "[IndoorGML] recenter_cell_space_geometry center=#{center} distance=#{center.distance(ORIGIN)}"
+              next if center.distance(ORIGIN) <= 0.001
 
-            set_group_transformation(
-              cell_space_entity,
-              cell_space_entity.transformation * Geom::Transformation.translation(center)
-            )
-            cell_space_entity.definition.entities.transform_entities(
-              Geom::Transformation.translation(center.vector_to(ORIGIN)),
-              cell_space_entity.definition.entities.to_a
-            )
+              set_group_transformation(
+                cell_space_entity,
+                cell_space_entity.transformation * Geom::Transformation.translation(center)
+              )
+              cell_space_entity.definition.entities.transform_entities(
+                Geom::Transformation.translation(center.vector_to(ORIGIN)),
+                cell_space_entity.definition.entities.to_a
+              )
+            end
           end
 
           def recenter_cell_space_origin(cell_space)
@@ -174,7 +178,7 @@ module ULOL
           end
 
           def lock_space_features_groups
-            lock_indoor_entity(@primal_group)
+            editing? ? unlock_indoor_entity(@primal_group) : lock_indoor_entity(@primal_group)
           end
 
           def enforce_space_features_constraints
