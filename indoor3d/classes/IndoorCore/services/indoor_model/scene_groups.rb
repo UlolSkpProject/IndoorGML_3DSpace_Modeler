@@ -180,8 +180,7 @@ module ULOL
           end
 
           def ordered_space_features_groups
-            cell_groups = @cell_spaces.filter_map { |cs| cs.sketchup_group if cs&.valid? }
-            [@primal_group, *cell_groups].compact
+            [@primal_group].compact
           end
 
           def set_group_transformation(group, transformation)
