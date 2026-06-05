@@ -31,31 +31,7 @@ module ULOL
             next unless group&.valid?
 
             restore_name(group)
-            next if restore_scale(group)
-
-            last_transform = @last_transforms[group.persistent_id]
-            next if last_transform && Utils::Transformation.same?(group.transformation, last_transform)
-
-            synchronize_from(group, groups)
-          end
-        end
-
-        def synchronize_from(source_group, groups)
-          return unless source_group&.valid?
-          return if Utils::Transformation.scaled?(source_group.transformation)
-
-          groups.each do |group|
-            next unless group&.valid?
-            next if group == source_group
-            next if Utils::Transformation.same?(group.transformation, source_group.transformation)
-
-            set_group_transformation(group, source_group.transformation)
-          end
-
-          groups.each do |group|
-            next unless group&.valid?
-
-            @last_transforms[group.persistent_id] = group.transformation
+            restore_scale(group)
           end
         end
 

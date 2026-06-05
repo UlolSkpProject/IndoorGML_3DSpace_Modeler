@@ -5,14 +5,14 @@ module ULOL
     module Utils
       module Materials
 
-        DEFINITIONS = {
-          state: ['Indoor3DGml_State', [0, 0, 255], 1.0],                           # DualSpace Node
-          transition: ['Indoor3DGml_Transition', [0, 0, 255], 1.0],                 # DualSpace Link
-          general_space: ['Indoor3DGml_GeneralSpace', [255, 0, 0], 0.3],
-          transition_space: ['Indoor3DGml_TransitionSpace', [0, 128, 0], 0.8],
-          connection_space: ['Indoor3DGml_ConnectionSpace', [145, 95, 210], 0.3],
-          anchor_space: ['Indoor3DGml_AnchorSpace', [0, 200, 180], 0.8]
-        }.freeze unless const_defined?(:DEFINITIONS, false)
+        LEGACY_MATERIAL_NAMES = [
+          'Indoor3DGml_State',
+          'Indoor3DGml_Transition',
+          'Indoor3DGml_GeneralSpace',
+          'Indoor3DGml_TransitionSpace',
+          'Indoor3DGml_ConnectionSpace',
+          'Indoor3DGml_AnchorSpace'
+        ].freeze unless const_defined?(:LEGACY_MATERIAL_NAMES, false)
 
         TEXTURE_DEFINITIONS = {
           'GeneralSpace|Room' => ['Indoor3DGml_GeneralSpace_Text', 'cellspace_room.png', 1.0],
@@ -23,19 +23,6 @@ module ULOL
           'AnchorSpace|Anchor' => ['Indoor3DGml_AnchorSpace_Text', 'cellspace_anchor.png', 1.0]
         }.freeze unless const_defined?(:TEXTURE_DEFINITIONS, false)
 
-        def self.state
-          fetch(:state)
-        end
-
-        def self.transition
-          fetch(:transition)
-        end
-        
-        # text Material이 없는 경우를 위한 기본 값.
-        def self.cell_space(cell_type)
-          fetch(cell_space_type_keys()[cell_type] || :general_space)
-        end
-
         def self.cell_space_text(cell_type, category_code)
           key = "#{::ULOL::Indoor3DGmlModeler::IndoorCore::CellSpaceType.label(cell_type)}|#{category_code}"
           return nil unless TEXTURE_DEFINITIONS.key?(key)
@@ -44,43 +31,63 @@ module ULOL
         end
 
         def self.ensure_all
-          DEFINITIONS.each_key { |key| fetch(key) }
+          remove_legacy_materials
           TEXTURE_DEFINITIONS.each_key { |key| fetch_textured(key) }
         end
 
-        def self.fetch(key)
-          name, rgb, alpha = DEFINITIONS.fetch(key)
-          material = Sketchup.active_model.materials[name] || Sketchup.active_model.materials.add(name)
-          material.color = Sketchup::Color.new(*rgb)
-          material.alpha = alpha if alpha && material.respond_to?(:alpha=)
-          material
-        end
-        private_class_method :fetch
-
         def self.fetch_textured(key)
           name, texture_name, alpha = TEXTURE_DEFINITIONS.fetch(key)
-          material = Sketchup.active_model.materials[name] || Sketchup.active_model.materials.add(name)
+          material = find_material(name) || Sketchup.active_model.materials.add(name)
           material.texture = texture_path(texture_name)
           material.alpha = alpha if alpha && material.respond_to?(:alpha=)
           material
         end
         private_class_method :fetch_textured
 
+        def self.find_material(name)
+          Sketchup.active_model.materials.find do |material|
+            material_names(material).include?(name)
+          end
+        end
+        private_class_method :find_material
+
+        def self.remove_legacy_materials
+          materials = Sketchup.active_model.materials
+          return unless materials.respond_to?(:remove)
+
+          materials.to_a.each do |material|
+            next unless legacy_material?(material)
+
+            begin
+              materials.remove(material)
+            rescue StandardError => e
+              puts "[IndoorGML] Legacy material removal failed: #{material_names(material).first} #{e.class}: #{e.message}"
+            end
+          end
+        end
+        private_class_method :remove_legacy_materials
+
+        def self.legacy_material?(material)
+          material_names(material).any? do |name|
+            LEGACY_MATERIAL_NAMES.any? do |base_name|
+              name.match?(/\A#{Regexp.escape(base_name)}(?:[\s_#-]?\d+)?\z/)
+            end
+          end
+        end
+        private_class_method :legacy_material?
+
+        def self.material_names(material)
+          [
+            material.respond_to?(:name) ? material.name.to_s : nil,
+            material.respond_to?(:display_name) ? material.display_name.to_s : nil
+          ].compact.uniq
+        end
+        private_class_method :material_names
+
         def self.texture_path(texture_name)
           File.expand_path("../assets/textures/#{texture_name}", __dir__)
         end
         private_class_method :texture_path
-
-        def self.cell_space_type_keys
-          cell_space_type = ::ULOL::Indoor3DGmlModeler::IndoorCore::CellSpaceType
-          {
-            cell_space_type::GENERAL    => :general_space,
-            cell_space_type::TRANSITION => :transition_space,
-            cell_space_type::CONNECTION => :connection_space,
-            cell_space_type::ANCHOR     => :anchor_space
-          }
-        end
-        private_class_method :cell_space_type_keys
 
       end
     end
