@@ -173,7 +173,6 @@ module ULOL
                 refresh_runtime_data
               elsif cell_space
                 synchronize_adjacency_and_transitions_for_cell_space(cell_space)
-                lock_indoor_entity(entity)
               else
                 puts '[IndoorGML] CellSpace runtime data missing. Refresh is required.'
               end
