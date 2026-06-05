@@ -6,8 +6,8 @@ module ULOL
       class IndoorModel
         module RuntimeSupport
           def refresh_runtime_data
-            begin
-              return true if @refreshing_runtime
+            with_indoor_model_operation('IndoorGML Refresh Runtime Data', transparent: true) do
+              next true if @refreshing_runtime
 
               @refreshing_runtime = true
               sync do
@@ -21,12 +21,37 @@ module ULOL
               apply_indoor_lock_policy()
               puts "[IndoorGML] Runtime refreshed: cells=#{@cell_spaces.length}, states=#{@states.length}, transitions=#{@transitions.length}"
               true
-            ensure
-              @refreshing_runtime = false
             end
+          ensure
+            @refreshing_runtime = false
           end
 
           private
+
+          def with_indoor_model_operation(name, transparent: false)
+            return yield if @indoor_operation_depth.to_i.positive?
+
+            model = Sketchup.active_model
+            return yield unless model
+            if model.respond_to?(:active_operation_name) && model.active_operation_name.to_s.length.positive?
+              return yield
+            end
+
+            operation_started = false
+            @indoor_operation_depth = @indoor_operation_depth.to_i + 1
+            begin
+              operation_started = model.start_operation(name, true, false, transparent)
+              result = yield
+              model.commit_operation if operation_started
+              operation_started = false
+              result
+            rescue StandardError
+              model.abort_operation if operation_started
+              raise
+            ensure
+              @indoor_operation_depth = [@indoor_operation_depth.to_i - 1, 0].max
+            end
+          end
 
           def bind_registry_collections
             @cell_spaces = @feature_registry.cell_spaces
