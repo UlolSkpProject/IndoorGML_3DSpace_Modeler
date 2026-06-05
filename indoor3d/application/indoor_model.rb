@@ -10,13 +10,13 @@ module ULOL
         ATTRIBUTE_DICTIONARY_NAME = 'IndoorGml'
         INDOOR_GML_VERSION = '1.0'
 
-        require_relative 'services/indoor_model/runtime_support.rb'
-        require_relative 'services/indoor_model/scene_groups.rb'
-        require_relative 'services/indoor_model/feature_lifecycle.rb'
-        require_relative 'services/indoor_model/topology.rb'
-        require_relative 'services/indoor_model/observer_routing.rb'
-        require_relative 'services/indoor_model/entity_relocation.rb'
-        require_relative 'services/indoor_model/editor_control.rb'
+        require_relative 'indoor_model/runtime_support.rb'
+        require_relative 'indoor_model/scene_groups.rb'
+        require_relative 'indoor_model/feature_lifecycle.rb'
+        require_relative 'indoor_model/topology.rb'
+        require_relative 'indoor_model/observer_routing.rb'
+        require_relative 'indoor_model/entity_relocation.rb'
+        require_relative 'indoor_model/editor_control.rb'
 
         include RuntimeSupport
         include SceneGroups
