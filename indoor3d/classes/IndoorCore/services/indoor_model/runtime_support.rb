@@ -37,6 +37,7 @@ module ULOL
           def reset_runtime_collections
             @feature_registry.reset!
             @cell_space_change_snapshots.clear
+            @space_features_change_snapshots.clear
             bind_registry_collections
           end
 
