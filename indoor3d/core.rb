@@ -221,10 +221,10 @@ module ULOL
 
     def self.finish_indoor_gml_editing
       begin
-        if IndoorCore::IndoorModel.current.finish_editing()
-          UI.messagebox('IndoorGML editing finished.')
-        else
+        unless IndoorCore::IndoorModel.current.finish_editing()
           UI.messagebox('IndoorGML editing is not active.')
+        # else
+        #   UI.messagebox('IndoorGML editing finished.')
         end
       rescue StandardError => e
         UI.messagebox("IndoorGML editing finish failed:\n#{e.message}")
