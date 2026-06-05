@@ -57,7 +57,7 @@ module ULOL
         def restore_state(cell_space)
           State.restore(
             cell_space,
-            restored_state_position(cell_space),
+            current_state_position(cell_space),
             id: @serializer.attribute(cell_space.sketchup_group, 'duality_state_id'),
             name: nil
           )
@@ -66,14 +66,8 @@ module ULOL
           nil
         end
 
-        def restored_state_position(cell_space)
-          entity = cell_space.sketchup_group
-          x = @serializer.attribute(entity, 'state_position_x')
-          y = @serializer.attribute(entity, 'state_position_y')
-          z = @serializer.attribute(entity, 'state_position_z')
-          return Geom::Point3d.new(x.to_f, y.to_f, z.to_f) unless x.nil? || y.nil? || z.nil?
-
-          Utils::Transformation.entity_origin_in_root_local(entity, nil)
+        def current_state_position(cell_space)
+          Utils::Transformation.entity_origin_in_root_local(cell_space.sketchup_group, nil)
         end
 
         def indoor_children(entities, feature)

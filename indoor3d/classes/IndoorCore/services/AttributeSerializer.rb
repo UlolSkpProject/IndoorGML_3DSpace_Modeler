@@ -50,6 +50,7 @@ module ULOL
           return false unless group
 
           write_attributes(group) do
+            remove_state_position_attributes(group)
             group.set_attribute(@dictionary_name, 'feature', 'CellSpace')
             group.set_attribute(@dictionary_name, 'id', cell_space.id)
             group.set_attribute(@dictionary_name, 'name', group.name)
@@ -60,9 +61,6 @@ module ULOL
             group.set_attribute(@dictionary_name, 'category_standard', cell_space.category_standard)
             group.set_attribute(@dictionary_name, 'duality_state_id', cell_space.duality_state.id) if cell_space.duality_state
             if cell_space.duality_state
-              group.set_attribute(@dictionary_name, 'state_position_x', cell_space.duality_state.position.x.to_f)
-              group.set_attribute(@dictionary_name, 'state_position_y', cell_space.duality_state.position.y.to_f)
-              group.set_attribute(@dictionary_name, 'state_position_z', cell_space.duality_state.position.z.to_f)
               group.set_attribute(@dictionary_name, 'state_transition_ids', cell_space.duality_state.transition_ids)
             end
             group.set_attribute(@dictionary_name, 'indoor_gml_version', @indoor_gml_version)
@@ -114,6 +112,12 @@ module ULOL
         rescue StandardError => e
           puts "[IndoorGML] Attribute write failed: #{e.class}: #{e.message}"
           false
+        end
+
+        def remove_state_position_attributes(entity)
+          %w[state_position_x state_position_y state_position_z].each do |key|
+            entity.delete_attribute(@dictionary_name, key) if entity.respond_to?(:delete_attribute)
+          end
         end
       end
 
