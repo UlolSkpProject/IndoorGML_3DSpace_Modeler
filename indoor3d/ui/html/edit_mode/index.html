@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="header">EDIT MODE - PRIMAL SPACE</div>
+  <div class="panel">
+    <div class="row"><span>Selected</span><span id="selectedFeature">None</span></div>
+    <div class="row"><span>ID</span><span id="selectedId">-</span></div>
+    <div class="row"><span>Name</span><span id="selectedName">-</span></div>
+    <select id="selectedClassification" disabled></select>
+  </div>
+  <label>
+    <span>Overlay radius range</span>
+    <output id="overlayRadiusValue"></output>
+  </label>
+  <div class="range-row">
+    <input id="overlayMinRadius" type="range" min="1" max="15" step="1">
+    <input id="overlayMaxRadius" type="range" min="7" max="25" step="1">
+  </div>
+  <button id="finish" type="button">Finish</button>
+  <button id="clearAll" class="danger" type="button">Clear All IndoorGML Elements</button>
+  <script src="app.js"></script>
+</body>
+</html>

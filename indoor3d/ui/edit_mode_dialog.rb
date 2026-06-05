@@ -20,7 +20,7 @@ module ULOL
         end
 
         def show
-          dialog.set_html(html)
+          dialog.set_file(File.join(__dir__, 'html', 'edit_mode', 'index.html'))
           dialog.show
         end
 
@@ -61,6 +61,9 @@ module ULOL
           )
           dialog.add_action_callback('fitContentHeight') do |_context, content_height|
             fit_content_height(content_height)
+          end
+          dialog.add_action_callback('domReady') do |_context|
+            dialog.execute_script(init_script)
           end
           dialog.add_action_callback('setOverlayMinRadius') do |_context, radius_pixels|
             UI.start_timer(0, false) do
@@ -110,190 +113,14 @@ module ULOL
           end
         end
 
-        def html
+        def init_script
           overlay_min_radius = @indoor_model.overlay_min_radius_pixels.round
           overlay_max_radius = @indoor_model.overlay_max_radius_pixels.round
-          classification_options = CellSpaceCategory.selection_options.map do |option|
-            "<option value=\"#{escape_html(option[:value])}\">#{escape_html(option[:label])}</option>"
-          end.join
-          <<~HTML
-            <!doctype html>
-            <html>
-            <head>
-              <meta charset="utf-8">
-              <style>
-                * { box-sizing: border-box; }
-                body {
-                  margin: 0;
-                  padding: 16px;
-                  font-family: Arial, sans-serif;
-                  color: #18212b;
-                  background: #f6f8fb;
-                }
-                .header {
-                  font-size: 13px;
-                  font-weight: 700;
-                  letter-spacing: .04em;
-                  color: #145291;
-                  margin-bottom: 14px;
-                }
-                label {
-                  display: flex;
-                  justify-content: space-between;
-                  align-items: baseline;
-                  font-size: 12px;
-                  font-weight: 700;
-                  margin-bottom: 8px;
-                }
-                output {
-                  font-weight: 400;
-                  color: #4a5867;
-                }
-                .panel {
-                  border-top: 1px solid #d8e0e8;
-                  border-bottom: 1px solid #d8e0e8;
-                  padding: 12px 0;
-                  margin: 0 0 14px;
-                }
-                .row {
-                  display: flex;
-                  justify-content: space-between;
-                  gap: 12px;
-                  font-size: 12px;
-                  margin-bottom: 6px;
-                }
-                .row span:first-child { color: #667484; }
-                .row span:last-child {
-                  min-width: 0;
-                  overflow: hidden;
-                  text-overflow: ellipsis;
-                  white-space: nowrap;
-                }
-                select {
-                  width: 100%;
-                  height: 30px;
-                  margin-top: 6px;
-                }
-                input[type="range"] {
-                  width: 100%;
-                  margin: 0 0 14px;
-                }
-                .range-row {
-                  display: grid;
-                  grid-template-columns: 1fr 1fr;
-                  gap: 8px;
-                  margin-bottom: 14px;
-                }
-                .range-row input[type="range"] { margin-bottom: 0; }
-                button {
-                  width: 100%;
-                  height: 34px;
-                  margin-top: 8px;
-                  border: 0;
-                  border-radius: 6px;
-                  background: #145291;
-                  color: white;
-                  font-weight: 700;
-                  cursor: pointer;
-                }
-                button:hover { background: #0f4275; }
-                button.danger { background: #a43838; }
-                button.danger:hover { background: #842d2d; }
-              </style>
-            </head>
-            <body>
-              <div class="header">EDIT MODE - PRIMAL SPACE</div>
-              <div class="panel">
-                <div class="row"><span>Selected</span><span id="selectedFeature">None</span></div>
-                <div class="row"><span>ID</span><span id="selectedId">-</span></div>
-                <div class="row"><span>Name</span><span id="selectedName">-</span></div>
-                <select id="selectedClassification" disabled>
-                  #{classification_options}
-                </select>
-              </div>
-              <label>
-                <span>Overlay radius range</span>
-                <output id="overlayRadiusValue">#{overlay_min_radius}-#{overlay_max_radius} px</output>
-              </label>
-              <div class="range-row">
-                <input id="overlayMinRadius" type="range" min="1" max="15" step="1" value="#{overlay_min_radius}">
-                <input id="overlayMaxRadius" type="range" min="7" max="25" step="1" value="#{overlay_max_radius}">
-              </div>
-              <button id="finish" type="button">Finish</button>
-              <button id="clearAll" class="danger" type="button">Clear All IndoorGML Elements</button>
-              <script>
-                var overlayMinRadius = document.getElementById('overlayMinRadius');
-                var overlayMaxRadius = document.getElementById('overlayMaxRadius');
-                var overlayRadiusValue = document.getElementById('overlayRadiusValue');
-                var selectedFeature = document.getElementById('selectedFeature');
-                var selectedId = document.getElementById('selectedId');
-                var selectedName = document.getElementById('selectedName');
-                var selectedClassification = document.getElementById('selectedClassification');
-                var suppressTypeChange = false;
+          options = CellSpaceCategory.selection_options.map do |option|
+            "{value: #{js_string(option[:value])}, label: #{js_string(option[:label])}}"
+          end.join(', ')
 
-                function updateSelectedCellSpace(snapshot) {
-                  suppressTypeChange = true;
-                  if (!snapshot || !snapshot.id) {
-                    selectedFeature.textContent = 'None';
-                    selectedId.textContent = '-';
-                    selectedName.textContent = '-';
-                    selectedClassification.disabled = true;
-                    selectedClassification.value = 'GeneralSpace|Room';
-                  } else {
-                    selectedFeature.textContent = snapshot.feature || 'CellSpace';
-                    selectedId.textContent = snapshot.id || '-';
-                    selectedName.textContent = snapshot.name || '-';
-                    selectedClassification.disabled = false;
-                    selectedClassification.value = snapshot.classification || 'GeneralSpace|Room';
-                  }
-                  suppressTypeChange = false;
-                }
-
-                function normalizedOverlayRadiusRange() {
-                  var minRadius = Number(overlayMinRadius.value);
-                  var maxRadius = Number(overlayMaxRadius.value);
-                  overlayRadiusValue.textContent = `${minRadius}-${maxRadius} px`;
-                  return [minRadius, maxRadius];
-                }
-
-                function previewOverlayRadiusRange() {
-                  normalizedOverlayRadiusRange();
-                }
-
-                function commitOverlayRadiusRange() {
-                  var range = normalizedOverlayRadiusRange();
-                  sketchup.setOverlayRadiusRange(range[0], range[1]);
-                }
-
-                function fitDialogToContent() {
-                  var contentHeight = Math.max(
-                    document.body.scrollHeight,
-                    document.documentElement.scrollHeight
-                  );
-                  sketchup.fitContentHeight(contentHeight);
-                }
-
-                overlayMinRadius.addEventListener('input', previewOverlayRadiusRange);
-                overlayMaxRadius.addEventListener('input', previewOverlayRadiusRange);
-                overlayMinRadius.addEventListener('change', commitOverlayRadiusRange);
-                overlayMaxRadius.addEventListener('change', commitOverlayRadiusRange);
-                selectedClassification.addEventListener('change', function () {
-                  if (!suppressTypeChange) {
-                    sketchup.setSelectedCellSpaceClassification(selectedClassification.value);
-                  }
-                });
-                document.getElementById('finish').addEventListener('click', function () {
-                  sketchup.finishEditing();
-                });
-                document.getElementById('clearAll').addEventListener('click', function () {
-                  sketchup.clearAllIndoorGmlElements();
-                });
-                window.addEventListener('load', fitDialogToContent);
-                window.addEventListener('resize', fitDialogToContent);
-              </script>
-            </body>
-            </html>
-          HTML
+          "init(#{overlay_min_radius}, #{overlay_max_radius}, [#{options}]);"
         end
 
         def selection_script(snapshot)
