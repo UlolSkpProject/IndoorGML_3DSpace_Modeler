@@ -49,7 +49,9 @@ module ULOL
           @primal_entities_observer = Indoor3DGmlPrimalEntitiesObserver.new(self)
           @selection_observer = Indoor3DGmlSelectionObserver.new(self)
           @cell_space_observed_ids = {}
+          @cell_space_change_snapshots = {}
           @space_features_observed_ids = {}
+          @space_features_change_snapshots = {}
           @selection_observed_model_id = nil
           @entities_observed_ids = {}
           @syncing = false
