@@ -85,13 +85,11 @@ module ULOL
           def write_attributes(cell_space)
             @attribute_serializer.write_cell_space_and_state(cell_space)
             remember_cell_space_change_snapshot(cell_space.sketchup_group) if cell_space&.valid?
-            lock_indoor_entity(cell_space.sketchup_group)
           end
 
           def write_cell_space_attributes(cell_space)
             @attribute_serializer.write_cell_space(cell_space)
             remember_cell_space_change_snapshot(cell_space.sketchup_group) if cell_space&.valid?
-            lock_indoor_entity(cell_space.sketchup_group)
           end
 
           def write_state_attributes(state)
