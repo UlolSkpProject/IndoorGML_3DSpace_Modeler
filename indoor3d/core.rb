@@ -114,13 +114,7 @@ module ULOL
 
     def self.create_temp_indoorgml
       begin
-        coordinate_system = prompt_export_coordinate_system
-        return if coordinate_system.nil?
-
-        output_path = IndoorCore::IndoorGmlConverter::TempExporter.new(
-          IndoorCore::IndoorModel.current,
-          coordinate_system: coordinate_system
-        ).export
+        output_path = IndoorCore::IndoorGmlConverter::GmlExporter.new(IndoorCore::IndoorModel.current).export
         UI.messagebox("IndoorGML temp.gml created:\n#{output_path}")
       rescue StandardError => e
         UI.messagebox("IndoorGML temp.gml creation failed:\n#{e.message}")
@@ -128,31 +122,23 @@ module ULOL
     end
 
     def self.export_gml
-      coordinate_system = prompt_export_coordinate_system
-      return if coordinate_system.nil?
 
       path = UI.savepanel('Export GML', '~', 'IndoorGML Files|*.gml;||')
       return if path.to_s.empty?
 
       path = "#{path}.gml" unless File.extname(path).downcase == '.gml'
       FileUtils.mkdir_p(File.dirname(path))
-      IndoorCore::IndoorGmlConverter::TempExporter.new(
-        IndoorCore::IndoorModel.current,
-        coordinate_system: coordinate_system
-      ).export(output_path: path)
+      IndoorCore::IndoorGmlConverter::GmlExporter.new(IndoorCore::IndoorModel.current).export(output_path: path)
       UI.messagebox("GML exported:\n#{path}")
     rescue StandardError => e
       UI.messagebox("GML export failed:\n#{e.message}")
     end
 
     def self.check_validity
-      coordinate_system = prompt_export_coordinate_system
-      return if coordinate_system.nil?
-
       progress = IndoorCore::IndoorGmlConverter::ExportProgressDialog.new
       progress.show
       UI.start_timer(0.1, false) do
-        perform_check_validity(progress, coordinate_system)
+        perform_check_validity(progress)
       end
     rescue StandardError => e
       progress&.close
@@ -167,7 +153,7 @@ module ULOL
       check_validity()
     end
 
-    def self.perform_check_validity(progress, coordinate_system)
+    def self.perform_check_validity(progress)
       current_step = :runtime
       begin
         indoor_model = IndoorCore::IndoorModel.current
@@ -178,10 +164,9 @@ module ULOL
 
         current_step = :temp_file
         progress.running(:temp_file)
-        temp_path = IndoorCore::IndoorGmlConverter::TempExporter.new(
+        temp_path = IndoorCore::IndoorGmlConverter::GmlExporter.new(
           indoor_model,
-          refresh_runtime_data: false,
-          coordinate_system: coordinate_system
+          refresh_runtime_data: false
         ).export
         progress.complete(:temp_file)
         validator = IndoorCore::IndoorGmlConverter::Val3dityRunner.new(temp_path)
@@ -318,22 +303,6 @@ module ULOL
 
       option = options.find { |candidate| candidate[:label] == result.first } || options.first
       [option[:cell_type], option[:category_code]]
-    end
-
-    def self.prompt_export_coordinate_system
-      labels = [
-        'Z-up RH (IndoorGML Standard)',
-        'Y-up LH (Unity / InViewerDesktop)'
-      ]
-      result = UI.inputbox(
-        ['Coordinate System'],
-        [labels.first],
-        [labels.join('|')],
-        'Export IndoorGML'
-      )
-      return nil unless result
-
-      result.first == labels.last ? :y_up_lh : :z_up_rh
     end
 
     def self.add_context_menu_items(menu)

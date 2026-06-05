@@ -9,13 +9,11 @@ module ULOL
     module IndoorCore
       module IndoorGmlConverter
 
-        class TempExporter
-          ROOT_ID = 'IF_001'
-          COORDINATE_SYSTEM_Z_UP_RH = :z_up_rh
-          COORDINATE_SYSTEM_Y_UP_LH = :y_up_lh
-          CORE_NAMESPACE = 'http://www.opengis.net/indoorgml/1.0/core'
-          NAVIGATION_NAMESPACE = 'http://www.opengis.net/indoorgml/1.0/navigation'
-          CORE_SCHEMA_LOCATION = 'http://schemas.opengis.net/indoorgml/1.0/indoorgmlcore.xsd'
+        class GmlExporter
+          ROOT_ID                    = 'IF_001'
+          CORE_NAMESPACE             = 'http://www.opengis.net/indoorgml/1.0/core'
+          NAVIGATION_NAMESPACE       = 'http://www.opengis.net/indoorgml/1.0/navigation'
+          CORE_SCHEMA_LOCATION       = 'http://schemas.opengis.net/indoorgml/1.0/indoorgmlcore.xsd'
           NAVIGATION_SCHEMA_LOCATION = 'http://schemas.opengis.net/indoorgml/1.0/indoorgmlnavi.xsd'
           CELL_SPACE_TAGS = {
             CellSpaceType::GENERAL => 'navi:GeneralSpace',
@@ -24,10 +22,9 @@ module ULOL
             CellSpaceType::ANCHOR => 'navi:AnchorSpace'
           }.freeze
 
-          def initialize(indoor_model, refresh_runtime_data: true, coordinate_system: COORDINATE_SYSTEM_Z_UP_RH)
+          def initialize(indoor_model, refresh_runtime_data: true)
             @indoor_model = indoor_model
             @refresh_runtime_data = refresh_runtime_data
-            @coordinate_system = coordinate_system
           end
 
           def export(output_path: self.class.default_temp_gml_path)
@@ -260,11 +257,7 @@ module ULOL
           end
 
           def export_point(point)
-            if @coordinate_system == COORDINATE_SYSTEM_Y_UP_LH
-              Geom::Point3d.new(point.x, point.z, -point.y)
-            else
-              Geom::Point3d.new(point.x, point.y, point.z)
-            end
+            Geom::Point3d.new(point.x, point.y, point.z)
           end
 
           def format_number(value)
