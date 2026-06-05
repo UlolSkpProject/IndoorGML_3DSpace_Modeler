@@ -10,7 +10,7 @@ module ULOL
             return false unless entity&.valid?
 
             with_guard_flag(:@constraining_space_features) do
-              enforce_space_features_constraints
+              enforce_space_features_constraints()
             end
             true
           ensure
