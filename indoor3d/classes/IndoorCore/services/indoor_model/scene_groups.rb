@@ -42,6 +42,7 @@ module ULOL
 
             observer_key = entity_observer_key(group)
             @scene_group_guard.track(group, expected_name)
+            remember_space_features_change_snapshot(group)
             return if @space_features_observed_ids[observer_key]
 
             group.add_observer(@space_features_observer)
@@ -110,6 +111,7 @@ module ULOL
             observer_key = entity_observer_key(group)
             @scene_group_guard.track(group, expected_name)
             with_unlocked(group) { group.name = expected_name } unless group.name == expected_name
+            remember_space_features_change_snapshot(group)
             return if @space_features_observed_ids[observer_key]
 
             group.add_observer(@space_features_observer)
