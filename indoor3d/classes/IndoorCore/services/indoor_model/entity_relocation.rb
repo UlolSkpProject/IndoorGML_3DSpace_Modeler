@@ -14,19 +14,19 @@ module ULOL
               return if @relocating_entity
 
               if target_root_group&.valid? && Utils::Transformation.direct_child_of_root?(entity, target_root_group)
-                lock_indoor_entity(entity)
+                lock_indoor_entity(entity) unless cell_space_entity?(entity)
                 return entity
               end
 
               @relocating_entity = true
               copy = copy_entity_to_entities(entity, target_entities, target_root_group)
-              unlock_indoor_entity(entity)
+              unlock_indoor_entity(entity) unless cell_space_entity?(entity)
               entity.erase! if entity.valid?
-              lock_indoor_entity(copy)
+              lock_indoor_entity(copy) unless cell_space_entity?(copy)
               copy
             rescue StandardError => e
               puts "[IndoorGML] Entity relocation failed: #{e.class}: #{e.message}"
-              lock_indoor_entity(entity)
+              lock_indoor_entity(entity) unless cell_space_entity?(entity)
               nil
             ensure
               @relocating_entity = false
@@ -57,6 +57,12 @@ module ULOL
 
           def copy_indoor_attributes(source, target)
             @attribute_serializer.copy_indoor_attributes(source, target)
+          end
+
+          def cell_space_entity?(entity)
+            indoor_feature(entity) == 'CellSpace'
+          rescue StandardError
+            false
           end
         end
       end
