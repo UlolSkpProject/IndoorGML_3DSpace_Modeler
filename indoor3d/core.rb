@@ -40,9 +40,9 @@ module ULOL
     require_relative 'application/indoor_model'
     require_relative 'export/gml_exporter'
     require_relative 'export/val3dity_runner'
-    require_relative 'export/export_progress_dialog'
     require_relative 'ui/edit_mode_overlay'
     require_relative 'ui/edit_mode_dialog'
+    require_relative 'ui/export_progress_dialog'
 
     def self.attach_model_observer
       begin
