@@ -15,7 +15,9 @@ module ULOL
         def onChangeEntity(entity)
           return unless indoor_gml_entity?(entity)
 
-          log_event('onChangeEntity', entity) if @indoor_model.space_features_changed(entity)
+          if @indoor_model.space_features_changed(entity)
+            log_event('onChangeEntity', entity) 
+          end
         end
 
         def onEraseEntity(entity)

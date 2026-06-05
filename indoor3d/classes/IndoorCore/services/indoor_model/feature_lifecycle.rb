@@ -45,7 +45,7 @@ module ULOL
           end
 
           def cell_space_changed(entity)
-            begin
+            # begin
               return false if guard_active?(:@syncing) || guard_active?(:@erasing)
 
               cell_space = find_cell_space_for_entity(entity)
@@ -66,9 +66,10 @@ module ULOL
                 synchronize_adjacency_and_transitions_for_cell_space(cell_space)
               end
               true
-            ensure
-              lock_indoor_entity(entity)
-            end
+            # end
+            # ensure
+            #   lock_indoor_entity(entity)
+            # end
           end
 
           def cell_space_closed(entity)
