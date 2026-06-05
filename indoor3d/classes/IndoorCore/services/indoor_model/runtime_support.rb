@@ -36,6 +36,8 @@ module ULOL
 
           def reset_runtime_collections
             @feature_registry.reset!
+            @cell_space_change_snapshots.clear
+            @space_features_change_snapshots.clear
             bind_registry_collections
           end
 
@@ -82,11 +84,13 @@ module ULOL
 
           def write_attributes(cell_space)
             @attribute_serializer.write_cell_space_and_state(cell_space)
+            remember_cell_space_change_snapshot(cell_space.sketchup_group) if cell_space&.valid?
             lock_indoor_entity(cell_space.sketchup_group)
           end
 
           def write_cell_space_attributes(cell_space)
             @attribute_serializer.write_cell_space(cell_space)
+            remember_cell_space_change_snapshot(cell_space.sketchup_group) if cell_space&.valid?
             lock_indoor_entity(cell_space.sketchup_group)
           end
 
