@@ -128,6 +128,93 @@ module ULOL
             remember_cell_space_change_snapshot(cell_space.sketchup_group)
           end
 
+          def duplicate_cell_space_identity?(entity)
+            copied_id = indoor_attribute(entity, 'id').to_s
+            return false if copied_id.empty?
+
+            original = cell_space_with_id(copied_id)
+            original && original.valid? && original.sketchup_group != entity
+          end
+
+          def make_cell_space_copy_independent(entity)
+            original_id = indoor_attribute(entity, 'id').to_s
+            original_state_id = indoor_attribute(entity, 'duality_state_id').to_s
+            original_transition_ids = indoor_attribute(entity, 'state_transition_ids')
+            puts "[IndoorGML] Duplicate CellSpace id detected: entity_id=#{entity.entityID} copied_id=#{original_id}"
+
+            with_transparent_cell_space_operation('IndoorGML CellSpace Copy Independence') do
+              sync do
+                make_unique_performed = make_cell_space_entity_unique(entity)
+                cell_space = build_independent_cell_space(entity)
+                state = cell_space.create_duality_state(nil, cell_space_local_origin(cell_space))
+                ensure_unique_feature_id!(cell_space)
+                ensure_unique_feature_id!(state, reserved_ids: [cell_space.id])
+
+                register_cell_space(cell_space)
+                register_state(state)
+                name_cell_space_entity(cell_space)
+                apply_cell_space_material(cell_space)
+                write_cell_space_attributes(cell_space)
+                synchronize_adjacency_and_transitions_for_cell_space(cell_space)
+                remember_cell_space_change_snapshot(entity)
+
+                puts "[IndoorGML] CellSpace copy independent: original_id=#{original_id} new_id=#{cell_space.id} original_state_id=#{original_state_id} new_state_id=#{state.id} make_unique=#{make_unique_performed} copied_transition_ids=#{original_transition_ids.inspect}"
+              end
+            end
+
+            true
+          rescue StandardError => e
+            puts "[IndoorGML] CellSpace copy independence failed: #{e.class}: #{e.message}"
+            false
+          end
+
+          def make_cell_space_entity_unique(entity)
+            return false unless entity.respond_to?(:make_unique)
+
+            entity.make_unique
+            true
+          rescue StandardError => e
+            puts "[IndoorGML] CellSpace make_unique failed: #{e.class}: #{e.message}"
+            false
+          end
+
+          def build_independent_cell_space(entity)
+            cell_type = CellSpaceType.from_label(indoor_attribute(entity, 'cell_type'))
+            cell_space = CellSpace.new(entity, cell_type, indoor_attribute(entity, 'category_code'))
+            cell_space.set_category(
+              indoor_attribute(entity, 'category_code'),
+              indoor_attribute(entity, 'category_label'),
+              indoor_attribute(entity, 'category_code_space'),
+              indoor_attribute(entity, 'category_standard')
+            )
+            cell_space
+          end
+
+          def cell_space_with_id(id)
+            @cell_spaces.find { |cell_space| cell_space&.id == id }
+          end
+
+          def ensure_unique_feature_id!(feature, reserved_ids: [])
+            return feature unless feature
+
+            while reserved_ids.include?(feature.id) || feature_id_in_use?(feature.id, excluding: feature)
+              feature.instance_variable_set(:@id, random_feature_id)
+            end
+            feature
+          end
+
+          def feature_id_in_use?(id, excluding: nil)
+            return false if id.to_s.empty?
+
+            (@cell_spaces + @states + @transitions).any? do |feature|
+              feature && feature != excluding && feature.id == id
+            end
+          end
+
+          def random_feature_id
+            rand(36**8).to_s(36)
+          end
+
           def classify_cell_space_change(entity)
             previous_snapshot = cell_space_change_snapshot_for(entity)
             current_snapshot = build_cell_space_change_snapshot(entity)

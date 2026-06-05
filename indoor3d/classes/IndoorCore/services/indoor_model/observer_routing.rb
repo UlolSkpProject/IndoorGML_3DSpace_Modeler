@@ -160,6 +160,12 @@ module ULOL
 
             ensure_space_features_groups
             if indoor_feature(entity) == 'CellSpace'
+              if duplicate_cell_space_identity?(entity)
+                return if make_cell_space_copy_independent(entity)
+
+                puts '[IndoorGML] CellSpace copy independence failed. Falling back to normal add handling.'
+              end
+
               cell_space = find_cell_space_for_entity(entity)
               attach_cell_space_observer(entity)
               if stale_cell_space_runtime?(cell_space, entity)
