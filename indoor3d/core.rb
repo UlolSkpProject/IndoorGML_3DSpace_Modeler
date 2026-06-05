@@ -229,7 +229,6 @@ module ULOL
         elsif !indoor_model.begin_editing()
           UI.messagebox('IndoorGML PrimalSpaceFeatures group was not found.')
         end
-        update_edit_property_command()
       rescue StandardError => e
         UI.messagebox("IndoorGML editing failed:\n#{e.message}")
       end
@@ -242,7 +241,6 @@ module ULOL
         else
           UI.messagebox('IndoorGML editing is not active.')
         end
-        update_edit_property_command()
       rescue StandardError => e
         UI.messagebox("IndoorGML editing finish failed:\n#{e.message}")
       end
@@ -283,13 +281,6 @@ module ULOL
       File.join(__dir__, 'assets', 'icons', filename)
     end
 
-    def self.update_edit_property_command
-      # SketchUp does not reliably repaint toolbar command icons after add_item.
-      # Edit/Finish are separate commands; validation procs switch availability.
-      nil
-    rescue StandardError => e
-      puts "[IndoorGML] Edit command update failed: #{e.class}: #{e.message}"
-    end
 
     def self.update_dual_overlay_command
       return unless @dual_overlay_command
@@ -436,26 +427,36 @@ module ULOL
       ) do
         change_selected_cell_space_type()
       end
+      change_type_command.set_validation_proc do
+        indoor_model = IndoorCore::IndoorModel.current
+        has_cell_space =
+          selected_indoor_gml_entities.any? do |entity|
+            indoor_feature(entity) == 'CellSpace'
+          end
+      
+        indoor_model.editing? && has_cell_space ? MF_ENABLED : MF_GRAYED
+      end
       @edit_property_command = create_command(
         'Edit CellSpace Property',
-        'Edit CellSpace properties',
+        'Toggle IndoorGML editing',
         icon: 'edit_cellspace_property.png'
       ) do
-        begin_indoor_gml_editing()
+        toggle_indoor_gml_editing()
       end
+
       @edit_property_command.set_validation_proc do
-        IndoorCore::IndoorModel.current.editing? ? MF_GRAYED : MF_ENABLED
+        IndoorCore::IndoorModel.current.editing? ? MF_CHECKED : MF_UNCHECKED
       end
-      finish_editing_command = create_command(
-        'Finish Editing',
-        'Finish IndoorGML editing',
-        icon: 'finish_editing.png'
-      ) do
-        finish_indoor_gml_editing()
-      end
-      finish_editing_command.set_validation_proc do
-        IndoorCore::IndoorModel.current.editing? ? MF_ENABLED : MF_GRAYED
-      end
+      # finish_editing_command = create_command(
+      #   'Finish Editing',
+      #   'Finish IndoorGML editing',
+      #   icon: 'finish_editing.png'
+      # ) do
+      #   finish_indoor_gml_editing()
+      # end
+      # finish_editing_command.set_validation_proc do
+      #   IndoorCore::IndoorModel.current.editing? ? MF_ENABLED : MF_GRAYED
+      # end
       @dual_overlay_command = create_command(
         'Show State/Link Overlay',
         'Show State and Transition overlay',
@@ -465,7 +466,7 @@ module ULOL
       end
       @dual_overlay_command.set_validation_proc do
         update_dual_overlay_command()
-        MF_ENABLED
+        IndoorCore::IndoorModel.current.dual_overlay_visible? ? MF_CHECKED : MF_UNCHECKED
       end
       export_command = create_command(
         'Export GML',
@@ -481,27 +482,28 @@ module ULOL
       ) do
         check_validity()
       end
-      update_edit_property_command()
       update_dual_overlay_command()
 
       menu.add_item(create_cell_space_command)
-      menu.add_item(change_type_command)
       menu.add_item(@edit_property_command)
-      menu.add_item(finish_editing_command)
+      menu.add_item(change_type_command)
       menu.add_item(@dual_overlay_command)
       menu.add_item(export_command)
       menu.add_item(check_validity_command)
 
-      UI.add_context_menu_handler do |context_menu|
+      UI.add_context_menu_handler do |dual_overlay_command|
         add_context_menu_items(context_menu)
       end
 
       toolbar = UI::Toolbar.new('Indoor3DGML Modeler')
       toolbar.add_item(create_cell_space_command)
-      toolbar.add_item(change_type_command)
+      toolbar.add_separator
+      toolbar.add_separator
       toolbar.add_item(@edit_property_command)
-      toolbar.add_item(finish_editing_command)
+      toolbar.add_item(change_type_command)
+      toolbar.add_separator
       toolbar.add_item(@dual_overlay_command)
+      toolbar.add_separator
       toolbar.add_item(export_command)
       toolbar.add_item(check_validity_command)
       toolbar.show()
