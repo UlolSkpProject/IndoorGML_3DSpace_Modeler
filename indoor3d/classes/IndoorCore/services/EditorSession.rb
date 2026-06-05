@@ -192,20 +192,11 @@ module ULOL
         end
 
         def apply_lock_policy
-          if @editing
-            mark_editable_primal_entities()
-          else
-            @editable_entity_ids = {}
-            clear_feature_editable_flags()
-          end
+          @editable_entity_ids = {}
+          primal_group = @indoor_model.primal_group
+          return unless primal_group&.valid?
 
-          indoor_entities.each do |entity|
-            if editable_entity?(entity)
-              unlock_entity(entity)
-            else
-              lock_entity(entity)
-            end
-          end
+          @editing ? unlock_entity(primal_group) : lock_entity(primal_group)
         end
 
         def active_path_changed(model)
@@ -380,18 +371,6 @@ module ULOL
         def mark_editable_primal_entities
           @editable_entity_ids = {}
           mark_editable(@indoor_model.primal_group)
-          @indoor_model.cell_spaces.each do |cell_space|
-            cell_space.editable = true if cell_space.respond_to?(:editable=)
-            mark_editable(cell_space.sketchup_group)
-          end
-          @indoor_model.states.each { |state| state.editable = false if state.respond_to?(:editable=) }
-          @indoor_model.transitions.each { |transition| transition.editable = false if transition.respond_to?(:editable=) }
-        end
-
-        def clear_feature_editable_flags
-          @indoor_model.cell_spaces.each { |cell_space| cell_space.editable = false if cell_space.respond_to?(:editable=) }
-          @indoor_model.states.each { |state| state.editable = false if state.respond_to?(:editable=) }
-          @indoor_model.transitions.each { |transition| transition.editable = false if transition.respond_to?(:editable=) }
         end
 
         def mark_editable(entity)
@@ -402,13 +381,6 @@ module ULOL
           rescue StandardError
             true
           end
-        end
-
-        def indoor_entities
-          entities = []
-          entities << @indoor_model.primal_group
-          @indoor_model.cell_spaces.each { |cell_space| entities << cell_space.sketchup_group }
-          entities.compact.select { |entity| entity&.valid?() }
         end
 
         def temporary_unlock_entities(entity)
