@@ -45,31 +45,27 @@ module ULOL
           end
 
           def cell_space_changed(entity)
-            # begin
+            begin
               return false if guard_active?(:@syncing) || guard_active?(:@erasing)
 
               cell_space = find_cell_space_for_entity(entity)
               cell_space = refresh_and_find_cell_space(entity) if stale_cell_space_runtime?(cell_space, entity)
               return false if cell_space.nil? || !cell_space.valid?
 
-              sync do
-                state = cell_space.duality_state
-                name_cell_space_entity(cell_space)
-                unless state&.valid?
-                  cell_space = refresh_and_find_cell_space(entity)
-                  state = cell_space&.duality_state
-                end
-                if state&.valid?
-                  local_position = cell_space_local_origin(cell_space)
-                  update_state_position(state, local_position)
-                end
-                synchronize_adjacency_and_transitions_for_cell_space(cell_space)
+              change_kind = classify_cell_space_change(entity)
+              return false if change_kind.nil?
+
+              case change_kind
+              when :cell_space_type
+                handle_cell_space_type_changed(cell_space)
+              when :name
+                handle_cell_space_name_changed(cell_space)
+              when :transform
+                handle_cell_space_transform_changed(cell_space)
+              else
+                handle_cell_space_etc_changed(cell_space)
               end
-              true
-            # end
-            # ensure
-            #   lock_indoor_entity(entity)
-            # end
+            end
           end
 
           def cell_space_closed(entity)
@@ -129,6 +125,167 @@ module ULOL
             attach_cell_space_observer(cell_space.sketchup_group)
             lock_indoor_entity(cell_space.sketchup_group)
             @scene_group_guard.track(cell_space.sketchup_group, cell_space.sketchup_group.name)
+            remember_cell_space_change_snapshot(cell_space.sketchup_group)
+          end
+
+          def classify_cell_space_change(entity)
+            previous_snapshot = cell_space_change_snapshot_for(entity)
+            current_snapshot = build_cell_space_change_snapshot(entity)
+            remember_cell_space_change_snapshot(entity, current_snapshot)
+            if previous_snapshot.nil?
+              log_cell_space_change(entity, :initial_snapshot, [], previous_snapshot, current_snapshot)
+              return nil
+            end
+
+            changed_fields = changed_cell_space_snapshot_fields(previous_snapshot, current_snapshot)
+            change_kind = cell_space_change_kind(changed_fields)
+            log_cell_space_change(entity, change_kind, changed_fields, previous_snapshot, current_snapshot)
+
+            change_kind
+          end
+
+          def handle_cell_space_name_changed(cell_space)
+            with_transparent_cell_space_operation('IndoorGML CellSpace Name Change') do
+              sync { name_cell_space_entity(cell_space) }
+            end
+            remember_cell_space_change_snapshot(cell_space.sketchup_group)
+            true
+          end
+
+          def handle_cell_space_transform_changed(cell_space)
+            with_transparent_cell_space_operation('IndoorGML CellSpace Transform Change') do
+              sync { synchronize_cell_space_geometry_change(cell_space) }
+            end
+            remember_cell_space_change_snapshot(cell_space.sketchup_group)
+            true
+          end
+
+          def handle_cell_space_type_changed(cell_space)
+            with_transparent_cell_space_operation('IndoorGML CellSpace Type Change') do
+              sync do
+                apply_cell_space_type_attributes(cell_space)
+                name_cell_space_entity(cell_space)
+                apply_cell_space_material(cell_space)
+                write_cell_space_attributes(cell_space)
+                synchronize_adjacency_and_transitions_for_cell_space(cell_space)
+              end
+            end
+            remember_cell_space_change_snapshot(cell_space.sketchup_group)
+            true
+          end
+
+          def handle_cell_space_etc_changed(cell_space)
+            puts "[IndoorGML] CellSpace change ignored as etc: entity_id=#{cell_space.sketchup_group.entityID} name=#{cell_space.sketchup_group.name}"
+            with_transparent_cell_space_operation('IndoorGML CellSpace Etc Change') {}
+            remember_cell_space_change_snapshot(cell_space.sketchup_group)
+            false
+          end
+
+          def synchronize_cell_space_geometry_change(cell_space)
+            state = cell_space.duality_state
+            unless state&.valid?
+              cell_space = refresh_and_find_cell_space(cell_space.sketchup_group)
+              state = cell_space&.duality_state
+            end
+            if state&.valid?
+              local_position = cell_space_local_origin(cell_space)
+              update_state_position(state, local_position)
+            end
+            synchronize_adjacency_and_transitions_for_cell_space(cell_space)
+          end
+
+          def apply_cell_space_type_attributes(cell_space)
+            entity = cell_space.sketchup_group
+            cell_space.cell_type = CellSpaceType.from_label(indoor_attribute(entity, 'cell_type'))
+            cell_space.set_category(
+              indoor_attribute(entity, 'category_code'),
+              indoor_attribute(entity, 'category_label'),
+              indoor_attribute(entity, 'category_code_space'),
+              indoor_attribute(entity, 'category_standard')
+            )
+          end
+
+          def with_transparent_cell_space_operation(name)
+            model = Sketchup.active_model
+            operation_started = false
+            begin
+              operation_started = model.start_operation(name, true, false, true) if model
+              yield
+            ensure
+              model.commit_operation if operation_started
+            end
+          end
+
+          def remember_cell_space_change_snapshot(entity, snapshot = nil)
+            return unless entity&.valid?
+
+            @cell_space_change_snapshots[entity_observer_key(entity)] = snapshot || build_cell_space_change_snapshot(entity)
+          rescue StandardError
+            nil
+          end
+
+          def cell_space_change_snapshot_for(entity)
+            @cell_space_change_snapshots[entity_observer_key(entity)]
+          rescue StandardError
+            nil
+          end
+
+          def build_cell_space_change_snapshot(entity)
+            {
+              name: entity.name.to_s,
+              transformation: entity.transformation.to_a,
+              cell_type: indoor_attribute(entity, 'cell_type').to_s,
+              category_code: indoor_attribute(entity, 'category_code').to_s,
+              category_label: indoor_attribute(entity, 'category_label').to_s,
+              category_code_space: indoor_attribute(entity, 'category_code_space').to_s,
+              category_standard: indoor_attribute(entity, 'category_standard').to_s
+            }
+          end
+
+          def changed_cell_space_snapshot_fields(previous_snapshot, current_snapshot)
+            current_snapshot.keys.select do |key|
+              snapshot_field_changed?(key, previous_snapshot[key], current_snapshot[key])
+            end
+          end
+
+          def snapshot_field_changed?(key, previous_value, current_value)
+            if key == :transformation
+              return true if previous_value.nil? || current_value.nil?
+
+              previous_value.each_with_index.any? do |value, index|
+                (value - current_value[index]).abs > 0.000001
+              end
+            else
+              previous_value != current_value
+            end
+          end
+
+          def cell_space_change_kind(changed_fields)
+            return :cell_space_type if (changed_fields & %i[cell_type category_code category_label category_code_space category_standard]).any?
+            return :name if changed_fields.include?(:name)
+            return :transform if changed_fields.include?(:transformation)
+
+            :etc
+          end
+
+          def log_cell_space_change(entity, change_kind, changed_fields, previous_snapshot, current_snapshot)
+            puts "[IndoorGML] CellSpace change classified kind=#{change_kind} entity_id=#{entity.entityID} name=#{entity.name} fields=#{changed_fields.join(',')}"
+            changed_fields.each do |field|
+              puts "[IndoorGML]   #{field}: #{snapshot_log_value(previous_snapshot&.[](field))} -> #{snapshot_log_value(current_snapshot&.[](field))}"
+            end
+          end
+
+          def snapshot_log_value(value)
+            return 'nil' if value.nil?
+            return transform_log_value(value) if value.is_a?(Array) && value.length == 16
+
+            value.inspect
+          end
+
+          def transform_log_value(values)
+            translation = values.values_at(12, 13, 14).map { |value| format('%.6f', value) }
+            axes = values.values_at(0, 5, 10).map { |value| format('%.6f', value) }
+            "translation=[#{translation.join(',')}] axes_diag=[#{axes.join(',')}]"
           end
 
           def name_cell_space_entity(cell_space)
