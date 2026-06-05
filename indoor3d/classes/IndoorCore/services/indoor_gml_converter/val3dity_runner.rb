@@ -17,7 +17,7 @@ module ULOL
 
           def initialize(gml_path)
             @gml_path = File.expand_path(gml_path)
-            @work_dir = TempExporter.output_root
+            @work_dir = GmlExporter.output_root
             @report_json_path = File.join(@work_dir, 'report.json')
             @report_dir = File.join(@work_dir, 'report')
             @report_html_path = File.join(@report_dir, 'report.html')
