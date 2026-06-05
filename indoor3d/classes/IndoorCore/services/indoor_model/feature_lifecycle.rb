@@ -69,30 +69,26 @@ module ULOL
           end
 
           def cell_space_closed(entity)
-            begin
-              return if @syncing || @erasing
+            return if @syncing || @erasing
 
-              cell_space = find_cell_space_for_entity(entity)
-              cell_space = refresh_and_find_cell_space(entity) if stale_cell_space_runtime?(cell_space, entity)
-              return if cell_space.nil? || !cell_space.valid?
+            cell_space = find_cell_space_for_entity(entity)
+            cell_space = refresh_and_find_cell_space(entity) if stale_cell_space_runtime?(cell_space, entity)
+            return if cell_space.nil? || !cell_space.valid?
 
-              sync do
-                recenter_cell_space_origin(cell_space)
-                name_cell_space_entity(cell_space)
-                apply_cell_space_material(cell_space)
-                state = cell_space.duality_state
-                unless state&.valid?
-                  cell_space = refresh_and_find_cell_space(entity)
-                  state = cell_space&.duality_state
-                end
-                if state&.valid?
-                  local_position = cell_space_local_origin(cell_space)
-                  update_state_position(state, local_position)
-                end
-                synchronize_adjacency_and_transitions_for_cell_space(cell_space)
+            sync do
+              recenter_cell_space_origin(cell_space)
+              name_cell_space_entity(cell_space)
+              apply_cell_space_material(cell_space)
+              state = cell_space.duality_state
+              unless state&.valid?
+                cell_space = refresh_and_find_cell_space(entity)
+                state = cell_space&.duality_state
               end
-            ensure
-              lock_indoor_entity(entity)
+              if state&.valid?
+                local_position = cell_space_local_origin(cell_space)
+                update_state_position(state, local_position)
+              end
+              synchronize_adjacency_and_transitions_for_cell_space(cell_space)
             end
           end
 
@@ -111,7 +107,6 @@ module ULOL
               erase_transitions_for_state(state)
               state.erase! if state&.valid?
               unregister_state(state)
-              unlock_indoor_entity(cell_space.sketchup_group) if erase_sketchup_group && cell_space.valid?
               cell_space.erase! if erase_sketchup_group && cell_space.valid?
               unregister_cell_space(cell_space)
               erase_adjacency_for_cell_space(cell_space)
@@ -122,10 +117,20 @@ module ULOL
 
           def register_cell_space(cell_space)
             @feature_registry.add_cell_space(cell_space)
+            ensure_cell_space_unlocked(cell_space.sketchup_group)
             attach_cell_space_observer(cell_space.sketchup_group)
-            lock_indoor_entity(cell_space.sketchup_group)
             @scene_group_guard.track(cell_space.sketchup_group, cell_space.sketchup_group.name)
             remember_cell_space_change_snapshot(cell_space.sketchup_group)
+          end
+
+          def ensure_cell_space_unlocked(entity)
+            return unless entity&.valid?
+            return unless entity.respond_to?(:locked=)
+            return unless entity.respond_to?(:locked?) && entity.locked?
+
+            entity.locked = false
+          rescue StandardError => e
+            puts "[IndoorGML] CellSpace unlock cleanup failed: #{e.class}: #{e.message}"
           end
 
           def duplicate_cell_space_identity?(entity)
@@ -378,9 +383,8 @@ module ULOL
           def name_cell_space_entity(cell_space)
             expected_name = "[#{CellSpaceType.label(cell_space.cell_type)}:#{cell_space.category_code}]-#{cell_space.id}"
             return if cell_space.sketchup_group.name == expected_name
-            with_unlocked(cell_space.sketchup_group) do
-              cell_space.sketchup_group.name = expected_name
-            end
+
+            cell_space.sketchup_group.name = expected_name
             @scene_group_guard.track(cell_space.sketchup_group, expected_name)
           end
 
@@ -388,13 +392,11 @@ module ULOL
             group = cell_space.sketchup_group
             text_material = Utils::Materials.cell_space_text(cell_space.cell_type, cell_space.category_code)
 
-            with_unlocked(group) do
-              group.material = nil if group.respond_to?(:material=)
-              return if text_material.nil?
+            group.material = nil if group.respond_to?(:material=)
+            return if text_material.nil?
 
-              group.entities.grep(Sketchup::Face) do |face|
-                apply_cell_space_face_material(face, text_material)
-              end
+            group.entities.grep(Sketchup::Face) do |face|
+              apply_cell_space_face_material(face, text_material)
             end
           end
 
