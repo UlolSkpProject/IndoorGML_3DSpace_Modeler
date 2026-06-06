@@ -55,7 +55,7 @@ module ULOL
           end
 
           def relocation_transformation(entity, target_root_group)
-            world_transformation = Utils::Transformation.entity_world_transformation(entity)
+            world_transformation = Utils::Transformation.entity_transformation_in_active_context(entity)
             return world_transformation unless target_root_group&.valid?
 
             target_root_group.transformation.inverse * world_transformation

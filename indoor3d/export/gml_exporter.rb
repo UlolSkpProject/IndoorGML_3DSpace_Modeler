@@ -121,7 +121,7 @@ module ULOL
             group = cell_space.valid_sketchup_group
             return unless group
 
-            world_transform = Utils::Transformation.entity_world_transformation(group)
+            world_transform = Utils::Transformation.entity_transformation_in_active_context(group)
             solid_center = export_point(group.definition.bounds.center.transform(world_transform))
             faces = group.definition.entities.grep(Sketchup::Face)
             faces.each_with_index do |face, index|

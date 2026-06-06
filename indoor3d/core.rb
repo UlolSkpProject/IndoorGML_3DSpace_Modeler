@@ -402,7 +402,7 @@ module ULOL
     def self.move_group_to_root_context(model, group)
       return group unless group&.valid?()
 
-      transformation = Utils::Transformation.entity_world_transformation(group)
+      transformation = Utils::Transformation.entity_transformation_in_active_context(group)
       copy = model.entities().add_instance(group.definition, transformation)
       copy = copy.to_group() if copy.respond_to?(:to_group)
       copy.make_unique() if copy.respond_to?(:make_unique)
