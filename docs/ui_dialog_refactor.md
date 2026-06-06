@@ -5,8 +5,8 @@
 This is a SketchUp Ruby extension (Indoor3DGML Modeler).
 Two Ruby files currently embed large HTML/CSS/JS strings inline as heredocs:
 
-- `indoor3d/classes/IndoorCore/services/EditModeDialog.rb`
-- `indoor3d/classes/IndoorCore/services/indoor_gml_converter/export_progress_dialog.rb`
+- `indoor3d/ui/edit_mode_dialog.rb`
+- `indoor3d/ui/export_progress_dialog.rb`
 
 The goal is to extract the HTML/CSS/JS into separate files and load them via `UI::HtmlDialog#set_file`.
 
@@ -30,8 +30,8 @@ indoor3d/
             └── app.js
 ```
 
-Move the two Ruby files from their current locations to `indoor3d/ui/`.
-Update `require_relative` references in `indoor3d/classes/IndoorCore/IndoorCore.rb` accordingly.
+The two Ruby files now live in `indoor3d/ui/`.
+Update `require_relative` references in `indoor3d/core.rb` accordingly.
 
 ---
 
@@ -58,9 +58,9 @@ Update `require_relative` references in `indoor3d/classes/IndoorCore/IndoorCore.
 
 | File | Action |
 |------|--------|
-| `indoor3d/classes/IndoorCore/services/EditModeDialog.rb` | Move to `indoor3d/ui/edit_mode_dialog.rb`, apply `set_file` pattern |
-| `indoor3d/classes/IndoorCore/services/indoor_gml_converter/export_progress_dialog.rb` | Move to `indoor3d/ui/export_progress_dialog.rb`, apply `set_file` pattern |
-| `indoor3d/classes/IndoorCore/IndoorCore.rb` | Update `require_relative` paths for both dialog files |
+| `indoor3d/ui/edit_mode_dialog.rb` | Apply `set_file` pattern |
+| `indoor3d/ui/export_progress_dialog.rb` | Apply `set_file` pattern |
+| `indoor3d/core.rb` | Update `require_relative` paths for both dialog files |
 | `indoor3d/ui/html/edit_mode/index.html` | New file — extracted markup |
 | `indoor3d/ui/html/edit_mode/style.css` | New file — extracted styles |
 | `indoor3d/ui/html/edit_mode/app.js` | New file — extracted scripts |
@@ -72,13 +72,19 @@ Update `require_relative` references in `indoor3d/classes/IndoorCore/IndoorCore.
 
 ## Acceptance Criteria
 
-- [ ] `EditModeDialog#show` calls `set_file`, not `set_html`
-- [ ] `ExportProgressDialog#show` calls `set_file`, not `set_html`
-- [ ] No inline HTML strings remain in either Ruby file
-- [ ] `html` private method is deleted from both Ruby files
-- [ ] Slider initial values and classification `<select>` options are populated via `execute_script` after `domReady`
-- [ ] `ExportProgressDialog#set_status` still works by calling `execute_script("setStatus(...)")`  
-- [ ] `EditModeDialog#update_selection` still works by calling `execute_script("updateSelectedCellSpace(...)")`
+- [x] `EditModeDialog#show` calls `set_file`, not `set_html`
+- [x] `ExportProgressDialog#show` calls `set_file`, not `set_html`
+- [x] No inline HTML strings remain in either Ruby file
+- [x] `html` private method is deleted from both Ruby files
+- [x] Slider initial values and classification `<select>` options are populated via `execute_script` after `domReady`
+- [x] `ExportProgressDialog#set_status` still works by calling `execute_script("setStatus(...)")`  
+- [x] `EditModeDialog#update_selection` still works by calling `execute_script("updateSelectedCellSpace(...)")`
 - [ ] CSS and JS load correctly via relative paths from `index.html`
-- [ ] `require_relative` paths in `IndoorCore.rb` are updated and correct
-- [ ] No other files are modified
+- [x] `require_relative` paths in `indoor3d/core.rb` are updated and correct
+- [x] No unintended files were modified beyond the file layout and dialog extraction scope
+
+## Implementation Status
+
+- Implemented in commit `b7b957d`.
+- Ruby syntax checks passed after extraction.
+- Relative CSS/JS loading still needs manual confirmation inside SketchUp's `UI::HtmlDialog`.

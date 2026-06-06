@@ -9,7 +9,7 @@ All `require_relative` paths must be updated to match the new locations.
 
 ---
 
-## Current Structure
+## Previous Structure
 
 ```
 indoor3d.rb
@@ -110,11 +110,11 @@ indoor3d/
 │       └── editor_session.rb
 ├── export/
 │   ├── gml_exporter.rb
-│   ├── val3dity_runner.rb
-│   └── export_progress_dialog.rb
+│   └── val3dity_runner.rb
 ├── ui/
 │   ├── edit_mode_dialog.rb
 │   ├── edit_mode_overlay.rb
+│   ├── export_progress_dialog.rb
 │   └── html/
 │       ├── edit_mode/
 │       │   ├── index.html
@@ -167,12 +167,12 @@ indoor3d/
 | `indoor3d/classes/IndoorCore/services/EditorSession.rb` | `indoor3d/infrastructure/scene/editor_session.rb` |
 | `indoor3d/classes/IndoorCore/services/indoor_gml_converter/gml_exporter.rb` | `indoor3d/export/gml_exporter.rb` |
 | `indoor3d/classes/IndoorCore/services/indoor_gml_converter/val3dity_runner.rb` | `indoor3d/export/val3dity_runner.rb` |
-| `indoor3d/classes/IndoorCore/services/indoor_gml_converter/export_progress_dialog.rb` | `indoor3d/export/export_progress_dialog.rb` |
+| `indoor3d/classes/IndoorCore/services/indoor_gml_converter/export_progress_dialog.rb` | `indoor3d/ui/export_progress_dialog.rb` |
 | `indoor3d/classes/IndoorCore/services/EditModeDialog.rb` | `indoor3d/ui/edit_mode_dialog.rb` |
 | `indoor3d/classes/IndoorCore/overlays/edit_mode_overlay.rb` | `indoor3d/ui/edit_mode_overlay.rb` |
 
 The old `indoor3d/classes/IndoorCore/IndoorCore.rb` and `indoor3d/classes/IndoorCore/Observers.rb`
-are replaced by a new loader file at `indoor3d/application/indoor_model.rb` — see the require list below.
+are replaced by the consolidated loader list in `indoor3d/core.rb`.
 
 ---
 
@@ -243,9 +243,9 @@ require_relative 'application/indoor_model/editor_control'
 require_relative 'application/indoor_model'
 require_relative 'export/gml_exporter'
 require_relative 'export/val3dity_runner'
-require_relative 'export/export_progress_dialog'
 require_relative 'ui/edit_mode_overlay'
 require_relative 'ui/edit_mode_dialog'
+require_relative 'ui/export_progress_dialog'
 ```
 
 ---
@@ -263,11 +263,18 @@ require_relative 'ui/edit_mode_dialog'
 
 ## Acceptance Criteria
 
-- [ ] `indoor3d/classes/` directory no longer exists
-- [ ] All files exist at the paths listed in the rename map
-- [ ] All `require_relative` references resolve correctly from each file's new location
-- [ ] `indoor3d/core.rb` requires all files in the correct dependency order
-- [ ] No inline HTML heredocs remain in `edit_mode_dialog.rb` or `export_progress_dialog.rb`
-- [ ] `UI::HtmlDialog#set_file` is used in both dialog files
-- [ ] All module/class names are unchanged
+- [x] `indoor3d/classes/` directory no longer exists
+- [x] All files exist at the paths listed in the rename map
+- [x] All `require_relative` references resolve correctly from each file's new location
+- [x] `indoor3d/core.rb` requires all files in the correct dependency order
+- [x] No inline HTML heredocs remain in `edit_mode_dialog.rb` or `export_progress_dialog.rb`
+- [x] `UI::HtmlDialog#set_file` is used in both dialog files
+- [x] All module/class names are unchanged
 - [ ] The extension loads without error in SketchUp
+
+## Implementation Status
+
+- File layout refactor was implemented in commit `7925d5d`.
+- Dialog UI asset extraction was implemented in commit `b7b957d`.
+- Ruby syntax checks passed after both changes.
+- SketchUp runtime load still needs manual confirmation because this cannot be verified from the repository alone.

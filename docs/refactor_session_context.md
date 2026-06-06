@@ -169,6 +169,23 @@ These were observed during refactor testing and recorded in `docs/RefactorTODO.m
 
 ## Recommended Next Step
 
+### Completed structural refactors
+
+- File layout refactor was completed in commit `7925d5d`.
+- Dialog UI extraction was completed in commit `b7b957d`.
+- Current top-level Ruby source layout is:
+  - `indoor3d/domain`
+  - `indoor3d/application`
+  - `indoor3d/infrastructure`
+  - `indoor3d/export`
+  - `indoor3d/ui`
+  - `indoor3d/utils`
+- `indoor3d/classes` is removed.
+- `indoor3d/core.rb` is now the consolidated loader.
+- `ExportProgressDialog` lives in `indoor3d/ui/export_progress_dialog.rb`, not `indoor3d/export/export_progress_dialog.rb`.
+- Dialog HTML/CSS/JS assets live under `indoor3d/ui/html`.
+- Any future refactor TODO file paths should use the new layout, not the old `indoor3d/classes/IndoorCore/...` paths.
+
 Do not jump directly into step 7 if the goal is stable future testing.
 
 Recommended order:
