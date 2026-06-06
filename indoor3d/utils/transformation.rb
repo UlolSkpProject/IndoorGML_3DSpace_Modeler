@@ -9,11 +9,6 @@ module ULOL
           Sketchup.active_model.edit_transform * entity.transformation
         end
 
-        # Deprecated: use entity_transformation_in_active_context for the active-path-aware transform.
-        def self.entity_world_transformation(entity)
-          entity_transformation_in_active_context(entity)
-        end
-
         def self.entity_origin_in_root_local(entity, root_group)
           entity.transformation.origin
         end

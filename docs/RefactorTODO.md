@@ -455,10 +455,6 @@ end
 def self.entity_transformation_in_active_context(entity)
   Sketchup.active_model.edit_transform * entity.transformation
 end
-
-def self.entity_world_transformation(entity)
-  entity_transformation_in_active_context(entity)
-end
 ```
 
 ## 수정해야 하는 이유
@@ -470,7 +466,7 @@ end
 - [x] `entity_world_transformation`의 실제 의미를 확인한다.
 - [x] active context 기준 변환이라면 이름을 `entity_transformation_in_active_context`처럼 변경한다.
 - [x] 호출부를 새 이름으로 수정한다.
-- [x] 기존 함수명을 바로 제거하지 말고 deprecated wrapper로 남길지 판단한다.
+- [x] 기존 함수명을 바로 제거하지 말고 deprecated wrapper로 남길지 판단한다. 내부 API라서 wrapper 없이 삭제했다.
 - [x] 위치 계산 동작은 변경하지 않는다.
 
 ## 테스트할 내용
