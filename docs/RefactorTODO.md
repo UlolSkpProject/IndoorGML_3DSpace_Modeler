@@ -441,11 +441,23 @@ active edit context에 의존하는 transformation 함수를 일반 world transf
 indoor3d/utils/transformation.rb
 ```
 
-현재 후보:
+이전 후보:
 
 ```ruby
 def self.entity_world_transformation(entity)
   Sketchup.active_model.edit_transform * entity.transformation
+end
+```
+
+현재 상태:
+
+```ruby
+def self.entity_transformation_in_active_context(entity)
+  Sketchup.active_model.edit_transform * entity.transformation
+end
+
+def self.entity_world_transformation(entity)
+  entity_transformation_in_active_context(entity)
 end
 ```
 
@@ -455,11 +467,11 @@ end
 
 ## Codex 작업 내용
 
-- [ ] `entity_world_transformation`의 실제 의미를 확인한다.
-- [ ] active context 기준 변환이라면 이름을 `entity_transformation_in_active_context`처럼 변경한다.
-- [ ] 호출부를 새 이름으로 수정한다.
-- [ ] 기존 함수명을 바로 제거하지 말고 deprecated wrapper로 남길지 판단한다.
-- [ ] 위치 계산 동작은 변경하지 않는다.
+- [x] `entity_world_transformation`의 실제 의미를 확인한다.
+- [x] active context 기준 변환이라면 이름을 `entity_transformation_in_active_context`처럼 변경한다.
+- [x] 호출부를 새 이름으로 수정한다.
+- [x] 기존 함수명을 바로 제거하지 말고 deprecated wrapper로 남길지 판단한다.
+- [x] 위치 계산 동작은 변경하지 않는다.
 
 ## 테스트할 내용
 
@@ -470,7 +482,7 @@ end
 
 ## 단계 완료 조건
 
-- [ ] Codex 작업 완료
+- [x] Codex 작업 완료
 - [ ] 실제 SketchUp 테스트 완료 - 사용자만 체크
 
 > 다음 단계 진행 금지 조건: `실제 SketchUp 테스트 완료`가 체크되지 않았다면 8단계로 넘어가지 않는다.
