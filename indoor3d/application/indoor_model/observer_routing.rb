@@ -155,6 +155,11 @@ module ULOL
           def primal_entity_added(entity)
             return if @relocating_entity
             unless indoor_gml_entity?(entity)
+              if contains_nested_cell_space_entity?(entity)
+                flatten_nested_cell_spaces_to_primal(entity)
+                return
+              end
+
               convert_new_edit_mode_group_to_cell_space(entity)
               return
             end
@@ -202,6 +207,62 @@ module ULOL
             rescue StandardError
               nil
             end
+          end
+
+          def contains_nested_cell_space_entity?(entity)
+            nested_cell_space_entities(entity).any?
+          rescue StandardError
+            false
+          end
+
+          def flatten_nested_cell_spaces_to_primal(container)
+            return unless @primal_group&.valid?
+            return unless container&.valid?
+
+            with_indoor_model_operation('IndoorGML Flatten Nested CellSpaces', transparent: true) do
+              begin
+                @relocating_entity = true
+                nested_cell_space_entities(container).each do |entry|
+                  copy_nested_cell_space_to_primal(entry[:entity], entry[:transformation])
+                end
+                container.erase! if container.valid?
+              ensure
+                @relocating_entity = false
+              end
+              refresh_runtime_data
+              Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
+            end
+          rescue StandardError => e
+            puts "[IndoorGML] Nested CellSpace flatten failed: #{e.class}: #{e.message}"
+          end
+
+          def nested_cell_space_entities(container, parent_transformation = nil)
+            return [] unless container&.valid?
+            return [] unless container.respond_to?(:definition) && container.respond_to?(:transformation)
+
+            accumulated = (parent_transformation || Geom::Transformation.new) * container.transformation
+            container.definition.entities.to_a.flat_map do |child|
+              next [] unless child&.valid?
+
+              if indoor_feature(child) == 'CellSpace'
+                [{ entity: child, transformation: accumulated * child.transformation }]
+              elsif child.respond_to?(:definition) && child.respond_to?(:transformation)
+                nested_cell_space_entities(child, accumulated)
+              else
+                []
+              end
+            end
+          end
+
+          def copy_nested_cell_space_to_primal(entity, local_transformation)
+            copy = @primal_group.entities.add_instance(entity.definition, local_transformation)
+            copy = copy.to_group if entity.is_a?(Sketchup::Group) && copy.respond_to?(:to_group)
+            copy.make_unique if entity.is_a?(Sketchup::Group) && copy.respond_to?(:make_unique)
+            copy.name = entity.name if copy.respond_to?(:name=) && entity.respond_to?(:name)
+            copy.material = entity.material if copy.respond_to?(:material=) && entity.respond_to?(:material)
+            copy_indoor_attributes(entity, copy)
+            entity.erase! if entity.valid?
+            copy
           end
 
           def convert_new_edit_mode_group_to_cell_space(entity)
