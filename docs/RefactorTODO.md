@@ -530,6 +530,7 @@ entity.parent == root_group.definition
 - [ ] 최상위 model.entities 아래 group 판정이 false다.
 - [ ] ComponentInstance도 기존 의도대로 판정된다.
 - [ ] CellSpace 변환 위치가 기존과 동일하다.
+- [ ] Primal group 내부 CellSpace들을 다시 그룹으로 묶으면 wrapper group이 CellSpace로 변환되지 않고 내부 CellSpace들이 Primal group 직속으로 복구된다.
 
 ## 단계 완료 조건
 

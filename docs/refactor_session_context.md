@@ -186,6 +186,13 @@ These were observed during refactor testing and recorded in `docs/RefactorTODO.m
 - Dialog HTML/CSS/JS assets live under `indoor3d/ui/html`.
 - Any future refactor TODO file paths should use the new layout, not the old `indoor3d/classes/IndoorCore/...` paths.
 
+### CellSpace direct-child policy
+
+- CellSpaces must remain direct children of `IndoorGML_PrimalSpaceFeatures`.
+- Nested CellSpaces are not a supported model structure.
+- If a normal wrapper group containing existing CellSpaces is added under the Primal group, the wrapper should not be converted into a new GeneralSpace.
+- Instead, the contained CellSpaces are flattened back to direct children of the Primal group while preserving their local transform relative to the Primal group.
+
 Do not jump directly into step 7 if the goal is stable future testing.
 
 Recommended order:
