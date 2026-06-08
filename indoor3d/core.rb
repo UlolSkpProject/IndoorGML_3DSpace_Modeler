@@ -501,9 +501,8 @@ module ULOL
       end
 
       toolbar = UI::Toolbar.new('Indoor3DGML Modeler')
+      toolbar.add_separator
       toolbar.add_item(create_cell_space_command)
-      toolbar.add_separator
-      toolbar.add_separator
       toolbar.add_item(@edit_property_command)
       toolbar.add_item(change_type_command)
       toolbar.add_separator
@@ -511,6 +510,7 @@ module ULOL
       toolbar.add_separator
       toolbar.add_item(export_command)
       toolbar.add_item(check_validity_command)
+      toolbar.add_separator
       toolbar.show()
       file_loaded(__FILE__)
     end

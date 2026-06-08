@@ -17,12 +17,12 @@ module ULOL
           ANCHOR => 'AnchorSpace'
         }.freeze unless const_defined?(:LABELS, false)
 
+        remove_const(:SELECTABLE_TYPES) if const_defined?(:SELECTABLE_TYPES, false)
         SELECTABLE_TYPES = [
           GENERAL,
           TRANSITION,
-          CONNECTION,
-          ANCHOR
-        ].freeze unless const_defined?(:SELECTABLE_TYPES, false)
+          CONNECTION
+        ].freeze
 
         def self.label(value)
           LABELS[value] || LABELS[GENERAL]

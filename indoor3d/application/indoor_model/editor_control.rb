@@ -89,6 +89,10 @@ module ULOL
             @editor_session.active_path_changed(model)
           end
 
+          def recover_unlocked_primal_after_transaction(model)
+            @editor_session.recover_unlocked_primal_after_transaction(model)
+          end
+
           def cleanup_before_quit
             @editor_session.cleanup_before_quit()
           end
@@ -121,31 +125,67 @@ module ULOL
             @editor_session.selection_changed()
           end
 
-          def selected_cell_space_snapshot
+          def selected_edit_mode_snapshot
             begin
-              cell_space = selected_cell_space || @editor_session.editing_cell_space
-              return nil unless cell_space&.valid?
+              cell_spaces = selected_cell_spaces
+              cell_spaces = [@editor_session.editing_cell_space].compact if cell_spaces.empty?
+              cell_spaces = cell_spaces.select { |cell_space| cell_space&.valid? }
+              return selected_solid_groups_snapshot if cell_spaces.empty?
+              return selected_cell_spaces_snapshot(cell_spaces) if cell_spaces.length > 1
 
+              cell_space = cell_spaces.first
               group = cell_space.sketchup_group
               {
+                mode: 'cell_space',
                 feature: 'CellSpace',
                 id: cell_space.id,
                 name: group&.name.to_s,
                 cell_type: CellSpaceType.label(cell_space.cell_type),
                 category_code: cell_space.category_code,
                 classification: CellSpaceCategory.selection_value(cell_space.cell_type, cell_space.category_code),
+                transition_count: cell_space.duality_state&.transition_ids&.length.to_i,
                 cell_geometry_editing: @editor_session.cell_space_geometry_editing?
               }
             rescue StandardError => e
-              puts "[IndoorGML] Selected CellSpace snapshot failed: #{e.class}: #{e.message}"
+              puts "[IndoorGML] Edit mode selection snapshot failed: #{e.class}: #{e.message}"
               nil
+            end
+          end
+
+          def convert_selected_solid_groups_to_cell_spaces(selection_value)
+            begin
+              cell_type, category_code = CellSpaceCategory.parse_selection_value(selection_value)
+              groups = selected_solid_groups
+              return false if groups.empty?
+
+              model = Sketchup.active_model
+              operation_started = false
+              model.start_operation('Convert Selected Solid Groups to CellSpaces', true)
+              operation_started = true
+              begin
+                groups.each do |group|
+                  convert_group_to_cell_space(group, cell_type, category_code)
+                end
+                model.commit_operation
+                operation_started = false
+              ensure
+                model.abort_operation if operation_started
+              end
+              @editor_session.selection_changed()
+              Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
+              true
+            rescue StandardError => e
+              puts "[IndoorGML] Selected solid group conversion failed: #{e.class}: #{e.message}"
+              false
             end
           end
 
           def set_selected_cell_space_type(cell_type_label, category_code = nil)
             begin
-              cell_space = selected_cell_space
-              return false unless cell_space&.valid?
+              cell_spaces = selected_cell_spaces
+              cell_spaces = [@editor_session.editing_cell_space].compact if cell_spaces.empty?
+              cell_spaces = cell_spaces.select { |cell_space| cell_space&.valid? }
+              return false if cell_spaces.empty?
 
               model = Sketchup.active_model()
               operation_started = false
@@ -153,7 +193,9 @@ module ULOL
               operation_started = true
               cell_type = CellSpaceType.from_label(cell_type_label)
               category_code = nil unless CellSpaceCategory.valid_for_type?(cell_type, category_code)
-              change_cell_space_type(cell_space.sketchup_group, cell_type, category_code)
+              cell_spaces.each do |cell_space|
+                change_cell_space_type(cell_space.sketchup_group, cell_type, category_code)
+              end
               model.commit_operation()
               @editor_session.selection_changed()
               model.active_view().invalidate() if model&.active_view
@@ -197,14 +239,65 @@ module ULOL
           end
 
           def selected_cell_space
-            selection = Sketchup.active_model&.selection
-            return nil unless selection
+            selected_cell_spaces.first
+          end
 
-            selection.each do |entity|
+          def selected_cell_spaces
+            selection = Sketchup.active_model&.selection
+            return [] unless selection
+
+            selection.each_with_object([]) do |entity, result|
               cell_space = find_cell_space_for_entity(entity)
-              return cell_space if cell_space&.valid?
+              result << cell_space if cell_space&.valid?
             end
-            nil
+          end
+
+          def selected_cell_spaces_snapshot(cell_spaces)
+            {
+              mode: 'cell_spaces',
+              cell_space_count: cell_spaces.length,
+              classification: common_cell_space_classification(cell_spaces)
+            }
+          end
+
+          def common_cell_space_classification(cell_spaces)
+            classifications = cell_spaces.map do |cell_space|
+              CellSpaceCategory.selection_value(cell_space.cell_type, cell_space.category_code)
+            end.uniq
+
+            classifications.length == 1 ? classifications.first : nil
+          end
+
+          def selected_solid_groups_snapshot
+            groups = selected_solid_groups
+            return nil if groups.empty?
+
+            {
+              mode: 'solid_groups',
+              solid_group_count: groups.length,
+              classification: CellSpaceCategory.selection_value(
+                CellSpaceType::GENERAL,
+                CellSpaceCategory.default_for(CellSpaceType::GENERAL)[:code]
+              )
+            }
+          end
+
+          def selected_solid_groups
+            selection = Sketchup.active_model&.selection
+            return [] unless selection
+            entities = selection.to_a
+            return [] if entities.empty?
+
+            groups = entities.grep(Sketchup::Group)
+            return [] unless groups.length == entities.length
+
+            solid_groups = groups.select do |group|
+              group&.valid? &&
+                group.respond_to?(:manifold?) &&
+                group.manifold? &&
+                find_cell_space_for_entity(group).nil?
+            end
+            solid_groups.length == groups.length ? solid_groups : []
           end
         end
       end
