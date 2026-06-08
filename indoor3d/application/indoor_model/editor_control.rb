@@ -38,6 +38,33 @@ module ULOL
             @editor_session.toggle_dual_overlay_visible()
           end
 
+          def progress_active?
+            @editor_session.progress_active?()
+          end
+
+          def progress_current
+            @editor_session.progress_current()
+          end
+
+          def progress_total
+            @editor_session.progress_total()
+          end
+
+          def progress_message
+            @editor_session.progress_message()
+          end
+
+          def run_batched(items, message:, batch_size: 20, complete: nil, failure: nil, &block)
+            @editor_session.run_batched(
+              items,
+              message: message,
+              batch_size: batch_size,
+              complete: complete,
+              failure: failure,
+              &block
+            )
+          end
+
           def set_overlay_min_radius_pixels(radius_pixels)
             radius_pixels = radius_pixels.to_f
             return false unless radius_pixels.positive?
@@ -162,19 +189,32 @@ module ULOL
               operation_started = false
               model.start_operation('Convert Selected Solid Groups to CellSpaces', true)
               operation_started = true
-              begin
-                groups.each do |group|
-                  convert_group_to_cell_space(group, cell_type, category_code)
+              scheduled = run_batched(
+                groups,
+                message: 'Converting CellSpaces...',
+                batch_size: 20,
+                complete: proc do
+                  model.commit_operation
+                  operation_started = false
+                  @editor_session.selection_changed()
+                  Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
+                end,
+                failure: proc do |error|
+                  model.abort_operation if operation_started
+                  operation_started = false
+                  puts "[IndoorGML] Selected solid group conversion failed: #{error.class}: #{error.message}"
                 end
-                model.commit_operation
-                operation_started = false
-              ensure
-                model.abort_operation if operation_started
+              ) do |group, _index|
+                convert_group_to_cell_space(group, cell_type, category_code)
               end
-              @editor_session.selection_changed()
-              Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
+              unless scheduled
+                model.abort_operation if operation_started
+                operation_started = false
+                return false
+              end
               true
             rescue StandardError => e
+              model.abort_operation if operation_started
               puts "[IndoorGML] Selected solid group conversion failed: #{e.class}: #{e.message}"
               false
             end

@@ -95,6 +95,28 @@ module ULOL
           touching_bounds_face_axis(entity1.bounds, entity2.bounds, tolerance)
         end
 
+        def self.adjacency_snapshot(entity)
+          return nil unless entity&.valid?
+          return nil unless entity.respond_to?(:definition) && entity.respond_to?(:transformation)
+
+          transformation = entity.transformation
+          snapshot = {
+            bounds: snapshot_bounds(entity.bounds),
+            faces: snapshot_faces(entity, transformation)
+          }
+          deep_freeze(snapshot)
+        end
+
+        def self.adjacency_axis_from_snapshots(snapshot1, snapshot2, tolerance: 1.mm)
+          return nil unless snapshot1 && snapshot2
+          return nil unless touching_snapshot_bounds?(snapshot1[:bounds], snapshot2[:bounds], tolerance)
+
+          face_axis = adjacent_snapshot_face_axis(snapshot1, snapshot2, tolerance)
+          return face_axis unless face_axis.nil?
+
+          touching_snapshot_bounds_face_axis(snapshot1[:bounds], snapshot2[:bounds], tolerance)
+        end
+
         def self.sphere_points(center, radius, segments, rings)
           (0..rings).map do |ring_index|
             phi = Math::PI * ring_index / rings
@@ -136,6 +158,40 @@ module ULOL
         end
         private_class_method :world_faces
 
+        def self.snapshot_bounds(bounds)
+          {
+            min: [bounds.min.x.to_f, bounds.min.y.to_f, bounds.min.z.to_f],
+            max: [bounds.max.x.to_f, bounds.max.y.to_f, bounds.max.z.to_f]
+          }
+        end
+        private_class_method :snapshot_bounds
+
+        def self.snapshot_faces(entity, transformation)
+          entity.definition.entities.grep(Sketchup::Face).map do |face|
+            points = face.outer_loop.vertices.map do |vertex|
+              point = vertex.position.transform(transformation)
+              [point.x.to_f, point.y.to_f, point.z.to_f]
+            end
+            next if points.length < 3
+
+            normal = face.normal.transform(transformation)
+            normal.normalize!
+            { points: points, normal: [normal.x.to_f, normal.y.to_f, normal.z.to_f] }
+          end.compact
+        end
+        private_class_method :snapshot_faces
+
+        def self.deep_freeze(object)
+          case object
+          when Array
+            object.each { |item| deep_freeze(item) }
+          when Hash
+            object.each_value { |value| deep_freeze(value) }
+          end
+          object.freeze
+        end
+        private_class_method :deep_freeze
+
         def self.adjacent_face_axis(entity1, entity2, tolerance)
           faces1 = world_faces(entity1)
           faces2 = world_faces(entity2)
@@ -160,12 +216,27 @@ module ULOL
         end
         private_class_method :touching_bounds?
 
+        def self.touching_snapshot_bounds?(bounds1, bounds2, tolerance)
+          axis_overlap_or_touch?(bounds1[:min][0], bounds1[:max][0], bounds2[:min][0], bounds2[:max][0], tolerance) &&
+            axis_overlap_or_touch?(bounds1[:min][1], bounds1[:max][1], bounds2[:min][1], bounds2[:max][1], tolerance) &&
+            axis_overlap_or_touch?(bounds1[:min][2], bounds1[:max][2], bounds2[:min][2], bounds2[:max][2], tolerance)
+        end
+        private_class_method :touching_snapshot_bounds?
+
         def self.touching_bounds_face_axis(bounds1, bounds2, tolerance)
           [:x, :y, :z].find do |axis|
             bounds_face_contact_on_axis?(bounds1, bounds2, axis, tolerance)
           end
         end
         private_class_method :touching_bounds_face_axis
+
+        def self.touching_snapshot_bounds_face_axis(bounds1, bounds2, tolerance)
+          [0, 1, 2].each do |axis|
+            return axis_symbol(axis) if snapshot_bounds_face_contact_on_axis?(bounds1, bounds2, axis, tolerance)
+          end
+          nil
+        end
+        private_class_method :touching_snapshot_bounds_face_axis
 
         def self.bounds_face_contact_on_axis?(bounds1, bounds2, axis, tolerance)
           min1 = bounds1.min.public_send(axis)
@@ -186,11 +257,40 @@ module ULOL
         end
         private_class_method :bounds_face_contact_on_axis?
 
+        def self.snapshot_bounds_face_contact_on_axis?(bounds1, bounds2, axis, tolerance)
+          min1 = bounds1[:min][axis]
+          max1 = bounds1[:max][axis]
+          min2 = bounds2[:min][axis]
+          max2 = bounds2[:max][axis]
+          return false unless (max1 - min2).abs <= tolerance || (max2 - min1).abs <= tolerance
+
+          ([0, 1, 2] - [axis]).all? do |overlap_axis|
+            overlap_length(
+              bounds1[:min][overlap_axis],
+              bounds1[:max][overlap_axis],
+              bounds2[:min][overlap_axis],
+              bounds2[:max][overlap_axis]
+            ) > tolerance
+          end
+        end
+        private_class_method :snapshot_bounds_face_contact_on_axis?
+
         def self.dominant_axis(vector)
           values = { x: vector.x.abs, y: vector.y.abs, z: vector.z.abs }
           values.max_by { |_axis, value| value }.first
         end
         private_class_method :dominant_axis
+
+        def self.dominant_snapshot_axis(vector)
+          values = { x: vector[0].abs, y: vector[1].abs, z: vector[2].abs }
+          values.max_by { |_axis, value| value }.first
+        end
+        private_class_method :dominant_snapshot_axis
+
+        def self.axis_symbol(axis)
+          [:x, :y, :z][axis]
+        end
+        private_class_method :axis_symbol
 
         def self.axis_overlap_or_touch?(min1, max1, min2, max2, tolerance)
           [min1, min2].max <= [max1, max2].min + tolerance
@@ -214,11 +314,46 @@ module ULOL
         end
         private_class_method :coplanar_touching_faces?
 
+        def self.adjacent_snapshot_face_axis(snapshot1, snapshot2, tolerance)
+          faces1 = snapshot1[:faces]
+          faces2 = snapshot2[:faces]
+          return nil if faces1.empty? || faces2.empty?
+
+          faces1.each do |face1|
+            faces2.each do |face2|
+              next unless coplanar_touching_snapshot_faces?(face1, face2, tolerance)
+
+              return dominant_snapshot_axis(face1[:normal])
+            end
+          end
+
+          nil
+        end
+        private_class_method :adjacent_snapshot_face_axis
+
+        def self.coplanar_touching_snapshot_faces?(face1, face2, tolerance)
+          normal1 = face1[:normal]
+          normal2 = face2[:normal]
+          return false unless snapshot_normals_parallel?(normal1, normal2)
+          return false unless snapshot_points_on_plane?(face2[:points], normal1, face1[:points].first, tolerance)
+
+          polygon1 = project_snapshot_points(face1[:points], normal1)
+          polygon2 = project_snapshot_points(face2[:points], normal1)
+          polygons_touch?(polygon1, polygon2, tolerance)
+        end
+        private_class_method :coplanar_touching_snapshot_faces?
+
         def self.normals_parallel?(normal1, normal2)
           dot = dot_product(normal1, normal2).abs
           (1.0 - dot) <= 0.000001
         end
         private_class_method :normals_parallel?
+
+        def self.snapshot_normals_parallel?(normal1, normal2)
+          dot = snapshot_dot_product(normal1, normal2).abs
+          (1.0 - dot) <= 0.000001
+        end
+        private_class_method :snapshot_normals_parallel?
 
         def self.points_on_plane?(points, normal, plane_point, tolerance)
           points.all? do |point|
@@ -227,6 +362,18 @@ module ULOL
           end
         end
         private_class_method :points_on_plane?
+
+        def self.snapshot_points_on_plane?(points, normal, plane_point, tolerance)
+          points.all? do |point|
+            vector = [
+              point[0] - plane_point[0],
+              point[1] - plane_point[1],
+              point[2] - plane_point[2]
+            ]
+            snapshot_dot_product(vector, normal).abs <= tolerance
+          end
+        end
+        private_class_method :snapshot_points_on_plane?
 
         def self.project_points(points, normal)
           ax = normal.x.abs
@@ -244,6 +391,23 @@ module ULOL
           end
         end
         private_class_method :project_points
+
+        def self.project_snapshot_points(points, normal)
+          ax = normal[0].abs
+          ay = normal[1].abs
+          az = normal[2].abs
+
+          points.map do |point|
+            if ax >= ay && ax >= az
+              [point[1], point[2]]
+            elsif ay >= ax && ay >= az
+              [point[0], point[2]]
+            else
+              [point[0], point[1]]
+            end
+          end
+        end
+        private_class_method :project_snapshot_points
 
         def self.polygons_touch?(polygon1, polygon2, tolerance)
           polygon1.any? { |point| point_in_polygon?(point, polygon2, tolerance) } ||
@@ -314,6 +478,11 @@ module ULOL
           (vector1.x * vector2.x) + (vector1.y * vector2.y) + (vector1.z * vector2.z)
         end
         private_class_method :dot_product
+
+        def self.snapshot_dot_product(vector1, vector2)
+          (vector1[0] * vector2[0]) + (vector1[1] * vector2[1]) + (vector1[2] * vector2[2])
+        end
+        private_class_method :snapshot_dot_product
 
         def self.validate_sphere_arguments!(entities, center, radius, segments, rings)
           unless entities.respond_to?(:add_face)

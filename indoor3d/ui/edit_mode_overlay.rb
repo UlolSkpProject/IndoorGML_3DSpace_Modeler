@@ -14,6 +14,10 @@ module ULOL
         HINT_COLOR = Sketchup::Color.new(214, 245, 229)
         DUAL_STATE_COLOR = Sketchup::Color.new(35, 120, 255, 255)
         DUAL_TRANSITION_COLOR = Sketchup::Color.new(35, 120, 255, 125)
+        PROGRESS_BACKDROP_COLOR = Sketchup::Color.new(17, 24, 39, 220)
+        PROGRESS_TRACK_COLOR = Sketchup::Color.new(75, 85, 99, 220)
+        PROGRESS_FILL_COLOR = Sketchup::Color.new(22, 130, 82, 235)
+        PROGRESS_TEXT_COLOR = Sketchup::Color.new(255, 255, 255, 255)
         CIRCLE_SEGMENTS = 16
         OVERLAY_RADIUS_SCALE = 1.1
 
@@ -24,7 +28,7 @@ module ULOL
 
         def draw(view)
           begin
-            return unless @indoor_model.editing?() || @indoor_model.dual_overlay_visible?()
+            return unless @indoor_model.editing?() || @indoor_model.dual_overlay_visible?() || @indoor_model.progress_active?()
 
             if @indoor_model.editing?()
               draw_screen_border(view)
@@ -32,6 +36,7 @@ module ULOL
               draw_cell_space_outlines(view)
             end
             draw_dual_space_overlay(view)
+            draw_progress_bar(view) if @indoor_model.progress_active?()
           rescue StandardError => e
             puts "[IndoorGML] Edit mode overlay draw failed: #{e.class}: #{e.message}"
           end
@@ -142,6 +147,62 @@ module ULOL
           ensure
             view.line_width = 1 if view.respond_to?(:line_width=)
           end
+        end
+
+        def draw_progress_bar(view)
+          width = view.vpwidth()
+          height = view.vpheight()
+          panel_width = [[width - 48, 460].min, 220].max
+          panel_height = 56
+          x = ((width - panel_width) / 2.0).round
+          y = height - panel_height - 28
+          padding = 12
+          bar_height = 10
+          bar_width = panel_width - (padding * 2)
+          bar_x = x + padding
+          bar_y = y + panel_height - padding - bar_height
+          total = [@indoor_model.progress_total, 1].max
+          current = [[@indoor_model.progress_current, 0].max, total].min
+          ratio = current.to_f / total
+          fill_width = (bar_width * ratio).round
+
+          draw_2d_quad(
+            view,
+            [
+              [x, y, 0],
+              [x + panel_width, y, 0],
+              [x + panel_width, y + panel_height, 0],
+              [x, y + panel_height, 0]
+            ],
+            PROGRESS_BACKDROP_COLOR
+          )
+          draw_2d_quad(
+            view,
+            [
+              [bar_x, bar_y, 0],
+              [bar_x + bar_width, bar_y, 0],
+              [bar_x + bar_width, bar_y + bar_height, 0],
+              [bar_x, bar_y + bar_height, 0]
+            ],
+            PROGRESS_TRACK_COLOR
+          )
+          if fill_width.positive?
+            draw_2d_quad(
+              view,
+              [
+                [bar_x, bar_y, 0],
+                [bar_x + fill_width, bar_y, 0],
+                [bar_x + fill_width, bar_y + bar_height, 0],
+                [bar_x, bar_y + bar_height, 0]
+              ],
+              PROGRESS_FILL_COLOR
+            )
+          end
+          view.draw_text(
+            Geom::Point3d.new(x + padding, y + 9, 0),
+            "#{@indoor_model.progress_message} #{current}/#{total}",
+            text_options(size: 11, bold: true, color: PROGRESS_TEXT_COLOR)
+          )
         end
 
         def draw_overlay_states(view)

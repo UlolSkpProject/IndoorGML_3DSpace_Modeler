@@ -78,7 +78,35 @@ module ULOL
         indoor_model.with_active_path_enforcement_suspended do
           root_solid_groups = move_groups_to_root_context(model, solid_groups)
           activate_root_context(model)
-          root_solid_groups.each do |group|
+          if root_solid_groups.empty?
+            restore_active_path(model, original_active_path)
+            model.abort_operation()
+            UI.messagebox('No valid solid groups were available for conversion.')
+            return
+          end
+
+          scheduled = indoor_model.run_batched(
+            root_solid_groups,
+            message: 'Converting CellSpaces...',
+            batch_size: 20,
+            complete: proc do
+              indoor_model.with_active_path_enforcement_suspended do
+                restore_active_path(model, original_active_path)
+              end
+              model.commit_operation()
+
+              message = "Converted #{converted_count} CellSpace(s)."
+              message += "\nFailed #{errors.length} group(s):\n#{errors.join("\n")}" if errors.any?()
+              UI.messagebox(message)
+            end,
+            failure: proc do |error|
+              indoor_model.with_active_path_enforcement_suspended do
+                restore_active_path(model, original_active_path)
+              end
+              model.abort_operation()
+              UI.messagebox("CellSpace conversion failed:\n#{error.message}")
+            end
+          ) do |group, _index|
             begin
               indoor_model.convert_group_to_cell_space(group, cell_type, category_code)
               converted_count += 1
@@ -87,13 +115,12 @@ module ULOL
               errors << "#{e.class}: #{e.message}"
             end
           end
-          restore_active_path(model, original_active_path)
+          unless scheduled
+            restore_active_path(model, original_active_path)
+            model.abort_operation()
+            UI.messagebox('CellSpace conversion could not be scheduled.')
+          end
         end
-        model.commit_operation()
-
-        message = "Converted #{converted_count} CellSpace(s)."
-        message += "\nFailed #{errors.length} group(s):\n#{errors.join("\n")}" if errors.any?()
-        UI.messagebox(message)
       rescue StandardError => e
         if model && original_active_path
           IndoorCore::IndoorModel.current.with_active_path_enforcement_suspended do
