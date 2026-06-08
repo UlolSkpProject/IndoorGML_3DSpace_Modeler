@@ -5,11 +5,10 @@ module ULOL
     module IndoorCore
 
       class RuntimeRestorer
-        def initialize(registry, serializer, cell_space_registrar:, state_registrar:)
+        def initialize(registry:, serializer:, callbacks:)
           @registry = registry
           @serializer = serializer
-          @cell_space_registrar = cell_space_registrar
-          @state_registrar = state_registrar
+          @callbacks = callbacks
         end
 
         def restore(primal_group:)
@@ -24,7 +23,7 @@ module ULOL
 
           indoor_children(primal_group.entities, 'CellSpace').each do |entity|
             cell_space = restore_cell_space(entity)
-            @cell_space_registrar.call(cell_space) if cell_space
+            callback(:cell_space_registrar).call(cell_space) if cell_space
           end
         end
 
@@ -34,8 +33,12 @@ module ULOL
             next unless state
 
             cell_space.restore_duality_state(state)
-            @state_registrar.call(state)
+            callback(:state_registrar).call(state)
           end
+        end
+
+        def callback(name)
+          @callbacks.fetch(name)
         end
 
         def restore_cell_space(entity)
