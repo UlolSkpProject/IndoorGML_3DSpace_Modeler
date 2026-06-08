@@ -28,11 +28,13 @@ module ULOL
           end
 
           def export(output_path: self.class.default_temp_gml_path)
-            @indoor_model.refresh_runtime_data if @refresh_runtime_data
-            output_path = File.expand_path(output_path)
-            FileUtils.mkdir_p(File.dirname(output_path))
-            File.write(output_path, document)
-            output_path
+            with_root_model_coordinates do
+              @indoor_model.refresh_runtime_data if @refresh_runtime_data
+              output_path = File.expand_path(output_path)
+              FileUtils.mkdir_p(File.dirname(output_path))
+              File.write(output_path, document)
+              output_path
+            end
           end
 
           def self.output_root
@@ -44,6 +46,51 @@ module ULOL
           end
 
           private
+
+          def with_root_model_coordinates
+            model = Sketchup.active_model
+            return yield unless model
+
+            previous_active_path = active_path_snapshot(model)
+            with_active_path_enforcement_suspended do
+              close_active_path(model)
+              yield
+            ensure
+              restore_active_path(model, previous_active_path)
+            end
+          end
+
+          def with_active_path_enforcement_suspended
+            if @indoor_model.respond_to?(:with_active_path_enforcement_suspended)
+              @indoor_model.with_active_path_enforcement_suspended { yield }
+            else
+              yield
+            end
+          end
+
+          def active_path_snapshot(model)
+            path = model.active_path
+            path ? path.dup : nil
+          rescue StandardError
+            nil
+          end
+
+          def close_active_path(model)
+            model.close_active while model.active_path
+          end
+
+          def restore_active_path(model, active_path)
+            return close_active_path(model) if active_path.nil?
+
+            valid_path = active_path.select { |entity| entity&.valid? }
+            if model.respond_to?(:active_path=) && !valid_path.empty?
+              model.active_path = valid_path
+            else
+              close_active_path(model)
+            end
+          rescue StandardError => e
+            puts "[IndoorGML] Export active path restore failed: #{e.class}: #{e.message}"
+          end
 
           def document
             doc = REXML::Document.new
@@ -121,7 +168,7 @@ module ULOL
             group = cell_space.valid_sketchup_group
             return unless group
 
-            world_transform = Utils::Transformation.entity_transformation_in_active_context(group)
+            world_transform = cell_space_world_transformation(group)
             solid_center = export_point(group.definition.bounds.center.transform(world_transform))
             faces = group.definition.entities.grep(Sketchup::Face)
             faces.each_with_index do |face, index|
@@ -246,6 +293,15 @@ module ULOL
             return point unless primal_group&.valid?
 
             point.transform(primal_group.transformation)
+          end
+
+          def cell_space_world_transformation(group)
+            primal_group = @indoor_model.primal_group
+            if primal_group&.valid? && Utils::Transformation.direct_child_of_root?(group, primal_group)
+              return primal_group.transformation * group.transformation
+            end
+
+            group.transformation
           end
 
           def format_point(point)

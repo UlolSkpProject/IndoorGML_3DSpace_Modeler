@@ -238,7 +238,13 @@ module ULOL
         end
 
         def overlay_state_point(state)
-          @indoor_model.primal_group.transformation * state.position
+          cell_space = state.duality_cell
+          group = cell_space&.valid_sketchup_group
+          return group.bounds.center if group
+
+          state.position
+        rescue StandardError
+          state.position
         end
 
         def draw_bounds(view, bounds)

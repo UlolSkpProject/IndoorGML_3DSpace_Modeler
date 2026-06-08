@@ -25,6 +25,12 @@ module ULOL
             current_snapshot = build_space_features_change_snapshot(entity)
             remember_space_features_change_snapshot(entity, current_snapshot)
             if previous_snapshot.nil?
+              expected_name = expected_space_features_name_for(entity)
+              if expected_name && current_snapshot[:name] != expected_name
+                log_space_features_change(entity, :name, [:name], { name: expected_name }, current_snapshot)
+                return :name
+              end
+
               log_space_features_change(entity, :initial_snapshot, [], previous_snapshot, current_snapshot)
               return nil
             end
@@ -232,11 +238,10 @@ module ULOL
 
           def normalize_primal_child_for_finish(entity, raw_entities)
             return unless entity&.valid?
+            return if space_features_origin_point?(entity)
             return if indoor_feature(entity) == 'CellSpace'
 
-            if convertible_new_cell_space_group?(entity)
-              convert_group_to_cell_space(entity, CellSpaceType::GENERAL)
-            elsif entity.respond_to?(:definition) && entity.respond_to?(:transformation)
+            if entity.respond_to?(:definition) && entity.respond_to?(:transformation)
               normalize_primal_container_without_operation(entity)
             else
               raw_entities << entity
@@ -331,6 +336,10 @@ module ULOL
 
             wrapper = @primal_group.entities.add_group(raw_entities)
             return unless wrapper&.valid?
+            if wrapper.entities.to_a.empty?
+              wrapper.erase!
+              return
+            end
 
             wrapper.name = 'IndoorGML_NonCellSpaceEntities' if wrapper.respond_to?(:name=)
             move_remaining_primal_container_to_root(wrapper)
@@ -339,19 +348,16 @@ module ULOL
             nil
           end
 
-          def primal_direct_container?(entity)
-            return false unless entity.is_a?(Sketchup::Group) || entity.is_a?(Sketchup::ComponentInstance)
-            return false unless @primal_group&.valid?
+          def space_features_origin_point?(entity)
+            return false unless entity.is_a?(Sketchup::ConstructionPoint)
 
-            Utils::Transformation.direct_child_of_root?(entity, @primal_group)
+            entity.position.distance(ORIGIN) <= 0.001
           rescue StandardError
             false
           end
 
-          def convertible_new_cell_space_group?(entity)
-            return false unless entity&.valid?
+          def primal_direct_container?(entity)
             return false unless entity.is_a?(Sketchup::Group) || entity.is_a?(Sketchup::ComponentInstance)
-            return false unless entity.respond_to?(:manifold?) && entity.manifold?
             return false unless @primal_group&.valid?
 
             Utils::Transformation.direct_child_of_root?(entity, @primal_group)

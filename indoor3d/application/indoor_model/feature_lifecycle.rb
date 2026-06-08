@@ -15,7 +15,7 @@ module ULOL
               cell_space = CellSpace.new(cell_group, cell_type, category_code)
               name_cell_space_entity(cell_space)
               apply_cell_space_material(cell_space)
-              state = cell_space.create_duality_state(nil, cell_space_local_origin(cell_space))
+              state = cell_space.create_duality_state(nil)
 
               register_cell_space(cell_space)
               register_state(state)
@@ -89,10 +89,6 @@ module ULOL
                   cell_space = refresh_and_find_cell_space(entity)
                   state = cell_space&.duality_state
                 end
-                if state&.valid?
-                  local_position = cell_space_local_origin(cell_space)
-                  update_state_position(state, local_position)
-                end
                 synchronize_adjacency_and_transitions_for_cell_space(cell_space)
               end
             end
@@ -160,7 +156,7 @@ module ULOL
               sync do
                 make_unique_performed = make_cell_space_entity_unique(entity)
                 cell_space = build_independent_cell_space(entity)
-                state = cell_space.create_duality_state(nil, cell_space_local_origin(cell_space))
+                state = cell_space.create_duality_state(nil)
                 ensure_unique_feature_id!(cell_space)
                 ensure_unique_feature_id!(state, reserved_ids: [cell_space.id])
 
@@ -287,10 +283,6 @@ module ULOL
             unless state&.valid?
               cell_space = refresh_and_find_cell_space(cell_space.sketchup_group)
               state = cell_space&.duality_state
-            end
-            if state&.valid?
-              local_position = cell_space_local_origin(cell_space)
-              update_state_position(state, local_position)
             end
             synchronize_adjacency_and_transitions_for_cell_space(cell_space)
           end
@@ -490,8 +482,7 @@ module ULOL
             @feature_registry.remove_state(state)
           end
 
-          def update_state_position(state, local_position)
-            state.update_position(local_position)
+          def update_state_position(state, _local_position = nil)
             write_state_attributes(state)
           end
 

@@ -11,7 +11,7 @@ module ULOL
       module IndoorGmlConverter
 
         class Val3dityRunner
-          VENDOR_ROOT = File.expand_path('../../../../assets/vendor/val3dity-windows-x64-v2.2.0', __dir__)
+          VENDOR_ROOT = File.expand_path('../assets/vendor/val3dity-windows-x64-v2.2.0', __dir__)
 
           attr_reader :report_json_path, :report_html_path
 
@@ -43,7 +43,6 @@ module ULOL
 
           def ensure_runtime_files!
             raise "val3dity.exe was not found:\n#{exe_path}" unless File.exist?(exe_path)
-            raise "val3dity report template was not found:\n#{report_template_dir}" unless Dir.exist?(report_template_dir)
             raise "GML file was not found:\n#{@gml_path}" unless File.exist?(@gml_path)
 
             FileUtils.mkdir_p(@work_dir)
@@ -66,8 +65,33 @@ module ULOL
 
           def prepare_html_report(raw_report)
             FileUtils.rm_rf(@report_dir)
-            FileUtils.cp_r(report_template_dir, @report_dir)
-            File.write(File.join(@report_dir, 'report.js'), "var report = #{JSON.pretty_generate(to_report_js(raw_report))}\n", encoding: 'UTF-8')
+            if Dir.exist?(report_template_dir)
+              FileUtils.cp_r(report_template_dir, @report_dir)
+              File.write(File.join(@report_dir, 'report.js'), "var report = #{JSON.pretty_generate(to_report_js(raw_report))}\n", encoding: 'UTF-8')
+            else
+              FileUtils.mkdir_p(@report_dir)
+              File.write(@report_html_path, fallback_report_html(raw_report), encoding: 'UTF-8')
+            end
+          end
+
+          def fallback_report_html(raw_report)
+            escaped_report = JSON.pretty_generate(raw_report)
+                                 .gsub('&', '&amp;')
+                                 .gsub('<', '&lt;')
+                                 .gsub('>', '&gt;')
+            <<~HTML
+              <!doctype html>
+              <html>
+              <head>
+                <meta charset="utf-8">
+                <title>val3dity report</title>
+              </head>
+              <body>
+                <h1>val3dity report</h1>
+                <pre>#{escaped_report}</pre>
+              </body>
+              </html>
+            HTML
           end
 
           def to_report_js(raw_report)
