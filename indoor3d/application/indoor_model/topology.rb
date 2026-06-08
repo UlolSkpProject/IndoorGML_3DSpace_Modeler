@@ -174,9 +174,7 @@ module ULOL
           end
 
           def rebuild_runtime_transitions_from_cell_adjacency
-            @cell_spaces.each do |cell_space|
-              synchronize_adjacency_and_transitions_for_cell_space(cell_space)
-            end
+            @adjacency_service.synchronize_all
           end
         end
       end

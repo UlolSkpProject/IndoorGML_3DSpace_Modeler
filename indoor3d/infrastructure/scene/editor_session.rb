@@ -17,6 +17,7 @@ module ULOL
           @editing_active_path_target = nil
           @enforcing_active_path = false
           @active_path_enforcement_suspended = false
+          @progress = nil
         end
 
         def editing?
@@ -35,9 +36,93 @@ module ULOL
           @dual_overlay_visible = visible == true
           model = Sketchup.active_model()
           ensure_overlay_registered(model) if @dual_overlay_visible
-          set_overlay_enabled(@editing || @dual_overlay_visible)
+          update_overlay_enabled()
           invalidate_view(model)
           @dual_overlay_visible
+        end
+
+        def progress_active?
+          @progress && @progress[:active] == true
+        end
+
+        def progress_current
+          @progress ? @progress[:current].to_i : 0
+        end
+
+        def progress_total
+          @progress ? @progress[:total].to_i : 0
+        end
+
+        def progress_message
+          @progress ? @progress[:message].to_s : ''
+        end
+
+        def start_progress(total, message)
+          @progress = {
+            active: true,
+            current: 0,
+            total: [total.to_i, 0].max,
+            message: message.to_s
+          }
+          model = Sketchup.active_model()
+          ensure_overlay_registered(model)
+          update_overlay_enabled()
+          invalidate_view(model)
+          true
+        end
+
+        def update_progress(current, message = nil)
+          return false unless @progress
+
+          @progress[:current] = [current.to_i, 0].max
+          @progress[:message] = message.to_s if message
+          invalidate_view(Sketchup.active_model())
+          true
+        end
+
+        def finish_progress
+          @progress = nil
+          model = Sketchup.active_model()
+          update_overlay_enabled()
+          invalidate_view(model)
+          true
+        end
+
+        def run_batched(items, message:, batch_size: 20, complete: nil, failure: nil, &block)
+          items = Array(items)
+          return false if items.empty?
+
+          batch_size = [batch_size.to_i, 1].max
+          index = 0
+          total = items.length
+          start_progress(total, message)
+
+          processor = nil
+          processor = proc do
+            begin
+              limit = [index + batch_size, total].min
+              while index < limit
+                block.call(items[index], index) if block
+                index += 1
+              end
+              update_progress(index, message)
+              if index < total
+                UI.start_timer(0, false) { processor.call }
+              else
+                finish_progress()
+                complete&.call()
+              end
+            rescue StandardError => e
+              finish_progress()
+              if failure
+                failure.call(e)
+              else
+                puts "[IndoorGML] Batched operation failed: #{e.class}: #{e.message}"
+              end
+            end
+          end
+          UI.start_timer(0, false) { processor.call }
+          true
         end
 
         def begin_editing
@@ -78,7 +163,7 @@ module ULOL
           @indoor_model.detach_edit_selection_observer(model)
           restore_active_path(model)
           @previous_active_path = nil
-          set_overlay_enabled(@dual_overlay_visible == true)
+          update_overlay_enabled()
           @dialog.close()
           apply_lock_policy()
           invalidate_view(model)
@@ -303,6 +388,10 @@ module ULOL
           rescue StandardError => e
             puts "[IndoorGML] Edit mode overlay enable failed: #{e.class}: #{e.message}"
           end
+        end
+
+        def update_overlay_enabled
+          set_overlay_enabled(@editing || @dual_overlay_visible == true || progress_active?)
         end
 
         def invalidate_view(model)
