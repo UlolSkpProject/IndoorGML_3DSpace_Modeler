@@ -161,10 +161,19 @@ module ULOL
                 transitionCount: #{snapshot[:transition_count].to_i},
                 cellSpaceCount: #{snapshot[:cell_space_count].to_i},
                 solidGroupCount: #{snapshot[:solid_group_count].to_i},
+                stateCount: #{snapshot[:state_count].to_i},
+                totalTransitionCount: #{snapshot[:total_transition_count].to_i},
+                cellTypeCounts: #{cell_type_counts_script(snapshot[:cell_type_counts])},
                 cellGeometryEditing: #{snapshot[:cell_geometry_editing] ? 'true' : 'false'}
               });
             JS
           end
+        end
+
+        def cell_type_counts_script(counts)
+          Array(counts).map do |entry|
+            "{label: #{js_string(entry[:label])}, count: #{entry[:count].to_i}}"
+          end.then { |items| "[#{items.join(', ')}]" }
         end
 
         def js_string(value)

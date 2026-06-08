@@ -157,7 +157,12 @@ module ULOL
               cell_spaces = selected_cell_spaces
               cell_spaces = [@editor_session.editing_cell_space].compact if cell_spaces.empty?
               cell_spaces = cell_spaces.select { |cell_space| cell_space&.valid? }
-              return selected_solid_groups_snapshot if cell_spaces.empty?
+              if cell_spaces.empty?
+                solid_snapshot = selected_solid_groups_snapshot
+                return solid_snapshot if solid_snapshot
+
+                return empty_edit_mode_snapshot
+              end
               return selected_cell_spaces_snapshot(cell_spaces) if cell_spaces.length > 1
 
               cell_space = cell_spaces.first
@@ -298,6 +303,24 @@ module ULOL
               cell_space_count: cell_spaces.length,
               classification: common_cell_space_classification(cell_spaces)
             }
+          end
+
+          def empty_edit_mode_snapshot
+            {
+              mode: 'empty',
+              cell_type_counts: cell_type_counts_snapshot,
+              state_count: @states.count { |state| state&.valid? },
+              total_transition_count: @transitions.count { |transition| transition&.valid? }
+            }
+          end
+
+          def cell_type_counts_snapshot
+            CellSpaceType::LABELS.map do |type, label|
+              {
+                label: label,
+                count: @cell_spaces.count { |cell_space| cell_space&.valid? && cell_space.cell_type == type }
+              }
+            end
           end
 
           def common_cell_space_classification(cell_spaces)
