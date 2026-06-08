@@ -234,3 +234,42 @@ Reason: steps 7 onward touch transformation, root-child detection, SceneGroupGua
   - Direct child solid Group/ComponentInstance is converted to CellSpace.
   - Any non-CellSpace container under `primal_group` is normalized recursively: nested CellSpaces are copied back under `primal_group`, and the remaining container is moved to model root.
   - Direct raw non-CellSpace entities under `primal_group` are grouped and moved to model root.
+
+## Overlay와 대량 모델 성능 메모
+
+Last updated: 2026-06-08
+
+### 오래 걸리는 작업의 progress UI
+
+- 오래 걸릴 수 있는 IndoorGML 작업은 하나의 큰 동기 Ruby 루프로 처리하지 않는 편이 좋다.
+- 모델 화면 안에서 진행률을 보여주는 표면으로는 2D overlay progress bar가 적절하다.
+- 다만 overlay는 표시만 해결한다. SketchUp이 응답없음으로 빠지지 않게 하려면 작업을 batch로 나누고 `UI.start_timer(0, false)`로 SketchUp 이벤트 루프에 제어권을 돌려줘야 한다.
+- batch progress 적용 후보:
+  - 많은 solid group을 CellSpace로 변환
+  - 많은 CellSpace entity로부터 runtime data 재구성
+  - 많은 CellSpace의 transition/adjacency 재계산
+  - export 준비 또는 validity check 전처리 중 전체 geometry를 순회하는 작업
+- 권장 구조:
+  - IndoorModel 또는 EditorSession에 작은 progress state를 둔다.
+  - overlay는 `current`, `total`, `message`를 읽어서 bar를 그린다.
+  - timer tick마다 제한된 개수의 item만 처리한다.
+  - 각 batch 뒤 view를 invalidate한다.
+  - 완료 시 progress state를 비우고 마지막으로 한 번 더 invalidate한다.
+- 응답없음 방지의 핵심은 progress bar 자체가 아니라 batch scheduler다.
+
+### CellSpace가 1000개 정도일 때 예상 병목
+
+- 가장 큰 병목 후보는 transition adjacency 계산이다.
+- 모든 CellSpace 쌍을 비교하면 1000개 기준 약 499,500개의 candidate pair가 생긴다.
+- 각 pair에서 SketchUp geometry API, bounds 검사, face 검사, solid/boolean 계열 처리, transformation 계산을 반복하면 비용이 급격히 커진다.
+- 다음 병목 후보:
+  - bounds, faces, groups, transformations에 대한 반복적인 SketchUp API 접근
+  - 많은 face에 대한 material/texture 재적용
+  - 많은 entity에 대한 attribute dictionary rewrite
+  - 모든 CellSpace, State, Transition을 한 번에 복원하는 full runtime refresh
+- overlay draw는 draw call batching 이후 상대적으로 부담이 줄어들지만, 매 frame마다 모든 state point, transition endpoint, CellSpace bounds를 다시 계산하면 여전히 비용이 생길 수 있다.
+- 이후 최적화 방향:
+  - 정밀 adjacency 검사 전에 bounding box 또는 spatial index로 후보를 줄인다.
+  - 한 번의 재계산 pass 안에서는 world-space CellSpace bounds/center를 cache한다.
+  - 가능하면 dirty/moved CellSpace 주변만 adjacency를 갱신한다.
+  - 명시적인 full refresh가 아니라면 CellSpace 하나의 변경 때문에 모든 transition을 재생성하지 않는다.
