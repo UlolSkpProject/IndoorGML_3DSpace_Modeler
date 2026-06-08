@@ -102,6 +102,7 @@ jobs:
           extension_id = os.environ["EXTENSION_ID"]
           extension_name = os.environ["EXTENSION_NAME"]
           loader_file = os.environ["LOADER_FILE"]
+source_dir = os.environ["SOURCE_DIR"]
           version = "${{ steps.version.outputs.version }}"
           base_url = os.environ["PAGES_BASE_URL"]
           rbz_basename = os.environ["RBZ_BASENAME"]
@@ -125,6 +126,7 @@ jobs:
               "name": extension_name,
               "version": version,
               "loader": loader_file,
+              "source_dir": source_dir,
               "download_url": download_url,
               "release_note": f"{extension_name} {version}"
           })
@@ -147,3 +149,4 @@ jobs:
 
           git commit -m "Deploy ${{ env.EXTENSION_NAME }} ${{ steps.version.outputs.version }}" || exit 0
           git push
+
