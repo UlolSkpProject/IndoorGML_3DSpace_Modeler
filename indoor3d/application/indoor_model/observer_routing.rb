@@ -155,12 +155,6 @@ module ULOL
           def primal_entity_added(entity)
             return if @relocating_entity
             unless indoor_gml_entity?(entity)
-              if contains_nested_cell_space_entity?(entity)
-                flatten_nested_cell_spaces_to_primal(entity)
-                return
-              end
-
-              convert_new_edit_mode_group_to_cell_space(entity)
               return
             end
 
@@ -215,17 +209,17 @@ module ULOL
             false
           end
 
-          def flatten_nested_cell_spaces_to_primal(container)
+          def normalize_primal_children_for_finish
             return unless @primal_group&.valid?
-            return unless container&.valid?
 
-            with_indoor_model_operation('IndoorGML Flatten Nested CellSpaces', transparent: true) do
+            with_indoor_model_operation('IndoorGML Normalize Primal Children On Finish', transparent: true) do
               begin
                 @relocating_entity = true
-                nested_cell_space_entities(container).each do |entry|
-                  copy_nested_cell_space_to_primal(entry[:entity], entry[:transformation])
+                raw_entities = []
+                @primal_group.entities.to_a.each do |entity|
+                  normalize_primal_child_for_finish(entity, raw_entities)
                 end
-                container.erase! if container.valid?
+                move_raw_primal_entities_to_root(raw_entities)
               ensure
                 @relocating_entity = false
               end
@@ -233,7 +227,45 @@ module ULOL
               Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
             end
           rescue StandardError => e
-            puts "[IndoorGML] Nested CellSpace flatten failed: #{e.class}: #{e.message}"
+            puts "[IndoorGML] Primal children finish normalize failed: #{e.class}: #{e.message}"
+          end
+
+          def normalize_primal_child_for_finish(entity, raw_entities)
+            return unless entity&.valid?
+            return if indoor_feature(entity) == 'CellSpace'
+
+            if convertible_new_cell_space_group?(entity)
+              convert_group_to_cell_space(entity, CellSpaceType::GENERAL)
+            elsif entity.respond_to?(:definition) && entity.respond_to?(:transformation)
+              normalize_primal_container_without_operation(entity)
+            else
+              raw_entities << entity
+            end
+          end
+
+          def normalize_primal_container(container)
+            return unless @primal_group&.valid?
+            return unless container&.valid?
+
+            with_indoor_model_operation('IndoorGML Normalize Primal Container', transparent: true) do
+              begin
+                @relocating_entity = true
+                normalize_primal_container_without_operation(container)
+              ensure
+                @relocating_entity = false
+              end
+              refresh_runtime_data
+              Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
+            end
+          rescue StandardError => e
+            puts "[IndoorGML] Primal container normalize failed: #{e.class}: #{e.message}"
+          end
+
+          def normalize_primal_container_without_operation(container)
+            nested_cell_space_entities(container).each do |entry|
+              copy_nested_cell_space_to_primal(entry[:entity], entry[:transformation])
+            end
+            cleanup_or_move_primal_container(container)
           end
 
           def nested_cell_space_entities(container, parent_transformation = nil)
@@ -265,30 +297,55 @@ module ULOL
             copy
           end
 
-          def convert_new_edit_mode_group_to_cell_space(entity)
-            return unless editing?
-            return unless convertible_new_cell_space_group?(entity)
+          def cleanup_or_move_primal_container(container)
+            return unless container&.valid?
 
-            UI.start_timer(0, false) do
-              operation_started = false
-              begin
-                next unless entity&.valid?
-                next if indoor_gml_entity?(entity)
-                next unless convertible_new_cell_space_group?(entity)
-
-                model = Sketchup.active_model()
-                model.start_operation('Convert New Group to GeneralSpace', true)
-                operation_started = true
-                convert_group_to_cell_space(entity, CellSpaceType::GENERAL)
-                model.commit_operation
-                operation_started = false
-                @editor_session.selection_changed()
-                model.active_view.invalidate if model&.active_view
-              rescue StandardError => e
-                model.abort_operation if operation_started && model
-                puts "[IndoorGML] Auto GeneralSpace conversion failed: #{e.class}: #{e.message}"
-              end
+            if container.respond_to?(:definition) && container.definition.entities.to_a.empty?
+              container.erase!
+            else
+              move_remaining_primal_container_to_root(container)
             end
+          end
+
+          def move_remaining_primal_container_to_root(container)
+            return unless container&.valid?
+            return unless container.respond_to?(:definition) && container.respond_to?(:transformation)
+            return unless primal_direct_container?(container)
+
+            model = Sketchup.active_model
+            copy = model.entities.add_instance(container.definition, @primal_group.transformation * container.transformation)
+            copy = copy.to_group if container.is_a?(Sketchup::Group) && copy.respond_to?(:to_group)
+            copy.make_unique if container.is_a?(Sketchup::Group) && copy.respond_to?(:make_unique)
+            copy.name = container.name if copy.respond_to?(:name=) && container.respond_to?(:name)
+            copy.material = container.material if copy.respond_to?(:material=) && container.respond_to?(:material)
+            copy.layer = container.layer if copy.respond_to?(:layer=) && container.respond_to?(:layer)
+            copy.visible = container.visible? if copy.respond_to?(:visible=) && container.respond_to?(:visible?)
+            container.erase! if container.valid?
+            copy
+          end
+
+          def move_raw_primal_entities_to_root(entities)
+            raw_entities = Array(entities).select { |entity| entity&.valid? }
+            return if raw_entities.empty?
+            return unless @primal_group&.valid?
+
+            wrapper = @primal_group.entities.add_group(raw_entities)
+            return unless wrapper&.valid?
+
+            wrapper.name = 'IndoorGML_NonCellSpaceEntities' if wrapper.respond_to?(:name=)
+            move_remaining_primal_container_to_root(wrapper)
+          rescue StandardError => e
+            puts "[IndoorGML] Raw primal entities relocate failed: #{e.class}: #{e.message}"
+            nil
+          end
+
+          def primal_direct_container?(entity)
+            return false unless entity.is_a?(Sketchup::Group) || entity.is_a?(Sketchup::ComponentInstance)
+            return false unless @primal_group&.valid?
+
+            Utils::Transformation.direct_child_of_root?(entity, @primal_group)
+          rescue StandardError
+            false
           end
 
           def convertible_new_cell_space_group?(entity)

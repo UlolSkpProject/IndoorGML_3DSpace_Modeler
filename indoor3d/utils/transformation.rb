@@ -28,15 +28,29 @@ module ULOL
         end
 
         def self.direct_child_of_root?(entity, root_group)
-          return false unless entity&.valid? && root_group&.valid?
-          return false unless root_group.respond_to?(:definition)
+          return false unless entity&.valid? && valid_container?(root_group)
 
-          # SketchUp stores a group's child entities in the group's ComponentDefinition.
-          # A direct child of the root group therefore has that definition as its parent.
-          entity.parent == root_group.definition
+          entity.parent == parent_container_for(root_group)
         rescue StandardError
           false
         end
+
+        def self.valid_container?(root_group)
+          return false if root_group.nil?
+          return root_group.valid? if root_group.respond_to?(:valid?)
+
+          true
+        end
+        private_class_method :valid_container?
+
+        def self.parent_container_for(root_group)
+          return root_group.entities.parent if root_group.respond_to?(:entities) && !root_group.respond_to?(:definition)
+          return root_group.definition if root_group.respond_to?(:definition)
+          return root_group.parent if root_group.respond_to?(:parent)
+
+          root_group
+        end
+        private_class_method :parent_container_for
 
         def self.ensure_direct_child_of_root!(entity, root_group, message = nil)
           return true if direct_child_of_root?(entity, root_group)
