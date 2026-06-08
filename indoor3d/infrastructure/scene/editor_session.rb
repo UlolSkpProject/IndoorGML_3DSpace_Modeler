@@ -235,7 +235,7 @@ module ULOL
         def selection_changed
           return unless @editing
 
-          @dialog.update_selection(@indoor_model.selected_cell_space_snapshot)
+          @dialog.update_selection(@indoor_model.selected_edit_mode_snapshot)
         end
 
         def cleanup_before_quit
@@ -244,6 +244,22 @@ module ULOL
             finish() if @editing
           rescue StandardError => e
             puts "[IndoorGML] Edit shutdown cleanup failed: #{e.class}: #{e.message}"
+          end
+        end
+
+        def recover_unlocked_primal_after_transaction(model)
+          begin
+            return false if @editing
+
+            primal_group = @indoor_model.primal_group
+            return false unless primal_group&.valid?
+            return false unless primal_group.respond_to?(:locked?)
+            return false if primal_group.locked?
+
+            reenter_editing_from_primal_path(model || Sketchup.active_model)
+          rescue StandardError => e
+            puts "[IndoorGML] Unlocked primal recovery failed: #{e.class}: #{e.message}"
+            false
           end
         end
 
@@ -317,6 +333,12 @@ module ULOL
           return if active_path_matches?(model, target_path)
 
           current_path = model.active_path
+          if current_path.nil?
+            set_active_path(model, target_path)
+            selection_changed()
+            invalidate_view(model)
+            return
+          end
 
           # # root 탈출 시 → 종료 확인 : viewport의 빈 곳을 클릭해도 root로 나가지는 issue가 있어서 일단 제외하는 목적으로 주석처리.
           # if current_path.nil? && target_path == [@indoor_model.primal_group]

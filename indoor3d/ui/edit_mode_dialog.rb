@@ -8,15 +8,15 @@ module ULOL
         include Utils::HtmlHelpers
         
         DIALOG_WIDTH = 280
-        INITIAL_DIALOG_HEIGHT = 260
-        MIN_DIALOG_HEIGHT = 280
+        INITIAL_DIALOG_HEIGHT = 320
+        MIN_DIALOG_HEIGHT = 260
         MAX_DIALOG_HEIGHT = 620
-        CONTENT_PADDING_HEIGHT = 24
-        DIALOG_WINDOW_CHROME_HEIGHT = 96
-
+        CONTENT_PADDING_HEIGHT = 8
+        DIALOG_WINDOW_CHROME_HEIGHT = 44
         def initialize(indoor_model)
           @indoor_model = indoor_model
           @dialog = nil
+          @dialog_height = INITIAL_DIALOG_HEIGHT
         end
 
         def show
@@ -53,7 +53,7 @@ module ULOL
           dialog = UI::HtmlDialog.new(
             dialog_title: 'IndoorGML Edit Mode',
             preferences_key: 'ULOL.Indoor3DGmlModeler.EditMode',
-            scrollable: true,
+            scrollable: false,
             resizable: false,
             width: DIALOG_WIDTH,
             height: INITIAL_DIALOG_HEIGHT,
@@ -79,6 +79,12 @@ module ULOL
             puts "[IndoorGML] EditModeDialog#setSelectedCellSpaceClassification value=#{selection_value}"
             UI.start_timer(0, false) do
               @indoor_model.set_selected_cell_space_classification(selection_value)
+            end
+          end
+          dialog.add_action_callback('convertSelectedSolidGroups') do |_context, selection_value|
+            puts "[IndoorGML] EditModeDialog#convertSelectedSolidGroups value=#{selection_value}"
+            UI.start_timer(0, false) do
+              @indoor_model.convert_selected_solid_groups_to_cell_spaces(selection_value)
             end
           end
           dialog.add_action_callback('finishEditing') do |_context|
@@ -107,34 +113,54 @@ module ULOL
 
             requested_height = content_height.to_i + CONTENT_PADDING_HEIGHT + DIALOG_WINDOW_CHROME_HEIGHT
             height = [[requested_height, MIN_DIALOG_HEIGHT].max, MAX_DIALOG_HEIGHT].min
-            @dialog.set_size(DIALOG_WIDTH, height)
+            set_dialog_height(height)
           rescue StandardError => e
             puts "[IndoorGML] Edit mode dialog resize failed: #{e.class}: #{e.message}"
           end
         end
 
+        def set_dialog_height(height)
+          @dialog.set_size(DIALOG_WIDTH, height)
+          @dialog_height = height
+        end
+
         def init_script
           overlay_min_radius = @indoor_model.overlay_min_radius_pixels.round
           overlay_max_radius = @indoor_model.overlay_max_radius_pixels.round
+          asset_root = File.expand_path('..', __dir__).tr('\\', '/')
           options = CellSpaceCategory.selection_options.map do |option|
             "{value: #{js_string(option[:value])}, label: #{js_string(option[:label])}}"
           end.join(', ')
 
-          "init(#{overlay_min_radius}, #{overlay_max_radius}, [#{options}]);"
+          "init({minRadius: #{overlay_min_radius}, maxRadius: #{overlay_max_radius}, classificationOptions: [#{options}], assetRoot: #{js_string(asset_root)}, overlayColors: #{overlay_colors_script}});"
+        end
+
+        def overlay_colors_script
+          state_color = EditModeOverlay::DUAL_STATE_COLOR
+          "{state: #{js_string(css_rgba(state_color))}, stateSoft: #{js_string(css_rgba(state_color, alpha: 0.36))}}"
+        end
+
+        def css_rgba(color, alpha: nil)
+          opacity = alpha || (color.alpha.to_f / 255.0)
+          "rgba(#{color.red}, #{color.green}, #{color.blue}, #{format('%.3f', opacity)})"
         end
 
         def selection_script(snapshot)
           if snapshot.nil?
-            'updateSelectedCellSpace(null);'
+            'updateSelectionAndFit(null);'
           else
             <<~JS
-              updateSelectedCellSpace({
+              updateSelectionAndFit({
+                mode: #{js_string(snapshot[:mode])},
                 feature: #{js_string(snapshot[:feature])},
                 id: #{js_string(snapshot[:id])},
                 name: #{js_string(snapshot[:name])},
                 cellType: #{js_string(snapshot[:cell_type])},
                 categoryCode: #{js_string(snapshot[:category_code])},
-                classification: #{js_string(snapshot[:classification])},
+                classification: #{snapshot[:classification].nil? ? 'null' : js_string(snapshot[:classification])},
+                transitionCount: #{snapshot[:transition_count].to_i},
+                cellSpaceCount: #{snapshot[:cell_space_count].to_i},
+                solidGroupCount: #{snapshot[:solid_group_count].to_i},
                 cellGeometryEditing: #{snapshot[:cell_geometry_editing] ? 'true' : 'false'}
               });
             JS

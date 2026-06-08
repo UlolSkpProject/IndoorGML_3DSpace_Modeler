@@ -1,49 +1,163 @@
 var overlayMinRadius = document.getElementById('overlayMinRadius');
 var overlayMaxRadius = document.getElementById('overlayMaxRadius');
 var overlayRadiusValue = document.getElementById('overlayRadiusValue');
-var selectedFeature = document.getElementById('selectedFeature');
+var minRadiusPreview = document.getElementById('minRadiusPreview');
+var maxRadiusPreview = document.getElementById('maxRadiusPreview');
+var emptyPanel = document.getElementById('emptyPanel');
+var solidPanel = document.getElementById('solidPanel');
+var cellPanel = document.getElementById('cellPanel');
+var solidCount = document.getElementById('solidCount');
+var solidClassification = document.getElementById('solidClassification');
+var selectedClassification = document.getElementById('selectedClassification');
 var selectedId = document.getElementById('selectedId');
 var selectedName = document.getElementById('selectedName');
-var selectedClassification = document.getElementById('selectedClassification');
+var transitionCount = document.getElementById('transitionCount');
+var singleCellInfo = document.getElementById('singleCellInfo');
+var multiCellInfo = document.getElementById('multiCellInfo');
+var cellSpaceCount = document.getElementById('cellSpaceCount');
+var clearAll = document.getElementById('clearAll');
 var suppressTypeChange = false;
+var currentMode = null;
+var currentSelectionKey = null;
 
-function init(minRadius, maxRadius, classificationOptions) {
-  selectedClassification.innerHTML = '';
-  classificationOptions.forEach(function (option) {
-    var element = document.createElement('option');
-    element.value = option.value;
-    element.textContent = option.label;
-    selectedClassification.appendChild(element);
-  });
-  overlayMinRadius.value = minRadius;
-  overlayMaxRadius.value = maxRadius;
-  updateSelectedCellSpace(null);
+function init(config) {
+  fillOptions(selectedClassification, config.classificationOptions);
+  fillOptions(solidClassification, config.classificationOptions);
+  setIcon('convertIcon', config.assetRoot, 'create_cellspace.png');
+  setIcon('changeTypeIcon', config.assetRoot, 'change_cellspace_type.png');
+  applyOverlayColors(config.overlayColors);
+  overlayMinRadius.value = config.minRadius;
+  overlayMaxRadius.value = config.maxRadius;
+  updateSelection(null);
   normalizedOverlayRadiusRange();
   fitDialogToContent();
 }
 
-function updateSelectedCellSpace(snapshot) {
-  suppressTypeChange = true;
-  if (!snapshot || !snapshot.id) {
-    selectedFeature.textContent = 'None';
-    selectedId.textContent = '-';
-    selectedName.textContent = '-';
-    selectedClassification.disabled = true;
-    selectedClassification.value = 'GeneralSpace|Room';
-  } else {
-    selectedFeature.textContent = snapshot.feature || 'CellSpace';
-    selectedId.textContent = snapshot.id || '-';
-    selectedName.textContent = snapshot.name || '-';
-    selectedClassification.disabled = false;
-    selectedClassification.value = snapshot.classification || 'GeneralSpace|Room';
+function fillOptions(select, options) {
+  select.innerHTML = '';
+  options.forEach(function (option) {
+    var element = document.createElement('option');
+    element.value = option.value;
+    element.textContent = option.label;
+    select.appendChild(element);
+  });
+}
+
+function setIcon(id, assetRoot, filename) {
+  var image = document.getElementById(id);
+  if (!image || !assetRoot) return;
+  image.src = encodeURI('file:///' + assetRoot + '/assets/icons/' + filename);
+}
+
+function applyOverlayColors(colors) {
+  if (!colors) return;
+
+  document.documentElement.style.setProperty('--overlay-state-color', colors.state);
+  document.documentElement.style.setProperty('--overlay-state-soft-color', colors.stateSoft);
+}
+
+function updateSelection(snapshot) {
+  var nextMode = snapshot && snapshot.mode ? snapshot.mode : 'empty';
+  var nextKey = selectionKey(snapshot);
+  if (nextKey === currentSelectionKey) {
+    return false;
   }
+
+  var modeChanged = nextMode !== currentMode;
+  suppressTypeChange = true;
+  if (modeChanged) {
+    setVisible(emptyPanel, nextMode === 'empty');
+    setVisible(solidPanel, nextMode === 'solid_groups');
+    setVisible(cellPanel, nextMode === 'cell_space' || nextMode === 'cell_spaces');
+    setVisible(clearAll, nextMode === 'empty');
+    currentMode = nextMode;
+  }
+
+  if (nextMode === 'solid_groups') {
+    showSolidGroups(snapshot);
+  } else if (nextMode === 'cell_spaces') {
+    showCellSpaces(snapshot);
+  } else if (nextMode === 'cell_space') {
+    showCellSpace(snapshot);
+  }
+
+  currentSelectionKey = nextKey;
   suppressTypeChange = false;
+  return modeChanged;
+}
+
+function updateSelectionAndFit(snapshot) {
+  if (updateSelection(snapshot)) {
+    fitDialogToContent();
+  }
+}
+
+function selectionKey(snapshot) {
+  if (!snapshot || !snapshot.mode) return 'empty';
+  return [
+    snapshot.mode,
+    snapshot.id || '',
+    snapshot.name || '',
+    snapshot.classification || '',
+    snapshot.transitionCount || 0,
+    snapshot.cellSpaceCount || 0,
+    snapshot.solidGroupCount || 0
+  ].join('|');
+}
+
+function setVisible(element, visible) {
+  if (visible) {
+    show(element);
+  } else {
+    hide(element);
+  }
+}
+
+function showSolidGroups(snapshot) {
+  solidCount.textContent = snapshot.solidGroupCount || 0;
+  solidClassification.value = snapshot.classification || 'GeneralSpace|Room';
+  show(solidPanel);
+}
+
+function showCellSpaces(snapshot) {
+  hide(singleCellInfo);
+  show(multiCellInfo);
+  cellSpaceCount.textContent = snapshot.cellSpaceCount || 0;
+  selectedClassification.value = snapshot.classification || 'GeneralSpace|Room';
+  show(cellPanel);
+}
+
+function showCellSpace(snapshot) {
+  show(singleCellInfo);
+  hide(multiCellInfo);
+  selectedId.textContent = snapshot.id || '-';
+  selectedName.textContent = snapshot.name || '-';
+  transitionCount.textContent = snapshot.transitionCount || 0;
+  selectedClassification.value = snapshot.classification || 'GeneralSpace|Room';
+  show(cellPanel);
+}
+
+function show(element) {
+  element.classList.remove('hidden');
+}
+
+function hide(element) {
+  element.classList.add('hidden');
 }
 
 function normalizedOverlayRadiusRange() {
   var minRadius = Number(overlayMinRadius.value);
   var maxRadius = Number(overlayMaxRadius.value);
-  overlayRadiusValue.textContent = `${minRadius}-${maxRadius} px`;
+  if (minRadius > maxRadius) {
+    var swap = minRadius;
+    minRadius = maxRadius;
+    maxRadius = swap;
+  }
+  overlayRadiusValue.textContent = minRadius + '-' + maxRadius + ' px';
+  minRadiusPreview.style.width = minRadius + 'px';
+  minRadiusPreview.style.height = minRadius + 'px';
+  maxRadiusPreview.style.width = maxRadius + 'px';
+  maxRadiusPreview.style.height = maxRadius + 'px';
   return [minRadius, maxRadius];
 }
 
@@ -57,10 +171,7 @@ function commitOverlayRadiusRange() {
 }
 
 function fitDialogToContent() {
-  var contentHeight = Math.max(
-    document.body.scrollHeight,
-    document.documentElement.scrollHeight
-  );
+  var contentHeight = document.body.scrollHeight;
   sketchup.fitContentHeight(contentHeight);
 }
 
@@ -68,10 +179,12 @@ overlayMinRadius.addEventListener('input', previewOverlayRadiusRange);
 overlayMaxRadius.addEventListener('input', previewOverlayRadiusRange);
 overlayMinRadius.addEventListener('change', commitOverlayRadiusRange);
 overlayMaxRadius.addEventListener('change', commitOverlayRadiusRange);
-selectedClassification.addEventListener('change', function () {
-  if (!suppressTypeChange) {
-    sketchup.setSelectedCellSpaceClassification(selectedClassification.value);
-  }
+solidClassification.addEventListener('change', fitDialogToContent);
+document.getElementById('changeType').addEventListener('click', function () {
+  sketchup.setSelectedCellSpaceClassification(selectedClassification.value);
+});
+document.getElementById('convertSelected').addEventListener('click', function () {
+  sketchup.convertSelectedSolidGroups(solidClassification.value);
 });
 document.getElementById('finish').addEventListener('click', function () {
   sketchup.finishEditing();
