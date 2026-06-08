@@ -42,7 +42,7 @@ module ULOL
           @category_standard = category[:standard]
         end
 
-        def create_duality_state(parent_entities, local_position)
+        def create_duality_state(parent_entities, local_position = nil)
           @duality_state ||= State.new(self, parent_entities, local_position)
         end
 

@@ -182,11 +182,23 @@ module ULOL
           end
 
           def enforce_space_features_constraints
+            ensure_space_features_guard_tracking
             @scene_group_guard.enforce(ordered_space_features_groups)
           end
 
           def ordered_space_features_groups
             [@primal_group].compact
+          end
+
+          def ensure_space_features_guard_tracking
+            @scene_group_guard.ensure_expected_name(@primal_group, PRIMAL_GROUP_NAME) if @primal_group&.valid?
+          end
+
+          def expected_space_features_name_for(entity)
+            return PRIMAL_GROUP_NAME if entity == @primal_group
+            return PRIMAL_GROUP_NAME if indoor_feature(entity) == PRIMAL_GROUP_FEATURE
+
+            nil
           end
 
           def set_group_transformation(group, transformation)

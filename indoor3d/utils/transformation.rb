@@ -10,7 +10,15 @@ module ULOL
         end
 
         def self.entity_origin_in_root_local(entity, root_group)
-          entity.transformation.origin
+          return entity.transformation.origin unless root_group&.valid?
+
+          entity_world_transformation_under_root(entity, root_group).origin.transform(root_group.transformation.inverse)
+        end
+
+        def self.entity_world_transformation_under_root(entity, root_group)
+          return entity.transformation unless root_group&.valid?
+
+          root_group.transformation * entity.transformation
         end
 
         def self.move_entity_origin_in_root_local_to(entity, root_group, local_position)

@@ -6,7 +6,6 @@ module ULOL
 
       class State < GML::AbstractFeature
         attr_reader :duality_cell
-        attr_reader :position
         attr_reader :radius
         attr_reader :transitions
         attr_accessor :editable
@@ -20,17 +19,26 @@ module ULOL
             raise ArgumentError, 'IndoorCore::CellSpace expected'
           end
 
-          unless local_position.is_a?(Geom::Point3d)
+          unless local_position.nil? || local_position.is_a?(Geom::Point3d)
             raise ArgumentError, 'Geom::Point3d local_position expected'
           end
 
           super()
 
           @duality_cell = cell_space
-          @position = local_position
+          @fallback_position = local_position
           @radius = self.class.display_radius
           @transitions = []
           @editable = false
+        end
+
+        def position
+          group = @duality_cell&.valid_sketchup_group
+          return group.transformation.origin if group
+
+          @fallback_position || ORIGIN
+        rescue StandardError
+          @fallback_position || ORIGIN
         end
 
         def update_position(local_position)
@@ -38,7 +46,7 @@ module ULOL
             raise ArgumentError, 'Geom::Point3d local_position expected'
           end
 
-          @position = local_position
+          @fallback_position = local_position
         end
 
         def add_transition(transition)
@@ -92,7 +100,7 @@ module ULOL
 
         def initialize_restored(cell_space, local_position, id, name)
           @duality_cell = cell_space
-          @position = local_position
+          @fallback_position = local_position
           @radius = self.class.display_radius
           @transitions = []
           @editable = false

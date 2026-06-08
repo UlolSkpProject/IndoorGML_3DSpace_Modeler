@@ -57,17 +57,13 @@ module ULOL
         def restore_state(cell_space)
           State.restore(
             cell_space,
-            current_state_position(cell_space),
+            nil,
             id: @serializer.attribute(cell_space.sketchup_group, 'duality_state_id'),
             name: nil
           )
         rescue StandardError => e
           puts "[IndoorGML] State restore failed: #{e.class}: #{e.message}"
           nil
-        end
-
-        def current_state_position(cell_space)
-          Utils::Transformation.entity_origin_in_root_local(cell_space.sketchup_group, nil)
         end
 
         def indoor_children(entities, feature)

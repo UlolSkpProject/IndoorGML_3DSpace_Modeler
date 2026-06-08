@@ -206,11 +206,17 @@ module ULOL
 
         def active_path_changed(model)
           begin
+            model ||= Sketchup.active_model()
+            if !@editing && primal_group_active_path?(model)
+              reenter_editing_from_primal_path(model)
+              return
+            end
+
             return unless @editing
             return if @enforcing_active_path
             return if @active_path_enforcement_suspended
 
-            enforce_edit_context(model || Sketchup.active_model())
+            enforce_edit_context(model)
           rescue StandardError => e
             puts "[IndoorGML] Edit active path enforcement failed: #{e.class}: #{e.message}"
           end
@@ -357,6 +363,23 @@ module ULOL
           return false unless active_path && active_path.length == target_path.length
 
           active_path.each_with_index.all? { |entity, index| entity == target_path[index] }
+        end
+
+        def primal_group_active_path?(model)
+          primal_group = @indoor_model.primal_group
+          return false unless primal_group&.valid?
+
+          active_path_matches?(model, [primal_group])
+        end
+
+        def reenter_editing_from_primal_path(model)
+          return false unless begin_editing
+
+          @previous_active_path = nil
+          true
+        rescue StandardError => e
+          puts "[IndoorGML] Edit mode reentry from primal active path failed: #{e.class}: #{e.message}"
+          false
         end
 
         def editing_cell_space_path?(path, primal_group)
