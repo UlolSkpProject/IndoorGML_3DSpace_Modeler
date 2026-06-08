@@ -11,6 +11,7 @@ module ULOL
 
           def finish_editing
             @finishing_editing = true
+            normalize_primal_children_for_finish()
             @editor_session.finish()
           ensure
             @finishing_editing = false

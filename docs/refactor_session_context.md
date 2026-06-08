@@ -212,3 +212,25 @@ Reason: steps 7 onward touch transformation, root-child detection, SceneGroupGua
 - Codex only checks the stage-level Codex completion checkbox, not the detailed task checkboxes.
 - Before starting each future step, verify that the TODO's stated reason for the change is actually valid against the current code and observed behavior.
 - After a user says the real SketchUp test for a step is complete, commit and push before moving to the next step.
+
+## Step 8 Test Clarification
+
+- `direct_child_of_root?` is a pure direct-child/container relationship check.
+- It must not decide whether an entity is solid or convertible to CellSpace.
+- For a `primal_group` container:
+  - A direct child `Sketchup::Group` or `Sketchup::ComponentInstance` should be `true`.
+  - A nested child under another group should be `false`.
+- For the top-level model root:
+  - A group directly under `model.entities` should be `true` when the root/container argument is the model or model entities.
+- CellSpace auto-conversion eligibility is a separate check:
+  - direct child of `primal_group`
+  - `Sketchup::Group` or `Sketchup::ComponentInstance`
+  - solid/manifold
+- Therefore a solid group directly under `primal_group` can be convertible, while a non-solid group directly under `primal_group` is still a direct child but must not be convertible.
+- `ComponentInstance` support must remain intact; do not narrow conversion logic to `Sketchup::Group` only.
+- EditMode primal child normalization should run once on Finish, not on every `EntitiesObserver#onElementAdded`.
+- Finish-time normalization policy:
+  - Direct child CellSpace stays under `primal_group`.
+  - Direct child solid Group/ComponentInstance is converted to CellSpace.
+  - Any non-CellSpace container under `primal_group` is normalized recursively: nested CellSpaces are copied back under `primal_group`, and the remaining container is moved to model root.
+  - Direct raw non-CellSpace entities under `primal_group` are grouped and moved to model root.
