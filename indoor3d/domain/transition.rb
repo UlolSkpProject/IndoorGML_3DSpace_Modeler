@@ -9,6 +9,10 @@ module ULOL
         attr_reader :state2
         attr_reader :cell1
         attr_reader :cell2
+        attr_reader :state1_id
+        attr_reader :state2_id
+        attr_reader :cell1_id
+        attr_reader :cell2_id
         attr_accessor :editable
 
         TRANSITION_RADIUS = State::STATE_NODE_RADIUS * 0.5 unless const_defined?(:TRANSITION_RADIUS, false)
@@ -21,12 +25,14 @@ module ULOL
           @state2 = state2
           @cell1 = cell1
           @cell2 = cell2
+          capture_reference_ids
           @editable = false
         end
 
         def update(_point1, _point2)
           return false unless valid_states?
 
+          capture_reference_ids
           true
         end
 
@@ -71,9 +77,17 @@ module ULOL
           @state2 = state2
           @cell1 = cell1
           @cell2 = cell2
+          capture_reference_ids
           @editable = false
           @id = id unless id.to_s.empty?
           @name = name.to_s
+        end
+
+        def capture_reference_ids
+          @state1_id = @state1&.id
+          @state2_id = @state2&.id
+          @cell1_id = @cell1&.id || @state1&.duality_cell&.id
+          @cell2_id = @cell2&.id || @state2&.duality_cell&.id
         end
 
         def valid_states?

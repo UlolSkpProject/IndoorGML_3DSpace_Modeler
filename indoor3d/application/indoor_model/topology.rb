@@ -129,6 +129,16 @@ module ULOL
             @adjacency_service.cell_pair_key(cell1, cell2)
           end
 
+          def transition_cell_pair_key(transition)
+            if transition.cell1 && transition.cell2
+              return cell_pair_key(transition.cell1, transition.cell2)
+            end
+
+            return nil if transition.cell1_id.to_s.empty? || transition.cell2_id.to_s.empty?
+
+            [transition.cell1_id, transition.cell2_id].sort.join(':')
+          end
+
           def register_transition_with_states(transition)
             transition.state1.add_transition(transition)
             transition.state2.add_transition(transition)
@@ -147,8 +157,8 @@ module ULOL
             return if state.nil?
 
             @transitions.select { |transition| transition.connected_to?(state) }.each do |transition|
-              if transition.cell1 && transition.cell2
-                pair_key = cell_pair_key(transition.cell1, transition.cell2)
+              pair_key = transition_cell_pair_key(transition)
+              if pair_key
                 @feature_registry.delete_transition_for_pair(pair_key)
                 @feature_registry.delete_adjacent_pair(pair_key)
               end

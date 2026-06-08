@@ -809,67 +809,6 @@ end
 - [x] Codex 작업 완료
 - [x] 실제 SketchUp 테스트 완료 - 사용자만 체크
 
-> 다음 단계 진행 금지 조건: `실제 SketchUp 테스트 완료`가 체크되지 않았다면 13단계로 넘어가지 않는다.
-
----
-
-# 13단계. FeatureRegistry를 persistent_id 중심으로 전환
-
-## 목표
-
-runtime feature lookup의 기준을 `persistent_id` 중심으로 통일한다.
-
-## 수정해야 할 부분
-
-주요 파일:
-
-```text
-indoor3d/application/feature_registry.rb
-indoor3d/application/indoor_model/observer_routing.rb
-indoor3d/application/indoor_model/feature_lifecycle.rb
-```
-
-## 수정해야 하는 이유
-
-entity object를 key로 사용하면 삭제/복구/재로드 시 stale wrapper 문제가 생길 수 있다. SketchUp entity를 영속적으로 추적하려면 `persistent_id` 중심이 더 안전하다.
-
-## Codex 작업 내용
-
-- [ ] `@cell_spaces_by_persistent_id`를 주요 lookup table로 사용한다.
-- [ ] entity object key는 가능한 한 제거하거나 보조 용도로만 남긴다.
-- [ ] `onElementRemoved(entity_id)` 대응을 위해 `entityID -> persistent_id` mapping은 별도로 유지한다.
-- [ ] 삭제 callback용 mapping 이름에 callback 용도를 명확히 드러낸다.
-- [ ] registry reset 시 모든 mapping이 같이 초기화되도록 한다.
-- [ ] 저장/재열기 복원 흐름과 충돌하지 않게 한다.
-
-예시 방향:
-
-```ruby
-@cell_spaces_by_persistent_id[pid] = cell_space
-@removed_entity_id_to_persistent_id[eid] = pid
-```
-
-삭제 callback:
-
-```ruby
-pid = @removed_entity_id_to_persistent_id[entity_id]
-cell_space = @cell_spaces_by_persistent_id[pid]
-```
-
-## 테스트할 내용
-
-- [ ] CellSpace 생성 시 persistent_id 기반 등록이 된다.
-- [ ] CellSpace 삭제 시 삭제 대상 CellSpace를 찾는다.
-- [ ] 삭제 Undo 후 refresh하면 다시 registry에 등록된다.
-- [ ] 여러 CellSpace 중 하나만 삭제해도 다른 CellSpace transition이 깨지지 않는다.
-- [ ] 저장/재열기 후 CellSpace가 복원된다.
-- [ ] Export GML이 정상이다.
-
-## 단계 완료 조건
-
-- [ ] Codex 작업 완료
-- [ ] 실제 SketchUp 테스트 완료 - 사용자만 체크
-
 > 다음 단계 진행 금지 조건: `실제 SketchUp 테스트 완료`가 체크되지 않았다면 14단계로 넘어가지 않는다.
 
 ---
@@ -932,8 +871,8 @@ Ruby GC는 순환 참조를 처리할 수 있지만, SketchUp Entity wrapper와 
 
 ## 단계 완료 조건
 
-- [ ] Codex 작업 완료
-- [ ] 실제 SketchUp 테스트 완료 - 사용자만 체크
+- [x] Codex 작업 완료
+- [x] 실제 SketchUp 테스트 완료 - 사용자만 체크
 
 > 다음 단계 진행 금지 조건: `실제 SketchUp 테스트 완료`가 체크되지 않았다면 15단계로 넘어가지 않는다.
 
@@ -1087,12 +1026,11 @@ Codex는 이 표에서 `Codex 작업 완료`만 체크할 수 있다. `실제 Sk
 |      6 | AttributeSerializer write 방어 강화                    | [x]             | [ ]                       |
 |      7 | Transformation 유틸 이름과 의미 정리                   | [x]             | [ ]                       |
 |      8 | direct_child_of_root? 판정 명확화                      | [x]             | [ ]                       |
-|      9 | SceneGroupGuard 내부 책임 정리                         | [ ]             | [ ]                       |
-|     10 | RuntimeRestorer 생성자 의존성 정리                     | [ ]             | [ ]                       |
+|      9 | SceneGroupGuard 내부 책임 정리                         | [x]             | [x]                       |
+|     10 | RuntimeRestorer 생성자 의존성 정리                     | [x]             | [x]                       |
 |     11 | 보류 - Undo/Redo 후 runtime refresh schedule 추가      | [ ]             | [ ]                       |
-|     12 | CellSpace dirty queue 도입                             | [ ]             | [ ]                       |
-|     13 | FeatureRegistry를 persistent_id 중심으로 전환          | [ ]             | [ ]                       |
-|     14 | Transition 순환 참조 완화 준비                         | [ ]             | [ ]                       |
+|     12 | CellSpace dirty queue 도입                             | [x]             | [x]                       |
+|     14 | Transition 순환 참조 완화 준비                         | [x]             | [ ]                       |
 |     15 | IndoorModel.current 호환 유지하며 모델별 인스턴스 준비 | [ ]             | [ ]                       |
 | 마지막 | 치명적 버그 수정 - EditMode CellSpace 복붙 중복        | [ ]             | [ ]                       |
 
