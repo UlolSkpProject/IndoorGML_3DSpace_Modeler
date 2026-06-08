@@ -35,12 +35,22 @@ module ULOL
         attr_reader :overlay_min_radius_pixels
         attr_reader :overlay_max_radius_pixels
 
-        def self.current
-          @current ||= new
+        def self.for(model = Sketchup.active_model)
+          @instances ||= {}
+          key = model ? model.object_id : :active_model
+          @instances[key] ||= new(model)
         end
 
-        def initialize
-          @model = Sketchup.active_model
+        def self.current
+          self.for(Sketchup.active_model)
+        end
+
+        def self.each_instance
+          @instances&.each_value || []
+        end
+
+        def initialize(model = Sketchup.active_model)
+          @model = model || Sketchup.active_model
           @feature_registry = FeatureRegistry.new
           bind_registry_collections
           @cell_space_observer = CellSpaceObserver.new(self)

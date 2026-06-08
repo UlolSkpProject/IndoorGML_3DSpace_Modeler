@@ -11,7 +11,7 @@ module ULOL
             with_indoor_model_operation('IndoorGML Ensure SpaceFeatures Groups', transparent: transparent) do
               Utils::Materials.ensure_all()
 
-              entities = Sketchup.active_model.entities
+              entities = (@model || Sketchup.active_model).entities
               @primal_group = find_group(entities, PRIMAL_GROUP_NAME)
               unless @primal_group&.valid?
                 @primal_group = entities.add_group
@@ -26,13 +26,14 @@ module ULOL
           end
 
           def find_existing_space_features_groups
-            entities = Sketchup.active_model.entities
+            entities = (@model || Sketchup.active_model).entities
             @primal_group = find_group(entities, PRIMAL_GROUP_NAME)
             puts '[IndoorGML] PrimalSpaceFeatures group not found during refresh.' unless @primal_group&.valid?
           end
 
           def attach_existing_space_features_observers
-            attach_entities_observer(:root, Sketchup.active_model.entities, @root_entities_observer)
+            model = @model || Sketchup.active_model
+            attach_entities_observer(:root, model.entities, @root_entities_observer)
             attach_existing_space_features_observer(@primal_group, PRIMAL_GROUP_NAME)
             @root_entities_observer.track_entity(@primal_group)
             attach_entities_observer(:primal, @primal_group.entities, @primal_entities_observer) if @primal_group&.valid?
@@ -123,7 +124,7 @@ module ULOL
           end
 
           def attach_entities_observers
-            model = Sketchup.active_model
+            model = @model || Sketchup.active_model
             attach_entities_observer(:root, model.entities, @root_entities_observer)
             attach_entities_observer(:primal, @primal_group.entities, @primal_entities_observer) if @primal_group&.valid?
             @root_entities_observer.track_entity(@primal_group)

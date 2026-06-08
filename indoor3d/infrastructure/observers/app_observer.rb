@@ -26,12 +26,12 @@ module ULOL
 
         def onNewModel(model)
           register_model(model)
-          refresh_runtime_data()
+          refresh_runtime_data(model)
         end
 
         def onOpenModel(model)
           register_model(model)
-          refresh_runtime_data()
+          refresh_runtime_data(model)
         end
 
         def expectsStartupModelNotifications
@@ -46,15 +46,15 @@ module ULOL
 
         def cleanup_before_quit
           begin
-            IndoorModel.current.cleanup_before_quit()
+            IndoorModel.each_instance.each(&:cleanup_before_quit)
           rescue StandardError => e
             puts "[IndoorGML] Shutdown cleanup failed: #{e.class}: #{e.message}"
           end
         end
 
-        def refresh_runtime_data
+        def refresh_runtime_data(model)
           begin
-            IndoorModel.current.refresh_runtime_data()
+            IndoorModel.for(model).refresh_runtime_data()
           rescue StandardError => e
             puts "[IndoorGML] Runtime refresh failed: #{e.class}: #{e.message}"
           end

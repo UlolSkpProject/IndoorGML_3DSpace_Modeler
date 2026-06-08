@@ -30,7 +30,7 @@ module ULOL
 
         def handle_active_path_changed(model, source:)
           puts "[IndoorGML] active path changed source=#{source}"
-          IndoorModel.current.active_path_changed(model)
+          IndoorModel.for(model).active_path_changed(model)
           remember_active_path(model)
         end
 
