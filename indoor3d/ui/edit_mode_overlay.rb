@@ -14,7 +14,7 @@ module ULOL
         HINT_COLOR = Sketchup::Color.new(214, 245, 229)
         DUAL_STATE_COLOR = Sketchup::Color.new(35, 120, 255, 255)
         DUAL_TRANSITION_COLOR = Sketchup::Color.new(35, 120, 255, 125)
-        CIRCLE_SEGMENTS = 32
+        CIRCLE_SEGMENTS = 16
         OVERLAY_RADIUS_SCALE = 1.1
 
         def initialize(indoor_model)
@@ -106,22 +106,30 @@ module ULOL
           h = view.vpheight()
           t = 4
           c = PRIMARY_COLOR
-          draw_2d_quad(view, [[0, 0, 0], [w, 0, 0], [w, t, 0], [0, t, 0]], c)
-          draw_2d_quad(view, [[0, h - t, 0], [w, h - t, 0], [w, h, 0], [0, h, 0]], c)
-          draw_2d_quad(view, [[0, 0, 0], [t, 0, 0], [t, h, 0], [0, h, 0]], c)
-          draw_2d_quad(view, [[w - t, 0, 0], [w, 0, 0], [w, h, 0], [w - t, h, 0]], c)
+          draw_2d_quads(
+            view,
+            [
+              [[0, 0, 0], [w, 0, 0], [w, t, 0], [0, t, 0]],
+              [[0, h - t, 0], [w, h - t, 0], [w, h, 0], [0, h, 0]],
+              [[0, 0, 0], [t, 0, 0], [t, h, 0], [0, h, 0]],
+              [[w - t, 0, 0], [w, 0, 0], [w, h, 0], [w - t, h, 0]]
+            ],
+            c
+          )
         end
 
         def draw_cell_space_outlines(view)
           begin
             view.line_width = 3 if view.respond_to?(:line_width=)
             view.drawing_color = PRIMARY_TRANSLUCENT_COLOR
+            points = []
             @indoor_model.cell_spaces.each do |cell_space|
               group = cell_space.valid_sketchup_group
               next unless group
 
-              draw_bounds(view, group.bounds)
+              points.concat(bounds_line_points(group.bounds))
             end
+            view.draw(GL_LINES, points) unless points.empty?
           ensure
             view.line_width = 1 if view.respond_to?(:line_width=)
           end
@@ -129,7 +137,6 @@ module ULOL
 
         def draw_dual_space_overlay(view)
           begin
-            view.line_width = 2 if view.respond_to?(:line_width=)
             draw_overlay_transitions(view)
             draw_overlay_states(view)
           ensure
@@ -139,25 +146,34 @@ module ULOL
 
         def draw_overlay_states(view)
           view.drawing_color = DUAL_STATE_COLOR
+          right_axis, up_axis = camera_billboard_axes(view)
+          points = []
           @indoor_model.states.each do |state|
             next unless state&.valid?()
 
             center = overlay_state_point(state)
             radius = overlay_state_radius(view, center, state)
-            draw_billboard_disk(view, center, radius)
+            points.concat(billboard_disk_triangle_points(center, right_axis, up_axis, radius))
           end
+          view.draw(GL_TRIANGLES, points) unless points.empty?
         end
 
         def draw_overlay_transitions(view)
           view.drawing_color = DUAL_TRANSITION_COLOR
+          view.line_width = overlay_transition_line_width if view.respond_to?(:line_width=)
+          points = []
           @indoor_model.transitions.each do |transition|
             next unless transition&.valid?()
             next unless transition.state1&.valid?() && transition.state2&.valid?()
 
             point1 = overlay_state_point(transition.state1)
             point2 = overlay_state_point(transition.state2)
-            draw_transition_billboard_quad(view, point1, point2, overlay_transition_radius(view, point1, point2, transition))
+            next if point1.distance(point2) <= 0.001
+
+            points << point1
+            points << point2
           end
+          view.draw(GL_LINES, points) unless points.empty?
         end
 
         def overlay_state_radius(view, center, state)
@@ -165,18 +181,8 @@ module ULOL
           clamp_overlay_radius(view, center, model_radius)
         end
 
-        def overlay_transition_radius(view, point1, point2, transition)
-          state_radius = [
-            transition.state1&.radius,
-            transition.state2&.radius
-          ].compact.first || State.display_radius
-          model_radius = state_radius * 0.5 * OVERLAY_RADIUS_SCALE
-          midpoint = Geom::Point3d.new(
-            (point1.x + point2.x) / 2.0,
-            (point1.y + point2.y) / 2.0,
-            (point1.z + point2.z) / 2.0
-          )
-          clamp_overlay_radius(view, midpoint, model_radius, pixel_scale: 0.5)
+        def overlay_transition_line_width
+          [(@indoor_model.overlay_min_radius_pixels * 0.5).round, 1].max
         end
 
         def clamp_overlay_radius(view, center, model_radius, pixel_scale: 1.0)
@@ -185,39 +191,11 @@ module ULOL
           [[model_radius, screen_min_radius].max, screen_max_radius].min
         end
 
-        def draw_billboard_disk(view, center, radius)
-          right_axis, up_axis = camera_billboard_axes(view)
-          points = [center]
-          points.concat(circle_points(center, right_axis, up_axis, radius))
-          points << points[1]
-          view.draw(GL_TRIANGLE_FAN, points)
-        end
-
-        def draw_transition_billboard_quad(view, point1, point2, half_width)
-          direction = point1.vector_to(point2)
-          return if direction.length <= 0.001
-
-          direction.normalize!
-          camera_direction = view.camera.direction
-          width_axis = direction.cross(camera_direction)
-          width_axis = direction.cross(view.camera.up) if width_axis.length <= 0.001
-          return if width_axis.length <= 0.001
-
-          width_axis.normalize!
-          offset = Geom::Vector3d.new(
-            width_axis.x * half_width,
-            width_axis.y * half_width,
-            width_axis.z * half_width
-          )
-          view.draw(
-            GL_QUADS,
-            [
-              point1.offset(offset),
-              point2.offset(offset),
-              point2.offset(offset.reverse),
-              point1.offset(offset.reverse)
-            ]
-          )
+        def billboard_disk_triangle_points(center, right_axis, up_axis, radius)
+          points = circle_points(center, right_axis, up_axis, radius)
+          points.each_with_index.flat_map do |point, index|
+            [center, point, points[(index + 1) % points.length]]
+          end
         end
 
         def circle_points(center, axis1, axis2, radius)
@@ -249,22 +227,24 @@ module ULOL
           state.position
         end
 
-        def draw_bounds(view, bounds)
+        def bounds_line_points(bounds)
           points = (0..7).map { |index| bounds.corner(index) }
-          loops = [
-            [0, 1, 3, 2],
-            [4, 5, 7, 6],
-            [0, 1, 5, 4],
-            [2, 3, 7, 6],
-            [0, 2, 6, 4],
-            [1, 3, 7, 5]
+          edges = [
+            [0, 1], [1, 3], [3, 2], [2, 0],
+            [4, 5], [5, 7], [7, 6], [6, 4],
+            [0, 4], [1, 5], [2, 6], [3, 7]
           ]
-          loops.each { |indices| view.draw(GL_LINE_LOOP, indices.map { |index| points[index] }) }
+          edges.flat_map { |from, to| [points[from], points[to]] }
         end
 
         def draw_2d_quad(view, points, color)
+          draw_2d_quads(view, [points], color)
+        end
+
+        def draw_2d_quads(view, quads, color)
           view.drawing_color = color
-          view.draw2d(GL_QUADS, points.map { |point| Geom::Point3d.new(*point) })
+          points = quads.flatten(1).map { |point| Geom::Point3d.new(*point) }
+          view.draw2d(GL_QUADS, points) unless points.empty?
         end
 
         def text_options(size:, bold:, color:)
