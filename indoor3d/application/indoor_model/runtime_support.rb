@@ -11,7 +11,7 @@ module ULOL
 
               @refreshing_runtime = true
               sync do
-                @model = Sketchup.active_model
+                @model ||= Sketchup.active_model
                 find_existing_space_features_groups
                 attach_existing_space_features_observers
                 reset_runtime_collections
@@ -31,7 +31,7 @@ module ULOL
           def with_indoor_model_operation(name, transparent: false)
             return yield if @indoor_operation_depth.to_i.positive?
 
-            model = Sketchup.active_model
+            model = @model || Sketchup.active_model
             return yield unless model
             if model.respond_to?(:active_operation_name) && model.active_operation_name.to_s.length.positive?
               return yield
