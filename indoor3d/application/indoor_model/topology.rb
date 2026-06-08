@@ -32,6 +32,53 @@ module ULOL
             @adjacency_service.synchronize_for(cell_space)
           end
 
+          def mark_cell_space_dirty(cell_space)
+            @dirty_cell_space_pids ||= {}
+            return unless cell_space&.valid?
+
+            entity = cell_space.valid_sketchup_group
+            return unless entity
+
+            @dirty_cell_space_pids[entity.persistent_id] = true
+            schedule_dirty_cell_space_sync
+          rescue StandardError => e
+            puts "[IndoorGML] CellSpace dirty mark failed: #{e.class}: #{e.message}"
+          end
+
+          def schedule_dirty_cell_space_sync
+            @dirty_cell_space_pids ||= {}
+            return if @cell_space_sync_scheduled
+
+            @cell_space_sync_scheduled = true
+            UI.start_timer(0, false) do
+              flush_dirty_cell_space_sync
+            end
+          end
+
+          def flush_dirty_cell_space_sync
+            @dirty_cell_space_pids ||= {}
+            pids = @dirty_cell_space_pids.keys
+            @dirty_cell_space_pids.clear
+            @cell_space_sync_scheduled = false
+            return if pids.empty?
+
+            with_transparent_cell_space_operation('IndoorGML Dirty CellSpace Sync') do
+              sync do
+                pids.each do |persistent_id|
+                  cell_space = @feature_registry.find_cell_space_by_persistent_id(persistent_id)
+                  next unless cell_space&.valid?
+
+                  synchronize_adjacency_and_transitions_for_cell_space(cell_space)
+                  remember_cell_space_change_snapshot(cell_space.sketchup_group)
+                end
+              end
+            end
+            Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
+          rescue StandardError => e
+            @cell_space_sync_scheduled = false
+            puts "[IndoorGML] Dirty CellSpace sync failed: #{e.class}: #{e.message}"
+          end
+
           def erase_adjacency_for_cell_space(cell_space)
             @adjacency_service.erase_for(cell_space)
           end
