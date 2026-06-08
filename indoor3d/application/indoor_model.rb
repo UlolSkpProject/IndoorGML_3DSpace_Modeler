@@ -50,6 +50,8 @@ module ULOL
           @selection_observer = Indoor3DGmlSelectionObserver.new(self)
           @cell_space_observed_ids = {}
           @cell_space_change_snapshots = {}
+          @dirty_cell_space_pids = {}
+          @cell_space_sync_scheduled = false
           @space_features_observed_ids = {}
           @space_features_change_snapshots = {}
           @selection_observed_model_id = nil

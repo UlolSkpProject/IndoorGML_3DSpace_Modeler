@@ -89,7 +89,7 @@ module ULOL
                   cell_space = refresh_and_find_cell_space(entity)
                   state = cell_space&.duality_state
                 end
-                synchronize_adjacency_and_transitions_for_cell_space(cell_space)
+                mark_cell_space_dirty(cell_space)
               end
             end
             remember_cell_space_change_snapshot(cell_space.sketchup_group)
@@ -251,7 +251,7 @@ module ULOL
 
           def handle_cell_space_transform_changed(cell_space)
             with_transparent_cell_space_operation('IndoorGML CellSpace Transform Change') do
-              sync { synchronize_cell_space_geometry_change(cell_space) }
+              sync { mark_cell_space_dirty(cell_space) }
             end
             remember_cell_space_change_snapshot(cell_space.sketchup_group)
             true
@@ -264,7 +264,7 @@ module ULOL
                 name_cell_space_entity(cell_space)
                 apply_cell_space_material(cell_space)
                 write_cell_space_attributes(cell_space)
-                synchronize_adjacency_and_transitions_for_cell_space(cell_space)
+                mark_cell_space_dirty(cell_space)
               end
             end
             remember_cell_space_change_snapshot(cell_space.sketchup_group)
@@ -284,7 +284,7 @@ module ULOL
               cell_space = refresh_and_find_cell_space(cell_space.sketchup_group)
               state = cell_space&.duality_state
             end
-            synchronize_adjacency_and_transitions_for_cell_space(cell_space)
+            mark_cell_space_dirty(cell_space)
           end
 
           def apply_cell_space_type_attributes(cell_space)
