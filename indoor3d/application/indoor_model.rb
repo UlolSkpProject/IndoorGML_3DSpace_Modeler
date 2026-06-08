@@ -72,10 +72,12 @@ module ULOL
             transition_eraser: method(:erase_transition_for_pair_key)
           )
           @runtime_restorer = RuntimeRestorer.new(
-            @feature_registry,
-            @attribute_serializer,
-            cell_space_registrar: method(:register_cell_space),
-            state_registrar: method(:register_state)
+            registry: @feature_registry,
+            serializer: @attribute_serializer,
+            callbacks: {
+              cell_space_registrar: method(:register_cell_space),
+              state_registrar: method(:register_state)
+            }
           )
           @scene_group_guard = SceneGroupGuard.new(
             with_unlocked: method(:with_unlocked),

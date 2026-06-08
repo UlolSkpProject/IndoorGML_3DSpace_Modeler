@@ -668,8 +668,8 @@ RuntimeRestorer.new(
 
 ## 단계 완료 조건
 
-- [ ] Codex 작업 완료
-- [ ] 실제 SketchUp 테스트 완료 - 사용자만 체크
+- [x] Codex 작업 완료
+- [x] 실제 SketchUp 테스트 완료 - 사용자만 체크
 
 > 다음 단계 진행 금지 조건: `실제 SketchUp 테스트 완료`가 체크되지 않았다면 11단계로 넘어가지 않는다.
 
