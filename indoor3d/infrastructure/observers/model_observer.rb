@@ -8,6 +8,7 @@ module ULOL
         def initialize
           super()
           @active_path_keys_by_model_id = {}
+          @recovering_unlocked_primal_by_model_id = {}
         end
 
         def onActivePathChanged(model)
@@ -42,14 +43,26 @@ module ULOL
               current_key = active_path_key(model)
               if previous_key_known && previous_key == current_key
                 remember_active_path_key(model, current_key)
+                recover_unlocked_primal_after_transaction(model)
                 next
               end
 
               handle_active_path_changed(model, source: source)
+              recover_unlocked_primal_after_transaction(model)
             rescue StandardError => e
               puts "[IndoorGML] Active path #{source} handling failed: #{e.class}: #{e.message}"
             end
           end
+        end
+
+        def recover_unlocked_primal_after_transaction(model)
+          key = model.object_id
+          return if @recovering_unlocked_primal_by_model_id[key]
+
+          @recovering_unlocked_primal_by_model_id[key] = true
+          IndoorModel.for(model).recover_unlocked_primal_after_transaction(model)
+        ensure
+          @recovering_unlocked_primal_by_model_id.delete(key) if @recovering_unlocked_primal_by_model_id
         end
 
         def remember_active_path(model)
