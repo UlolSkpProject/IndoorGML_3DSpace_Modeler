@@ -5,23 +5,62 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="header">EDIT MODE - PRIMAL SPACE</div>
-  <div class="panel">
-    <div class="row"><span>Selected</span><span id="selectedFeature">None</span></div>
-    <div class="row"><span>ID</span><span id="selectedId">-</span></div>
-    <div class="row"><span>Name</span><span id="selectedName">-</span></div>
-    <select id="selectedClassification" disabled></select>
-  </div>
-  <label>
-    <span>Overlay radius range</span>
-    <output id="overlayRadiusValue"></output>
-  </label>
-  <div class="range-row">
-    <input id="overlayMinRadius" type="range" min="1" max="15" step="1">
-    <input id="overlayMaxRadius" type="range" min="7" max="25" step="1">
-  </div>
-  <button id="finish" type="button">Finish</button>
-  <button id="clearAll" class="danger" type="button">Clear All IndoorGML Elements</button>
+  <header>
+    <div class="eyebrow">IndoorGML</div>
+    <h1>편집 모드</h1>
+  </header>
+
+  <main>
+    <section id="emptyPanel" class="mode-panel">
+      <p class="description">CellSpace를 선택하면 타입을 변경할 수 있습니다.<br>Solid Group만 선택하면 CellSpace로 변환할 수 있습니다.</p>
+    </section>
+
+    <section id="solidPanel" class="mode-panel hidden">
+      <div class="summary-line">Solid Group <span id="solidCount">0</span>개 선택됨</div>
+      <label class="field-label" for="solidClassification">CellSpace 타입</label>
+      <select id="solidClassification"></select>
+      <button id="convertSelected" class="command" type="button">
+        <img id="convertIcon" alt="">
+        <span>선택한 Solid Group을 CellSpace로 변환</span>
+      </button>
+    </section>
+
+    <section id="cellPanel" class="mode-panel hidden">
+      <div id="singleCellInfo" class="info-grid">
+        <span>ID</span><strong id="selectedId">-</strong>
+        <span>이름</span><strong id="selectedName">-</strong>
+        <span>연결 Transition</span><strong id="transitionCount">0</strong>
+      </div>
+      <div id="multiCellInfo" class="summary-line hidden">
+        CellSpace <span id="cellSpaceCount">0</span>개 선택됨
+      </div>
+      <label class="field-label" for="selectedClassification">CellSpace 타입</label>
+      <select id="selectedClassification"></select>
+      <button id="changeType" class="command" type="button">
+        <img id="changeTypeIcon" alt="">
+        <span>선택한 CellSpace 타입 변경</span>
+      </button>
+    </section>
+
+    <section class="mode-panel">
+      <div class="range-header">
+        <label class="field-label" for="overlayMinRadius">Overlay 반지름 범위</label>
+        <output id="overlayRadiusValue"></output>
+      </div>
+      <div class="radius-preview" aria-hidden="true">
+        <span id="maxRadiusPreview" class="radius-circle max"></span>
+        <span id="minRadiusPreview" class="radius-circle min"></span>
+      </div>
+      <div class="range-row">
+        <input id="overlayMinRadius" type="range" min="1" max="15" step="1">
+        <input id="overlayMaxRadius" type="range" min="7" max="25" step="1">
+      </div>
+    </section>
+
+    <button id="finish" class="primary" type="button">편집 완료</button>
+    <button id="clearAll" class="danger" type="button">모든 IndoorGML 요소 삭제</button>
+  </main>
+
   <script src="app.js"></script>
 </body>
 </html>

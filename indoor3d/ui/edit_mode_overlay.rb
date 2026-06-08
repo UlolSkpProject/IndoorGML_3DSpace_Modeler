@@ -12,6 +12,8 @@ module ULOL
         PRIMARY_COLOR = Sketchup::Color.new(22, 130, 82, 255)
         PRIMARY_TRANSLUCENT_COLOR = Sketchup::Color.new(22, 130, 82, 210)
         HINT_COLOR = Sketchup::Color.new(214, 245, 229)
+        DUAL_STATE_COLOR = Sketchup::Color.new(35, 120, 255, 255)
+        DUAL_TRANSITION_COLOR = Sketchup::Color.new(35, 120, 255, 125)
         CIRCLE_SEGMENTS = 32
         OVERLAY_RADIUS_SCALE = 1.1
 
@@ -136,7 +138,7 @@ module ULOL
         end
 
         def draw_overlay_states(view)
-          view.drawing_color = Sketchup::Color.new(35, 120, 255, 255)
+          view.drawing_color = DUAL_STATE_COLOR
           @indoor_model.states.each do |state|
             next unless state&.valid?()
 
@@ -147,7 +149,7 @@ module ULOL
         end
 
         def draw_overlay_transitions(view)
-          view.drawing_color = Sketchup::Color.new(35, 120, 255, 125)
+          view.drawing_color = DUAL_TRANSITION_COLOR
           @indoor_model.transitions.each do |transition|
             next unless transition&.valid?()
             next unless transition.state1&.valid?() && transition.state2&.valid?()
