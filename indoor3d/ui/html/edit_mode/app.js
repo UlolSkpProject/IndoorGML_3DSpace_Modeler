@@ -16,6 +16,9 @@ var singleCellInfo = document.getElementById('singleCellInfo');
 var multiCellInfo = document.getElementById('multiCellInfo');
 var cellSpaceCount = document.getElementById('cellSpaceCount');
 var clearAll = document.getElementById('clearAll');
+var cellTypeCounts = document.getElementById('cellTypeCounts');
+var stateCount = document.getElementById('stateCount');
+var totalTransitionCount = document.getElementById('totalTransitionCount');
 var suppressTypeChange = false;
 var currentMode = null;
 var currentSelectionKey = null;
@@ -79,6 +82,8 @@ function updateSelection(snapshot) {
     showCellSpaces(snapshot);
   } else if (nextMode === 'cell_space') {
     showCellSpace(snapshot);
+  } else {
+    showEmpty(snapshot);
   }
 
   currentSelectionKey = nextKey;
@@ -101,8 +106,18 @@ function selectionKey(snapshot) {
     snapshot.classification || '',
     snapshot.transitionCount || 0,
     snapshot.cellSpaceCount || 0,
-    snapshot.solidGroupCount || 0
+    snapshot.solidGroupCount || 0,
+    snapshot.stateCount || 0,
+    snapshot.totalTransitionCount || 0,
+    cellTypeCountKey(snapshot.cellTypeCounts)
   ].join('|');
+}
+
+function cellTypeCountKey(counts) {
+  if (!counts || !counts.length) return '';
+  return counts.map(function (entry) {
+    return [entry.label || '', entry.count || 0].join(':');
+  }).join(',');
 }
 
 function setVisible(element, visible) {
@@ -117,6 +132,24 @@ function showSolidGroups(snapshot) {
   solidCount.textContent = snapshot.solidGroupCount || 0;
   solidClassification.value = snapshot.classification || 'GeneralSpace|Room';
   show(solidPanel);
+}
+
+function showEmpty(snapshot) {
+  var counts = snapshot && snapshot.cellTypeCounts ? snapshot.cellTypeCounts : [];
+  cellTypeCounts.innerHTML = '';
+  counts.forEach(function (entry) {
+    var row = document.createElement('div');
+    row.className = 'type-count-row';
+    var label = document.createElement('span');
+    label.textContent = entry.label || '-';
+    var count = document.createElement('strong');
+    count.textContent = entry.count || 0;
+    row.appendChild(label);
+    row.appendChild(count);
+    cellTypeCounts.appendChild(row);
+  });
+  stateCount.textContent = snapshot && snapshot.stateCount ? snapshot.stateCount : 0;
+  totalTransitionCount.textContent = snapshot && snapshot.totalTransitionCount ? snapshot.totalTransitionCount : 0;
 }
 
 function showCellSpaces(snapshot) {

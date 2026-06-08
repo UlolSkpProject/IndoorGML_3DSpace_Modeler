@@ -54,6 +54,42 @@ main {
   word-break: keep-all;
 }
 
+.model-summary {
+  margin-bottom: 10px;
+}
+
+.summary-title {
+  margin-bottom: 6px;
+  color: #2c3b34;
+  font-weight: 700;
+}
+
+.type-counts {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.type-count-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #52645a;
+}
+
+.type-count-row strong,
+.summary-metrics strong {
+  color: #1f2a24;
+}
+
+.summary-metrics {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #52645a;
+}
+
 .summary-line {
   margin-bottom: 10px;
   color: #2c3b34;
