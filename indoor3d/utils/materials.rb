@@ -11,7 +11,11 @@ module ULOL
           'Indoor3DGml_GeneralSpace',
           'Indoor3DGml_TransitionSpace',
           'Indoor3DGml_ConnectionSpace',
-          'Indoor3DGml_AnchorSpace'
+          'Indoor3DGml_AnchorSpace',
+          'indoor_cell',
+          'indoor_stair',
+          'indoor_door',
+          'indoor_link'
         ].freeze unless const_defined?(:LEGACY_MATERIAL_NAMES, false)
 
         TEXTURE_DEFINITIONS = {
