@@ -15,6 +15,9 @@ on:
         default: active
         options: [active, preview, deprecated, disabled]
 
+permissions:
+  contents: write
+
 jobs:
   deploy:
     uses: UlolSkpProject/ULOL-Extension-Repository/.github/workflows/deploy-extension.yml@main
