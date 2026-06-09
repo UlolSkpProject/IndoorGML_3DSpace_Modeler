@@ -27,4 +27,4 @@ jobs:
       visibility: ${{ github.event.inputs.visibility }}
       distribution: ${{ github.event.inputs.distribution }}
     secrets:
-      DEPLOY_REPO_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+      DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
