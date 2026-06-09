@@ -105,6 +105,9 @@ jobs:
 
       - name: Update manifest
         shell: bash
+        env:
+          INPUT_VISIBILITY: ${{ github.event.inputs.visibility }}
+          INPUT_DISTRIBUTION: ${{ github.event.inputs.distribution }}
         run: |
           python3 << 'PY'
           import json
