@@ -2,6 +2,25 @@
 
 on:
   workflow_dispatch:
+    inputs:
+      visibility:
+        description: 'Visibility'
+        required: true
+        default: 'visible'
+        type: choice
+        options:
+          - visible
+          - hidden
+      distribution:
+        description: 'Distribution'
+        required: true
+        default: 'active'
+        type: choice
+        options:
+          - active
+          - preview
+          - deprecated
+          - disabled
   release:
     types: [published]
 
@@ -106,6 +125,9 @@ jobs:
           version = "${{ steps.version.outputs.version }}"
           base_url = os.environ["PAGES_BASE_URL"]
           rbz_basename = os.environ["RBZ_BASENAME"]
+          event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+          input_visibility = os.environ.get("INPUT_VISIBILITY", "")
+          input_distribution = os.environ.get("INPUT_DISTRIBUTION", "")
 
           filename = f"{rbz_basename}-{version}.rbz"
           download_url = f"{base_url}/rbz/{extension_id}/{filename}"
@@ -123,6 +145,12 @@ jobs:
 
           target.setdefault("visibility", "visible")
           target.setdefault("distribution", "active")
+
+          if event_name == "workflow_dispatch" and input_visibility:
+              target["visibility"] = input_visibility
+
+          if event_name == "workflow_dispatch" and input_distribution:
+              target["distribution"] = input_distribution
 
           target.update({
               "id": extension_id,
@@ -152,4 +180,5 @@ jobs:
 
           git commit -m "Deploy ${{ env.EXTENSION_NAME }} ${{ steps.version.outputs.version }}" || exit 0
           git push
+
 
