@@ -1,4 +1,4 @@
-name: Deploy SketchUp Extension
+﻿name: Deploy SketchUp Extension
 
 on:
   workflow_dispatch:
@@ -121,6 +121,9 @@ jobs:
               target = {}
               extensions.append(target)
 
+          target.setdefault("visibility", "visible")
+          target.setdefault("distribution", "active")
+
           target.update({
               "id": extension_id,
               "name": extension_name,
@@ -149,3 +152,4 @@ jobs:
 
           git commit -m "Deploy ${{ env.EXTENSION_NAME }} ${{ steps.version.outputs.version }}" || exit 0
           git push
+
