@@ -26,7 +26,6 @@ on:
 
 env:
   EXTENSION_ID: indoor3d
-  EXTENSION_NAME: Indoor3DGML Modeler
   LOADER_FILE: indoor3d.rb
   SOURCE_DIR: indoor3d
   RBZ_BASENAME: Indoor3DGML_Modeler
@@ -41,11 +40,11 @@ jobs:
       - name: Checkout extension repo
         uses: actions/checkout@v4
 
-      - name: Extract version
-        id: version
+      - name: Extract metadata
+        id: metadata
         shell: bash
         run: |
-          VERSION=$(python3 - << 'PY'
+          python3 << 'PY' > metadata.env
           import re
           import os
           from pathlib import Path
@@ -53,28 +52,57 @@ jobs:
           loader = os.environ["LOADER_FILE"]
           text = Path(loader).read_text(encoding="utf-8")
 
-          patterns = [
-              r"EXTENSION_VERSION\s*=\s*['\"]([^'\"]+)['\"]",
-              r"EXTENSION\.version\s*=\s*['\"]([^'\"]+)['\"]",
-          ]
-
-          for pattern in patterns:
+          def extract_const(name):
+              pattern = rf"{name}\s*=\s*['\"]([^'\"]+)['\"]"
               match = re.search(pattern, text)
-              if match:
-                  print(match.group(1))
-                  break
-          else:
-              raise SystemExit("Extension version not found")
-          PY
-          )
+              return match.group(1) if match else ""
 
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Version: $VERSION"
+          def extract_extension_attr(attr):
+              pattern = rf"EXTENSION\.{attr}\s*=\s*['\"]([^'\"]+)['\"]"
+              match = re.search(pattern, text)
+              return match.group(1) if match else ""
+
+          name = extract_const("EXTENSION_NAME")
+          version = extract_const("EXTENSION_VERSION")
+          creator = extract_const("EXTENSION_CREATOR")
+          description = extract_const("EXTENSION_DESCRIPTION")
+
+          if not name:
+              match = re.search(r"SketchupExtension\.new\(\s*['\"]([^'\"]+)['\"]", text, re.S)
+              name = match.group(1) if match else ""
+
+          if not version:
+              version = extract_extension_attr("version")
+
+          if not creator:
+              creator = extract_extension_attr("creator")
+
+          if not description:
+              description = extract_extension_attr("description")
+
+          if not name:
+              raise SystemExit("Extension name not found")
+
+          if not version:
+              raise SystemExit("Extension version not found")
+
+          print(f"name={name}")
+          print(f"version={version}")
+          print(f"creator={creator}")
+          print(f"description={description}")
+          PY
+
+          while IFS='=' read -r key value; do
+            echo "$key=$value" >> "$GITHUB_OUTPUT"
+          done < metadata.env
+
+          echo "Name: $(grep '^name=' metadata.env | cut -d= -f2-)"
+          echo "Version: $(grep '^version=' metadata.env | cut -d= -f2-)"
 
       - name: Build RBZ
         shell: bash
         run: |
-          RBZ_NAME="${{ env.RBZ_BASENAME }}-${{ steps.version.outputs.version }}.rbz"
+          RBZ_NAME="${{ env.RBZ_BASENAME }}-${{ steps.metadata.outputs.version }}.rbz"
 
           rm -rf package
           mkdir package
@@ -98,7 +126,7 @@ jobs:
       - name: Copy RBZ
         shell: bash
         run: |
-          RBZ_NAME="${{ env.RBZ_BASENAME }}-${{ steps.version.outputs.version }}.rbz"
+          RBZ_NAME="${{ env.RBZ_BASENAME }}-${{ steps.metadata.outputs.version }}.rbz"
 
           mkdir -p "deploy_repo/rbz/${{ env.EXTENSION_ID }}"
           cp "$RBZ_NAME" "deploy_repo/rbz/${{ env.EXTENSION_ID }}/$RBZ_NAME"
@@ -122,10 +150,12 @@ jobs:
               data = {"schema_version": 1, "extensions": []}
 
           extension_id = os.environ["EXTENSION_ID"]
-          extension_name = os.environ["EXTENSION_NAME"]
+          extension_name = """${{ steps.metadata.outputs.name }}"""
+          extension_creator = """${{ steps.metadata.outputs.creator }}"""
+          extension_description = """${{ steps.metadata.outputs.description }}"""
           loader_file = os.environ["LOADER_FILE"]
           source_dir = os.environ["SOURCE_DIR"]
-          version = "${{ steps.version.outputs.version }}"
+          version = "${{ steps.metadata.outputs.version }}"
           base_url = os.environ["PAGES_BASE_URL"]
           rbz_basename = os.environ["RBZ_BASENAME"]
           event_name = os.environ.get("GITHUB_EVENT_NAME", "")
@@ -181,7 +211,8 @@ jobs:
 
           git add manifest.json "rbz/${{ env.EXTENSION_ID }}"
 
-          git commit -m "Deploy ${{ env.EXTENSION_NAME }} ${{ steps.version.outputs.version }}" || exit 0
+          git commit -m "Deploy ${{ steps.metadata.outputs.name }} ${{ steps.metadata.outputs.version }}" || exit 0
           git push
+
 
 
