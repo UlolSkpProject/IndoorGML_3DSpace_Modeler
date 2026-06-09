@@ -1,218 +1,27 @@
-﻿name: Deploy SketchUp Extension
+﻿name: Deploy Extension
 
 on:
   workflow_dispatch:
     inputs:
       visibility:
-        description: 'Visibility'
-        required: true
-        default: 'visible'
         type: choice
-        options:
-          - visible
-          - hidden
-      distribution:
-        description: 'Distribution'
         required: true
-        default: 'active'
-        type: choice
-        options:
-          - active
-          - preview
-          - deprecated
-          - disabled
-  release:
-    types: [published]
+        default: visible
+        options: [visible, hidden]
 
-env:
-  EXTENSION_ID: indoor3d
-  LOADER_FILE: indoor3d.rb
-  SOURCE_DIR: indoor3d
-  RBZ_BASENAME: Indoor3DGML_Modeler
-  DEPLOY_REPO: UlolSkpProject/ULOL-Extension-Repository
-  PAGES_BASE_URL: https://ulolskpproject.github.io/ULOL-Extension-Repository
+      distribution:
+        type: choice
+        required: true
+        default: active
+        options: [active, preview, deprecated, disabled]
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout extension repo
-        uses: actions/checkout@v4
-
-      - name: Extract metadata
-        id: metadata
-        shell: bash
-        run: |
-          python3 << 'PY' > metadata.env
-          import re
-          import os
-          from pathlib import Path
-
-          loader = os.environ["LOADER_FILE"]
-          text = Path(loader).read_text(encoding="utf-8")
-
-          def extract_const(name):
-              pattern = rf"{name}\s*=\s*['\"]([^'\"]+)['\"]"
-              match = re.search(pattern, text)
-              return match.group(1) if match else ""
-
-          def extract_extension_attr(attr):
-              pattern = rf"EXTENSION\.{attr}\s*=\s*['\"]([^'\"]+)['\"]"
-              match = re.search(pattern, text)
-              return match.group(1) if match else ""
-
-          name = extract_const("EXTENSION_NAME")
-          version = extract_const("EXTENSION_VERSION")
-          creator = extract_const("EXTENSION_CREATOR")
-          description = extract_const("EXTENSION_DESCRIPTION")
-
-          if not name:
-              match = re.search(r"SketchupExtension\.new\(\s*['\"]([^'\"]+)['\"]", text, re.S)
-              name = match.group(1) if match else ""
-
-          if not version:
-              version = extract_extension_attr("version")
-
-          if not creator:
-              creator = extract_extension_attr("creator")
-
-          if not description:
-              description = extract_extension_attr("description")
-
-          if not name:
-              raise SystemExit("Extension name not found")
-
-          if not version:
-              raise SystemExit("Extension version not found")
-
-          print(f"name={name}")
-          print(f"version={version}")
-          print(f"creator={creator}")
-          print(f"description={description}")
-          PY
-
-          while IFS='=' read -r key value; do
-            echo "$key=$value" >> "$GITHUB_OUTPUT"
-          done < metadata.env
-
-          echo "Name: $(grep '^name=' metadata.env | cut -d= -f2-)"
-          echo "Version: $(grep '^version=' metadata.env | cut -d= -f2-)"
-
-      - name: Build RBZ
-        shell: bash
-        run: |
-          RBZ_NAME="${{ env.RBZ_BASENAME }}-${{ steps.metadata.outputs.version }}.rbz"
-
-          rm -rf package
-          mkdir package
-
-          cp "${{ env.LOADER_FILE }}" package/
-          cp -r "${{ env.SOURCE_DIR }}" package/
-
-          cd package
-          zip -r "../$RBZ_NAME" .
-
-          cd ..
-          ls -lh "$RBZ_NAME"
-
-      - name: Checkout deployment repo
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.DEPLOY_REPO }}
-          token: ${{ secrets.DEPLOY_TOKEN }}
-          path: deploy_repo
-
-      - name: Copy RBZ
-        shell: bash
-        run: |
-          RBZ_NAME="${{ env.RBZ_BASENAME }}-${{ steps.metadata.outputs.version }}.rbz"
-
-          mkdir -p "deploy_repo/rbz/${{ env.EXTENSION_ID }}"
-          cp "$RBZ_NAME" "deploy_repo/rbz/${{ env.EXTENSION_ID }}/$RBZ_NAME"
-
-      - name: Update manifest
-        shell: bash
-        env:
-          INPUT_VISIBILITY: ${{ github.event.inputs.visibility }}
-          INPUT_DISTRIBUTION: ${{ github.event.inputs.distribution }}
-        run: |
-          python3 << 'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          manifest_path = Path("deploy_repo/manifest.json")
-
-          if manifest_path.exists():
-              data = json.loads(manifest_path.read_text(encoding="utf-8"))
-          else:
-              data = {"schema_version": 1, "extensions": []}
-
-          extension_id = os.environ["EXTENSION_ID"]
-          extension_name = """${{ steps.metadata.outputs.name }}"""
-          extension_creator = """${{ steps.metadata.outputs.creator }}"""
-          extension_description = """${{ steps.metadata.outputs.description }}"""
-          loader_file = os.environ["LOADER_FILE"]
-          source_dir = os.environ["SOURCE_DIR"]
-          version = "${{ steps.metadata.outputs.version }}"
-          base_url = os.environ["PAGES_BASE_URL"]
-          rbz_basename = os.environ["RBZ_BASENAME"]
-          event_name = os.environ.get("GITHUB_EVENT_NAME", "")
-          input_visibility = os.environ.get("INPUT_VISIBILITY", "")
-          input_distribution = os.environ.get("INPUT_DISTRIBUTION", "")
-
-          filename = f"{rbz_basename}-{version}.rbz"
-          download_url = f"{base_url}/rbz/{extension_id}/{filename}"
-
-          extensions = data.setdefault("extensions", [])
-
-          target = next(
-              (ext for ext in extensions if ext.get("id") == extension_id),
-              None
-          )
-
-          if target is None:
-              target = {}
-              extensions.append(target)
-
-          target.setdefault("visibility", "visible")
-          target.setdefault("distribution", "active")
-
-          if event_name == "workflow_dispatch" and input_visibility:
-              target["visibility"] = input_visibility
-
-          if event_name == "workflow_dispatch" and input_distribution:
-              target["distribution"] = input_distribution
-
-          target.update({
-              "id": extension_id,
-              "name": extension_name,
-              "version": version,
-              "loader": loader_file,
-              "source_dir": source_dir,
-              "download_url": download_url,
-              "release_note": f"{extension_name} {version}"
-          })
-
-          manifest_path.write_text(
-              json.dumps(data, ensure_ascii=False, indent=2) + "\n",
-              encoding="utf-8"
-          )
-          PY
-
-      - name: Commit and push
-        shell: bash
-        run: |
-          cd deploy_repo
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add manifest.json "rbz/${{ env.EXTENSION_ID }}"
-
-          git commit -m "Deploy ${{ steps.metadata.outputs.name }} ${{ steps.metadata.outputs.version }}" || exit 0
-          git push
-
-
-
+    uses: UlolSkpProject/ULOL-Extension-Repository/.github/workflows/deploy-extension.yml@main
+    with:
+      extension_id: indoor3d # <-여기
+      loader_file: indoor3d.rb # <-여기
+      visibility: ${{ github.event.inputs.visibility }}
+      distribution: ${{ github.event.inputs.distribution }}
+    secrets:
+      DEPLOY_REPO_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
