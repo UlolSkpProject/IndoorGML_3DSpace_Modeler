@@ -67,8 +67,16 @@ module ULOL
           return
         end
 
-        cell_type, category_code = prompt_cell_space_type_and_category('Convert Solid Groups to CellSpace')
-        return if cell_type.nil?
+        rm_groups = solid_groups.select { |group| rm_helper_cell_space_type_and_category(group) }
+        use_rm_helper = rm_groups.any?
+        
+        if use_rm_helper
+          target_groups = rm_groups
+        else
+          target_groups = solid_groups
+          cell_type, category_code = prompt_cell_space_type_and_category('Convert Solid Groups to CellSpace')
+          return if cell_type.nil?
+        end
 
         indoor_model = IndoorCore::IndoorModel.current
         converted_count = 0
@@ -76,7 +84,7 @@ module ULOL
 
         model.start_operation('Convert Solid Groups to CellSpace', true)
         indoor_model.with_active_path_enforcement_suspended do
-          root_solid_groups = move_groups_to_root_context(model, solid_groups)
+          root_solid_groups = move_groups_to_root_context(model, target_groups)
           activate_root_context(model)
           if root_solid_groups.empty?
             restore_active_path(model, original_active_path)
@@ -108,7 +116,13 @@ module ULOL
             end
           ) do |group, _index|
             begin
-              indoor_model.convert_group_to_cell_space(group, cell_type, category_code)
+              if use_rm_helper
+                rm_cell_type, rm_category_code = rm_helper_cell_space_type_and_category(group)
+                next if rm_cell_type.nil?
+                indoor_model.convert_group_to_cell_space(group, rm_cell_type, rm_category_code)
+              else
+                indoor_model.convert_group_to_cell_space(group, cell_type, category_code)
+              end
               converted_count += 1
             rescue StandardError => e
               puts "[IndoorGML] CellSpace conversion failed: #{e.class}: #{e.message}"
@@ -173,6 +187,20 @@ module ULOL
       UI.messagebox('IndoorGML runtime data refreshed.')
     rescue StandardError => e
       UI.messagebox("Runtime refresh failed:\n#{e.message}")
+    end
+
+    def self.rm_helper_cell_space_type_and_category(group)
+      space_type = group.get_attribute(RM_HELPER_DICT, RM_HELPER_SPACE_TYPE_KEY).to_s.strip.upcase
+      category_code = RM_HELPER_SPACE_TYPE_TO_CATEGORY_CODE[space_type]
+      return nil if category_code.nil?
+      
+      option = IndoorCore::CellSpaceCategory.selection_options.find do |candidate|
+        candidate[:category_code] == category_code
+      end
+      
+      return nil if option.nil?
+    
+      [option[:cell_type], option[:category_code]]
     end
 
     def self.create_temp_indoorgml

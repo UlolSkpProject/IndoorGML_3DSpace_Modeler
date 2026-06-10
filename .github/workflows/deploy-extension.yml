@@ -1,151 +1,30 @@
-name: Deploy SketchUp Extension
+﻿name: Deploy Extension
 
 on:
   workflow_dispatch:
-  release:
-    types: [published]
+    inputs:
+      visibility:
+        type: choice
+        required: true
+        default: visible
+        options: [visible, hidden]
 
-env:
-  EXTENSION_ID: indoor3d
-  EXTENSION_NAME: Indoor3DGML Modeler
-  LOADER_FILE: indoor3d.rb
-  SOURCE_DIR: indoor3d
-  RBZ_BASENAME: Indoor3DGML_Modeler
-  DEPLOY_REPO: UlolSkpProject/ULOL-Extension-Repository
-  PAGES_BASE_URL: https://ulolskpproject.github.io/ULOL-Extension-Repository
+      distribution:
+        type: choice
+        required: true
+        default: preview
+        options: [active, preview, deprecated, disabled]
+
+permissions:
+  contents: write
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout extension repo
-        uses: actions/checkout@v4
-
-      - name: Extract version
-        id: version
-        shell: bash
-        run: |
-          VERSION=$(python3 - << 'PY'
-          import re
-          import os
-          from pathlib import Path
-
-          loader = os.environ["LOADER_FILE"]
-          text = Path(loader).read_text(encoding="utf-8")
-
-          patterns = [
-              r"EXTENSION_VERSION\s*=\s*['\"]([^'\"]+)['\"]",
-              r"EXTENSION\.version\s*=\s*['\"]([^'\"]+)['\"]",
-          ]
-
-          for pattern in patterns:
-              match = re.search(pattern, text)
-              if match:
-                  print(match.group(1))
-                  break
-          else:
-              raise SystemExit("Extension version not found")
-          PY
-          )
-
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Version: $VERSION"
-
-      - name: Build RBZ
-        shell: bash
-        run: |
-          RBZ_NAME="${{ env.RBZ_BASENAME }}-${{ steps.version.outputs.version }}.rbz"
-
-          rm -rf package
-          mkdir package
-
-          cp "${{ env.LOADER_FILE }}" package/
-          cp -r "${{ env.SOURCE_DIR }}" package/
-
-          cd package
-          zip -r "../$RBZ_NAME" .
-
-          cd ..
-          ls -lh "$RBZ_NAME"
-
-      - name: Checkout deployment repo
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.DEPLOY_REPO }}
-          token: ${{ secrets.DEPLOY_TOKEN }}
-          path: deploy_repo
-
-      - name: Copy RBZ
-        shell: bash
-        run: |
-          RBZ_NAME="${{ env.RBZ_BASENAME }}-${{ steps.version.outputs.version }}.rbz"
-
-          mkdir -p "deploy_repo/rbz/${{ env.EXTENSION_ID }}"
-          cp "$RBZ_NAME" "deploy_repo/rbz/${{ env.EXTENSION_ID }}/$RBZ_NAME"
-
-      - name: Update manifest
-        shell: bash
-        run: |
-          python3 << 'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          manifest_path = Path("deploy_repo/manifest.json")
-
-          if manifest_path.exists():
-              data = json.loads(manifest_path.read_text(encoding="utf-8"))
-          else:
-              data = {"schema_version": 1, "extensions": []}
-
-          extension_id = os.environ["EXTENSION_ID"]
-          extension_name = os.environ["EXTENSION_NAME"]
-          loader_file = os.environ["LOADER_FILE"]
-          source_dir = os.environ["SOURCE_DIR"]
-          version = "${{ steps.version.outputs.version }}"
-          base_url = os.environ["PAGES_BASE_URL"]
-          rbz_basename = os.environ["RBZ_BASENAME"]
-
-          filename = f"{rbz_basename}-{version}.rbz"
-          download_url = f"{base_url}/rbz/{extension_id}/{filename}"
-
-          extensions = data.setdefault("extensions", [])
-
-          target = next(
-              (ext for ext in extensions if ext.get("id") == extension_id),
-              None
-          )
-
-          if target is None:
-              target = {}
-              extensions.append(target)
-
-          target.update({
-              "id": extension_id,
-              "name": extension_name,
-              "version": version,
-              "loader": loader_file,
-              "source_dir": source_dir,
-              "download_url": download_url,
-              "release_note": f"{extension_name} {version}"
-          })
-
-          manifest_path.write_text(
-              json.dumps(data, ensure_ascii=False, indent=2) + "\n",
-              encoding="utf-8"
-          )
-          PY
-
-      - name: Commit and push
-        shell: bash
-        run: |
-          cd deploy_repo
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add manifest.json "rbz/${{ env.EXTENSION_ID }}"
-
-          git commit -m "Deploy ${{ env.EXTENSION_NAME }} ${{ steps.version.outputs.version }}" || exit 0
-          git push
+    uses: UlolSkpProject/ULOL-Extension-Repository/.github/workflows/deploy-extension.yml@main
+    with:
+      extension_id: indoor3d
+      loader_file: indoor3d.rb
+      visibility: ${{ github.event.inputs.visibility }}
+      distribution: ${{ github.event.inputs.distribution }}
+    secrets:
+      DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}

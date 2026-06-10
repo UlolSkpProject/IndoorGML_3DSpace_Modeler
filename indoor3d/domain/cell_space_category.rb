@@ -18,10 +18,10 @@ module ULOL
           ],
           CellSpaceType::CONNECTION => [
             { code: 'Door', label: 'Door', code_space: DEFAULT_CODE_SPACE, standard: true, texture: 'cellspace_door.png' }
-          ],
-          CellSpaceType::ANCHOR => [
-            { code: 'Anchor', label: 'Anchor', code_space: DEFAULT_CODE_SPACE, standard: true, texture: 'cellspace_anchor.png' }
           ]
+          # CellSpaceType::ANCHOR => [
+          #   { code: 'Anchor', label: 'Anchor', code_space: DEFAULT_CODE_SPACE, standard: true, texture: 'cellspace_anchor.png' }
+          # ]
         }.freeze unless const_defined?(:DEFAULTS, false)
 
         def self.default_for(cell_type)
