@@ -15,10 +15,10 @@ module ULOL
       'EV' => 'Elevator',
       'ES' => 'Escalator'
     }.freeze
-    
+
     unless const_defined?(:EXTENSION, false)
       EXTENSION_NAME = "IndoorGML 3D Modeler"
-      EXTENSION_VERSION = "1.0.0"
+      EXTENSION_VERSION = "1.1.0"
       EXTENSION_CREATOR = "ULOL"
       EXTENSION_DESCRIPTION = 'Create, import, export, and validate IndoorGML models.'
 
