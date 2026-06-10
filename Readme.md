@@ -285,34 +285,6 @@ EditMode 진입 상태에서 `Ctrl+Z`를 누르면 EditMode UI/상태는 켜진 
 
 ---
 
-## 이미지 에셋 구성
-
-```
-(레포 루트)/
-└── docs/
-    ├── images/
-    │   ├── preview.png                — 메인 UI 전체 스크린샷 (README 상단)
-    │   ├── toolbar.png                — 툴바 버튼 전체
-    │   ├── step1_solid_group.png      — Solid Group 준비 화면
-    │   ├── step2_create_cellspace.png — Create CellSpace 후 화면
-    │   ├── step3_edit_mode.png        — EditMode 진입 화면 (2D Overlay 배너)
-    │   ├── step4_edit_cellspace.png   — CellSpace 이동·편집 화면
-    │   ├── dialog_summary.png         — Dialog 요소 요약
-    │   ├── dialog_cellspace.png       — Dialog CellSpace 선택 정보
-    │   ├── dialog_overlay_radius.png  — Dialog Overlay 반지름 슬라이더
-    │   ├── dialog_clear_all.png       — Dialog 전체 삭제
-    │   └── screen_space_radius.png    — Screen Space 반지름 비교
-    └── icons/                         — 커스텀 이모지 PNG (32×32)
-        ├── create_cellspace.png
-        ├── edit_cellspace_property.png
-        ├── change_cellspace_type.png
-        ├── toggle_dual_overlay.png
-        ├── export_gml.png
-        └── check_validity.png
-```
-
----
-
 ## 참고
 
 - IndoorGML 1.0 표준: https://www.ogc.org/standards/indoorgml
