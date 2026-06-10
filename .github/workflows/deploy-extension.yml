@@ -12,7 +12,7 @@ on:
       distribution:
         type: choice
         required: true
-        default: active
+        default: preview
         options: [active, preview, deprecated, disabled]
 
 permissions:
@@ -22,8 +22,8 @@ jobs:
   deploy:
     uses: UlolSkpProject/ULOL-Extension-Repository/.github/workflows/deploy-extension.yml@main
     with:
-      extension_id: indoor3d # <-여기
-      loader_file: indoor3d.rb # <-여기
+      extension_id: indoor3d
+      loader_file: indoor3d.rb
       visibility: ${{ github.event.inputs.visibility }}
       distribution: ${{ github.event.inputs.distribution }}
     secrets:
