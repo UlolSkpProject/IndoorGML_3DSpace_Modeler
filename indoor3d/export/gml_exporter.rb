@@ -18,8 +18,8 @@ module ULOL
           CELL_SPACE_TAGS = {
             CellSpaceType::GENERAL => 'navi:GeneralSpace',
             CellSpaceType::TRANSITION => 'navi:TransitionSpace',
-            CellSpaceType::CONNECTION => 'navi:ConnectionSpace',
-            CellSpaceType::ANCHOR => 'navi:AnchorSpace'
+            CellSpaceType::CONNECTION => 'navi:ConnectionSpace'
+            # CellSpaceType::ANCHOR => 'navi:AnchorSpace'
           }.freeze
 
           def initialize(indoor_model, refresh_runtime_data: true)
@@ -371,8 +371,8 @@ module ULOL
               'door'
             when CellSpaceType::TRANSITION
               'transition'
-            when CellSpaceType::ANCHOR
-              'entrance'
+            # when CellSpaceType::ANCHOR
+            #   'entrance'
             else
               'space'
             end
