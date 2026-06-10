@@ -5,14 +5,30 @@ require 'extensions.rb'
 
 module ULOL
   module Indoor3DGmlModeler
+    
+    RM_HELPER_DICT = 'RM_helper'.freeze
+    RM_HELPER_SPACE_TYPE_KEY = 'SpaceType'.freeze
+    RM_HELPER_SPACE_TYPE_TO_CATEGORY_CODE = {
+      'RM' => 'Room',
+      'DR' => 'Door',
+      'ST' => 'Stair',
+      'EV' => 'Elevator',
+      'ES' => 'Escalator'
+    }.freeze
+
     unless const_defined?(:EXTENSION, false)
+      EXTENSION_NAME = "IndoorGML 3D Modeler"
+      EXTENSION_VERSION = "1.1.0"
+      EXTENSION_CREATOR = "ULOL"
+      EXTENSION_DESCRIPTION = 'SketchUp에서 IndoorGML 1.0 실내 공간 모델을 구축하고 CellSpace 변환, 위상 연결, GML 내보내기, geometry 검증을 수행하는 Extension.'
+
       EXTENSION = SketchupExtension.new(
-        'Indoor3DGML Modeler',
+        EXTENSION_NAME,
         File.join(__dir__, 'indoor3d', 'core')
       )
-      EXTENSION.creator = 'DKIM'
-      EXTENSION.description = 'Create, import, export, and validate IndoorGML models.'
-      EXTENSION.version = '1.0.0'
+      EXTENSION.creator = EXTENSION_CREATOR
+      EXTENSION.description = EXTENSION_DESCRIPTION
+      EXTENSION.version = EXTENSION_VERSION
       EXTENSION.copyright = ''
 
       Sketchup.register_extension(EXTENSION, true)

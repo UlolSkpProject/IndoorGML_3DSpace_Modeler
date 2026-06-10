@@ -8,13 +8,13 @@ module ULOL
         GENERAL    = 0 unless const_defined?(:GENERAL, false)
         TRANSITION = 1 unless const_defined?(:TRANSITION, false)
         CONNECTION = 2 unless const_defined?(:CONNECTION, false)
-        ANCHOR     = 3 unless const_defined?(:ANCHOR, false)
+        # ANCHOR     = 3 unless const_defined?(:ANCHOR, false)
 
         LABELS = {
           GENERAL => 'GeneralSpace',
           TRANSITION => 'TransitionSpace',
-          CONNECTION => 'ConnectionSpace',
-          ANCHOR => 'AnchorSpace'
+          CONNECTION => 'ConnectionSpace'
+          # ANCHOR => 'AnchorSpace'
         }.freeze unless const_defined?(:LABELS, false)
 
         remove_const(:SELECTABLE_TYPES) if const_defined?(:SELECTABLE_TYPES, false)
