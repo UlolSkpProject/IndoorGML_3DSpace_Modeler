@@ -119,9 +119,9 @@ module ULOL
               if use_rm_helper
                 rm_cell_type, rm_category_code = rm_helper_cell_space_type_and_category(group)
                 next if rm_cell_type.nil?
-                indoor_model.convert_group_to_cell_space(group, rm_cell_type, rm_category_code)
+                indoor_model.convert_single_group_to_cell_space(group, rm_cell_type, rm_category_code)
               else
-                indoor_model.convert_group_to_cell_space(group, cell_type, category_code)
+                indoor_model.convert_single_group_to_cell_space(group, cell_type, category_code)
               end
               converted_count += 1
             rescue StandardError => e

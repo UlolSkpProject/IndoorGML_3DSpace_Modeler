@@ -210,7 +210,7 @@ module ULOL
                   puts "[IndoorGML] Selected solid group conversion failed: #{error.class}: #{error.message}"
                 end
               ) do |group, _index|
-                convert_group_to_cell_space(group, cell_type, category_code)
+                convert_single_group_to_cell_space(group, cell_type, category_code)
               end
               unless scheduled
                 model.abort_operation if operation_started
