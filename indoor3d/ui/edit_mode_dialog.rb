@@ -158,6 +158,7 @@ module ULOL
                 cellType: #{js_string(snapshot[:cell_type])},
                 categoryCode: #{js_string(snapshot[:category_code])},
                 classification: #{snapshot[:classification].nil? ? 'null' : js_string(snapshot[:classification])},
+                classificationLocked: #{snapshot[:classification_locked] ? 'true' : 'false'},
                 transitionCount: #{snapshot[:transition_count].to_i},
                 cellSpaceCount: #{snapshot[:cell_space_count].to_i},
                 solidGroupCount: #{snapshot[:solid_group_count].to_i},

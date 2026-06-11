@@ -104,6 +104,7 @@ function selectionKey(snapshot) {
     snapshot.id || '',
     snapshot.name || '',
     snapshot.classification || '',
+    snapshot.classificationLocked ? 'locked' : 'unlocked',
     snapshot.transitionCount || 0,
     snapshot.cellSpaceCount || 0,
     snapshot.solidGroupCount || 0,
@@ -131,6 +132,7 @@ function setVisible(element, visible) {
 function showSolidGroups(snapshot) {
   solidCount.textContent = snapshot.solidGroupCount || 0;
   solidClassification.value = snapshot.classification || 'GeneralSpace|Room';
+  setControlLocked(solidClassification, null, snapshot.classificationLocked);
   show(solidPanel);
 }
 
@@ -157,6 +159,7 @@ function showCellSpaces(snapshot) {
   show(multiCellInfo);
   cellSpaceCount.textContent = snapshot.cellSpaceCount || 0;
   selectedClassification.value = snapshot.classification || 'GeneralSpace|Room';
+  setControlLocked(selectedClassification, document.getElementById('changeType'), snapshot.classificationLocked);
   show(cellPanel);
 }
 
@@ -167,7 +170,14 @@ function showCellSpace(snapshot) {
   selectedName.textContent = snapshot.name || '-';
   transitionCount.textContent = snapshot.transitionCount || 0;
   selectedClassification.value = snapshot.classification || 'GeneralSpace|Room';
+  setControlLocked(selectedClassification, document.getElementById('changeType'), snapshot.classificationLocked);
   show(cellPanel);
+}
+
+function setControlLocked(select, button, locked) {
+  var disabled = Boolean(locked);
+  if (select) select.disabled = disabled;
+  if (button) button.disabled = disabled;
 }
 
 function show(element) {

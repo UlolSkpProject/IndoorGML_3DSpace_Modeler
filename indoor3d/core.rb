@@ -44,6 +44,30 @@ module ULOL
     require_relative 'ui/edit_mode_dialog'
     require_relative 'ui/export_progress_dialog'
 
+    module IndoorCore
+      def self.rm_helper_cell_space_type_and_category(group)
+        return nil unless group&.respond_to?(:get_attribute)
+
+        space_type = group.get_attribute(
+          ::ULOL::Indoor3DGmlModeler::RM_HELPER_DICT,
+          ::ULOL::Indoor3DGmlModeler::RM_HELPER_SPACE_TYPE_KEY
+        ).to_s.strip.upcase
+        category_code = ::ULOL::Indoor3DGmlModeler::RM_HELPER_SPACE_TYPE_TO_CATEGORY_CODE[space_type]
+        return nil if category_code.nil?
+
+        option = CellSpaceCategory.selection_options.find do |candidate|
+          candidate[:category_code] == category_code
+        end
+        return nil if option.nil?
+
+        [option[:cell_type], option[:category_code]]
+      end
+
+      def self.resolve_cell_space_type_and_category(group, cell_type, category_code)
+        rm_helper_cell_space_type_and_category(group) || [cell_type, category_code]
+      end
+    end
+
     def self.attach_model_observer
       begin
         @app_observer ||= IndoorCore::Indoor3DGmlAppObserver.new
@@ -68,12 +92,9 @@ module ULOL
         end
 
         rm_groups = solid_groups.select { |group| rm_helper_cell_space_type_and_category(group) }
-        use_rm_helper = rm_groups.any?
-        
-        if use_rm_helper
-          target_groups = rm_groups
-        else
-          target_groups = solid_groups
+        non_rm_groups = solid_groups - rm_groups
+
+        if non_rm_groups.any?
           cell_type, category_code = prompt_cell_space_type_and_category('Convert Solid Groups to CellSpace')
           return if cell_type.nil?
         end
@@ -84,7 +105,7 @@ module ULOL
 
         model.start_operation('Convert Solid Groups to CellSpace', true)
         indoor_model.with_active_path_enforcement_suspended do
-          root_solid_groups = move_groups_to_root_context(model, target_groups)
+          root_solid_groups = move_groups_to_root_context(model, solid_groups)
           activate_root_context(model)
           if root_solid_groups.empty?
             restore_active_path(model, original_active_path)
@@ -116,13 +137,12 @@ module ULOL
             end
           ) do |group, _index|
             begin
-              if use_rm_helper
-                rm_cell_type, rm_category_code = rm_helper_cell_space_type_and_category(group)
-                next if rm_cell_type.nil?
-                indoor_model.convert_single_group_to_cell_space(group, rm_cell_type, rm_category_code)
-              else
-                indoor_model.convert_single_group_to_cell_space(group, cell_type, category_code)
-              end
+              target_cell_type, target_category_code = IndoorCore.resolve_cell_space_type_and_category(
+                group,
+                cell_type,
+                category_code
+              )
+              indoor_model.convert_single_group_to_cell_space(group, target_cell_type, target_category_code)
               converted_count += 1
             rescue StandardError => e
               puts "[IndoorGML] CellSpace conversion failed: #{e.class}: #{e.message}"
@@ -155,6 +175,17 @@ module ULOL
         return
       end
 
+      cell_space_groups = groups.select { |group| indoor_feature(group) == 'CellSpace' }
+      if cell_space_groups.empty?
+        UI.messagebox('Select one or more CellSpace groups to change type.')
+        return
+      end
+
+      unless cell_space_type_change_available?(cell_space_groups)
+        UI.messagebox('Selected CellSpace type is locked by RM_helper and already matches the mapped type.')
+        return
+      end
+
       cell_type, category_code = prompt_cell_space_type_and_category('Change CellSpace Type')
       return if cell_type.nil?
 
@@ -163,7 +194,7 @@ module ULOL
       errors = []
 
       model.start_operation('Change CellSpace Type', true)
-      groups.each do |group|
+      cell_space_groups.each do |group|
         begin
           indoor_model.change_cell_space_type(group, cell_type, category_code)
           changed_count += 1
@@ -190,17 +221,7 @@ module ULOL
     end
 
     def self.rm_helper_cell_space_type_and_category(group)
-      space_type = group.get_attribute(RM_HELPER_DICT, RM_HELPER_SPACE_TYPE_KEY).to_s.strip.upcase
-      category_code = RM_HELPER_SPACE_TYPE_TO_CATEGORY_CODE[space_type]
-      return nil if category_code.nil?
-      
-      option = IndoorCore::CellSpaceCategory.selection_options.find do |candidate|
-        candidate[:category_code] == category_code
-      end
-      
-      return nil if option.nil?
-    
-      [option[:cell_type], option[:category_code]]
+      IndoorCore.rm_helper_cell_space_type_and_category(group)
     end
 
     def self.create_temp_indoorgml
@@ -405,7 +426,7 @@ module ULOL
         menu.add_item('Edit IndoorGML') { begin_indoor_gml_editing() }
       end
 
-      if indoor_model.editing?() && selected_cell_spaces.any?()
+      if indoor_model.editing?() && cell_space_type_change_available?(selected_cell_spaces)
         menu.add_item('Change CellSpace Type') { change_selected_cell_space_type() }
       end
     rescue StandardError => e
@@ -422,6 +443,29 @@ module ULOL
       entity.get_attribute(IndoorCore::IndoorModel::ATTRIBUTE_DICTIONARY_NAME, 'feature')
     rescue StandardError
       nil
+    end
+
+    def self.cell_space_type_change_available?(groups)
+      cell_space_groups = Array(groups).select { |group| indoor_feature(group) == 'CellSpace' }
+      return false if cell_space_groups.empty?
+
+      !cell_space_groups.all? { |group| rm_helper_cell_space_type_matches_indoor_attributes?(group) }
+    end
+
+    def self.rm_helper_cell_space_type_matches_indoor_attributes?(group)
+      target = rm_helper_cell_space_type_and_category(group)
+      return false if target.nil?
+
+      current_type = IndoorCore::CellSpaceType.from_label(
+        group.get_attribute(IndoorCore::IndoorModel::ATTRIBUTE_DICTIONARY_NAME, 'cell_type')
+      )
+      current_category_code = group.get_attribute(
+        IndoorCore::IndoorModel::ATTRIBUTE_DICTIONARY_NAME,
+        'category_code'
+      ).to_s
+      current_type == target[0] && current_category_code == target[1]
+    rescue StandardError
+      false
     end
 
     def self.active_path_snapshot(model)
@@ -489,12 +533,11 @@ module ULOL
       end
       change_type_command.set_validation_proc do
         indoor_model = IndoorCore::IndoorModel.current
-        has_cell_space =
-          selected_indoor_gml_entities.any? do |entity|
-            indoor_feature(entity) == 'CellSpace'
-          end
+        selected_cell_spaces = selected_indoor_gml_entities.select do |entity|
+          indoor_feature(entity) == 'CellSpace'
+        end
       
-        indoor_model.editing? && has_cell_space ? MF_ENABLED : MF_GRAYED
+        indoor_model.editing? && cell_space_type_change_available?(selected_cell_spaces) ? MF_ENABLED : MF_GRAYED
       end
       @edit_property_command = create_command(
         'Edit CellSpace Property',
