@@ -24,8 +24,6 @@ Create CellSpace 실행 전에 선택된 solid group의 geometry를 검사하고
 4. 변환 가능한 single shell solid에 대해 reversed face를 검사하고 보정한다.
 5. 보정된 solid만 CellSpace로 변환한다.
 6. batch 변환이 끝나면 실패한 solid 목록을 사용자에게 보여준다.
-7. 실패 solid는 edge를 따라 3D overlay로 highlight한다.
-8. message box를 닫으면 highlight가 약 1초 동안 fade out되며 사라진다.
 
 ## Disconnected Solid 검사
 
@@ -64,21 +62,6 @@ Create CellSpace 실행 전에 선택된 solid group의 geometry를 검사하고
 - disconnected shell group은 CellSpace 변환을 하지 않는다.
 - batch 변환 중 실패 목록에 추가한다.
 - 변환 완료 후 message box에 실패 group 이름 또는 entity id를 보여준다.
-- 실패 group의 component boundary 또는 전체 edge를 overlay로 highlight한다.
-- message box가 닫히면 highlight는 1초 동안 fade out 후 자동 제거한다.
-
-## Overlay 계획
-
-- 기존 `EditModeOverlay` 또는 별도 temporary overlay에 highlight state를 추가한다.
-- highlight state는 다음 정보를 가진다.
-  - edge point pairs
-  - color
-  - start time
-  - duration
-  - alpha
-- draw 단계에서 `GL_LINES`로 edge를 표시한다.
-- timer 또는 view invalidation loop로 alpha를 줄인다.
-- duration이 끝나면 highlight state를 clear한다.
 
 ## 구현 후보 위치
 
@@ -90,9 +73,6 @@ Create CellSpace 실행 전에 선택된 solid group의 geometry를 검사하고
   - `indoor3d/core.rb`
 - edit mode dialog batch 실패 메시지:
   - `indoor3d/application/indoor_model/editor_control.rb`
-- temporary 3D highlight:
-  - `indoor3d/ui/edit_mode_overlay.rb`
-  - 또는 별도 overlay class 추가
 
 ## 테스트 시나리오
 
@@ -108,7 +88,6 @@ Create CellSpace 실행 전에 선택된 solid group의 geometry를 검사하고
 3. 한 group 안에 떨어진 cube 2개
    - CellSpace 생성 안 함
    - 실패 목록에 표시
-   - 두 component edge highlight
 
 4. RM_helper attr dict가 있는 disconnected group
    - 자동 분리하지 않음
