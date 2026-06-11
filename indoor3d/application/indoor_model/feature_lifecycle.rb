@@ -8,6 +8,11 @@ module ULOL
           def convert_single_group_to_cell_space(sketchup_group, cell_type = CellSpaceType::GENERAL, category_code = nil)
             with_indoor_model_operation('IndoorGML Convert Group to CellSpace') do
               raise ArgumentError, 'Group is already converted to CellSpace' if converted_group?(sketchup_group)
+              cell_type, category_code = IndoorCore.resolve_cell_space_type_and_category(
+                sketchup_group,
+                cell_type,
+                category_code
+              )
 
               ensure_space_features_groups
               cell_group = place_cell_group(sketchup_group)
@@ -33,6 +38,7 @@ module ULOL
               cell_space = find_cell_space_for_entity(sketchup_group)
               raise ArgumentError, 'Selected entity is not a registered CellSpace' if cell_space.nil?
               raise ArgumentError, 'CellSpace is no longer valid' unless cell_space.valid?
+              cell_type, category_code = rm_helper_cell_space_type_change_target(cell_space, cell_type, category_code)
 
               sync do
                 cell_space.cell_type = cell_type
@@ -119,6 +125,17 @@ module ULOL
           end
 
           private
+
+          def rm_helper_cell_space_type_change_target(cell_space, cell_type, category_code)
+            target = IndoorCore.rm_helper_cell_space_type_and_category(cell_space.sketchup_group)
+            return [cell_type, category_code] if target.nil?
+
+            if cell_space.cell_type == target[0] && cell_space.category_code == target[1]
+              raise ArgumentError, 'CellSpace type is locked by RM_helper and already matches the mapped type'
+            end
+
+            target
+          end
 
           def register_cell_space(cell_space)
             @feature_registry.add_cell_space(cell_space)

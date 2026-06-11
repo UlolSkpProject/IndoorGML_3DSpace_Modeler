@@ -175,6 +175,7 @@ module ULOL
                 cell_type: CellSpaceType.label(cell_space.cell_type),
                 category_code: cell_space.category_code,
                 classification: CellSpaceCategory.selection_value(cell_space.cell_type, cell_space.category_code),
+                classification_locked: cell_space_type_change_locked_by_rm_helper?([cell_space]),
                 transition_count: cell_space.duality_state&.transition_ids&.length.to_i,
                 cell_geometry_editing: @editor_session.cell_space_geometry_editing?
               }
@@ -301,7 +302,8 @@ module ULOL
             {
               mode: 'cell_spaces',
               cell_space_count: cell_spaces.length,
-              classification: common_cell_space_classification(cell_spaces)
+              classification: common_cell_space_classification(cell_spaces),
+              classification_locked: cell_space_type_change_locked_by_rm_helper?(cell_spaces)
             }
           end
 
@@ -338,11 +340,43 @@ module ULOL
             {
               mode: 'solid_groups',
               solid_group_count: groups.length,
-              classification: CellSpaceCategory.selection_value(
-                CellSpaceType::GENERAL,
-                CellSpaceCategory.default_for(CellSpaceType::GENERAL)[:code]
-              )
+              classification: solid_groups_classification(groups),
+              classification_locked: solid_groups_classification_locked_by_rm_helper?(groups)
             }
+          end
+
+          def solid_groups_classification(groups)
+            rm_helper_classification = common_rm_helper_classification(groups)
+            return rm_helper_classification unless rm_helper_classification.nil?
+
+            CellSpaceCategory.selection_value(
+              CellSpaceType::GENERAL,
+              CellSpaceCategory.default_for(CellSpaceType::GENERAL)[:code]
+            )
+          end
+
+          def solid_groups_classification_locked_by_rm_helper?(groups)
+            !common_rm_helper_classification(groups).nil?
+          end
+
+          def common_rm_helper_classification(groups)
+            targets = groups.map { |group| IndoorCore.rm_helper_cell_space_type_and_category(group) }
+            return nil if targets.empty? || targets.any?(&:nil?)
+
+            classifications = targets.map do |target|
+              CellSpaceCategory.selection_value(target[0], target[1])
+            end.uniq
+
+            classifications.length == 1 ? classifications.first : nil
+          end
+
+          def cell_space_type_change_locked_by_rm_helper?(cell_spaces)
+            return false if cell_spaces.empty?
+
+            cell_spaces.all? do |cell_space|
+              target = IndoorCore.rm_helper_cell_space_type_and_category(cell_space.sketchup_group)
+              target && cell_space.cell_type == target[0] && cell_space.category_code == target[1]
+            end
           end
 
           def selected_solid_groups
