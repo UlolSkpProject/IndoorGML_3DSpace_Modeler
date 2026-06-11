@@ -13,6 +13,10 @@ module ULOL
                 cell_type,
                 category_code
               )
+              validation = Utils::Geometry.prepare_cell_space_source_group!(sketchup_group)
+              unless validation[:valid]
+                raise ArgumentError, validation[:reason] || 'Invalid CellSpace source geometry'
+              end
 
               ensure_space_features_groups
               cell_group = place_cell_group(sketchup_group)
