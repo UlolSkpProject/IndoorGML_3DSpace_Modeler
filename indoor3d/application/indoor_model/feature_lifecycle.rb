@@ -5,7 +5,7 @@ module ULOL
     module IndoorCore
       class IndoorModel
         module FeatureLifecycle
-          def convert_group_to_cell_space(sketchup_group, cell_type = CellSpaceType::GENERAL, category_code = nil)
+          def convert_single_group_to_cell_space(sketchup_group, cell_type = CellSpaceType::GENERAL, category_code = nil)
             with_indoor_model_operation('IndoorGML Convert Group to CellSpace') do
               raise ArgumentError, 'Group is already converted to CellSpace' if converted_group?(sketchup_group)
 
