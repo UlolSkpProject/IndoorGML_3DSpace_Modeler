@@ -176,9 +176,10 @@ module ULOL
               polygon.add_attribute('gml:id', "polygon_#{index}_#{cell_id}")
               exterior = polygon.add_element('gml:exterior')
               linear_ring = exterior.add_element('gml:LinearRing')
-              face_ring_points(face, world_transform).each do |point|
+              exterior_ring_points(face, world_transform).each do |point|
                 linear_ring.add_element('gml:pos').text = format_export_point(point)
               end
+              append_interior_rings(polygon, face, world_transform)
             end
           end
 
@@ -239,17 +240,36 @@ module ULOL
             end
           end
 
-          def ring_points(face, transform)
-            face.outer_loop.vertices.map do |vertex|
+          def loop_points(loop, transform)
+            loop.vertices.map do |vertex|
               export_point(vertex.position.transform(transform))
             end
           end
 
-          def face_ring_points(face, transform)
-            ring = ring_points(face, transform)
+          def exterior_ring_points(face, transform)
+            oriented_ring_points(face.outer_loop, transform, transformed_face_normal(face, transform), true)
+          end
+
+          def append_interior_rings(polygon, face, transform)
             normal = transformed_face_normal(face, transform)
+            face.loops.each do |loop|
+              next if loop == face.outer_loop
+
+              interior = polygon.add_element('gml:interior')
+              linear_ring = interior.add_element('gml:LinearRing')
+              oriented_ring_points(loop, transform, normal, false).each do |point|
+                linear_ring.add_element('gml:pos').text = format_export_point(point)
+              end
+            end
+          end
+
+          def oriented_ring_points(loop, transform, normal, align_with_normal)
+            ring = loop_points(loop, transform)
             polygon_normal = polygon_normal(ring)
-            ring.reverse! if normal && polygon_normal && polygon_normal.dot(normal) < 0.0
+            if normal && polygon_normal
+              same_direction = polygon_normal.dot(normal) >= 0.0
+              ring.reverse! if same_direction != align_with_normal
+            end
             ring << ring.first if ring.first
             ring
           end
