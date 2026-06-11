@@ -169,15 +169,15 @@ module ULOL
             return unless group
 
             world_transform = cell_space_world_transformation(group)
-            solid_center = export_point(group.definition.bounds.center.transform(world_transform))
             faces = group.definition.entities.grep(Sketchup::Face)
-            faces.each_with_index do |face, index|
+            oriented_rings = oriented_shell_rings(faces, world_transform)
+            oriented_rings.each_with_index do |points, index|
               surface_member = shell.add_element('gml:surfaceMember')
               polygon = surface_member.add_element('gml:Polygon')
               polygon.add_attribute('gml:id', "polygon_#{index}_#{cell_id}")
               exterior = polygon.add_element('gml:exterior')
               linear_ring = exterior.add_element('gml:LinearRing')
-              convert_ring_winding(ring_points(face, world_transform), solid_center).each do |point|
+              closed_ring(points).each do |point|
                 linear_ring.add_element('gml:pos').text = format_export_point(point)
               end
             end
@@ -246,45 +246,109 @@ module ULOL
             end
           end
 
-          def convert_ring_winding(points, solid_center)
-            points = points.dup
-            points.reverse! unless outward_ring?(points, solid_center)
-            points << points.first if points.first
-            points
-          end
-
-          def outward_ring?(points, solid_center)
-            normal = polygon_normal(points)
-            return true if normal.nil? || normal.length <= 0.000001
-
-            center = average_point(points)
-            direction = solid_center.vector_to(center)
-            return true if direction.length <= 0.000001
-
-            normal.dot(direction) > 0.0
-          end
-
-          def polygon_normal(points)
-            return nil if points.length < 3
-
-            x = 0.0
-            y = 0.0
-            z = 0.0
-            points.each_with_index do |point, index|
-              next_point = points[(index + 1) % points.length]
-              x += (point.y - next_point.y) * (point.z + next_point.z)
-              y += (point.z - next_point.z) * (point.x + next_point.x)
-              z += (point.x - next_point.x) * (point.y + next_point.y)
+          def oriented_shell_rings(faces, transform)
+            surfaces = faces.map do |face|
+              { points: ring_points(face, transform), reversed: false }
             end
-            normal = Geom::Vector3d.new(x, y, z)
-            normal.length <= 0.000001 ? nil : normal
+            orient_connected_shell_surfaces(surfaces)
+            rings = surfaces.map { |surface| oriented_points(surface) }
+            rings.map!(&:reverse) if shell_signed_volume(rings) < 0.0
+            rings
           end
 
-          def average_point(points)
-            x = points.map(&:x).sum / points.length.to_f
-            y = points.map(&:y).sum / points.length.to_f
-            z = points.map(&:z).sum / points.length.to_f
-            Geom::Point3d.new(x, y, z)
+          def orient_connected_shell_surfaces(surfaces)
+            edge_map = shell_edge_map(surfaces)
+            visited = Array.new(surfaces.length, false)
+            surfaces.each_index do |start_index|
+              next if visited[start_index]
+
+              queue = [start_index]
+              visited[start_index] = true
+              until queue.empty?
+                index = queue.shift
+                current = surfaces[index]
+                oriented_edges(current).each do |edge|
+                  edge_map[edge_key(edge[0], edge[1])].each do |neighbor|
+                    neighbor_index = neighbor[:surface_index]
+                    next if neighbor_index == index || visited[neighbor_index]
+
+                    neighbor_same_direction = neighbor[:from] == edge[0] && neighbor[:to] == edge[1]
+                    surfaces[neighbor_index][:reversed] = neighbor_same_direction
+                    visited[neighbor_index] = true
+                    queue << neighbor_index
+                  end
+                end
+              end
+            end
+          end
+
+          def shell_edge_map(surfaces)
+            edge_map = Hash.new { |hash, key| hash[key] = [] }
+            surfaces.each_with_index do |surface, surface_index|
+              surface_edges(surface[:points]).each do |from, to|
+                edge_map[edge_key(from, to)] << {
+                  surface_index: surface_index,
+                  from: point_key(from),
+                  to: point_key(to)
+                }
+              end
+            end
+            edge_map
+          end
+
+          def oriented_edges(surface)
+            surface_edges(oriented_points(surface)).map do |from, to|
+              [point_key(from), point_key(to)]
+            end
+          end
+
+          def surface_edges(points)
+            return [] if points.length < 2
+
+            points.each_index.map do |index|
+              [points[index], points[(index + 1) % points.length]]
+            end
+          end
+
+          def oriented_points(surface)
+            surface[:reversed] ? surface[:points].reverse : surface[:points]
+          end
+
+          def closed_ring(points)
+            ring = points.dup
+            ring << ring.first if ring.first
+            ring
+          end
+
+          def shell_signed_volume(rings)
+            rings.sum do |points|
+              next 0.0 if points.length < 3
+
+              origin = points.first
+              (1...(points.length - 1)).sum do |index|
+                signed_tetrahedron_volume(origin, points[index], points[index + 1])
+              end
+            end
+          end
+
+          def signed_tetrahedron_volume(point1, point2, point3)
+            (
+              point1.x * (point2.y * point3.z - point2.z * point3.y) +
+              point1.y * (point2.z * point3.x - point2.x * point3.z) +
+              point1.z * (point2.x * point3.y - point2.y * point3.x)
+            ) / 6.0
+          end
+
+          def edge_key(point1_key, point2_key)
+            [normalized_point_key(point1_key), normalized_point_key(point2_key)].sort.join('|')
+          end
+
+          def normalized_point_key(point_or_key)
+            point_or_key.is_a?(String) ? point_or_key : point_key(point_or_key)
+          end
+
+          def point_key(point)
+            [point.x, point.y, point.z].map { |coordinate| format('%.6f', coordinate.to_f) }.join(',')
           end
 
           def state_world_position(state)
