@@ -107,7 +107,7 @@ module ULOL
           )
           return center unless best_point
 
-          refined_point, refined_distance = refined_inner_sample(
+          refined_point = refined_inner_sample(
             faces,
             cell_space_entity.definition.bounds,
             best_point,
@@ -115,7 +115,7 @@ module ULOL
             SHELL_CENTER_COARSE_DIVISIONS,
             SHELL_CENTER_REFINE_DIVISIONS,
             tolerance
-          )
+          ).first
           refined_point || best_point || center
         rescue StandardError => e
           puts "[IndoorGML] Shell inner centroid failed: #{e.class}: #{e.message}"
@@ -831,18 +831,6 @@ module ULOL
           nil
         end
         private_class_method :adjacent_snapshot_face_axis
-
-        def self.coplanar_touching_snapshot_faces?(face1, face2, tolerance)
-          normal1 = face1[:normal]
-          normal2 = face2[:normal]
-          return false unless snapshot_normals_parallel?(normal1, normal2)
-          return false unless snapshot_points_on_plane?(face2[:points], normal1, face1[:points].first, tolerance)
-
-          polygon1 = project_snapshot_points(face1[:points], normal1)
-          polygon2 = project_snapshot_points(face2[:points], normal1)
-          polygons_touch?(polygon1, polygon2, tolerance)
-        end
-        private_class_method :coplanar_touching_snapshot_faces?
 
         def self.coplanar_area_overlapping_snapshot_faces?(face1, face2, tolerance)
           normal1 = face1[:normal]
