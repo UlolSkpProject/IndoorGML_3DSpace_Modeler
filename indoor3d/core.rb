@@ -10,6 +10,7 @@ module ULOL
     require_relative 'utils/geometry'
     require_relative 'utils/transformation'
     require_relative 'utils/materials'
+    require_relative 'utils/catmul_rom_curve'
     require_relative 'domain/abstract_feature'
     require_relative 'domain/cell_space_type'
     require_relative 'domain/cell_space_category'

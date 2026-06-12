@@ -3,7 +3,7 @@ module ULOL
     module Utils
       module Math
         module CatmullRom
-                    
+
           def self.catmull_rom_point(p0, p1, p2, p3, t)
             t2 = t * t
             t3 = t2 * t
