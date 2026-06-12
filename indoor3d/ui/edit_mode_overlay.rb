@@ -21,9 +21,11 @@ module ULOL
         CIRCLE_SEGMENTS = 16
         OVERLAY_RADIUS_SCALE = 1.1
         TRANSITION_DEPTH_OFFSET_PIXELS = 2.0
+        TRANSITION_CURVE_SEGMENTS = 8
 
         def initialize(indoor_model)
           @indoor_model = indoor_model
+          @transition_curve_cache = {}
           super(OVERLAY_ID, OVERLAY_NAME, description: 'Shows when IndoorGML editing is active.')
         end
 
@@ -246,12 +248,42 @@ module ULOL
           control_points = transition_control_points(transition)
           return [] if control_points.length < 2
 
-          spline_points = Utils::Math::CatmullRom.generate_spline(control_points, 32)
-          spline_points = offset_transition_points_behind_states(view, spline_points)
-          polyline_segments(spline_points)
+          curve_points = cached_transition_curve_points(transition, control_points)
+          curve_points = offset_transition_points_behind_states(view, curve_points)
+          polyline_segments(curve_points)
         rescue StandardError => e
           puts "[IndoorGML] Transition curve draw failed: #{e.class}: #{e.message}"
           polyline_segments(control_points || [])
+        end
+
+        def cached_transition_curve_points(transition, control_points)
+          return control_points if control_points.length < 3
+
+          @transition_curve_cache ||= {}
+          key = transition_curve_cache_key(transition, control_points)
+          cached = @transition_curve_cache[key]
+          return cached if cached
+
+          @transition_curve_cache.clear if @transition_curve_cache.length > 512
+          @transition_curve_cache[key] = Utils::Math::CatmullRom.generate_spline(
+            control_points,
+            TRANSITION_CURVE_SEGMENTS
+          )
+        end
+
+        def transition_curve_cache_key(transition, control_points)
+          [
+            transition.id,
+            control_points.map { |point| point_key(point) }
+          ]
+        end
+
+        def point_key(point)
+          [
+            point.x.to_f.round(6),
+            point.y.to_f.round(6),
+            point.z.to_f.round(6)
+          ]
         end
 
         def transition_control_points(transition)
