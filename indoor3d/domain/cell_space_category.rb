@@ -9,19 +9,16 @@ module ULOL
 
         DEFAULTS = {
           CellSpaceType::GENERAL => [
-            { code: 'Room', label: 'Room', code_space: DEFAULT_CODE_SPACE, standard: true, texture: 'cellspace_room.png' }
+            { code: 'Room', label: 'Room', code_space: DEFAULT_CODE_SPACE, standard: true }
           ],
           CellSpaceType::TRANSITION => [
-            { code: 'Stair',     label: 'Stair',     code_space: DEFAULT_CODE_SPACE, standard: true, texture: 'cellspace_stair.png'     },
-            { code: 'Escalator', label: 'Escalator', code_space: DEFAULT_CODE_SPACE, standard: true, texture: 'cellspace_escalator.png' },
-            { code: 'Elevator',  label: 'Elevator',  code_space: DEFAULT_CODE_SPACE, standard: true, texture: 'cellspace_elevator.png'  },
+            { code: 'Stair',     label: 'Stair',     code_space: DEFAULT_CODE_SPACE, standard: true },
+            { code: 'Escalator', label: 'Escalator', code_space: DEFAULT_CODE_SPACE, standard: true },
+            { code: 'Elevator',  label: 'Elevator',  code_space: DEFAULT_CODE_SPACE, standard: true },
           ],
           CellSpaceType::CONNECTION => [
-            { code: 'Door', label: 'Door', code_space: DEFAULT_CODE_SPACE, standard: true, texture: 'cellspace_door.png' }
+            { code: 'Door', label: 'Door', code_space: DEFAULT_CODE_SPACE, standard: true }
           ]
-          # CellSpaceType::ANCHOR => [
-          #   { code: 'Anchor', label: 'Anchor', code_space: DEFAULT_CODE_SPACE, standard: true, texture: 'cellspace_anchor.png' }
-          # ]
         }.freeze unless const_defined?(:DEFAULTS, false)
 
         def self.default_for(cell_type)
@@ -30,11 +27,6 @@ module ULOL
 
         def self.list_for(cell_type)
           DEFAULTS[cell_type] || DEFAULTS[CellSpaceType::GENERAL]
-        end
-
-        def self.texture_for(cell_type, category_code)
-          category = find(cell_type, category_code) || default_for(cell_type)
-          category[:texture]
         end
 
         def self.find(cell_type, code)
