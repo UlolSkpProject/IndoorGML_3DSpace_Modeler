@@ -40,27 +40,6 @@ module ULOL
           touching_snapshot_bounds_face_axis(snapshot1[:bounds], snapshot2[:bounds], tolerance)
         end
 
-        def self.common_face_waypoint_candidates(entity1, entity2, tolerance: 1.mm)
-          return [] unless entity1&.valid? && entity2&.valid?
-          return [] unless touching_bounds?(entity1.bounds, entity2.bounds, tolerance)
-
-          candidates = common_face_candidates(entity1, entity2, tolerance)
-          return [] if candidates.empty?
-
-          max_area = candidates.map { |candidate| candidate[:area] }.max
-          candidates.select { |candidate| (candidate[:area] - max_area).abs <= tolerance.to_f }
-                    .map do |candidate|
-                      {
-                        point: candidate[:centroid],
-                        normal1: candidate[:normal1],
-                        normal2: candidate[:normal2]
-                      }
-                    end
-        rescue StandardError => e
-          puts "[IndoorGML] Common face waypoint candidates failed: #{e.class}: #{e.message}"
-          []
-        end
-
         def self.validate_cell_space_source_group(group)
           faces = group_faces(group)
           return { valid: false, reason: 'No faces found', component_count: 0, reversed_face_count: 0 } if faces.empty?
@@ -342,36 +321,6 @@ module ULOL
             { points: points, normal: normal, triangles: face_mesh_triangles(face, transformation) }
           end.compact
         end
-        private_class_method :world_faces
-
-        def self.common_face_candidates(entity1, entity2, tolerance)
-          faces1 = world_faces(entity1)
-          faces2 = world_faces(entity2)
-          faces1.each_with_object([]) do |face1, candidates|
-            faces2.each do |face2|
-              next unless normals_parallel?(face1[:normal], face2[:normal])
-              next unless points_on_plane?(face2[:points], face1[:normal], face1[:points].first, tolerance)
-
-              overlap = coplanar_overlap_candidate(face1, face2, tolerance)
-              candidates << overlap if overlap
-            end
-          end
-        end
-        private_class_method :common_face_candidates
-
-        def self.coplanar_overlap_candidate(face1, face2, tolerance)
-          metrics = coplanar_overlap_metrics(face1, face2, tolerance)
-          return nil unless metrics
-
-          area = metrics[:area]
-          centroid_2d = metrics[:centroid_2d]
-          axis = dominant_axis(face1[:normal])
-          centroid = unproject_point(centroid_2d, axis, face1[:normal], face1[:points].first)
-          return nil unless centroid
-
-          { area: area, centroid: centroid, normal1: face1[:normal], normal2: face2[:normal] }
-        end
-        private_class_method :coplanar_overlap_candidate
 
         def self.coplanar_overlap_metrics(face1, face2, tolerance)
           return nil if face1[:triangles].empty? || face2[:triangles].empty?
@@ -401,7 +350,6 @@ module ULOL
 
           { area: total_area, centroid_2d: [weighted_x / total_area, weighted_y / total_area] }
         end
-        private_class_method :coplanar_overlap_metrics
 
         def self.project_points_for_axis(points, axis)
           points.map do |point|
@@ -645,7 +593,6 @@ module ULOL
             axis_overlap_or_touch?(bounds1.min.y, bounds1.max.y, bounds2.min.y, bounds2.max.y, tolerance) &&
             axis_overlap_or_touch?(bounds1.min.z, bounds1.max.z, bounds2.min.z, bounds2.max.z, tolerance)
         end
-        private_class_method :touching_bounds?
 
         def self.touching_snapshot_bounds?(bounds1, bounds2, tolerance)
           axis_overlap_or_touch?(bounds1[:min][0], bounds1[:max][0], bounds2[:min][0], bounds2[:max][0], tolerance) &&
@@ -710,7 +657,6 @@ module ULOL
           values = { x: vector.x.abs, y: vector.y.abs, z: vector.z.abs }
           values.max_by { |_axis, value| value }.first
         end
-        private_class_method :dominant_axis
 
         def self.dominant_snapshot_axis(vector)
           values = { x: vector[0].abs, y: vector[1].abs, z: vector[2].abs }
@@ -815,31 +761,6 @@ module ULOL
         end
         private_class_method :vertex_average_2d
 
-        def self.unproject_point(point_2d, axis, normal, plane_point)
-          plane_dot = dot_product(Geom::Vector3d.new(plane_point.x, plane_point.y, plane_point.z), normal)
-          case axis
-          when :x
-            return nil if normal.x.abs <= 0.000001
-
-            y, z = point_2d
-            x = (plane_dot - (normal.y * y) - (normal.z * z)) / normal.x
-            Geom::Point3d.new(x, y, z)
-          when :y
-            return nil if normal.y.abs <= 0.000001
-
-            x, z = point_2d
-            y = (plane_dot - (normal.x * x) - (normal.z * z)) / normal.y
-            Geom::Point3d.new(x, y, z)
-          else
-            return nil if normal.z.abs <= 0.000001
-
-            x, y = point_2d
-            z = (plane_dot - (normal.x * x) - (normal.y * y)) / normal.z
-            Geom::Point3d.new(x, y, z)
-          end
-        end
-        private_class_method :unproject_point
-
         def self.coplanar_area_overlapping_faces?(face1, face2, tolerance)
           normal1 = face1[:normal]
           normal2 = face2[:normal]
@@ -901,7 +822,6 @@ module ULOL
           dot = dot_product(normal1, normal2).abs
           (1.0 - dot) <= 0.000001
         end
-        private_class_method :normals_parallel?
 
         def self.snapshot_normals_parallel?(normal1, normal2)
           dot = snapshot_dot_product(normal1, normal2).abs
@@ -915,7 +835,6 @@ module ULOL
             dot_product(vector, normal).abs <= tolerance
           end
         end
-        private_class_method :points_on_plane?
 
         def self.snapshot_points_on_plane?(points, normal, plane_point, tolerance)
           points.all? do |point|
@@ -988,7 +907,6 @@ module ULOL
         def self.dot_product(vector1, vector2)
           (vector1.x * vector2.x) + (vector1.y * vector2.y) + (vector1.z * vector2.z)
         end
-        private_class_method :dot_product
 
         def self.snapshot_dot_product(vector1, vector2)
           (vector1[0] * vector2[0]) + (vector1[1] * vector2[1]) + (vector1[2] * vector2[2])

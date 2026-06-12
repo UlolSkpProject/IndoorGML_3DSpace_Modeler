@@ -191,7 +191,7 @@ module ULOL
           def transition_waypoint_candidates(transition)
             return [] unless transition.cell1&.valid? && transition.cell2&.valid?
 
-            world_candidates = Utils::Geometry.common_face_waypoint_candidates(
+            world_candidates = AdjacencyService::GeometryQuery.common_face_waypoint_candidates(
               transition.cell1.sketchup_group,
               transition.cell2.sketchup_group
             )
