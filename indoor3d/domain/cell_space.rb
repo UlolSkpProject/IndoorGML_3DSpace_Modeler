@@ -4,7 +4,7 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
 
-      class CellSpace < GML::AbstractFeature
+      class CellSpace < AbstractFeature
         attr_reader :sketchup_group
         attr_reader :sketchup_group_id
         attr_accessor :cell_type
