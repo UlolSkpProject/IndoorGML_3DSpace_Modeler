@@ -117,6 +117,21 @@ module ULOL
           touching_snapshot_bounds_face_axis(snapshot1[:bounds], snapshot2[:bounds], tolerance)
         end
 
+        def self.common_face_waypoint_candidates(entity1, entity2, tolerance: 1.mm)
+          return [] unless entity1&.valid? && entity2&.valid?
+          return [] unless touching_bounds?(entity1.bounds, entity2.bounds, tolerance)
+
+          candidates = common_face_candidates(entity1, entity2, tolerance)
+          return [] if candidates.empty?
+
+          max_area = candidates.map { |candidate| candidate[:area] }.max
+          candidates.select { |candidate| (candidate[:area] - max_area).abs <= tolerance.to_f }
+                    .map { |candidate| candidate[:centroid] }
+        rescue StandardError => e
+          puts "[IndoorGML] Common face waypoint candidates failed: #{e.class}: #{e.message}"
+          []
+        end
+
         def self.validate_cell_space_source_group(group)
           faces = group_faces(group)
           return { valid: false, reason: 'No faces found', component_count: 0, reversed_face_count: 0 } if faces.empty?
@@ -187,6 +202,52 @@ module ULOL
           end.compact
         end
         private_class_method :world_faces
+
+        def self.common_face_candidates(entity1, entity2, tolerance)
+          faces1 = world_faces(entity1)
+          faces2 = world_faces(entity2)
+          faces1.each_with_object([]) do |face1, candidates|
+            faces2.each do |face2|
+              next unless coplanar_touching_faces?(face1, face2, tolerance)
+
+              overlap = coplanar_overlap_candidate(face1, face2, tolerance)
+              candidates << overlap if overlap
+            end
+          end
+        end
+        private_class_method :common_face_candidates
+
+        def self.coplanar_overlap_candidate(face1, face2, tolerance)
+          axis = dominant_axis(face1[:normal])
+          polygon1 = project_points_for_axis(face1[:points], axis)
+          polygon2 = project_points_for_axis(face2[:points], axis)
+          overlap = clip_polygon(polygon1, polygon2)
+          return nil if overlap.length < 3
+
+          area = polygon_area_2d(overlap).abs
+          return nil if area <= tolerance.to_f
+
+          centroid_2d = polygon_centroid_2d(overlap)
+          centroid = unproject_point(centroid_2d, axis, face1[:normal], face1[:points].first)
+          return nil unless centroid
+
+          { area: area, centroid: centroid }
+        end
+        private_class_method :coplanar_overlap_candidate
+
+        def self.project_points_for_axis(points, axis)
+          points.map do |point|
+            case axis
+            when :x
+              [point.y.to_f, point.z.to_f]
+            when :y
+              [point.x.to_f, point.z.to_f]
+            else
+              [point.x.to_f, point.y.to_f]
+            end
+          end
+        end
+        private_class_method :project_points_for_axis
 
         def self.snapshot_bounds(bounds)
           {
@@ -480,6 +541,113 @@ module ULOL
           [max1, max2].min - [min1, min2].max
         end
         private_class_method :overlap_length
+
+        def self.clip_polygon(subject_polygon, clip_polygon)
+          return [] if subject_polygon.empty? || clip_polygon.length < 3
+
+          clip_sign = polygon_area_2d(clip_polygon) < 0.0 ? -1.0 : 1.0
+          output = subject_polygon
+          clip_polygon.each_index do |index|
+            clip_start = clip_polygon[index]
+            clip_end = clip_polygon[(index + 1) % clip_polygon.length]
+            input = output
+            output = []
+            break if input.empty?
+
+            previous = input.last
+            input.each do |current|
+              current_inside = inside_clip_edge?(current, clip_start, clip_end, clip_sign)
+              previous_inside = inside_clip_edge?(previous, clip_start, clip_end, clip_sign)
+              if current_inside
+                output << line_intersection_2d(previous, current, clip_start, clip_end) unless previous_inside
+                output << current
+              elsif previous_inside
+                output << line_intersection_2d(previous, current, clip_start, clip_end)
+              end
+              previous = current
+            end
+            output.compact!
+          end
+          output
+        end
+        private_class_method :clip_polygon
+
+        def self.inside_clip_edge?(point, edge_start, edge_end, clip_sign)
+          clip_sign * orientation(edge_start, edge_end, point) >= -0.000001
+        end
+        private_class_method :inside_clip_edge?
+
+        def self.line_intersection_2d(line1_start, line1_end, line2_start, line2_end)
+          x1, y1 = line1_start
+          x2, y2 = line1_end
+          x3, y3 = line2_start
+          x4, y4 = line2_end
+          denominator = ((x1 - x2) * (y3 - y4)) - ((y1 - y2) * (x3 - x4))
+          return line1_end if denominator.abs <= 0.000001
+
+          px = ((((x1 * y2) - (y1 * x2)) * (x3 - x4)) - ((x1 - x2) * ((x3 * y4) - (y3 * x4)))) / denominator
+          py = ((((x1 * y2) - (y1 * x2)) * (y3 - y4)) - ((y1 - y2) * ((x3 * y4) - (y3 * x4)))) / denominator
+          [px, py]
+        end
+        private_class_method :line_intersection_2d
+
+        def self.polygon_area_2d(points)
+          return 0.0 if points.length < 3
+
+          points.each_index.sum do |index|
+            next_point = points[(index + 1) % points.length]
+            (points[index][0] * next_point[1]) - (next_point[0] * points[index][1])
+          end / 2.0
+        end
+        private_class_method :polygon_area_2d
+
+        def self.polygon_centroid_2d(points)
+          area_factor = 0.0
+          centroid_x = 0.0
+          centroid_y = 0.0
+          points.each_index do |index|
+            point = points[index]
+            next_point = points[(index + 1) % points.length]
+            cross = (point[0] * next_point[1]) - (next_point[0] * point[1])
+            area_factor += cross
+            centroid_x += (point[0] + next_point[0]) * cross
+            centroid_y += (point[1] + next_point[1]) * cross
+          end
+          return vertex_average_2d(points) if area_factor.abs <= 0.000001
+
+          [centroid_x / (3.0 * area_factor), centroid_y / (3.0 * area_factor)]
+        end
+        private_class_method :polygon_centroid_2d
+
+        def self.vertex_average_2d(points)
+          [points.map(&:first).sum / points.length.to_f, points.map(&:last).sum / points.length.to_f]
+        end
+        private_class_method :vertex_average_2d
+
+        def self.unproject_point(point_2d, axis, normal, plane_point)
+          plane_dot = dot_product(Geom::Vector3d.new(plane_point.x, plane_point.y, plane_point.z), normal)
+          case axis
+          when :x
+            return nil if normal.x.abs <= 0.000001
+
+            y, z = point_2d
+            x = (plane_dot - (normal.y * y) - (normal.z * z)) / normal.x
+            Geom::Point3d.new(x, y, z)
+          when :y
+            return nil if normal.y.abs <= 0.000001
+
+            x, z = point_2d
+            y = (plane_dot - (normal.x * x) - (normal.z * z)) / normal.y
+            Geom::Point3d.new(x, y, z)
+          else
+            return nil if normal.z.abs <= 0.000001
+
+            x, y = point_2d
+            z = (plane_dot - (normal.x * x) - (normal.y * y)) / normal.z
+            Geom::Point3d.new(x, y, z)
+          end
+        end
+        private_class_method :unproject_point
 
         def self.coplanar_touching_faces?(face1, face2, tolerance)
           normal1 = face1[:normal]
