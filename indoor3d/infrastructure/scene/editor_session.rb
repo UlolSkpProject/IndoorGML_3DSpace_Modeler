@@ -5,6 +5,9 @@ module ULOL
     module IndoorCore
 
       class EditorSession
+        GRAPH_VISIBLE_ATTRIBUTE = 'graph_visible'
+        GEOMETRY_VISIBLE_ATTRIBUTE = 'geometry_visible'
+
         def initialize(indoor_model)
           @indoor_model = indoor_model
           @editing = false
@@ -18,6 +21,8 @@ module ULOL
           @enforcing_active_path = false
           @active_path_enforcement_suspended = false
           @progress = nil
+          @dual_overlay_visible = model_boolean_attribute(GRAPH_VISIBLE_ATTRIBUTE, true)
+          @geometry_visible = model_boolean_attribute(GEOMETRY_VISIBLE_ATTRIBUTE, true)
         end
 
         def editing?
@@ -34,11 +39,32 @@ module ULOL
 
         def set_dual_overlay_visible(visible)
           @dual_overlay_visible = visible == true
+          write_model_boolean_attribute(GRAPH_VISIBLE_ATTRIBUTE, @dual_overlay_visible)
           model = Sketchup.active_model()
           ensure_overlay_registered(model) if @dual_overlay_visible
           update_overlay_enabled()
           invalidate_view(model)
           @dual_overlay_visible
+        end
+
+        def geometry_visible?
+          @geometry_visible != false
+        end
+
+        def toggle_geometry_visible
+          set_geometry_visible(!geometry_visible?)
+        end
+
+        def set_geometry_visible(visible)
+          @geometry_visible = visible == true
+          write_model_boolean_attribute(GEOMETRY_VISIBLE_ATTRIBUTE, @geometry_visible)
+          apply_geometry_visibility()
+          @geometry_visible
+        end
+
+        def apply_display_state
+          set_dual_overlay_visible(dual_overlay_visible?)
+          apply_geometry_visibility()
         end
 
         def progress_active?
@@ -292,6 +318,21 @@ module ULOL
           @editing ? unlock_entity(primal_group) : lock_entity(primal_group)
         end
 
+        def apply_geometry_visibility
+          primal_group = @indoor_model.primal_group
+          return false unless primal_group&.valid?
+          return false unless primal_group.respond_to?(:visible=)
+
+          with_unlocked(primal_group) do
+            primal_group.visible = geometry_visible?
+          end
+          invalidate_view(Sketchup.active_model())
+          true
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Geometry visibility update failed: #{e.class}: #{e.message}"
+          false
+        end
+
         def active_path_changed(model)
           begin
             model ||= Sketchup.active_model()
@@ -399,6 +440,27 @@ module ULOL
 
         def invalidate_view(model)
           model.active_view().invalidate() if model&.active_view()
+        end
+
+        def model_boolean_attribute(key, default)
+          model = @indoor_model.model || Sketchup.active_model
+          value = model&.get_attribute(IndoorModel::ATTRIBUTE_DICTIONARY_NAME, key)
+          if value.nil?
+            write_model_boolean_attribute(key, default)
+            return default == true
+          end
+
+          value == true || value.to_s == 'true'
+        rescue StandardError
+          default == true
+        end
+
+        def write_model_boolean_attribute(key, value)
+          model = @indoor_model.model || Sketchup.active_model
+          model&.set_attribute(IndoorModel::ATTRIBUTE_DICTIONARY_NAME, key, value == true)
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Display state write failed: #{e.class}: #{e.message}"
+          false
         end
 
         def active_path_snapshot(model)

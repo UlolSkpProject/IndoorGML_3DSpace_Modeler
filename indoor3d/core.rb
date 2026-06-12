@@ -137,6 +137,17 @@ module ULOL
       @edit_property_command.set_validation_proc do
         IndoorCore::IndoorModel.current.editing? ? MF_CHECKED : MF_UNCHECKED
       end
+      @geometry_command = create_command(
+        'Show Geometry',
+        'Show CellSpace geometry'
+      ) do
+        dispatcher.toggle_geometry()
+      end
+      dispatcher.geometry_command = @geometry_command
+      @geometry_command.set_validation_proc do
+        dispatcher.update_geometry_command()
+        IndoorCore::IndoorModel.current.geometry_visible? ? MF_CHECKED : MF_UNCHECKED
+      end
       @dual_overlay_command = create_command(
         'Show State/Link Overlay',
         'Show State and Transition overlay',
@@ -163,11 +174,13 @@ module ULOL
       ) do
         dispatcher.check_validity()
       end
+      dispatcher.update_geometry_command()
       dispatcher.update_dual_overlay_command()
 
       menu.add_item(create_cell_space_command)
       menu.add_item(@edit_property_command)
       menu.add_item(change_type_command)
+      menu.add_item(@geometry_command)
       menu.add_item(@dual_overlay_command)
       menu.add_item(export_command)
       menu.add_item(check_validity_command)
@@ -182,6 +195,7 @@ module ULOL
       toolbar.add_item(@edit_property_command)
       toolbar.add_item(change_type_command)
       toolbar.add_separator
+      toolbar.add_item(@geometry_command)
       toolbar.add_item(@dual_overlay_command)
       toolbar.add_separator
       toolbar.add_item(export_command)
