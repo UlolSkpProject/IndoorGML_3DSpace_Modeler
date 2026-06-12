@@ -167,10 +167,41 @@ module ULOL
           end
 
           def update_transition(transition)
-            transition.update(
+            updated = transition.update(
               state_local_position(transition.state1),
               state_local_position(transition.state2)
             )
+            refresh_transition_waypoint_candidates(transition) if updated
+            updated
+          end
+
+          def refresh_transition_waypoint_candidates(transition)
+            candidates = transition_waypoint_candidates(transition)
+            unless candidates.empty?
+              transition.set_waypoint_candidates(
+                candidates,
+                point1: state_local_position(transition.state1),
+                point2: state_local_position(transition.state2)
+              )
+            end
+          rescue StandardError => e
+            puts "[IndoorGML] Transition waypoint candidate refresh failed: #{e.class}: #{e.message}"
+          end
+
+          def transition_waypoint_candidates(transition)
+            return [] unless transition.cell1&.valid? && transition.cell2&.valid?
+
+            world_candidates = Utils::Geometry.common_face_waypoint_candidates(
+              transition.cell1.sketchup_group,
+              transition.cell2.sketchup_group
+            )
+            world_candidates.map { |point| world_point_to_primal_local(point) }
+          end
+
+          def world_point_to_primal_local(point)
+            return point unless @primal_group&.valid?
+
+            point.transform(@primal_group.transformation.inverse)
           end
 
           def rebuild_runtime_transitions_from_cell_adjacency
