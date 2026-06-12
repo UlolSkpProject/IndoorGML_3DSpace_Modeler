@@ -157,17 +157,20 @@ module ULOL
           return false unless @editing
 
           model = Sketchup.active_model()
-          @editing = false
-          @editable_entity_ids = {}
-          @editing_active_path_target = nil
-          @indoor_model.detach_edit_selection_observer(model)
-          restore_active_path(model)
-          @previous_active_path = nil
-          update_overlay_enabled()
-          @dialog.close()
-          apply_lock_policy()
-          invalidate_view(model)
-          true
+          with_active_path_enforcement_suspended do
+            prepare_active_path_for_finish(model)
+            @editing = false
+            @editable_entity_ids = {}
+            @editing_active_path_target = nil
+            @indoor_model.detach_edit_selection_observer(model)
+            close_active_path(model)
+            @previous_active_path = nil
+            update_overlay_enabled()
+            @dialog.close()
+            apply_lock_policy()
+            invalidate_view(model)
+            true
+          end
         end
 
         def editable_entity?(entity)
@@ -528,6 +531,33 @@ module ULOL
           rescue StandardError => e
             puts "[IndoorGML] Edit context restore failed: #{e.class}: #{e.message}"
           end
+        end
+
+        def prepare_active_path_for_finish(model)
+          begin
+            active_path = model.active_path()
+            return if active_path.nil?
+
+            primal_group = @indoor_model.primal_group
+            if active_path_matches?(model, [primal_group])
+              return
+            end
+
+            if primal_group && active_path.first == primal_group
+              set_active_path(model, [primal_group])
+              return
+            end
+
+            close_active_path(model)
+          rescue StandardError => e
+            puts "[IndoorGML] Edit context finish preparation failed: #{e.class}: #{e.message}"
+          end
+        end
+
+        def close_active_path(model)
+          model.close_active() while model.active_path()
+        rescue StandardError => e
+          puts "[IndoorGML] Edit context close failed: #{e.class}: #{e.message}"
         end
 
         def mark_editable_primal_entities
