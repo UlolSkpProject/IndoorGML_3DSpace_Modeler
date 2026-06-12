@@ -139,7 +139,8 @@ module ULOL
       end
       @geometry_command = create_command(
         'Show Geometry',
-        'Show CellSpace geometry'
+        'Show CellSpace geometry',
+        icon: 'svgs/toggle_geometry.svg'
       ) do
         dispatcher.toggle_geometry()
       end
