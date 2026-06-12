@@ -579,16 +579,6 @@ module ULOL
       @edit_property_command.set_validation_proc do
         IndoorCore::IndoorModel.current.editing? ? MF_CHECKED : MF_UNCHECKED
       end
-      # finish_editing_command = create_command(
-      #   'Finish Editing',
-      #   'Finish IndoorGML editing',
-      #   icon: 'finish_editing.png'
-      # ) do
-      #   finish_indoor_gml_editing()
-      # end
-      # finish_editing_command.set_validation_proc do
-      #   IndoorCore::IndoorModel.current.editing? ? MF_ENABLED : MF_GRAYED
-      # end
       @dual_overlay_command = create_command(
         'Show State/Link Overlay',
         'Show State and Transition overlay',
