@@ -88,7 +88,7 @@ module ULOL
 
           def recenter_cell_space_geometry(cell_space_entity)
             with_indoor_model_operation('IndoorGML Recenter CellSpace Geometry', transparent: true) do
-              center = cell_space_entity.definition.bounds.center
+              center = Utils::Geometry.find_shell_inner_centroid(cell_space_entity)
               puts "[IndoorGML] recenter_cell_space_geometry center=#{center} distance=#{center.distance(ORIGIN)}"
               next if center.distance(ORIGIN) <= 0.001
 

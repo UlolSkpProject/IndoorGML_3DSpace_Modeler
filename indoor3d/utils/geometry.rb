@@ -5,86 +5,6 @@ module ULOL
     module Utils
       module Geometry
 
-        def self.add_sphere(entities, center, radius, segments: 16, rings: 8)
-          validate_sphere_arguments!(entities, center, radius, segments, rings)
-
-          points = sphere_points(center, radius, segments, rings)
-          faces = []
-
-          (0...rings).each do |ring_index|
-            (0...segments).each do |segment_index|
-              next_segment_index = (segment_index + 1) % segments
-              face_points =
-                if ring_index.zero?
-                  [
-                    points[ring_index][segment_index],
-                    points[ring_index + 1][next_segment_index],
-                    points[ring_index + 1][segment_index]
-                  ]
-                elsif ring_index == rings - 1
-                  [
-                    points[ring_index][segment_index],
-                    points[ring_index][next_segment_index],
-                    points[ring_index + 1][segment_index]
-                  ]
-                else
-                  [
-                    points[ring_index][segment_index],
-                    points[ring_index][next_segment_index],
-                    points[ring_index + 1][next_segment_index],
-                    points[ring_index + 1][segment_index]
-                  ]
-                end
-
-              face = entities.add_face(face_points)
-              faces << face if face&.valid?
-            end
-          end
-
-          faces
-        end
-
-        def self.add_cylinder(entities, radius, height, segments: 24)
-          validate_cylinder_arguments!(entities, radius, height, segments)
-
-          half_height = height / 2.0
-          bottom_points = cylinder_ring_points(-half_height, radius, segments)
-          top_points = cylinder_ring_points(half_height, radius, segments)
-          faces = []
-
-          bottom_face = entities.add_face(bottom_points.reverse)
-          faces << bottom_face if bottom_face&.valid?
-
-          top_face = entities.add_face(top_points)
-          faces << top_face if top_face&.valid?
-
-          (0...segments).each do |index|
-            next_index = (index + 1) % segments
-            face = entities.add_face(
-              bottom_points[index],
-              bottom_points[next_index],
-              top_points[next_index],
-              top_points[index]
-            )
-            faces << face if face&.valid?
-          end
-
-          faces
-        end
-
-        def self.adjacent_solids?(entity1, entity2, tolerance: 1.mm)
-          !adjacency_axis(entity1, entity2, tolerance: tolerance).nil?
-        end
-
-        def self.horizontal_adjacency?(entity1, entity2, tolerance: 1.mm)
-          axis = adjacency_axis(entity1, entity2, tolerance: tolerance)
-          axis == :x || axis == :y
-        end
-
-        def self.vertical_adjacency?(entity1, entity2, tolerance: 1.mm)
-          adjacency_axis(entity1, entity2, tolerance: tolerance) == :z
-        end
-
         def self.adjacency_axis(entity1, entity2, tolerance: 1.mm)
           return nil unless entity1&.valid? && entity2&.valid?
           return nil unless touching_bounds?(entity1.bounds, entity2.bounds, tolerance)
@@ -170,43 +90,15 @@ module ULOL
 
         def self.find_shell_inner_centroid(cell_space_entity)
 
-            center = cell_space_entity.definition.bounds.center
+          center = cell_space_entity.definition.bounds.center
 
-            # if center isn't in shell
-            #   center = 최대 내접 sphere의 center
+          # TODO: If the bounds center is outside the shell, replace it with the
+          # center of the maximum inscribed sphere.
 
-            return center
+          center
         end
 
         #=============================================================================================================#
-
-        def self.sphere_points(center, radius, segments, rings)
-          (0..rings).map do |ring_index|
-            phi = Math::PI * ring_index / rings
-            z = radius * Math.cos(phi)
-            ring_radius = radius * Math.sin(phi)
-
-            (0...segments).map do |segment_index|
-              theta = 2.0 * Math::PI * segment_index / segments
-              x = ring_radius * Math.cos(theta)
-              y = ring_radius * Math.sin(theta)
-              Geom::Point3d.new(center.x + x, center.y + y, center.z + z)
-            end
-          end
-        end
-        private_class_method :sphere_points
-
-        def self.cylinder_ring_points(z, radius, segments)
-          (0...segments).map do |segment_index|
-            theta = 2.0 * Math::PI * segment_index / segments
-            Geom::Point3d.new(
-              radius * Math.cos(theta),
-              radius * Math.sin(theta),
-              z
-            )
-          end
-        end
-        private_class_method :cylinder_ring_points
 
         def self.world_faces(entity)
           transformation = entity.transformation
