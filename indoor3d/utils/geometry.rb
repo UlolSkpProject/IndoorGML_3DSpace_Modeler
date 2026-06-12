@@ -363,7 +363,6 @@ module ULOL
             end
           end
         end
-        private_class_method :project_points_for_axis
 
         def self.snapshot_bounds(bounds)
           {
@@ -816,7 +815,6 @@ module ULOL
         def self.area_tolerance(tolerance)
           tolerance.to_f * tolerance.to_f
         end
-        private_class_method :area_tolerance
 
         def self.normals_parallel?(normal1, normal2)
           dot = dot_product(normal1, normal2).abs
