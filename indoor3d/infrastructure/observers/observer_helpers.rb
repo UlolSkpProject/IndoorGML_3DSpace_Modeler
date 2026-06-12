@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
