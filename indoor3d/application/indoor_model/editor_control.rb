@@ -38,6 +38,14 @@ module ULOL
             @editor_session.toggle_dual_overlay_visible()
           end
 
+          def geometry_visible?
+            @editor_session.geometry_visible?()
+          end
+
+          def toggle_geometry_visible
+            @editor_session.toggle_geometry_visible()
+          end
+
           def progress_active?
             @editor_session.progress_active?()
           end

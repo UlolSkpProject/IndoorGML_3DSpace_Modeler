@@ -7,6 +7,7 @@ module ULOL
     module IndoorCore
       class CommandDispatcher
         attr_accessor :dual_overlay_command
+        attr_accessor :geometry_command
 
         def convert_selected_solid_groups_to_cell_spaces
           begin
@@ -284,11 +285,34 @@ module ULOL
           Logger.puts "[IndoorGML] Dual overlay command update failed: #{e.class}: #{e.message}"
         end
 
+        def update_geometry_command
+          return unless @geometry_command
+
+          if IndoorModel.current.geometry_visible?
+            @geometry_command.menu_text = 'Hide Geometry'
+            @geometry_command.tooltip = 'Hide CellSpace geometry'
+            @geometry_command.status_bar_text = 'Hide CellSpace geometry'
+          else
+            @geometry_command.menu_text = 'Show Geometry'
+            @geometry_command.tooltip = 'Show CellSpace geometry'
+            @geometry_command.status_bar_text = 'Show CellSpace geometry'
+          end
+        rescue StandardError => e
+          Logger.puts "[IndoorGML] Geometry command update failed: #{e.class}: #{e.message}"
+        end
+
         def toggle_dual_overlay
           IndoorModel.current.toggle_dual_overlay_visible()
           update_dual_overlay_command()
         rescue StandardError => e
           UI.messagebox("State/Link overlay toggle failed:\n#{e.message}")
+        end
+
+        def toggle_geometry
+          IndoorModel.current.toggle_geometry_visible()
+          update_geometry_command()
+        rescue StandardError => e
+          UI.messagebox("Geometry toggle failed:\n#{e.message}")
         end
 
         def add_context_menu_items(menu)
