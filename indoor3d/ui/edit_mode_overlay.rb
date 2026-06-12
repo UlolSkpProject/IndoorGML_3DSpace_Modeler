@@ -441,11 +441,11 @@ module ULOL
         end
 
         def overlay_state_point(state)
-          cell_space = state.duality_cell
-          group = cell_space&.valid_sketchup_group
-          return group.bounds.center if group
+          point = state.position
+          primal_group = @indoor_model.primal_group
+          return point.transform(primal_group.transformation) if primal_group&.valid?
 
-          state.position
+          point
         rescue StandardError
           state.position
         end
