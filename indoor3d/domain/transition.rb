@@ -13,6 +13,8 @@ module ULOL
         attr_reader :state2_id
         attr_reader :cell1_id
         attr_reader :cell2_id
+        attr_reader :waypoint_candidates
+        attr_reader :selected_waypoint
         attr_accessor :editable
 
         TRANSITION_RADIUS = State::STATE_NODE_RADIUS * 0.5 unless const_defined?(:TRANSITION_RADIUS, false)
@@ -25,15 +27,27 @@ module ULOL
           @state2 = state2
           @cell1 = cell1
           @cell2 = cell2
+          @waypoint_candidates = []
+          @selected_waypoint = nil
           capture_reference_ids
           @editable = false
         end
 
-        def update(_point1, _point2)
+        def update(point1, point2, waypoint_candidates: nil)
           return false unless valid_states?
 
+          candidates = Array(waypoint_candidates).compact
+          candidates = [midpoint(point1, point2)] if candidates.empty?
+          set_waypoint_candidates(candidates, point1: point1, point2: point2)
           capture_reference_ids
           true
+        end
+
+        def set_waypoint_candidates(points, selected_index: 0, point1: nil, point2: nil)
+          @waypoint_candidates = Array(points).compact.select { |point| point.is_a?(Geom::Point3d) }
+          @selected_waypoint = shortest_waypoint(point1, point2) ||
+                               @waypoint_candidates[selected_index.to_i] ||
+                               @waypoint_candidates.first
         end
 
         def valid?
@@ -49,6 +63,8 @@ module ULOL
           @state2 = nil
           @cell1 = nil
           @cell2 = nil
+          @waypoint_candidates = []
+          @selected_waypoint = nil
         end
 
         def self.restore(state1, state2, cell1: nil, cell2: nil, id: nil, name: nil)
@@ -77,10 +93,31 @@ module ULOL
           @state2 = state2
           @cell1 = cell1
           @cell2 = cell2
+          @waypoint_candidates = []
+          @selected_waypoint = nil
           capture_reference_ids
           @editable = false
           @id = id unless id.to_s.empty?
           @name = name.to_s
+        end
+
+        def midpoint(point1, point2)
+          return nil unless point1.is_a?(Geom::Point3d) && point2.is_a?(Geom::Point3d)
+
+          Geom::Point3d.new(
+            (point1.x + point2.x) / 2.0,
+            (point1.y + point2.y) / 2.0,
+            (point1.z + point2.z) / 2.0
+          )
+        end
+
+        def shortest_waypoint(point1, point2)
+          return nil unless point1.is_a?(Geom::Point3d) && point2.is_a?(Geom::Point3d)
+          return nil if @waypoint_candidates.empty?
+
+          @waypoint_candidates.min_by do |candidate|
+            point1.distance(candidate) + candidate.distance(point2)
+          end
         end
 
         def capture_reference_ids
