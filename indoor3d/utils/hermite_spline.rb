@@ -18,12 +18,39 @@ module ULOL
             )
           end
 
+          # def self.generate_segment(p0, p1, tangent0, tangent1, segments = 8, include_start: true)
+          #   segments = [segments.to_i, 1].max
+          #   start_index = include_start ? 0 : 1
+          #   (start_index..segments).map do |index|
+          #     point(p0, p1, tangent0, tangent1, index.to_f / segments)
+          #   end
+          # end
+
           def self.generate_segment(p0, p1, tangent0, tangent1, segments = 8, include_start: true)
-            segments = [segments.to_i, 1].max
-            start_index = include_start ? 0 : 1
-            (start_index..segments).map do |index|
-              point(p0, p1, tangent0, tangent1, index.to_f / segments)
+            # 1단계: 기본 t값들 생성
+            base_ts = (0..segments).map { |i| i.to_f / segments }
+            
+            # 2단계: 각 구간의 "꺾임 정도"로 가중치 계산
+            points = base_ts.map { |t| point(p0, p1, tangent0, tangent1, t) }
+            
+            refined_ts = [base_ts.first]
+            base_ts.each_cons(2).with_index do |(t_a, t_b), i|
+              bend = bend_factor(points[i-1], points[i], points[i+1]) rescue 0
+              extra = (bend * 3).round.clamp(0, 4)  # 꺾임 클수록 추가 분할
+              extra.times do |k|
+                refined_ts << t_a + (t_b - t_a) * (k+1).to_f / (extra+1)
+              end
+              refined_ts << t_b
             end
+            
+            start_index = include_start ? 0 : 1
+            refined_ts.uniq.sort[start_index..-1].map { |t| point(p0, p1, tangent0, tangent1, t) }
+          end
+          
+          def self.bend_factor(pa, pb, pc)
+            v1 = (pb - pa); v1.normalize!
+            v2 = (pc - pb); v2.normalize!
+            1.0 - v1.dot(v2)  # 0=직선, 클수록 많이 꺾임
           end
         end
       end
