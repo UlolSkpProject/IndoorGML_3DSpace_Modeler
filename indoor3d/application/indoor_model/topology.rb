@@ -18,16 +18,6 @@ module ULOL
 
           private
 
-          def connect_states(state1, state2)
-            ensure_space_features_groups(transparent: true)
-
-            cell1 = state1&.duality_cell
-            cell2 = state2&.duality_cell
-            return nil if cell1.nil? || cell2.nil?
-
-            create_or_update_transition_for_pair(cell1, cell2)
-          end
-
           def synchronize_adjacency_and_transitions_for_cell_space(cell_space)
             @adjacency_service.synchronize_for(cell_space)
           end

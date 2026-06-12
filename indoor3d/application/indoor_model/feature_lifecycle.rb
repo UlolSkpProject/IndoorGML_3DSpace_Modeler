@@ -299,15 +299,6 @@ module ULOL
             false
           end
 
-          def synchronize_cell_space_geometry_change(cell_space)
-            state = cell_space.duality_state
-            unless state&.valid?
-              cell_space = refresh_and_find_cell_space(cell_space.sketchup_group)
-              state = cell_space&.duality_state
-            end
-            mark_cell_space_dirty(cell_space)
-          end
-
           def apply_cell_space_type_attributes(cell_space)
             entity = cell_space.sketchup_group
             cell_space.cell_type = CellSpaceType.from_label(indoor_attribute(entity, 'cell_type'))
@@ -439,10 +430,6 @@ module ULOL
             return if state.nil?
 
             @feature_registry.remove_state(state)
-          end
-
-          def update_state_position(state, _local_position = nil)
-            write_state_attributes(state)
           end
 
           def attach_cell_space_observer(entity)

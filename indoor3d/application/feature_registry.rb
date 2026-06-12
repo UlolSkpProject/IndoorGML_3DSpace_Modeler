@@ -8,7 +8,6 @@ module ULOL
         attr_reader :cell_spaces
         attr_reader :states
         attr_reader :transitions
-        attr_reader :adjacent_cell_space_pairs
         attr_reader :transitions_by_cell_pair
 
         def initialize
@@ -82,10 +81,6 @@ module ULOL
 
         def transition_for_pair(pair_key)
           @transitions_by_cell_pair[pair_key]
-        end
-
-        def set_transition_for_pair(pair_key, transition)
-          @transitions_by_cell_pair[pair_key] = transition
         end
 
         def delete_transition_for_pair(pair_key)

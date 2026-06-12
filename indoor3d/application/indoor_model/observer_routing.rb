@@ -209,12 +209,6 @@ module ULOL
             end
           end
 
-          def contains_nested_cell_space_entity?(entity)
-            nested_cell_space_entities(entity).any?
-          rescue StandardError
-            false
-          end
-
           def normalize_primal_children_for_finish
             return unless @primal_group&.valid?
 
@@ -246,24 +240,6 @@ module ULOL
             else
               raw_entities << entity
             end
-          end
-
-          def normalize_primal_container(container)
-            return unless @primal_group&.valid?
-            return unless container&.valid?
-
-            with_indoor_model_operation('IndoorGML Normalize Primal Container', transparent: true) do
-              begin
-                @relocating_entity = true
-                normalize_primal_container_without_operation(container)
-              ensure
-                @relocating_entity = false
-              end
-              refresh_runtime_data
-              Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
-            end
-          rescue StandardError => e
-            puts "[IndoorGML] Primal container normalize failed: #{e.class}: #{e.message}"
           end
 
           def normalize_primal_container_without_operation(container)

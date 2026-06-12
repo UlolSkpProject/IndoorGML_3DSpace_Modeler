@@ -220,11 +220,6 @@ module ULOL
             end
           end
 
-          def cell_space_local_origin(cell_space)
-            ensure_cell_space_is_child_of_primal_space!(cell_space)
-            Utils::Transformation.entity_origin_in_root_local(cell_space.sketchup_group, @primal_group)
-          end
-
           def state_local_position(state)
             state.position
           end
