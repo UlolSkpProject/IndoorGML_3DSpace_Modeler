@@ -126,7 +126,13 @@ module ULOL
 
           max_area = candidates.map { |candidate| candidate[:area] }.max
           candidates.select { |candidate| (candidate[:area] - max_area).abs <= tolerance.to_f }
-                    .map { |candidate| candidate[:centroid] }
+                    .map do |candidate|
+                      {
+                        point: candidate[:centroid],
+                        normal1: candidate[:normal1],
+                        normal2: candidate[:normal2]
+                      }
+                    end
         rescue StandardError => e
           puts "[IndoorGML] Common face waypoint candidates failed: #{e.class}: #{e.message}"
           []
@@ -161,6 +167,18 @@ module ULOL
           result[:reversed_face_count] = orient_single_shell_faces!(group_faces(group))
           result
         end
+
+        def self.find_shell_inner_centroid(cell_space_entity)
+
+            center = cell_space_entity.definition.bounds.center
+
+            # if center isn't in shell
+            #   center = 최대 내접 sphere의 center
+
+            return center
+        end
+
+        #=============================================================================================================#
 
         def self.sphere_points(center, radius, segments, rings)
           (0..rings).map do |ring_index|
@@ -231,7 +249,7 @@ module ULOL
           centroid = unproject_point(centroid_2d, axis, face1[:normal], face1[:points].first)
           return nil unless centroid
 
-          { area: area, centroid: centroid }
+          { area: area, centroid: centroid, normal1: face1[:normal], normal2: face2[:normal] }
         end
         private_class_method :coplanar_overlap_candidate
 

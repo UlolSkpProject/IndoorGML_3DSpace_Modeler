@@ -223,16 +223,21 @@ module ULOL
         end
 
         def draw_overlay_transitions(view)
-          view.drawing_color = DUAL_TRANSITION_COLOR
           view.line_width = overlay_transition_line_width if view.respond_to?(:line_width=)
           points = []
           @indoor_model.transitions.each do |transition|
             next unless transition&.valid?()
             next unless transition.state1&.valid?() && transition.state2&.valid?()
 
-            points.concat(transition_curve_segments(view, transition))
+            segments = transition_curve_segments(view, transition)
+            points.concat(segments[:default])
+            points.concat(segments[:first])
+            points.concat(segments[:second])
           end
-          view.draw(GL_LINES, points) unless points.empty?
+          return if points.empty?
+
+          view.drawing_color = DUAL_STATE_COLOR
+          view.draw(GL_LINES, points)
         end
 
         def overlay_state_radius(view, center, state)
@@ -246,18 +251,29 @@ module ULOL
 
         def transition_curve_segments(view, transition)
           control_points = transition_control_points(transition)
-          return [] if control_points.length < 2
+          return empty_transition_segment_groups if control_points.length < 2
 
-          curve_points = cached_transition_curve_points(transition, control_points)
-          curve_points = offset_transition_points_behind_states(view, curve_points)
-          polyline_segments(curve_points)
+          curve_point_groups = cached_transition_curve_point_groups(transition, control_points)
+          {
+            default: polyline_segments(offset_transition_points_behind_states(view, curve_point_groups[:default])),
+            first: polyline_segments(offset_transition_points_behind_states(view, curve_point_groups[:first])),
+            second: polyline_segments(offset_transition_points_behind_states(view, curve_point_groups[:second]))
+          }
         rescue StandardError => e
           puts "[IndoorGML] Transition curve draw failed: #{e.class}: #{e.message}"
-          polyline_segments(control_points || [])
+          {
+            default: polyline_segments(control_points || []),
+            first: [],
+            second: []
+          }
         end
 
-        def cached_transition_curve_points(transition, control_points)
-          return control_points if control_points.length < 3
+        def empty_transition_segment_groups
+          { default: [], first: [], second: [] }
+        end
+
+        def cached_transition_curve_point_groups(transition, control_points)
+          return { default: control_points, first: [], second: [] } if control_points.length < 3
 
           @transition_curve_cache ||= {}
           key = transition_curve_cache_key(transition, control_points)
@@ -265,16 +281,17 @@ module ULOL
           return cached if cached
 
           @transition_curve_cache.clear if @transition_curve_cache.length > 512
-          @transition_curve_cache[key] = Utils::Math::CatmullRom.generate_spline(
-            control_points,
-            TRANSITION_CURVE_SEGMENTS
-          )
+          @transition_curve_cache[key] = transition.selected_waypoint_normal1 && transition.selected_waypoint_normal2 ?
+            hermite_transition_curve_point_groups(transition, control_points) :
+            { default: control_points, first: [], second: [] }
         end
 
         def transition_curve_cache_key(transition, control_points)
           [
             transition.id,
-            control_points.map { |point| point_key(point) }
+            control_points.map { |point| point_key(point) },
+            vector_key(transition.selected_waypoint_normal1),
+            vector_key(transition.selected_waypoint_normal2)
           ]
         end
 
@@ -284,6 +301,68 @@ module ULOL
             point.y.to_f.round(6),
             point.z.to_f.round(6)
           ]
+        end
+
+        def vector_key(vector)
+          return nil unless vector.is_a?(Geom::Vector3d)
+
+          [
+            vector.x.to_f.round(6),
+            vector.y.to_f.round(6),
+            vector.z.to_f.round(6)
+          ]
+        end
+
+        def hermite_transition_curve_point_groups(transition, control_points)
+          return { default: control_points, first: [], second: [] } unless control_points.length == 3
+
+          point1, waypoint, point2 = control_points
+          normal1 = transition.selected_waypoint_normal1
+          normal2 = transition.selected_waypoint_normal2
+          unless normal1.is_a?(Geom::Vector3d) && normal1.length > 0.001 &&
+                 normal2.is_a?(Geom::Vector3d) && normal2.length > 0.001
+            return { default: control_points, first: [], second: [] }
+          end
+
+          tangent_magnitude = [point1.distance(waypoint), point2.distance(waypoint)].min * 2.5
+          return { default: control_points, first: [], second: [] } if tangent_magnitude <= 0.001
+
+          first_waypoint_tangent = scaled_normal(normal1, tangent_magnitude)
+          second_waypoint_tangent = scaled_normal(normal2, tangent_magnitude)
+
+          first_start_tangent = scaled_vector(point1, waypoint, 2.0)
+          first_end_tangent = first_waypoint_tangent
+          second_start_tangent = scaled_vector(point2, waypoint, 2.0)
+          second_end_tangent = second_waypoint_tangent
+
+          first_segment = Utils::Math::HermiteSpline.generate_segment(
+            point1,
+            waypoint,
+            first_start_tangent,
+            first_end_tangent,
+            TRANSITION_CURVE_SEGMENTS
+          )
+          second_segment = Utils::Math::HermiteSpline.generate_segment(
+            point2,
+            waypoint,
+            second_start_tangent,
+            second_end_tangent,
+            TRANSITION_CURVE_SEGMENTS
+          )
+          { default: [], first: first_segment, second: second_segment }
+        end
+
+        def scaled_normal(normal, magnitude)
+          tangent = normal.clone
+          tangent.normalize!
+          tangent.length = magnitude
+          tangent
+        end
+
+        def scaled_vector(from, to, scale)
+          vector = from.vector_to(to)
+          vector.length = vector.length * scale if vector.length > 0.001
+          vector
         end
 
         def transition_control_points(transition)
