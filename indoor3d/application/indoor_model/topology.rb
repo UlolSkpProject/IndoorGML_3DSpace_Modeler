@@ -5,17 +5,6 @@ module ULOL
     module IndoorCore
       class IndoorModel
         module Topology
-          def update_transitions_for_state(state)
-            return if state.nil?
-
-            @transitions.each do |transition|
-              next unless transition.connected_to?(state)
-
-              update_transition(transition)
-              write_transition_attributes(transition)
-            end
-          end
-
           private
 
           def synchronize_adjacency_and_transitions_for_cell_space(cell_space)
