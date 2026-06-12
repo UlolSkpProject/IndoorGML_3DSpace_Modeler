@@ -18,6 +18,7 @@ module ULOL
     require_relative 'domain/cell_space'
     require_relative 'domain/state'
     require_relative 'domain/transition'
+    require_relative 'integration/rm_helper_adapter'
     require_relative 'infrastructure/observers/observer_helpers'
     require_relative 'infrastructure/observers/cell_space_observer'
     require_relative 'infrastructure/observers/space_features_observer'
@@ -48,25 +49,11 @@ module ULOL
 
     module IndoorCore
       def self.rm_helper_cell_space_type_and_category(group)
-        return nil unless group&.respond_to?(:get_attribute)
-
-        space_type = group.get_attribute(
-          ::ULOL::Indoor3DGmlModeler::RM_HELPER_DICT,
-          ::ULOL::Indoor3DGmlModeler::RM_HELPER_SPACE_TYPE_KEY
-        ).to_s.strip.upcase
-        category_code = ::ULOL::Indoor3DGmlModeler::RM_HELPER_SPACE_TYPE_TO_CATEGORY_CODE[space_type]
-        return nil if category_code.nil?
-
-        option = CellSpaceCategory.selection_options.find do |candidate|
-          candidate[:category_code] == category_code
-        end
-        return nil if option.nil?
-
-        [option[:cell_type], option[:category_code]]
+        RmHelperAdapter.cell_space_type_and_category(group)
       end
 
       def self.resolve_cell_space_type_and_category(group, cell_type, category_code)
-        rm_helper_cell_space_type_and_category(group) || [cell_type, category_code]
+        RmHelperAdapter.resolve_cell_space_type_and_category(group, cell_type, category_code)
       end
     end
 
