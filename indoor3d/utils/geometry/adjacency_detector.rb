@@ -8,10 +8,7 @@ module ULOL
           return nil unless entity1&.valid? && entity2&.valid?
           return nil unless touching_bounds?(entity1.bounds, entity2.bounds, tolerance)
 
-          face_axis = adjacent_face_axis(entity1, entity2, tolerance)
-          return face_axis unless face_axis.nil?
-
-          touching_bounds_face_axis(entity1.bounds, entity2.bounds, tolerance)
+          adjacent_face_axis(entity1, entity2, tolerance)
         end
 
         def self.adjacency_snapshot(entity)
@@ -30,10 +27,7 @@ module ULOL
           return nil unless snapshot1 && snapshot2
           return nil unless touching_snapshot_bounds?(snapshot1[:bounds], snapshot2[:bounds], tolerance)
 
-          face_axis = adjacent_snapshot_face_axis(snapshot1, snapshot2, tolerance)
-          return face_axis unless face_axis.nil?
-
-          touching_snapshot_bounds_face_axis(snapshot1[:bounds], snapshot2[:bounds], tolerance)
+          adjacent_snapshot_face_axis(snapshot1, snapshot2, tolerance)
         end
         def self.world_faces(entity)
           transformation = entity.transformation
@@ -175,58 +169,6 @@ module ULOL
         end
         private_class_method :touching_snapshot_bounds?
 
-        def self.touching_bounds_face_axis(bounds1, bounds2, tolerance)
-          [:x, :y, :z].find do |axis|
-            bounds_face_contact_on_axis?(bounds1, bounds2, axis, tolerance)
-          end
-        end
-        private_class_method :touching_bounds_face_axis
-
-        def self.touching_snapshot_bounds_face_axis(bounds1, bounds2, tolerance)
-          [0, 1, 2].each do |axis|
-            return axis_symbol(axis) if snapshot_bounds_face_contact_on_axis?(bounds1, bounds2, axis, tolerance)
-          end
-          nil
-        end
-        private_class_method :touching_snapshot_bounds_face_axis
-
-        def self.bounds_face_contact_on_axis?(bounds1, bounds2, axis, tolerance)
-          min1 = bounds1.min.public_send(axis)
-          max1 = bounds1.max.public_send(axis)
-          min2 = bounds2.min.public_send(axis)
-          max2 = bounds2.max.public_send(axis)
-          return false unless (max1 - min2).abs <= tolerance || (max2 - min1).abs <= tolerance
-
-          axes = [:x, :y, :z] - [axis]
-          axes.all? do |overlap_axis|
-            overlap_length(
-              bounds1.min.public_send(overlap_axis),
-              bounds1.max.public_send(overlap_axis),
-              bounds2.min.public_send(overlap_axis),
-              bounds2.max.public_send(overlap_axis)
-            ) > tolerance
-          end
-        end
-        private_class_method :bounds_face_contact_on_axis?
-
-        def self.snapshot_bounds_face_contact_on_axis?(bounds1, bounds2, axis, tolerance)
-          min1 = bounds1[:min][axis]
-          max1 = bounds1[:max][axis]
-          min2 = bounds2[:min][axis]
-          max2 = bounds2[:max][axis]
-          return false unless (max1 - min2).abs <= tolerance || (max2 - min1).abs <= tolerance
-
-          ([0, 1, 2] - [axis]).all? do |overlap_axis|
-            overlap_length(
-              bounds1[:min][overlap_axis],
-              bounds1[:max][overlap_axis],
-              bounds2[:min][overlap_axis],
-              bounds2[:max][overlap_axis]
-            ) > tolerance
-          end
-        end
-        private_class_method :snapshot_bounds_face_contact_on_axis?
-
         def self.dominant_axis(vector)
           values = { x: vector.x.abs, y: vector.y.abs, z: vector.z.abs }
           values.max_by { |_axis, value| value }.first
@@ -238,20 +180,10 @@ module ULOL
         end
         private_class_method :dominant_snapshot_axis
 
-        def self.axis_symbol(axis)
-          [:x, :y, :z][axis]
-        end
-        private_class_method :axis_symbol
-
         def self.axis_overlap_or_touch?(min1, max1, min2, max2, tolerance)
           [min1, min2].max <= [max1, max2].min + tolerance
         end
         private_class_method :axis_overlap_or_touch?
-
-        def self.overlap_length(min1, max1, min2, max2)
-          [max1, max2].min - [min1, min2].max
-        end
-        private_class_method :overlap_length
         def self.coplanar_area_overlapping_faces?(face1, face2, tolerance)
           normal1 = face1[:normal]
           normal2 = face2[:normal]
