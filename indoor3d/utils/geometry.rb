@@ -457,7 +457,7 @@ module ULOL
 
           faces1.each do |face1|
             faces2.each do |face2|
-              next unless coplanar_touching_faces?(face1, face2, tolerance)
+              next unless coplanar_area_overlapping_faces?(face1, face2, tolerance)
 
               return dominant_axis(face1[:normal])
             end
@@ -679,6 +679,19 @@ module ULOL
         end
         private_class_method :coplanar_touching_faces?
 
+        def self.coplanar_area_overlapping_faces?(face1, face2, tolerance)
+          normal1 = face1[:normal]
+          normal2 = face2[:normal]
+          return false unless normals_parallel?(normal1, normal2)
+          return false unless points_on_plane?(face2[:points], normal1, face1[:points].first, tolerance)
+
+          axis = dominant_axis(normal1)
+          polygon1 = project_points_for_axis(face1[:points], axis)
+          polygon2 = project_points_for_axis(face2[:points], axis)
+          polygon_area_2d(clip_polygon(polygon1, polygon2)).abs > area_tolerance(tolerance)
+        end
+        private_class_method :coplanar_area_overlapping_faces?
+
         def self.adjacent_snapshot_face_axis(snapshot1, snapshot2, tolerance)
           faces1 = snapshot1[:faces]
           faces2 = snapshot2[:faces]
@@ -686,7 +699,7 @@ module ULOL
 
           faces1.each do |face1|
             faces2.each do |face2|
-              next unless coplanar_touching_snapshot_faces?(face1, face2, tolerance)
+              next unless coplanar_area_overlapping_snapshot_faces?(face1, face2, tolerance)
 
               return dominant_snapshot_axis(face1[:normal])
             end
@@ -707,6 +720,23 @@ module ULOL
           polygons_touch?(polygon1, polygon2, tolerance)
         end
         private_class_method :coplanar_touching_snapshot_faces?
+
+        def self.coplanar_area_overlapping_snapshot_faces?(face1, face2, tolerance)
+          normal1 = face1[:normal]
+          normal2 = face2[:normal]
+          return false unless snapshot_normals_parallel?(normal1, normal2)
+          return false unless snapshot_points_on_plane?(face2[:points], normal1, face1[:points].first, tolerance)
+
+          polygon1 = project_snapshot_points(face1[:points], normal1)
+          polygon2 = project_snapshot_points(face2[:points], normal1)
+          polygon_area_2d(clip_polygon(polygon1, polygon2)).abs > area_tolerance(tolerance)
+        end
+        private_class_method :coplanar_area_overlapping_snapshot_faces?
+
+        def self.area_tolerance(tolerance)
+          tolerance.to_f * tolerance.to_f
+        end
+        private_class_method :area_tolerance
 
         def self.normals_parallel?(normal1, normal2)
           dot = dot_product(normal1, normal2).abs
