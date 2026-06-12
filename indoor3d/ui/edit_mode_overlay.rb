@@ -324,11 +324,14 @@ module ULOL
             return { default: control_points, first: [], second: [] }
           end
 
-          tangent_magnitude = [point1.distance(waypoint), point2.distance(waypoint)].min * 2.5
-          return { default: control_points, first: [], second: [] } if tangent_magnitude <= 0.001
+          dir1 = point1.vector_to(waypoint)
+          dir2 = point2.vector_to(waypoint)
+          tangent1_mag = dir1.length
+          tangent2_mag = dir2.length
+          return { default: control_points, first: [], second: [] } if tangent1_mag <= 0.001 || tangent2_mag <= 0.001
 
-          first_waypoint_tangent = scaled_normal(normal1, tangent_magnitude)
-          second_waypoint_tangent = scaled_normal(normal2, tangent_magnitude)
+          first_waypoint_tangent = scaled_normal(normal1, tangent1_mag * tangent_angle_weight(dir1, normal1))
+          second_waypoint_tangent = scaled_normal(normal2, tangent2_mag * tangent_angle_weight(dir2, normal2))
 
           first_start_tangent = scaled_vector(point1, waypoint, 2.0)
           first_end_tangent = first_waypoint_tangent
@@ -357,6 +360,15 @@ module ULOL
           tangent.normalize!
           tangent.length = magnitude
           tangent
+        end
+
+        def tangent_angle_weight(direction, normal)
+          dir = direction.clone
+          norm = normal.clone
+          dir.normalize!
+          norm.normalize!
+          dot = [[dir.dot(norm), -1.0].max, 1.0].min
+          0.55 - (0.45 * dot)
         end
 
         def scaled_vector(from, to, scale)
