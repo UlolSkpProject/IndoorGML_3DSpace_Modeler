@@ -195,13 +195,36 @@ module ULOL
               transition.cell1.sketchup_group,
               transition.cell2.sketchup_group
             )
-            world_candidates.map { |point| world_point_to_primal_local(point) }
+            world_candidates.filter_map { |candidate| waypoint_candidate_to_primal_local(candidate) }
           end
 
           def world_point_to_primal_local(point)
             return point unless @primal_group&.valid?
 
             point.transform(@primal_group.transformation.inverse)
+          end
+
+          def waypoint_candidate_to_primal_local(candidate)
+            return world_point_to_primal_local(candidate) if candidate.is_a?(Geom::Point3d)
+            return nil unless candidate.is_a?(Hash)
+
+            point = candidate[:point]
+            return nil unless point.is_a?(Geom::Point3d)
+
+            {
+              point: world_point_to_primal_local(point),
+              normal1: world_vector_to_primal_local(candidate[:normal1] || candidate[:normal]),
+              normal2: world_vector_to_primal_local(candidate[:normal2])
+            }
+          end
+
+          def world_vector_to_primal_local(vector)
+            return vector unless vector.is_a?(Geom::Vector3d)
+            return vector unless @primal_group&.valid?
+
+            transformed = vector.transform(@primal_group.transformation.inverse)
+            transformed.normalize! if transformed.length > 0.001
+            transformed
           end
 
           def rebuild_runtime_transitions_from_cell_adjacency
