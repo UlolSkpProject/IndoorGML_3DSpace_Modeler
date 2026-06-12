@@ -2,7 +2,7 @@
 
 module ULOL
   module Indoor3DGmlModeler
-    module GML
+    module IndoorCore
       class AbstractFeature
         attr_reader :name
         attr_reader :id

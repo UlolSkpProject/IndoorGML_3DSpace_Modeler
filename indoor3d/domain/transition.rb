@@ -4,7 +4,7 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
 
-      class Transition < GML::AbstractFeature
+      class Transition < AbstractFeature
         attr_reader :state1
         attr_reader :state2
         attr_reader :cell1

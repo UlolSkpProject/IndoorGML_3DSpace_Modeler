@@ -8,7 +8,7 @@ If IndoorGML 1.1 behavior is added later, the policy should be introduced as an 
 
 ## Domain Namespace Policy
 
-`GML::AbstractFeature` intentionally lives under the `GML` namespace because it represents the common feature identity shape used by exported IndoorGML features. Runtime feature classes such as `IndoorCore::CellSpace`, `IndoorCore::State`, and `IndoorCore::Transition` inherit from it while remaining part of the SketchUp-backed runtime model.
+Feature model classes use the `IndoorCore` namespace consistently. `AbstractFeature` provides the common feature identity shape for `CellSpace`, `State`, and `Transition`.
 
 This is not a pure domain boundary. The current `indoor3d/domain` folder should be understood as SketchUp-backed runtime model code until a future refactor separates pure IndoorGML model objects from SketchUp entity adapters.
 

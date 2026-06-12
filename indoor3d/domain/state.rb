@@ -4,7 +4,7 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
 
-      class State < GML::AbstractFeature
+      class State < AbstractFeature
         attr_reader :duality_cell
         attr_reader :radius
         attr_reader :transitions
