@@ -107,7 +107,7 @@ These were observed during refactor testing and recorded in `docs/RefactorTODO.m
      - Undo material reapply / close-time correction.
      - Undo the face pull.
      - Undo active_path or overlay-visible edit-context state.
-- Current code intentionally reapplies CellSpace PNG face material on `CellSpaceObserver#onClose`.
+- Current code intentionally reapplies CellSpace RGBA face material on `CellSpaceObserver#onClose`.
 - That reapply is wrapped in the transparent `IndoorGML CellSpace Geometry Close` operation.
 - However, `onClose` fires after the modeling operation and around active_path closing. Because SketchUp records active_path changes in the Undo stack, the transparent material operation may attach to the close/edit-context history instead of the original face-pull operation.
 - This means transparent operation alone does not guarantee that close-time material correction disappears into the face-pull Undo item.
@@ -264,7 +264,7 @@ Last updated: 2026-06-08
 - 각 pair에서 SketchUp geometry API, bounds 검사, face 검사, solid/boolean 계열 처리, transformation 계산을 반복하면 비용이 급격히 커진다.
 - 다음 병목 후보:
   - bounds, faces, groups, transformations에 대한 반복적인 SketchUp API 접근
-  - 많은 face에 대한 material/texture 재적용
+  - 많은 face에 대한 material 재적용
   - 많은 entity에 대한 attribute dictionary rewrite
   - 모든 CellSpace, State, Transition을 한 번에 복원하는 full runtime refresh
 - overlay draw는 draw call batching 이후 상대적으로 부담이 줄어들지만, 매 frame마다 모든 state point, transition endpoint, CellSpace bounds를 다시 계산하면 여전히 비용이 생길 수 있다.
