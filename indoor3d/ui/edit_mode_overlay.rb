@@ -13,15 +13,15 @@ module ULOL
         PRIMARY_TRANSLUCENT_COLOR = Sketchup::Color.new(22, 130, 82, 210)
         HINT_COLOR = Sketchup::Color.new(214, 245, 229)
         DUAL_STATE_COLOR = Sketchup::Color.new(35, 120, 255, 255)
-        DUAL_TRANSITION_COLOR = Sketchup::Color.new(35, 120, 255, 125)
+        DUAL_TRANSITION_COLOR = Sketchup::Color.new(255, 255, 255, 220)
         PROGRESS_BACKDROP_COLOR = Sketchup::Color.new(17, 24, 39, 220)
         PROGRESS_TRACK_COLOR = Sketchup::Color.new(75, 85, 99, 220)
         PROGRESS_FILL_COLOR = Sketchup::Color.new(22, 130, 82, 235)
         PROGRESS_TEXT_COLOR = Sketchup::Color.new(255, 255, 255, 255)
         CIRCLE_SEGMENTS = 16
-        OVERLAY_RADIUS_SCALE = 1.1
+        OVERLAY_RADIUS_SCALE = 1.0
         TRANSITION_DEPTH_OFFSET_PIXELS = 2.0
-        TRANSITION_CURVE_SEGMENTS = 8
+        TRANSITION_CURVE_SEGMENTS = 12
 
         def initialize(indoor_model)
           @indoor_model = indoor_model
@@ -36,7 +36,6 @@ module ULOL
             if @indoor_model.editing?()
               draw_screen_border(view)
               draw_banner(view)
-              draw_cell_space_outlines(view)
             end
             draw_dual_space_overlay(view)
             draw_progress_bar(view) if @indoor_model.progress_active?()
@@ -48,7 +47,6 @@ module ULOL
         def getExtents
           begin
             bounds = Geom::BoundingBox.new
-            add_cell_space_bounds(bounds)
             add_dual_overlay_bounds(bounds)
             bounds
           rescue StandardError => e
@@ -58,17 +56,6 @@ module ULOL
         end
 
         private
-
-        def add_cell_space_bounds(bounds)
-          @indoor_model.cell_spaces.each do |cell_space|
-            group = cell_space.valid_sketchup_group
-            add_bounds(bounds, group.bounds) if group
-          end
-        end
-
-        def add_bounds(target_bounds, source_bounds)
-          (0..7).each { |index| target_bounds.add(source_bounds.corner(index)) }
-        end
 
         def add_dual_overlay_bounds(bounds)
           @indoor_model.states.each do |state|
@@ -124,23 +111,6 @@ module ULOL
             ],
             c
           )
-        end
-
-        def draw_cell_space_outlines(view)
-          begin
-            view.line_width = 3 if view.respond_to?(:line_width=)
-            view.drawing_color = PRIMARY_TRANSLUCENT_COLOR
-            points = []
-            @indoor_model.cell_spaces.each do |cell_space|
-              group = cell_space.valid_sketchup_group
-              next unless group
-
-              points.concat(bounds_line_points(group.bounds))
-            end
-            view.draw(GL_LINES, points) unless points.empty?
-          ensure
-            view.line_width = 1 if view.respond_to?(:line_width=)
-          end
         end
 
         def draw_dual_space_overlay(view)
@@ -215,7 +185,7 @@ module ULOL
           @indoor_model.states.each do |state|
             next unless state&.valid?()
 
-            center = overlay_state_point(state)
+            center = offset_state_point_in_front_of_transitions(view, overlay_state_point(state))
             radius = overlay_state_radius(view, center, state)
             points.concat(billboard_disk_triangle_points(center, right_axis, up_axis, radius))
           end
@@ -236,17 +206,24 @@ module ULOL
           end
           return if points.empty?
 
-          view.drawing_color = DUAL_STATE_COLOR
+          view.drawing_color = DUAL_TRANSITION_COLOR
           view.draw(GL_LINES, points)
         end
 
         def overlay_state_radius(view, center, state)
-          model_radius = (state.radius || State.display_radius) * OVERLAY_RADIUS_SCALE
-          clamp_overlay_radius(view, center, model_radius)
+          degree_scale = overlay_state_degree_scale(state)
+          model_radius = (state.radius || State.display_radius) * OVERLAY_RADIUS_SCALE * degree_scale
+          clamp_overlay_radius(view, center, model_radius, pixel_scale: degree_scale)
+        end
+
+        def overlay_state_degree_scale(state)
+          transition_count = state.transitions.count { |transition| transition&.valid? }
+          scale = 1.0 + (Math.sqrt([transition_count - 1, 0].max) * 0.12)
+          [scale, 1.45].min
         end
 
         def overlay_transition_line_width
-          [(@indoor_model.overlay_max_radius_pixels.to_f * 1.0).round, 2].max
+          [(@indoor_model.overlay_min_radius_pixels.to_f * 1.25).round, 2].max
         end
 
         def transition_curve_segments(view, transition)
@@ -255,9 +232,9 @@ module ULOL
 
           curve_point_groups = cached_transition_curve_point_groups(transition, control_points)
           {
-            default: polyline_segments(offset_transition_points_behind_states(view, curve_point_groups[:default])),
-            first: polyline_segments(offset_transition_points_behind_states(view, curve_point_groups[:first])),
-            second: polyline_segments(offset_transition_points_behind_states(view, curve_point_groups[:second]))
+            default: polyline_segments(offset_transition_points_behind_states(view, curve_point_groups[:default]), view),
+            first: polyline_segments(offset_transition_points_behind_states(view, curve_point_groups[:first]), view),
+            second: polyline_segments(offset_transition_points_behind_states(view, curve_point_groups[:second]), view)
           }
         rescue StandardError => e
           puts "[IndoorGML] Transition curve draw failed: #{e.class}: #{e.message}"
@@ -386,12 +363,24 @@ module ULOL
           waypoint ? [point1, waypoint, point2] : [point1, point2]
         end
 
-        def polyline_segments(points)
+        def polyline_segments(points, view = nil)
           points.each_cons(2).flat_map do |from, to|
             next [] if from.distance(to) <= 0.001
 
-            [from, to]
+            view ? extended_line_segment(view, from, to) : [from, to]
           end
+        end
+
+        def extended_line_segment(view, from, to)
+          direction = from.vector_to(to)
+          return [from, to] if direction.length <= 0.001
+
+          extension = view.pixels_to_model(overlay_transition_line_width * 0.55, from)
+          direction.length = extension
+          [
+            Geom::Point3d.new(from.x - direction.x, from.y - direction.y, from.z - direction.z),
+            Geom::Point3d.new(to.x + direction.x, to.y + direction.y, to.z + direction.z)
+          ]
         end
 
         def offset_transition_points_behind_states(view, points)
@@ -407,6 +396,19 @@ module ULOL
           end
         rescue StandardError
           points
+        end
+
+        def offset_state_point_in_front_of_transitions(view, point)
+          direction = view.camera.direction.clone
+          direction.normalize!
+          distance = view.pixels_to_model(TRANSITION_DEPTH_OFFSET_PIXELS, point)
+          Geom::Point3d.new(
+            point.x - (direction.x * distance),
+            point.y - (direction.y * distance),
+            point.z - (direction.z * distance)
+          )
+        rescue StandardError
+          point
         end
 
         def overlay_transition_waypoint(point)
@@ -460,16 +462,6 @@ module ULOL
           point
         rescue StandardError
           state.position
-        end
-
-        def bounds_line_points(bounds)
-          points = (0..7).map { |index| bounds.corner(index) }
-          edges = [
-            [0, 1], [1, 3], [3, 2], [2, 0],
-            [4, 5], [5, 7], [7, 6], [6, 4],
-            [0, 4], [1, 5], [2, 6], [3, 7]
-          ]
-          edges.flat_map { |from, to| [points[from], points[to]] }
         end
 
         def draw_2d_quad(view, points, color)
