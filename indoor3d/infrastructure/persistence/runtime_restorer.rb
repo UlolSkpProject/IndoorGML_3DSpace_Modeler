@@ -53,7 +53,7 @@ module ULOL
             category_standard: @serializer.attribute(entity, 'category_standard')
           )
         rescue StandardError => e
-          puts "[IndoorGML] CellSpace restore failed: #{e.class}: #{e.message}"
+          IndoorCore::Logger.puts "[IndoorGML] CellSpace restore failed: #{e.class}: #{e.message}"
           nil
         end
 
@@ -65,7 +65,7 @@ module ULOL
             name: nil
           )
         rescue StandardError => e
-          puts "[IndoorGML] State restore failed: #{e.class}: #{e.message}"
+          IndoorCore::Logger.puts "[IndoorGML] State restore failed: #{e.class}: #{e.message}"
           nil
         end
 

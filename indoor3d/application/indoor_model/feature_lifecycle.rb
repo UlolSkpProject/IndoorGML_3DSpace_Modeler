@@ -156,7 +156,7 @@ module ULOL
 
             entity.locked = false
           rescue StandardError => e
-            puts "[IndoorGML] CellSpace unlock cleanup failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] CellSpace unlock cleanup failed: #{e.class}: #{e.message}"
           end
 
           def duplicate_cell_space_identity?(entity)
@@ -171,7 +171,7 @@ module ULOL
             original_id = indoor_attribute(entity, 'id').to_s
             original_state_id = indoor_attribute(entity, 'duality_state_id').to_s
             original_transition_ids = indoor_attribute(entity, 'state_transition_ids')
-            puts "[IndoorGML] Duplicate CellSpace id detected: entity_id=#{entity.entityID} copied_id=#{original_id}"
+            IndoorCore::Logger.puts "[IndoorGML] Duplicate CellSpace id detected: entity_id=#{entity.entityID} copied_id=#{original_id}"
 
             with_transparent_cell_space_operation('IndoorGML CellSpace Copy Independence') do
               sync do
@@ -189,13 +189,13 @@ module ULOL
                 synchronize_adjacency_and_transitions_for_cell_space(cell_space)
                 remember_cell_space_change_snapshot(entity)
 
-                puts "[IndoorGML] CellSpace copy independent: original_id=#{original_id} new_id=#{cell_space.id} original_state_id=#{original_state_id} new_state_id=#{state.id} make_unique=#{make_unique_performed} copied_transition_ids=#{original_transition_ids.inspect}"
+                IndoorCore::Logger.puts "[IndoorGML] CellSpace copy independent: original_id=#{original_id} new_id=#{cell_space.id} original_state_id=#{original_state_id} new_state_id=#{state.id} make_unique=#{make_unique_performed} copied_transition_ids=#{original_transition_ids.inspect}"
               end
             end
 
             true
           rescue StandardError => e
-            puts "[IndoorGML] CellSpace copy independence failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] CellSpace copy independence failed: #{e.class}: #{e.message}"
             false
           end
 
@@ -205,7 +205,7 @@ module ULOL
             entity.make_unique
             true
           rescue StandardError => e
-            puts "[IndoorGML] CellSpace make_unique failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] CellSpace make_unique failed: #{e.class}: #{e.message}"
             false
           end
 
@@ -293,7 +293,7 @@ module ULOL
           end
 
           def handle_cell_space_etc_changed(cell_space)
-            puts "[IndoorGML] CellSpace change ignored as etc: entity_id=#{cell_space.sketchup_group.entityID} name=#{cell_space.sketchup_group.name}"
+            IndoorCore::Logger.puts "[IndoorGML] CellSpace change ignored as etc: entity_id=#{cell_space.sketchup_group.entityID} name=#{cell_space.sketchup_group.name}"
             with_transparent_cell_space_operation('IndoorGML CellSpace Etc Change') {}
             remember_cell_space_change_snapshot(cell_space.sketchup_group)
             false
@@ -367,9 +367,9 @@ module ULOL
           end
 
           def log_cell_space_change(entity, change_kind, changed_fields, previous_snapshot, current_snapshot)
-            puts "[IndoorGML] CellSpace change classified kind=#{change_kind} entity_id=#{entity.entityID} name=#{entity.name} fields=#{changed_fields.join(',')}"
+            IndoorCore::Logger.puts "[IndoorGML] CellSpace change classified kind=#{change_kind} entity_id=#{entity.entityID} name=#{entity.name} fields=#{changed_fields.join(',')}"
             changed_fields.each do |field|
-              puts "[IndoorGML]   #{field}: #{snapshot_log_value(previous_snapshot&.[](field))} -> #{snapshot_log_value(current_snapshot&.[](field))}"
+              IndoorCore::Logger.puts "[IndoorGML]   #{field}: #{snapshot_log_value(previous_snapshot&.[](field))} -> #{snapshot_log_value(current_snapshot&.[](field))}"
             end
           end
 
@@ -411,7 +411,7 @@ module ULOL
               face.material = material
               face.back_material = material if face.respond_to?(:back_material=)
             rescue StandardError => e
-              puts "[IndoorGML] CellSpace face material failed: #{e.class}: #{e.message}"
+              IndoorCore::Logger.puts "[IndoorGML] CellSpace face material failed: #{e.class}: #{e.message}"
             end
           end
 
@@ -448,10 +448,10 @@ module ULOL
               return if observed_ids[key]
 
               attached = entity.add_observer(observer)
-              puts "[IndoorGML] #{observer.class} attached=#{attached} entity_id=#{entity.entityID}"
+              IndoorCore::Logger.puts "[IndoorGML] #{observer.class} attached=#{attached} entity_id=#{entity.entityID}"
               observed_ids[key] = true
             rescue StandardError => e
-              puts "[IndoorGML] Observer attach failed: #{e.class}: #{e.message}"
+              IndoorCore::Logger.puts "[IndoorGML] Observer attach failed: #{e.class}: #{e.message}"
             end
           end
         end

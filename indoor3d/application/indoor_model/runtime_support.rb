@@ -19,7 +19,7 @@ module ULOL
                 rebuild_runtime_transitions_from_cell_adjacency
               end
               apply_indoor_lock_policy()
-              puts "[IndoorGML] Runtime refreshed: cells=#{@cell_spaces.length}, states=#{@states.length}, transitions=#{@transitions.length}"
+              IndoorCore::Logger.puts "[IndoorGML] Runtime refreshed: cells=#{@cell_spaces.length}, states=#{@states.length}, transitions=#{@transitions.length}"
               true
             end
           ensure

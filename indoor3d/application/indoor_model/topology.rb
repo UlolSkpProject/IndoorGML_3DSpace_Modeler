@@ -21,7 +21,7 @@ module ULOL
             @dirty_cell_space_pids[entity.persistent_id] = true
             schedule_dirty_cell_space_sync
           rescue StandardError => e
-            puts "[IndoorGML] CellSpace dirty mark failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] CellSpace dirty mark failed: #{e.class}: #{e.message}"
           end
 
           def schedule_dirty_cell_space_sync
@@ -55,7 +55,7 @@ module ULOL
             Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
           rescue StandardError => e
             @cell_space_sync_scheduled = false
-            puts "[IndoorGML] Dirty CellSpace sync failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Dirty CellSpace sync failed: #{e.class}: #{e.message}"
           end
 
           def erase_adjacency_for_cell_space(cell_space)
@@ -164,7 +164,7 @@ module ULOL
               )
             end
           rescue StandardError => e
-            puts "[IndoorGML] Transition waypoint candidate refresh failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Transition waypoint candidate refresh failed: #{e.class}: #{e.message}"
           end
 
           def transition_waypoint_candidates(transition)

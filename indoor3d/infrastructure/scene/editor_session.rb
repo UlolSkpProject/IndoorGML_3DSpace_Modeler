@@ -117,7 +117,7 @@ module ULOL
               if failure
                 failure.call(e)
               else
-                puts "[IndoorGML] Batched operation failed: #{e.class}: #{e.message}"
+                IndoorCore::Logger.puts "[IndoorGML] Batched operation failed: #{e.class}: #{e.message}"
               end
             end
           end
@@ -221,7 +221,7 @@ module ULOL
             invalidate_view(model)
             true
           rescue StandardError => e
-            puts "[IndoorGML] CellSpace geometry edit activation failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] CellSpace geometry edit activation failed: #{e.class}: #{e.message}"
             false
           end
         end
@@ -241,7 +241,7 @@ module ULOL
             invalidate_view(model)
             true
           rescue StandardError => e
-            puts "[IndoorGML] CellSpace geometry edit finish failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] CellSpace geometry edit finish failed: #{e.class}: #{e.message}"
             false
           end
         end
@@ -306,7 +306,7 @@ module ULOL
 
             enforce_edit_context(model)
           rescue StandardError => e
-            puts "[IndoorGML] Edit active path enforcement failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Edit active path enforcement failed: #{e.class}: #{e.message}"
           end
         end
 
@@ -331,7 +331,7 @@ module ULOL
             @dialog.close()
             finish() if @editing
           rescue StandardError => e
-            puts "[IndoorGML] Edit shutdown cleanup failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Edit shutdown cleanup failed: #{e.class}: #{e.message}"
           end
         end
 
@@ -346,7 +346,7 @@ module ULOL
 
             reenter_editing_from_primal_path(model || Sketchup.active_model)
           rescue StandardError => e
-            puts "[IndoorGML] Unlocked primal recovery failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Unlocked primal recovery failed: #{e.class}: #{e.message}"
             false
           end
         end
@@ -368,7 +368,7 @@ module ULOL
             @overlay_model = model
             set_overlay_enabled(true)
           rescue StandardError => e
-            puts "[IndoorGML] Edit mode overlay registration failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Edit mode overlay registration failed: #{e.class}: #{e.message}"
           end
         end
 
@@ -389,7 +389,7 @@ module ULOL
 
             @overlay.enabled = enabled
           rescue StandardError => e
-            puts "[IndoorGML] Edit mode overlay enable failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Edit mode overlay enable failed: #{e.class}: #{e.message}"
           end
         end
 
@@ -414,7 +414,7 @@ module ULOL
             set_active_path(model, target_path)
             true
           rescue StandardError => e
-            puts "[IndoorGML] Edit context activation failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Edit context activation failed: #{e.class}: #{e.message}"
             false
           end
         end
@@ -492,7 +492,7 @@ module ULOL
           @previous_active_path = nil
           true
         rescue StandardError => e
-          puts "[IndoorGML] Edit mode reentry from primal active path failed: #{e.class}: #{e.message}"
+          IndoorCore::Logger.puts "[IndoorGML] Edit mode reentry from primal active path failed: #{e.class}: #{e.message}"
           false
         end
 
@@ -529,7 +529,7 @@ module ULOL
 
             model.close_active() while model.active_path()
           rescue StandardError => e
-            puts "[IndoorGML] Edit context restore failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Edit context restore failed: #{e.class}: #{e.message}"
           end
         end
 
@@ -550,14 +550,14 @@ module ULOL
 
             close_active_path(model)
           rescue StandardError => e
-            puts "[IndoorGML] Edit context finish preparation failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Edit context finish preparation failed: #{e.class}: #{e.message}"
           end
         end
 
         def close_active_path(model)
           model.close_active() while model.active_path()
         rescue StandardError => e
-          puts "[IndoorGML] Edit context close failed: #{e.class}: #{e.message}"
+          IndoorCore::Logger.puts "[IndoorGML] Edit context close failed: #{e.class}: #{e.message}"
         end
 
         def mark_editable_primal_entities

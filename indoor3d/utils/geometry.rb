@@ -97,7 +97,7 @@ module ULOL
           ).first
           refined_point || best_point || center
         rescue StandardError => e
-          puts "[IndoorGML] Shell inner centroid failed: #{e.class}: #{e.message}"
+          IndoorCore::Logger.puts "[IndoorGML] Shell inner centroid failed: #{e.class}: #{e.message}"
           center || cell_space_entity.definition.bounds.center
         end
 
@@ -400,7 +400,7 @@ module ULOL
             polygon.length == 3 ? [polygon] : triangulate_polygon_fan(polygon)
           end
         rescue StandardError => e
-          puts "[IndoorGML] Face mesh triangulation failed: #{e.class}: #{e.message}"
+          IndoorCore::Logger.puts "[IndoorGML] Face mesh triangulation failed: #{e.class}: #{e.message}"
           []
         end
         private_class_method :face_mesh_triangles

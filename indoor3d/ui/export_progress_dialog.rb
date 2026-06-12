@@ -48,7 +48,7 @@ module ULOL
             @dialog&.close if @dialog&.visible?
             @dialog = nil
           rescue StandardError => e
-            puts "[IndoorGML] Export progress close failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Export progress close failed: #{e.class}: #{e.message}"
           end
 
           private
@@ -78,7 +78,7 @@ module ULOL
 
             @dialog.execute_script("setStatus(#{step.to_s.inspect}, #{status.inspect});")
           rescue StandardError => e
-            puts "[IndoorGML] Export progress update failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Export progress update failed: #{e.class}: #{e.message}"
           end
 
           def init_script

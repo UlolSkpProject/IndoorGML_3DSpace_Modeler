@@ -63,7 +63,7 @@ module ULOL
         def self.ensure_direct_child_of_root!(entity, root_group, message = nil)
           return true if direct_child_of_root?(entity, root_group)
 
-          puts(message || default_child_warning(entity, root_group))
+          IndoorCore::Logger.puts(message || default_child_warning(entity, root_group))
           false
         end
 

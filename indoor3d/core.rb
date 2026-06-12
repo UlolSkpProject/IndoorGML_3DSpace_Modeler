@@ -6,6 +6,7 @@ module ULOL
   include Geom
   module Indoor3DGmlModeler
 
+    require_relative 'utils/logger'
     require_relative 'utils/html_helpers'
     require_relative 'utils/geometry'
     require_relative 'utils/transformation'
@@ -76,7 +77,7 @@ module ULOL
         @app_observer.register_model(Sketchup.active_model())
         IndoorCore::IndoorModel.current.refresh_runtime_data()
       rescue StandardError => e
-        puts "[IndoorGML] Model observer setup failed: #{e.class}: #{e.message}"
+        IndoorCore::Logger.puts "[IndoorGML] Model observer setup failed: #{e.class}: #{e.message}"
       end
     end
 
@@ -144,7 +145,7 @@ module ULOL
               indoor_model.convert_single_group_to_cell_space(group, target_cell_type, target_category_code)
               converted_count += 1
             rescue StandardError => e
-              puts "[IndoorGML] CellSpace conversion failed: #{e.class}: #{e.message}"
+              IndoorCore::Logger.puts "[IndoorGML] CellSpace conversion failed: #{e.class}: #{e.message}"
               errors << { group: cell_space_conversion_group_label(group), reason: e.message }
             end
           end
@@ -198,7 +199,7 @@ module ULOL
           indoor_model.change_cell_space_type(group, cell_type, category_code)
           changed_count += 1
         rescue StandardError => e
-          puts "[IndoorGML] CellSpace type change failed: #{e.class}: #{e.message}"
+          IndoorCore::Logger.puts "[IndoorGML] CellSpace type change failed: #{e.class}: #{e.message}"
           errors << "#{group.name}: #{e.message}"
         end
       end
@@ -370,7 +371,7 @@ module ULOL
       command.small_icon = path
       command.large_icon = path
     rescue StandardError => e
-      puts "[IndoorGML] Command icon failed: #{e.class}: #{e.message}"
+      IndoorCore::Logger.puts "[IndoorGML] Command icon failed: #{e.class}: #{e.message}"
     end
 
     def self.icon_path(filename)
@@ -391,7 +392,7 @@ module ULOL
         @dual_overlay_command.status_bar_text = 'Show State and Transition overlay'
       end
     rescue StandardError => e
-      puts "[IndoorGML] Dual overlay command update failed: #{e.class}: #{e.message}"
+      IndoorCore::Logger.puts "[IndoorGML] Dual overlay command update failed: #{e.class}: #{e.message}"
     end
 
     def self.toggle_dual_overlay
@@ -429,7 +430,7 @@ module ULOL
         menu.add_item('Change CellSpace Type') { change_selected_cell_space_type() }
       end
     rescue StandardError => e
-      puts "[IndoorGML] Context menu failed: #{e.class}: #{e.message}"
+      IndoorCore::Logger.puts "[IndoorGML] Context menu failed: #{e.class}: #{e.message}"
     end
 
     def self.selected_indoor_gml_entities
@@ -487,7 +488,7 @@ module ULOL
           model.active_path = valid_path
         end
       rescue StandardError => e
-        puts "[IndoorGML] Edit context restore failed: #{e.class}: #{e.message}"
+        IndoorCore::Logger.puts "[IndoorGML] Edit context restore failed: #{e.class}: #{e.message}"
       end
     end
 
