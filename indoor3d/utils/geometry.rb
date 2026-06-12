@@ -339,7 +339,7 @@ module ULOL
 
             normal = face.normal.transform(transformation)
             normal.normalize!
-            { points: points, normal: normal }
+            { points: points, normal: normal, triangles: face_mesh_triangles(face, transformation) }
           end.compact
         end
         private_class_method :world_faces
@@ -349,7 +349,8 @@ module ULOL
           faces2 = world_faces(entity2)
           faces1.each_with_object([]) do |face1, candidates|
             faces2.each do |face2|
-              next unless coplanar_touching_faces?(face1, face2, tolerance)
+              next unless normals_parallel?(face1[:normal], face2[:normal])
+              next unless points_on_plane?(face2[:points], face1[:normal], face1[:points].first, tolerance)
 
               overlap = coplanar_overlap_candidate(face1, face2, tolerance)
               candidates << overlap if overlap
@@ -359,22 +360,48 @@ module ULOL
         private_class_method :common_face_candidates
 
         def self.coplanar_overlap_candidate(face1, face2, tolerance)
+          metrics = coplanar_overlap_metrics(face1, face2, tolerance)
+          return nil unless metrics
+
+          area = metrics[:area]
+          centroid_2d = metrics[:centroid_2d]
           axis = dominant_axis(face1[:normal])
-          polygon1 = project_points_for_axis(face1[:points], axis)
-          polygon2 = project_points_for_axis(face2[:points], axis)
-          overlap = clip_polygon(polygon1, polygon2)
-          return nil if overlap.length < 3
-
-          area = polygon_area_2d(overlap).abs
-          return nil if area <= tolerance.to_f
-
-          centroid_2d = polygon_centroid_2d(overlap)
           centroid = unproject_point(centroid_2d, axis, face1[:normal], face1[:points].first)
           return nil unless centroid
 
           { area: area, centroid: centroid, normal1: face1[:normal], normal2: face2[:normal] }
         end
         private_class_method :coplanar_overlap_candidate
+
+        def self.coplanar_overlap_metrics(face1, face2, tolerance)
+          return nil if face1[:triangles].empty? || face2[:triangles].empty?
+
+          axis = dominant_axis(face1[:normal])
+          weighted_x = 0.0
+          weighted_y = 0.0
+          total_area = 0.0
+
+          face1[:triangles].each do |triangle1|
+            polygon1 = project_points_for_axis(triangle1, axis)
+            face2[:triangles].each do |triangle2|
+              polygon2 = project_points_for_axis(triangle2, axis)
+              overlap = clip_polygon(polygon1, polygon2)
+              next if overlap.length < 3
+
+              area = polygon_area_2d(overlap).abs
+              next if area <= area_tolerance(tolerance)
+
+              centroid = polygon_centroid_2d(overlap)
+              weighted_x += centroid[0] * area
+              weighted_y += centroid[1] * area
+              total_area += area
+            end
+          end
+          return nil if total_area <= area_tolerance(tolerance)
+
+          { area: total_area, centroid_2d: [weighted_x / total_area, weighted_y / total_area] }
+        end
+        private_class_method :coplanar_overlap_metrics
 
         def self.project_points_for_axis(points, axis)
           points.map do |point|
@@ -408,10 +435,33 @@ module ULOL
 
             normal = face.normal.transform(transformation)
             normal.normalize!
-            { points: points, normal: [normal.x.to_f, normal.y.to_f, normal.z.to_f] }
+            triangles = face_mesh_triangles(face, transformation).map do |triangle|
+              triangle.map { |point| [point.x.to_f, point.y.to_f, point.z.to_f] }
+            end
+            { points: points, normal: [normal.x.to_f, normal.y.to_f, normal.z.to_f], triangles: triangles }
           end.compact
         end
         private_class_method :snapshot_faces
+
+        def self.face_mesh_triangles(face, transformation)
+          mesh = face.mesh
+          points = (1..mesh.count_points).map { |index| mesh.point_at(index).transform(transformation) }
+          (1..mesh.count_polygons).flat_map do |index|
+            polygon = mesh.polygon_at(index).map { |point_index| points[point_index.abs - 1] }.compact
+            next [] if polygon.length < 3
+
+            polygon.length == 3 ? [polygon] : triangulate_polygon_fan(polygon)
+          end
+        rescue StandardError => e
+          puts "[IndoorGML] Face mesh triangulation failed: #{e.class}: #{e.message}"
+          []
+        end
+        private_class_method :face_mesh_triangles
+
+        def self.triangulate_polygon_fan(points)
+          (1...(points.length - 1)).map { |index| [points.first, points[index], points[index + 1]] }
+        end
+        private_class_method :triangulate_polygon_fan
 
         def self.group_faces(group)
           return [] unless group&.valid?
@@ -790,28 +840,14 @@ module ULOL
         end
         private_class_method :unproject_point
 
-        def self.coplanar_touching_faces?(face1, face2, tolerance)
-          normal1 = face1[:normal]
-          normal2 = face2[:normal]
-          return false unless normals_parallel?(normal1, normal2)
-          return false unless points_on_plane?(face2[:points], normal1, face1[:points].first, tolerance)
-
-          polygon1 = project_points(face1[:points], normal1)
-          polygon2 = project_points(face2[:points], normal1)
-          polygons_touch?(polygon1, polygon2, tolerance)
-        end
-        private_class_method :coplanar_touching_faces?
-
         def self.coplanar_area_overlapping_faces?(face1, face2, tolerance)
           normal1 = face1[:normal]
           normal2 = face2[:normal]
           return false unless normals_parallel?(normal1, normal2)
           return false unless points_on_plane?(face2[:points], normal1, face1[:points].first, tolerance)
 
-          axis = dominant_axis(normal1)
-          polygon1 = project_points_for_axis(face1[:points], axis)
-          polygon2 = project_points_for_axis(face2[:points], axis)
-          polygon_area_2d(clip_polygon(polygon1, polygon2)).abs > area_tolerance(tolerance)
+          metrics = coplanar_overlap_metrics(face1, face2, tolerance)
+          metrics && metrics[:area] > area_tolerance(tolerance)
         end
         private_class_method :coplanar_area_overlapping_faces?
 
@@ -838,11 +874,23 @@ module ULOL
           return false unless snapshot_normals_parallel?(normal1, normal2)
           return false unless snapshot_points_on_plane?(face2[:points], normal1, face1[:points].first, tolerance)
 
-          polygon1 = project_snapshot_points(face1[:points], normal1)
-          polygon2 = project_snapshot_points(face2[:points], normal1)
-          polygon_area_2d(clip_polygon(polygon1, polygon2)).abs > area_tolerance(tolerance)
+          snapshot_coplanar_overlap_area(face1, face2) > area_tolerance(tolerance)
         end
         private_class_method :coplanar_area_overlapping_snapshot_faces?
+
+        def self.snapshot_coplanar_overlap_area(face1, face2)
+          return 0.0 if face1[:triangles].empty? || face2[:triangles].empty?
+
+          axis = dominant_snapshot_axis(face1[:normal])
+          face1[:triangles].sum do |triangle1|
+            polygon1 = project_snapshot_points_for_axis(triangle1, axis)
+            face2[:triangles].sum do |triangle2|
+              polygon2 = project_snapshot_points_for_axis(triangle2, axis)
+              polygon_area_2d(clip_polygon(polygon1, polygon2)).abs
+            end
+          end
+        end
+        private_class_method :snapshot_coplanar_overlap_area
 
         def self.area_tolerance(tolerance)
           tolerance.to_f * tolerance.to_f
@@ -881,48 +929,19 @@ module ULOL
         end
         private_class_method :snapshot_points_on_plane?
 
-        def self.project_points(points, normal)
-          ax = normal.x.abs
-          ay = normal.y.abs
-          az = normal.z.abs
-
+        def self.project_snapshot_points_for_axis(points, axis)
           points.map do |point|
-            if ax >= ay && ax >= az
-              [point.y.to_f, point.z.to_f]
-            elsif ay >= ax && ay >= az
-              [point.x.to_f, point.z.to_f]
-            else
-              [point.x.to_f, point.y.to_f]
-            end
-          end
-        end
-        private_class_method :project_points
-
-        def self.project_snapshot_points(points, normal)
-          ax = normal[0].abs
-          ay = normal[1].abs
-          az = normal[2].abs
-
-          points.map do |point|
-            if ax >= ay && ax >= az
+            case axis
+            when :x
               [point[1], point[2]]
-            elsif ay >= ax && ay >= az
+            when :y
               [point[0], point[2]]
             else
               [point[0], point[1]]
             end
           end
         end
-        private_class_method :project_snapshot_points
-
-        def self.polygons_touch?(polygon1, polygon2, tolerance)
-          polygon1.any? { |point| point_in_polygon?(point, polygon2, tolerance) } ||
-            polygon2.any? { |point| point_in_polygon?(point, polygon1, tolerance) } ||
-            polygon_edges(polygon1).any? do |edge1|
-              polygon_edges(polygon2).any? { |edge2| segments_intersect?(edge1, edge2, tolerance) }
-            end
-        end
-        private_class_method :polygons_touch?
+        private_class_method :project_snapshot_points_for_axis
 
         def self.polygon_edges(polygon)
           polygon.each_index.map do |index|
@@ -947,20 +966,6 @@ module ULOL
           inside
         end
         private_class_method :point_in_polygon?
-
-        def self.segments_intersect?(edge1, edge2, tolerance)
-          p1, p2 = edge1
-          q1, q2 = edge2
-
-          return true if point_on_segment?(p1, edge2, tolerance)
-          return true if point_on_segment?(p2, edge2, tolerance)
-          return true if point_on_segment?(q1, edge1, tolerance)
-          return true if point_on_segment?(q2, edge1, tolerance)
-
-          orientation(p1, p2, q1) * orientation(p1, p2, q2) < 0 &&
-            orientation(q1, q2, p1) * orientation(q1, q2, p2) < 0
-        end
-        private_class_method :segments_intersect?
 
         def self.point_on_segment?(point, edge, tolerance)
           p1, p2 = edge
