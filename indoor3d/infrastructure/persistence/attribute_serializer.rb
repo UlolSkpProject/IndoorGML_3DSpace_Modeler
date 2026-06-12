@@ -110,7 +110,7 @@ module ULOL
           yield
           true
         rescue StandardError => e
-          puts "[IndoorGML] Attribute write failed: #{e.class}: #{e.message}"
+          IndoorCore::Logger.puts "[IndoorGML] Attribute write failed: #{e.class}: #{e.message}"
           false
         end
 

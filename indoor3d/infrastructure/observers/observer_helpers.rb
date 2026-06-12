@@ -27,11 +27,11 @@ module ULOL
         end
 
         def log_event(event_name, entity)
-          puts "[IndoorGML] #{self.class.name.split('::').last}##{event_name} #{entity_summary(entity)}"
+          IndoorCore::Logger.puts "[IndoorGML] #{self.class.name.split('::').last}##{event_name} #{entity_summary(entity)}"
         end
         
         def log_removed(event_name, entity_id)
-          puts "[IndoorGML] #{self.class.name.split('::').last}##{event_name} entity_id=#{entity_id}"
+          IndoorCore::Logger.puts "[IndoorGML] #{self.class.name.split('::').last}##{event_name} entity_id=#{entity_id}"
         end
 
       end

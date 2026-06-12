@@ -12,6 +12,7 @@ module ULOL
 
         class Val3dityRunner
           VENDOR_ROOT = File.expand_path('../assets/vendor/val3dity-windows-x64-v2.2.0', __dir__)
+          WINDOWS_ONLY_MESSAGE = 'Val3dity validity check is currently supported only on Windows because the bundled runtime is val3dity-windows-x64-v2.2.0.'
 
           attr_reader :report_json_path, :report_html_path
 
@@ -24,6 +25,7 @@ module ULOL
           end
 
           def validate(progress: nil)
+            ensure_supported_platform!
             ensure_runtime_files!
             FileUtils.rm_f(@report_json_path)
             progress&.running(:val3dity)
@@ -40,6 +42,10 @@ module ULOL
           end
 
           private
+
+          def ensure_supported_platform!
+            raise WINDOWS_ONLY_MESSAGE unless windows?
+          end
 
           def ensure_runtime_files!
             raise "val3dity.exe was not found:\n#{exe_path}" unless File.exist?(exe_path)
@@ -180,11 +186,7 @@ module ULOL
           end
 
           def run_hidden(args)
-            if windows?
-              run_hidden_windows(args)
-            else
-              system(*args)
-            end
+            run_hidden_windows(args)
           end
 
           def run_hidden_windows(args)

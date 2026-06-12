@@ -15,7 +15,7 @@ module ULOL
           begin
             handle_active_path_changed(model, source: :active_path_changed)
           rescue StandardError => e
-            puts "[IndoorGML] Active path handling failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Active path handling failed: #{e.class}: #{e.message}"
           end
         end
 
@@ -30,7 +30,7 @@ module ULOL
         private
 
         def handle_active_path_changed(model, source:)
-          puts "[IndoorGML] active path changed source=#{source}"
+          IndoorCore::Logger.puts "[IndoorGML] active path changed source=#{source}"
           IndoorModel.for(model).active_path_changed(model)
           remember_active_path(model)
         end
@@ -50,7 +50,7 @@ module ULOL
               handle_active_path_changed(model, source: source)
               recover_unlocked_primal_after_transaction(model)
             rescue StandardError => e
-              puts "[IndoorGML] Active path #{source} handling failed: #{e.class}: #{e.message}"
+              IndoorCore::Logger.puts "[IndoorGML] Active path #{source} handling failed: #{e.class}: #{e.message}"
             end
           end
         end

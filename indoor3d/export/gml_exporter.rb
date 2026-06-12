@@ -89,7 +89,7 @@ module ULOL
               close_active_path(model)
             end
           rescue StandardError => e
-            puts "[IndoorGML] Export active path restore failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Export active path restore failed: #{e.class}: #{e.message}"
           end
 
           def document

@@ -20,7 +20,7 @@ module ULOL
             model.add_observer(@model_observer)
             @observed_model_ids[key] = true
           rescue StandardError => e
-            puts "[IndoorGML] Model observer setup failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Model observer setup failed: #{e.class}: #{e.message}"
           end
         end
 
@@ -48,7 +48,7 @@ module ULOL
           begin
             IndoorModel.each_instance.each(&:cleanup_before_quit)
           rescue StandardError => e
-            puts "[IndoorGML] Shutdown cleanup failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Shutdown cleanup failed: #{e.class}: #{e.message}"
           end
         end
 
@@ -56,7 +56,7 @@ module ULOL
           begin
             IndoorModel.for(model).refresh_runtime_data()
           rescue StandardError => e
-            puts "[IndoorGML] Runtime refresh failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Runtime refresh failed: #{e.class}: #{e.message}"
           end
         end
       end

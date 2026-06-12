@@ -18,7 +18,7 @@ module ULOL
           end
 
           def request_finish_editing
-            puts '[IndoorGML] EditModeDialog#RequestfinishEditing'
+            IndoorCore::Logger.puts '[IndoorGML] EditModeDialog#RequestfinishEditing'
             result = UI.messagebox("CellSpace 편집을 종료하시겠습니까?", MB_YESNO)
             return false unless result == IDYES
 
@@ -84,7 +84,7 @@ module ULOL
               Sketchup.active_model().active_view().invalidate() if Sketchup.active_model&.active_view
               true
             rescue StandardError => e
-              puts "[IndoorGML] Overlay radius range update failed: #{e.class}: #{e.message}"
+              IndoorCore::Logger.puts "[IndoorGML] Overlay radius range update failed: #{e.class}: #{e.message}"
               false
             end
           end
@@ -107,7 +107,7 @@ module ULOL
               true
             rescue StandardError => e
               model.abort_operation
-              puts "[IndoorGML] Clear all failed: #{e.class}: #{e.message}"
+              IndoorCore::Logger.puts "[IndoorGML] Clear all failed: #{e.class}: #{e.message}"
               false
             end
           end
@@ -132,7 +132,7 @@ module ULOL
               model.selection.add_observer(@selection_observer)
               @selection_observed_model_id = model.object_id
             rescue StandardError => e
-              puts "[IndoorGML] Selection observer attach failed: #{e.class}: #{e.message}"
+              IndoorCore::Logger.puts "[IndoorGML] Selection observer attach failed: #{e.class}: #{e.message}"
             end
           end
 
@@ -144,7 +144,7 @@ module ULOL
               model.selection.remove_observer(@selection_observer)
               @selection_observed_model_id = nil
             rescue StandardError => e
-              puts "[IndoorGML] Selection observer detach failed: #{e.class}: #{e.message}"
+              IndoorCore::Logger.puts "[IndoorGML] Selection observer detach failed: #{e.class}: #{e.message}"
             end
           end
 
@@ -180,7 +180,7 @@ module ULOL
                 cell_geometry_editing: @editor_session.cell_space_geometry_editing?
               }
             rescue StandardError => e
-              puts "[IndoorGML] Edit mode selection snapshot failed: #{e.class}: #{e.message}"
+              IndoorCore::Logger.puts "[IndoorGML] Edit mode selection snapshot failed: #{e.class}: #{e.message}"
               nil
             end
           end
@@ -211,7 +211,7 @@ module ULOL
                 failure: proc do |error|
                   model.abort_operation if operation_started
                   operation_started = false
-                  puts "[IndoorGML] Selected solid group conversion failed: #{error.class}: #{error.message}"
+                  IndoorCore::Logger.puts "[IndoorGML] Selected solid group conversion failed: #{error.class}: #{error.message}"
                   UI.messagebox("CellSpace conversion failed:\n#{error.message}")
                 end
               ) do |group, _index|
@@ -219,7 +219,7 @@ module ULOL
                   convert_single_group_to_cell_space(group, cell_type, category_code)
                   converted_count += 1
                 rescue StandardError => e
-                  puts "[IndoorGML] Selected solid group conversion failed: #{e.class}: #{e.message}"
+                  IndoorCore::Logger.puts "[IndoorGML] Selected solid group conversion failed: #{e.class}: #{e.message}"
                   errors << { group: cell_space_conversion_group_label(group), reason: e.message }
                 end
               end
@@ -231,7 +231,7 @@ module ULOL
               true
             rescue StandardError => e
               model.abort_operation if operation_started
-              puts "[IndoorGML] Selected solid group conversion failed: #{e.class}: #{e.message}"
+              IndoorCore::Logger.puts "[IndoorGML] Selected solid group conversion failed: #{e.class}: #{e.message}"
               false
             end
           end
@@ -258,7 +258,7 @@ module ULOL
               true
             rescue StandardError => e
               model.abort_operation() if operation_started
-              puts "[IndoorGML] Selected CellSpace type update failed: #{e.class}: #{e.message}"
+              IndoorCore::Logger.puts "[IndoorGML] Selected CellSpace type update failed: #{e.class}: #{e.message}"
               false
             end
           end
@@ -275,7 +275,7 @@ module ULOL
 
               @editor_session.edit_cell_space_geometry(cell_space)
             rescue StandardError => e
-              puts "[IndoorGML] Selected CellSpace geometry edit failed: #{e.class}: #{e.message}"
+              IndoorCore::Logger.puts "[IndoorGML] Selected CellSpace geometry edit failed: #{e.class}: #{e.message}"
               false
             end
           end

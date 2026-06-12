@@ -31,7 +31,7 @@ module ULOL
               lock_indoor_entity(copy) unless cell_space_entity?(copy)
               copy
             rescue StandardError => e
-              puts "[IndoorGML] Entity relocation failed: #{e.class}: #{e.message}"
+              IndoorCore::Logger.puts "[IndoorGML] Entity relocation failed: #{e.class}: #{e.message}"
               lock_indoor_entity(entity) unless cell_space_entity?(entity)
               nil
             ensure

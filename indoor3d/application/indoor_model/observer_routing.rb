@@ -56,7 +56,7 @@ module ULOL
           end
 
           def handle_space_features_etc_changed(entity)
-            puts "[IndoorGML] SpaceFeatures change ignored as etc: entity_id=#{entity.entityID} name=#{entity.name}"
+            IndoorCore::Logger.puts "[IndoorGML] SpaceFeatures change ignored as etc: entity_id=#{entity.entityID} name=#{entity.name}"
             remember_space_features_change_snapshot(entity)
             false
           ensure
@@ -110,9 +110,9 @@ module ULOL
           end
 
           def log_space_features_change(entity, change_kind, changed_fields, previous_snapshot, current_snapshot)
-            puts "[IndoorGML] SpaceFeatures change classified kind=#{change_kind} entity_id=#{entity.entityID} name=#{entity.name} fields=#{changed_fields.join(',')}"
+            IndoorCore::Logger.puts "[IndoorGML] SpaceFeatures change classified kind=#{change_kind} entity_id=#{entity.entityID} name=#{entity.name} fields=#{changed_fields.join(',')}"
             changed_fields.each do |field|
-              puts "[IndoorGML]   #{field}: #{space_features_snapshot_log_value(previous_snapshot&.[](field))} -> #{space_features_snapshot_log_value(current_snapshot&.[](field))}"
+              IndoorCore::Logger.puts "[IndoorGML]   #{field}: #{space_features_snapshot_log_value(previous_snapshot&.[](field))} -> #{space_features_snapshot_log_value(current_snapshot&.[](field))}"
             end
           end
 
@@ -155,7 +155,7 @@ module ULOL
           def root_entity_removed(entity_id)
             return if @erasing || @relocating_entity
 
-            puts "[IndoorGML] Root entity removed: entity_id=#{entity_id}"
+            IndoorCore::Logger.puts "[IndoorGML] Root entity removed: entity_id=#{entity_id}"
           end
 
           def primal_entity_added(entity)
@@ -170,18 +170,18 @@ module ULOL
                 if duplicate_cell_space_identity?(entity)
                   next if make_cell_space_copy_independent(entity)
 
-                  puts '[IndoorGML] CellSpace copy independence failed. Falling back to normal add handling.'
+                  IndoorCore::Logger.puts '[IndoorGML] CellSpace copy independence failed. Falling back to normal add handling.'
                 end
 
                 cell_space = find_cell_space_for_entity(entity)
                 attach_cell_space_observer(entity)
                 if stale_cell_space_runtime?(cell_space, entity)
-                  puts '[IndoorGML] CellSpace runtime stale. Refreshing runtime data.'
+                  IndoorCore::Logger.puts '[IndoorGML] CellSpace runtime stale. Refreshing runtime data.'
                   refresh_runtime_data
                 elsif cell_space
                   synchronize_adjacency_and_transitions_for_cell_space(cell_space)
                 else
-                  puts '[IndoorGML] CellSpace runtime data missing. Refresh is required.'
+                  IndoorCore::Logger.puts '[IndoorGML] CellSpace runtime data missing. Refresh is required.'
                 end
               end
             else
@@ -193,7 +193,7 @@ module ULOL
             return if @erasing || @relocating_entity
 
             cell_space = @feature_registry.find_cell_space_by_removed_entity_id(entity_id)
-            puts "[IndoorGML] Primal entity removed: entity_id=#{entity_id} cell_space=#{cell_space&.id || 'missing'}"
+            IndoorCore::Logger.puts "[IndoorGML] Primal entity removed: entity_id=#{entity_id} cell_space=#{cell_space&.id || 'missing'}"
             with_indoor_model_operation('IndoorGML Primal CellSpace Removed', transparent: true) do
               erase_cell_space(cell_space, erase_sketchup_group: false) if cell_space
             end
@@ -227,7 +227,7 @@ module ULOL
               Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
             end
           rescue StandardError => e
-            puts "[IndoorGML] Primal children finish normalize failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Primal children finish normalize failed: #{e.class}: #{e.message}"
           end
 
           def normalize_primal_child_for_finish(entity, raw_entities)
@@ -320,7 +320,7 @@ module ULOL
             wrapper.name = 'IndoorGML_NonCellSpaceEntities' if wrapper.respond_to?(:name=)
             move_remaining_primal_container_to_root(wrapper)
           rescue StandardError => e
-            puts "[IndoorGML] Raw primal entities relocate failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Raw primal entities relocate failed: #{e.class}: #{e.message}"
             nil
           end
 

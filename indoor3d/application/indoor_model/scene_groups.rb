@@ -28,7 +28,7 @@ module ULOL
           def find_existing_space_features_groups
             entities = (@model || Sketchup.active_model).entities
             @primal_group = find_group(entities, PRIMAL_GROUP_NAME)
-            puts '[IndoorGML] PrimalSpaceFeatures group not found during refresh.' unless @primal_group&.valid?
+            IndoorCore::Logger.puts '[IndoorGML] PrimalSpaceFeatures group not found during refresh.' unless @primal_group&.valid?
           end
 
           def attach_existing_space_features_observers
@@ -89,7 +89,7 @@ module ULOL
           def recenter_cell_space_geometry(cell_space_entity)
             with_indoor_model_operation('IndoorGML Recenter CellSpace Geometry', transparent: true) do
               center = Utils::Geometry.find_shell_inner_centroid(cell_space_entity)
-              puts "[IndoorGML] recenter_cell_space_geometry center=#{center} distance=#{center.distance(ORIGIN)}"
+              IndoorCore::Logger.puts "[IndoorGML] recenter_cell_space_geometry center=#{center} distance=#{center.distance(ORIGIN)}"
               next if center.distance(ORIGIN) <= 0.001
 
               set_group_transformation(
@@ -143,7 +143,7 @@ module ULOL
 
           def register_space_features_entity(entity, feature)
             unless entity.is_a?(Sketchup::Group)
-              puts "[IndoorGML] SpaceFeatures restore skipped: #{feature} is #{entity.class}"
+              IndoorCore::Logger.puts "[IndoorGML] SpaceFeatures restore skipped: #{feature} is #{entity.class}"
               return
             end
 
@@ -164,7 +164,7 @@ module ULOL
               point = origin_construction_point(group) || group.entities.add_cpoint(ORIGIN)
               point.hidden = true if point&.valid? && point.respond_to?(:hidden=)
             rescue StandardError => e
-              puts "[IndoorGML] Origin point creation failed: #{e.class}: #{e.message}"
+              IndoorCore::Logger.puts "[IndoorGML] Origin point creation failed: #{e.class}: #{e.message}"
             end
           end
 

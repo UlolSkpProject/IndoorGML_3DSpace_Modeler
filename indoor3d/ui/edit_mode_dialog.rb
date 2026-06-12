@@ -30,7 +30,7 @@ module ULOL
 
             @dialog.execute_script(selection_script(snapshot))
           rescue StandardError => e
-            puts "[IndoorGML] Edit mode dialog selection update failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Edit mode dialog selection update failed: #{e.class}: #{e.message}"
           end
         end
 
@@ -39,7 +39,7 @@ module ULOL
             @dialog&.close if @dialog&.visible?
             @dialog = nil
           rescue StandardError => e
-            puts "[IndoorGML] Edit mode dialog close failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Edit mode dialog close failed: #{e.class}: #{e.message}"
           end
         end
 
@@ -76,13 +76,13 @@ module ULOL
             end
           end
           dialog.add_action_callback('setSelectedCellSpaceClassification') do |_context, selection_value|
-            puts "[IndoorGML] EditModeDialog#setSelectedCellSpaceClassification value=#{selection_value}"
+            IndoorCore::Logger.puts "[IndoorGML] EditModeDialog#setSelectedCellSpaceClassification value=#{selection_value}"
             UI.start_timer(0, false) do
               @indoor_model.set_selected_cell_space_classification(selection_value)
             end
           end
           dialog.add_action_callback('convertSelectedSolidGroups') do |_context, selection_value|
-            puts "[IndoorGML] EditModeDialog#convertSelectedSolidGroups value=#{selection_value}"
+            IndoorCore::Logger.puts "[IndoorGML] EditModeDialog#convertSelectedSolidGroups value=#{selection_value}"
             UI.start_timer(0, false) do
               @indoor_model.convert_selected_solid_groups_to_cell_spaces(selection_value)
             end
@@ -93,13 +93,13 @@ module ULOL
             end
           end
           dialog.add_action_callback('clearAllIndoorGmlElements') do |_context|
-            puts '[IndoorGML] EditModeDialog#clearAllIndoorGmlElements'
+            IndoorCore::Logger.puts '[IndoorGML] EditModeDialog#clearAllIndoorGmlElements'
             UI.start_timer(0, false) do
               @indoor_model.clear_all_indoor_gml_elements()
             end
           end
           dialog.set_on_closed do
-            puts "[IndoorGML] set_on_closed called, editing=#{@indoor_model.editing?}"
+            IndoorCore::Logger.puts "[IndoorGML] set_on_closed called, editing=#{@indoor_model.editing?}"
             @indoor_model.finish_editing()
             @dialog = nil
           end if dialog.respond_to?(:set_on_closed)
@@ -115,7 +115,7 @@ module ULOL
             height = [[requested_height, MIN_DIALOG_HEIGHT].max, MAX_DIALOG_HEIGHT].min
             set_dialog_height(height)
           rescue StandardError => e
-            puts "[IndoorGML] Edit mode dialog resize failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Edit mode dialog resize failed: #{e.class}: #{e.message}"
           end
         end
 

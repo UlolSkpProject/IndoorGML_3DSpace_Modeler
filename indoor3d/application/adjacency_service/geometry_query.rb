@@ -22,7 +22,7 @@ module ULOL
                         }
                       end
           rescue StandardError => e
-            puts "[IndoorGML] Common face waypoint candidates failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Common face waypoint candidates failed: #{e.class}: #{e.message}"
             []
           end
 

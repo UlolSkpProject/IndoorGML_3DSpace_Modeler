@@ -40,7 +40,7 @@ module ULOL
             draw_dual_space_overlay(view)
             draw_progress_bar(view) if @indoor_model.progress_active?()
           rescue StandardError => e
-            puts "[IndoorGML] Edit mode overlay draw failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Edit mode overlay draw failed: #{e.class}: #{e.message}"
           end
         end
 
@@ -50,7 +50,7 @@ module ULOL
             add_dual_overlay_bounds(bounds)
             bounds
           rescue StandardError => e
-            puts "[IndoorGML] Edit mode overlay extents failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Edit mode overlay extents failed: #{e.class}: #{e.message}"
             Geom::BoundingBox.new
           end
         end
@@ -237,7 +237,7 @@ module ULOL
             second: polyline_segments(offset_transition_points_behind_states(view, curve_point_groups[:second]), view)
           }
         rescue StandardError => e
-          puts "[IndoorGML] Transition curve draw failed: #{e.class}: #{e.message}"
+          IndoorCore::Logger.puts "[IndoorGML] Transition curve draw failed: #{e.class}: #{e.message}"
           {
             default: polyline_segments(control_points || []),
             first: [],
