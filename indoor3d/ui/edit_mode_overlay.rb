@@ -20,6 +20,7 @@ module ULOL
         PROGRESS_TEXT_COLOR = Sketchup::Color.new(255, 255, 255, 255)
         CIRCLE_SEGMENTS = 16
         OVERLAY_RADIUS_SCALE = 1.1
+        TRANSITION_DEPTH_OFFSET_PIXELS = 2.0
 
         def initialize(indoor_model)
           @indoor_model = indoor_model
@@ -227,12 +228,7 @@ module ULOL
             next unless transition&.valid?()
             next unless transition.state1&.valid?() && transition.state2&.valid?()
 
-            point1 = overlay_state_point(transition.state1)
-            point2 = overlay_state_point(transition.state2)
-            next if point1.distance(point2) <= 0.001
-
-            points << point1
-            points << point2
+            points.concat(transition_curve_segments(view, transition))
           end
           view.draw(GL_LINES, points) unless points.empty?
         end
@@ -243,7 +239,62 @@ module ULOL
         end
 
         def overlay_transition_line_width
-          [(@indoor_model.overlay_min_radius_pixels * 0.5).round, 1].max
+          [(@indoor_model.overlay_max_radius_pixels.to_f * 1.0).round, 2].max
+        end
+
+        def transition_curve_segments(view, transition)
+          control_points = transition_control_points(transition)
+          return [] if control_points.length < 2
+
+          spline_points = Utils::Math::CatmullRom.generate_spline(control_points, 32)
+          spline_points = offset_transition_points_behind_states(view, spline_points)
+          polyline_segments(spline_points)
+        rescue StandardError => e
+          puts "[IndoorGML] Transition curve draw failed: #{e.class}: #{e.message}"
+          polyline_segments(control_points || [])
+        end
+
+        def transition_control_points(transition)
+          point1 = overlay_state_point(transition.state1)
+          point2 = overlay_state_point(transition.state2)
+          return [] if point1.distance(point2) <= 0.001
+
+          waypoint = overlay_transition_waypoint(transition.selected_waypoint)
+          waypoint ? [point1, waypoint, point2] : [point1, point2]
+        end
+
+        def polyline_segments(points)
+          points.each_cons(2).flat_map do |from, to|
+            next [] if from.distance(to) <= 0.001
+
+            [from, to]
+          end
+        end
+
+        def offset_transition_points_behind_states(view, points)
+          direction = view.camera.direction.clone
+          direction.normalize!
+          points.map do |point|
+            distance = view.pixels_to_model(TRANSITION_DEPTH_OFFSET_PIXELS, point)
+            Geom::Point3d.new(
+              point.x + (direction.x * distance),
+              point.y + (direction.y * distance),
+              point.z + (direction.z * distance)
+            )
+          end
+        rescue StandardError
+          points
+        end
+
+        def overlay_transition_waypoint(point)
+          return nil unless point.is_a?(Geom::Point3d)
+
+          primal_group = @indoor_model.primal_group
+          return point.transform(primal_group.transformation) if primal_group&.valid?
+
+          point
+        rescue StandardError
+          point
         end
 
         def clamp_overlay_radius(view, center, model_radius, pixel_scale: 1.0)
