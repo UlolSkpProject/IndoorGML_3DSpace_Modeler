@@ -4,7 +4,7 @@
      viewBox="0 0 32 32"
      fill="none">
   <!-- Geometry cube -->
-  <g transform="translate(-0.3 4.8) scale(1.14)">
+  <g transform="translate(-0.3 0.8) scale(1.14)">
     <path d="M12 3.5 L20 8 L12 12.5 L4 8 Z"
           fill="#E3F2FD"
           stroke="#1F2937"
