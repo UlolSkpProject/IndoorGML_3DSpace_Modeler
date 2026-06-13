@@ -214,7 +214,7 @@ module ULOL
                   operation_started = false
                   @editor_session.selection_changed()
                   Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
-                  UI.messagebox(cell_space_conversion_result_message(converted_count, errors))
+                  UI.messagebox(ConversionMessageFormatter.result_message(converted_count, errors))
                 end,
                 failure: proc do |error|
                   model.abort_operation if operation_started
@@ -228,7 +228,7 @@ module ULOL
                   converted_count += 1
                 rescue StandardError => e
                   IndoorCore::Logger.puts "[IndoorGML] Selected solid group conversion failed: #{e.class}: #{e.message}"
-                  errors << { group: cell_space_conversion_group_label(group), reason: e.message }
+                  errors << { group: ConversionMessageFormatter.group_label(group), reason: e.message }
                 end
               end
               unless scheduled
@@ -386,36 +386,6 @@ module ULOL
             end.uniq
 
             classifications.length == 1 ? classifications.first : nil
-          end
-
-          def cell_space_conversion_group_label(group)
-            name = group.respond_to?(:name) ? group.name.to_s.strip : ''
-            id = group.respond_to?(:entityID) ? group.entityID : nil
-            return "#{name} (entity #{id})" unless name.empty? || id.nil?
-            return name unless name.empty?
-            return "entity #{id}" unless id.nil?
-
-            'unknown group'
-          end
-
-          def cell_space_conversion_result_message(converted_count, errors)
-            message = +"Succeed : #{converted_count}\nFailed : #{errors.length}"
-            return message if errors.empty?
-
-            grouped_errors = errors.group_by { |error| cell_space_conversion_reason_label(error[:reason]) }
-            grouped_errors.each do |reason, entries|
-              message << "\n- #{reason}"
-              entries.each do |entry|
-                message << "\n  #{entry[:group]}"
-              end
-            end
-            message
-          end
-
-          def cell_space_conversion_reason_label(reason)
-            return 'SolidGroup내 분리된 형상' if reason.to_s.include?('Disconnected solid shells detected')
-
-            reason.to_s.empty? ? '알 수 없는 실패 원인' : reason.to_s
           end
 
           def cell_space_type_change_locked_by_rm_helper?(cell_spaces)

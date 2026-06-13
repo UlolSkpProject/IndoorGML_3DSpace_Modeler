@@ -342,19 +342,7 @@ module ULOL
 
           def changed_cell_space_snapshot_fields(previous_snapshot, current_snapshot)
             current_snapshot.keys.select do |key|
-              snapshot_field_changed?(key, previous_snapshot[key], current_snapshot[key])
-            end
-          end
-
-          def snapshot_field_changed?(key, previous_value, current_value)
-            if key == :transformation
-              return true if previous_value.nil? || current_value.nil?
-
-              previous_value.each_with_index.any? do |value, index|
-                (value - current_value[index]).abs > 0.000001
-              end
-            else
-              previous_value != current_value
+              Utils::ChangeSnapshot.field_changed?(key, previous_snapshot[key], current_snapshot[key])
             end
           end
 
@@ -369,21 +357,8 @@ module ULOL
           def log_cell_space_change(entity, change_kind, changed_fields, previous_snapshot, current_snapshot)
             IndoorCore::Logger.puts "[IndoorGML] CellSpace change classified kind=#{change_kind} entity_id=#{entity.entityID} name=#{entity.name} fields=#{changed_fields.join(',')}"
             changed_fields.each do |field|
-              IndoorCore::Logger.puts "[IndoorGML]   #{field}: #{snapshot_log_value(previous_snapshot&.[](field))} -> #{snapshot_log_value(current_snapshot&.[](field))}"
+              IndoorCore::Logger.puts "[IndoorGML]   #{field}: #{Utils::ChangeSnapshot.log_value(previous_snapshot&.[](field))} -> #{Utils::ChangeSnapshot.log_value(current_snapshot&.[](field))}"
             end
-          end
-
-          def snapshot_log_value(value)
-            return 'nil' if value.nil?
-            return transform_log_value(value) if value.is_a?(Array) && value.length == 16
-
-            value.inspect
-          end
-
-          def transform_log_value(values)
-            translation = values.values_at(12, 13, 14).map { |value| format('%.6f', value) }
-            axes = values.values_at(0, 5, 10).map { |value| format('%.6f', value) }
-            "translation=[#{translation.join(',')}] axes_diag=[#{axes.join(',')}]"
           end
 
           def name_cell_space_entity(cell_space)

@@ -49,7 +49,7 @@ module ULOL
                   end
                   model.commit_operation()
 
-                  UI.messagebox(cell_space_conversion_result_message(converted_count, errors))
+                  UI.messagebox(ConversionMessageFormatter.result_message(converted_count, errors))
                 end,
                 failure: proc do |error|
                   indoor_model.with_active_path_enforcement_suspended do
@@ -69,7 +69,7 @@ module ULOL
                   converted_count += 1
                 rescue StandardError => e
                   Logger.puts "[IndoorGML] CellSpace conversion failed: #{e.class}: #{e.message}"
-                  errors << { group: cell_space_conversion_group_label(group), reason: e.message }
+                  errors << { group: ConversionMessageFormatter.group_label(group), reason: e.message }
                 end
               end
               unless scheduled

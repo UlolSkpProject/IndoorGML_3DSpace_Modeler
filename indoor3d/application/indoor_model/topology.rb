@@ -12,7 +12,6 @@ module ULOL
           end
 
           def mark_cell_space_dirty(cell_space)
-            @dirty_cell_space_pids ||= {}
             return unless cell_space&.valid?
 
             entity = cell_space.valid_sketchup_group
@@ -25,7 +24,6 @@ module ULOL
           end
 
           def schedule_dirty_cell_space_sync
-            @dirty_cell_space_pids ||= {}
             return if @cell_space_sync_scheduled
 
             @cell_space_sync_scheduled = true
@@ -35,7 +33,6 @@ module ULOL
           end
 
           def flush_dirty_cell_space_sync
-            @dirty_cell_space_pids ||= {}
             pids = @dirty_cell_space_pids.keys
             @dirty_cell_space_pids.clear
             @cell_space_sync_scheduled = false

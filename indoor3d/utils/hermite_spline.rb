@@ -20,14 +20,6 @@ module ULOL
             )
           end
 
-          # def self.generate_segment(p0, p1, tangent0, tangent1, segments = 8, include_start: true)
-          #   segments = [segments.to_i, 1].max
-          #   start_index = include_start ? 0 : 1
-          #   (start_index..segments).map do |index|
-          #     point(p0, p1, tangent0, tangent1, index.to_f / segments)
-          #   end
-          # end
-
           def self.generate_segment(p0, p1, tangent0, tangent1, segments = 8, include_start: true)
             # 1단계: 기본 t값들 생성
             base_ts = (0..segments).map { |i| i.to_f / segments }
