@@ -41,12 +41,33 @@ module ULOL
           @instances[key] ||= new(model)
         end
 
+        def self.release(model)
+          return unless model
+
+          instance = @instances&.delete(model.object_id)
+          instance&.cleanup_for_model_close
+        end
+
         def self.current
           self.for(Sketchup.active_model)
         end
 
         def self.each_instance
           @instances&.each_value || []
+        end
+
+        def cleanup_for_model_close
+          @editor_session.close_dialog_only()
+          detach_edit_selection_observer(@model)
+          reset_runtime_collections
+          @cell_space_observed_ids.clear
+          @space_features_observed_ids.clear
+          @selection_observed_model_id = nil
+          @entities_observed_ids.clear
+          @primal_group = nil
+          @model = nil
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] IndoorModel close cleanup failed: #{e.class}: #{e.message}"
         end
 
         def initialize(model = Sketchup.active_model)

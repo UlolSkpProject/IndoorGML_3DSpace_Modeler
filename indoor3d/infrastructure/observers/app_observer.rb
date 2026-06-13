@@ -34,6 +34,10 @@ module ULOL
           refresh_runtime_data(model)
         end
 
+        def onCloseModel(model)
+          release_model(model)
+        end
+
         def expectsStartupModelNotifications
           true
         end
@@ -43,6 +47,27 @@ module ULOL
         end
 
         private
+
+        def release_model(model)
+          begin
+            key = model&.object_id
+            detach_model_observer(model)
+            @model_observer.forget_model(model) if @model_observer.respond_to?(:forget_model)
+            @observed_model_ids.delete(key) unless key.nil?
+            IndoorModel.release(model)
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Model close cleanup failed: #{e.class}: #{e.message}"
+          end
+        end
+
+        def detach_model_observer(model)
+          return unless model && @model_observer
+          return unless model.respond_to?(:remove_observer)
+
+          model.remove_observer(@model_observer)
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Model observer detach skipped during close: #{e.class}: #{e.message}"
+        end
 
         def cleanup_before_quit
           begin

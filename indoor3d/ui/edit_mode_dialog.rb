@@ -17,6 +17,7 @@ module ULOL
           @indoor_model = indoor_model
           @dialog = nil
           @dialog_height = INITIAL_DIALOG_HEIGHT
+          @suppress_close_callback = false
         end
 
         def show
@@ -43,6 +44,16 @@ module ULOL
           end
         end
 
+        def close_without_finish
+          begin
+            @suppress_close_callback = true
+            @dialog&.close if @dialog&.visible?
+            @dialog = nil
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Edit mode dialog dispose failed: #{e.class}: #{e.message}"
+          end
+        end
+
         private
 
         def dialog
@@ -50,6 +61,7 @@ module ULOL
         end
 
         def build_dialog
+          @suppress_close_callback = false
           dialog = UI::HtmlDialog.new(
             dialog_title: 'IndoorGML Edit Mode',
             preferences_key: 'ULOL.Indoor3DGmlModeler.EditMode',
@@ -100,7 +112,11 @@ module ULOL
           end
           dialog.set_on_closed do
             IndoorCore::Logger.puts "[IndoorGML] set_on_closed called, editing=#{@indoor_model.editing?}"
-            @indoor_model.finish_editing()
+            if @suppress_close_callback
+              @suppress_close_callback = false
+            else
+              @indoor_model.finish_editing()
+            end
             @dialog = nil
           end if dialog.respond_to?(:set_on_closed)
 

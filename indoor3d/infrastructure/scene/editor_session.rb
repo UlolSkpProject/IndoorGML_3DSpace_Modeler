@@ -376,6 +376,20 @@ module ULOL
           end
         end
 
+        def close_dialog_only
+          begin
+            @dialog.close_without_finish()
+            @editing = false
+            @editable_entity_ids = {}
+            @editing_active_path_target = nil
+            @previous_active_path = nil
+            @progress = nil
+            set_overlay_enabled(false)
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Edit model close cleanup failed: #{e.class}: #{e.message}"
+          end
+        end
+
         def recover_unlocked_primal_after_transaction(model)
           begin
             return false if @editing
