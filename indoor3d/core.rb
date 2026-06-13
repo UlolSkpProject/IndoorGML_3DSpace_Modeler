@@ -107,14 +107,14 @@ module ULOL
       create_cell_space_command = create_command(
         'Create CellSpace',
         'Convert selected solid groups to CellSpace',
-        icon: 'svgs/create_cellspace.svg'
+        icon: 'create_cellspace.svg'
       ) do
         dispatcher.convert_selected_solid_groups_to_cell_spaces()
       end
       change_type_command = create_command(
         'Change CellSpace Type',
         'Change selected CellSpace type',
-        icon: 'svgs/change_cellspace_type.svg'
+        icon: 'change_cellspace_type.svg'
       ) do
         dispatcher.change_selected_cell_space_type()
       end
@@ -129,7 +129,7 @@ module ULOL
       @edit_property_command = create_command(
         'Edit CellSpace Property',
         'Toggle IndoorGML editing',
-        icon: 'svgs/edit_cellspace_property.svg'
+        icon: 'edit_cellspace_property.svg'
       ) do
         dispatcher.toggle_indoor_gml_editing()
       end
@@ -140,7 +140,7 @@ module ULOL
       @geometry_command = create_command(
         'Show Geometry',
         'Show CellSpace geometry',
-        icon: 'svgs/toggle_geometry.svg'
+        icon: 'toggle_geometry.svg'
       ) do
         dispatcher.toggle_geometry()
       end
@@ -152,7 +152,7 @@ module ULOL
       @dual_overlay_command = create_command(
         'Show State/Link Overlay',
         'Show State and Transition overlay',
-        icon: 'svgs/toggle_dual_overlay.svg'
+        icon: 'toggle_dual_overlay.svg'
       ) do
         dispatcher.toggle_dual_overlay()
       end
@@ -164,14 +164,14 @@ module ULOL
       export_command = create_command(
         'Export GML',
         'Export GML without validity check',
-        icon: 'svgs/export_gml.svg'
+        icon: 'export_gml.svg'
       ) do
         dispatcher.export_gml()
       end
       check_validity_command = create_command(
         'Check Validity',
         'Create temp GML and run validity check',
-        icon: 'svgs/check_validity.svg'
+        icon: 'check_validity.svg'
       ) do
         dispatcher.check_validity()
       end

@@ -52,11 +52,15 @@
         stroke-width="1.1"
         stroke-linecap="round"/>
   <!-- Bulb base -->
-  <path d="M21.8 23.6H27.2"
+  <path d="M21.8 24.6H27.2"
         stroke="#111827"
         stroke-width="1.1"
         stroke-linecap="round"/>
-  <path d="M22.3 25H26.7"
+  <path d="M22.3 26H26.7"
+        stroke="#111827"
+        stroke-width="1.1"
+        stroke-linecap="round"/>
+  <path d="M22.8 27.4H26.2"
         stroke="#111827"
         stroke-width="1.1"
         stroke-linecap="round"/>
