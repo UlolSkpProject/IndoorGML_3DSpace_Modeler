@@ -27,6 +27,14 @@ module ULOL
           handle_transaction_replayed(model, source: :redo)
         end
 
+        def forget_model(model)
+          key = model&.object_id
+          return if key.nil?
+
+          @active_path_keys_by_model_id.delete(key)
+          @recovering_unlocked_primal_by_model_id.delete(key)
+        end
+
         private
 
         def handle_active_path_changed(model, source:)
