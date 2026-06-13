@@ -7,6 +7,7 @@ module ULOL
 
     require_relative 'utils/logger'
     require_relative 'utils/html_helpers'
+    require_relative 'utils/change_snapshot'
     require_relative 'utils/geometry'
     require_relative 'utils/transformation'
     require_relative 'utils/materials'
@@ -42,6 +43,7 @@ module ULOL
     require_relative 'application/indoor_model'
     require_relative 'export/gml_exporter'
     require_relative 'export/val3dity_runner'
+    require_relative 'ui/commands/conversion_message_formatter'
     require_relative 'ui/edit_mode_overlay'
     require_relative 'ui/edit_mode_dialog'
     require_relative 'ui/export_progress_dialog'

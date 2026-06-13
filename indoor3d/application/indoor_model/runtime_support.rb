@@ -64,7 +64,7 @@ module ULOL
             @feature_registry.reset!
             @cell_space_change_snapshots.clear
             @space_features_change_snapshots.clear
-            @dirty_cell_space_pids&.clear
+            @dirty_cell_space_pids.clear
             @cell_space_sync_scheduled = false
             bind_registry_collections
           end
