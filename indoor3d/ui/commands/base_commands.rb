@@ -1,0 +1,147 @@
+# frozen_string_literal: true
+
+module ULOL
+  module Indoor3DGmlModeler
+    module IndoorCore
+      module BaseCommands
+        def refresh_runtime_data
+          IndoorModel.current.refresh_runtime_data
+          UI.messagebox('IndoorGML runtime data refreshed.')
+        rescue StandardError => e
+          UI.messagebox("Runtime refresh failed:\n#{e.message}")
+        end
+
+        def selected_indoor_gml_entities
+          Sketchup.active_model.selection.to_a.select do |entity|
+            entity&.valid? && indoor_feature(entity).to_s.length.positive?
+          end
+        end
+
+        def indoor_feature(entity)
+          entity.get_attribute(IndoorModel::ATTRIBUTE_DICTIONARY_NAME, 'feature')
+        rescue StandardError
+          nil
+        end
+
+        def cell_space_type_change_available?(groups)
+          cell_space_groups = Array(groups).select { |group| indoor_feature(group) == 'CellSpace' }
+          return false if cell_space_groups.empty?
+
+          !cell_space_groups.all? { |group| rm_helper_cell_space_type_matches_indoor_attributes?(group) }
+        end
+
+        private
+
+        def rm_helper_cell_space_type_and_category(group)
+          RmHelperAdapter.cell_space_type_and_category(group)
+        end
+
+        def prompt_cell_space_type_and_category(title)
+          options = CellSpaceCategory.selection_options
+          labels = options.map { |option| option[:label] }
+          result = UI.inputbox(
+            ['CellSpace'],
+            [labels.first],
+            [labels.join('|')],
+            title
+          )
+          return nil unless result
+
+          option = options.find { |candidate| candidate[:label] == result.first } || options.first
+          [option[:cell_type], option[:category_code]]
+        end
+
+        def rm_helper_cell_space_type_matches_indoor_attributes?(group)
+          target = rm_helper_cell_space_type_and_category(group)
+          return false if target.nil?
+
+          current_type = CellSpaceType.from_label(
+            group.get_attribute(IndoorModel::ATTRIBUTE_DICTIONARY_NAME, 'cell_type')
+          )
+          current_category_code = group.get_attribute(
+            IndoorModel::ATTRIBUTE_DICTIONARY_NAME,
+            'category_code'
+          ).to_s
+          current_type == target[0] && current_category_code == target[1]
+        rescue StandardError
+          false
+        end
+
+        def active_path_snapshot(model)
+          path = model.active_path()
+          path ? path.dup : nil
+        end
+
+        def activate_root_context(model)
+          model.close_active() while model.active_path()
+        end
+
+        def restore_active_path(model, active_path)
+          begin
+            return unless active_path
+
+            valid_path = active_path.select { |entity| entity&.valid?() }
+            return if valid_path.empty?()
+
+            if model.respond_to?(:active_path=)
+              model.active_path = valid_path
+            end
+          rescue StandardError => e
+            Logger.puts "[IndoorGML] Edit context restore failed: #{e.class}: #{e.message}"
+          end
+        end
+
+        def move_groups_to_root_context(model, groups)
+          return groups if model.active_path().nil?
+
+          groups.map { |group| move_group_to_root_context(model, group) }.compact
+        end
+
+        def move_group_to_root_context(model, group)
+          return group unless group&.valid?()
+
+          transformation = Utils::Transformation.entity_transformation_in_active_context(group)
+          copy = model.entities().add_instance(group.definition, transformation)
+          copy = copy.to_group() if copy.respond_to?(:to_group)
+          copy.make_unique() if copy.respond_to?(:make_unique)
+          copy.name = group.name if copy.respond_to?(:name=)
+          copy.material = group.material if copy.respond_to?(:material=)
+          copy.layer = group.layer if copy.respond_to?(:layer=)
+          copy.visible = group.visible?() if copy.respond_to?(:visible=)
+          group.erase!() if group.valid?()
+          copy
+        end
+
+        def cell_space_conversion_group_label(group)
+          name = group.respond_to?(:name) ? group.name.to_s.strip : ''
+          id = group.respond_to?(:entityID) ? group.entityID : nil
+          return "#{name} (entity #{id})" unless name.empty? || id.nil?
+          return name unless name.empty?
+          return "entity #{id}" unless id.nil?
+
+          'unknown group'
+        end
+
+        def cell_space_conversion_result_message(converted_count, errors)
+          message = +"Succeed : #{converted_count}\nFailed : #{errors.length}"
+          return message if errors.empty?
+
+          grouped_errors = errors.group_by { |error| cell_space_conversion_reason_label(error[:reason]) }
+          grouped_errors.each do |reason, entries|
+            message << "\n- #{reason}"
+            entries.each do |entry|
+              message << "\n  #{entry[:group]}"
+            end
+          end
+          message
+        end
+
+        def cell_space_conversion_reason_label(reason)
+          return 'SolidGroup내 분리된 형상' if reason.to_s.include?('Disconnected solid shells detected')
+
+          reason.to_s.empty? ? '알 수 없는 실패 원인' : reason.to_s
+        end
+      end
+    end
+  end
+end
