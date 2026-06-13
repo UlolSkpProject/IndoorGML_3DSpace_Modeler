@@ -16,6 +16,7 @@ module ULOL
         require_relative 'indoor_model/topology.rb'
         require_relative 'indoor_model/observer_routing.rb'
         require_relative 'indoor_model/entity_relocation.rb'
+        require_relative 'indoor_model/primal_normalization.rb'
         require_relative 'indoor_model/editor_control.rb'
 
         include RuntimeSupport
@@ -24,6 +25,7 @@ module ULOL
         include Topology
         include ObserverRouting
         include EntityRelocation
+        include PrimalNormalization
         include EditorControl
 
         attr_reader :cell_spaces
