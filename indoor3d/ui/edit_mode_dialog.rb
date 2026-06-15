@@ -69,7 +69,7 @@ module ULOL
             resizable: false,
             width: DIALOG_WIDTH,
             height: INITIAL_DIALOG_HEIGHT,
-            style: UI::HtmlDialog::STYLE_DIALOG
+            style: UI::HtmlDialog::STYLE_UTILITY
           )
           dialog.add_action_callback('fitContentHeight') do |_context, content_height|
             fit_content_height(content_height)
