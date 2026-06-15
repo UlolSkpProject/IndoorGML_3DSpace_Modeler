@@ -30,6 +30,7 @@ jobs:
       loader_file: indoor3d.rb
       visibility: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.visibility || '' }}
       distribution: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.distribution || '' }}
+      category: SeoulSpace
       release_note_url: "https://u-lo-l.notion.site/Indoor-Modeler-35fbe883973b80d1be3be90372b712ed?source=copy_link"
     secrets:
       DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
