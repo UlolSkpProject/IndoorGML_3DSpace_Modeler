@@ -32,6 +32,7 @@ module ULOL
             return unless entity&.valid?
             return if space_features_origin_point?(entity)
             return if indoor_feature(entity) == 'CellSpace'
+            return if auto_convert_tagged_primal_entity(entity)
 
             if entity.respond_to?(:definition) && entity.respond_to?(:transformation)
               normalize_primal_container_without_operation(entity)
@@ -41,6 +42,7 @@ module ULOL
           end
 
           def normalize_primal_container_without_operation(container)
+            auto_convert_direct_tagged_children(container)
             nested_cell_space_entities(container).each do |entry|
               copy_nested_cell_space_to_primal(entry[:entity], entry[:transformation])
             end

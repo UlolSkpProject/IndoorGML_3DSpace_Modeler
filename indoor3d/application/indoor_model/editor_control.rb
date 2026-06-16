@@ -183,7 +183,7 @@ module ULOL
                 cell_type: CellSpaceType.label(cell_space.cell_type),
                 category_code: cell_space.category_code,
                 classification: CellSpaceCategory.selection_value(cell_space.cell_type, cell_space.category_code),
-                classification_locked: cell_space_type_change_locked_by_rm_helper?([cell_space]),
+                classification_locked: cell_space_type_change_locked_by_tag?([cell_space]),
                 transition_count: cell_space.duality_state&.transition_ids&.length.to_i,
                 cell_geometry_editing: @editor_session.cell_space_geometry_editing?
               }
@@ -196,8 +196,8 @@ module ULOL
           def convert_selected_solid_groups_to_cell_spaces(selection_value)
             begin
               cell_type, category_code = CellSpaceCategory.parse_selection_value(selection_value)
-              groups = selected_solid_groups
-              return false if groups.empty?
+              jobs = selected_cell_space_conversion_jobs
+              return false if jobs.empty?
 
               model = Sketchup.active_model
               operation_started = false
@@ -206,7 +206,7 @@ module ULOL
               model.start_operation('Convert Selected Solid Groups to CellSpaces', true)
               operation_started = true
               scheduled = run_batched(
-                groups,
+                jobs,
                 message: 'Converting CellSpaces...',
                 batch_size: 20,
                 complete: proc do
@@ -222,13 +222,17 @@ module ULOL
                   IndoorCore::Logger.puts "[IndoorGML] Selected solid group conversion failed: #{error.class}: #{error.message}"
                   UI.messagebox("CellSpace conversion failed:\n#{error.message}")
                 end
-              ) do |group, _index|
+              ) do |job, _index|
                 begin
-                  convert_single_group_to_cell_space(group, cell_type, category_code)
+                  target_cell_type, target_category_code = job[:target] || [cell_type, category_code]
+                  source = copy_conversion_job_to_model_root(job)
+                  convert_single_group_to_cell_space(source, target_cell_type, target_category_code)
+                  job[:source].erase! if job[:source]&.valid?
                   converted_count += 1
                 rescue StandardError => e
                   IndoorCore::Logger.puts "[IndoorGML] Selected solid group conversion failed: #{e.class}: #{e.message}"
-                  errors << { group: ConversionMessageFormatter.group_label(group), reason: e.message }
+                  source.erase! if source&.valid? && indoor_feature(source) != 'CellSpace'
+                  errors << { group: ConversionMessageFormatter.group_label(job[:source]), reason: e.message }
                 end
               end
               unless scheduled
@@ -321,7 +325,7 @@ module ULOL
               mode: 'cell_spaces',
               cell_space_count: cell_spaces.length,
               classification: common_cell_space_classification(cell_spaces),
-              classification_locked: cell_space_type_change_locked_by_rm_helper?(cell_spaces)
+              classification_locked: cell_space_type_change_locked_by_tag?(cell_spaces)
             }
           end
 
@@ -352,20 +356,20 @@ module ULOL
           end
 
           def selected_solid_groups_snapshot
-            groups = selected_solid_groups
-            return nil if groups.empty?
+            jobs = selected_cell_space_conversion_jobs
+            return nil if jobs.empty?
 
             {
               mode: 'solid_groups',
-              solid_group_count: groups.length,
-              classification: solid_groups_classification(groups),
-              classification_locked: solid_groups_classification_locked_by_rm_helper?(groups)
+              solid_group_count: jobs.length,
+              classification: solid_groups_classification(jobs),
+              classification_locked: solid_groups_classification_locked_by_tag?(jobs)
             }
           end
 
           def solid_groups_classification(groups)
-            rm_helper_classification = common_rm_helper_classification(groups)
-            return rm_helper_classification unless rm_helper_classification.nil?
+            tag_classification = common_tag_classification(groups)
+            return tag_classification unless tag_classification.nil?
 
             CellSpaceCategory.selection_value(
               CellSpaceType::GENERAL,
@@ -373,12 +377,14 @@ module ULOL
             )
           end
 
-          def solid_groups_classification_locked_by_rm_helper?(groups)
-            !common_rm_helper_classification(groups).nil?
+          def solid_groups_classification_locked_by_tag?(groups)
+            !common_tag_classification(groups).nil?
           end
 
-          def common_rm_helper_classification(groups)
-            targets = groups.map { |group| IndoorCore.rm_helper_cell_space_type_and_category(group) }
+          def common_tag_classification(groups_or_jobs)
+            targets = groups_or_jobs.map do |item|
+              item.is_a?(Hash) ? item[:target] : IndoorCore.tag_cell_space_type_and_category(item)
+            end
             return nil if targets.empty? || targets.any?(&:nil?)
 
             classifications = targets.map do |target|
@@ -388,11 +394,11 @@ module ULOL
             classifications.length == 1 ? classifications.first : nil
           end
 
-          def cell_space_type_change_locked_by_rm_helper?(cell_spaces)
+          def cell_space_type_change_locked_by_tag?(cell_spaces)
             return false if cell_spaces.empty?
 
             cell_spaces.all? do |cell_space|
-              target = IndoorCore.rm_helper_cell_space_type_and_category(cell_space.sketchup_group)
+              target = IndoorCore.tag_cell_space_type_and_category(cell_space.sketchup_group)
               target && cell_space.cell_type == target[0] && cell_space.category_code == target[1]
             end
           end
@@ -403,7 +409,7 @@ module ULOL
             entities = selection.to_a
             return [] if entities.empty?
 
-            groups = entities.grep(Sketchup::Group)
+            groups = entities.select { |entity| entity.is_a?(Sketchup::Group) || entity.is_a?(Sketchup::ComponentInstance) }
             return [] unless groups.length == entities.length
 
             solid_groups = groups.select do |group|
@@ -413,6 +419,80 @@ module ULOL
                 find_cell_space_for_entity(group).nil?
             end
             solid_groups.length == groups.length ? solid_groups : []
+          end
+
+          def selected_cell_space_conversion_jobs
+            selection = Sketchup.active_model&.selection
+            return [] unless selection
+
+            parent_target = active_context_parent_tag_target
+            selection.to_a.each_with_object([]) do |entity, jobs|
+              next unless convertible_cell_space_container?(entity)
+
+              collect_selected_cell_space_conversion_jobs(
+                entity,
+                Utils::Transformation.entity_transformation_in_active_context(entity),
+                parent_target,
+                jobs
+              )
+            end
+          end
+
+          def active_context_parent_tag_target
+            parent = Sketchup.active_model&.active_path&.last
+            parent ? IndoorCore.tag_cell_space_type_and_category(parent) : nil
+          rescue StandardError
+            nil
+          end
+
+          def collect_selected_cell_space_conversion_jobs(entity, world_transformation, parent_target, jobs)
+            return unless entity&.valid?
+            return unless convertible_cell_space_container?(entity)
+            return if indoor_feature(entity) == 'CellSpace'
+
+            if solid_container?(entity)
+              jobs << {
+                source: entity,
+                transformation: world_transformation,
+                target: selected_entity_tag_target(entity, parent_target)
+              }
+              return
+            end
+
+            entity_target = IndoorCore.tag_cell_space_type_and_category(entity)
+            return unless entity.respond_to?(:definition) && entity.definition&.valid?
+
+            entity.definition.entities.to_a.each do |child|
+              next unless child&.valid?
+              next unless convertible_cell_space_container?(child)
+
+              collect_selected_cell_space_conversion_jobs(
+                child,
+                world_transformation * child.transformation,
+                entity_target,
+                jobs
+              )
+            end
+          end
+
+          def selected_entity_tag_target(entity, parent_target)
+            entity_target = IndoorCore.tag_cell_space_type_and_category(entity)
+            return entity_target if entity_target
+            return parent_target unless IndoorCore.tag_assigned?(entity)
+
+            nil
+          end
+
+          def copy_conversion_job_to_model_root(job)
+            source = job[:source]
+            copy = (@model || Sketchup.active_model).entities.add_instance(source.definition, job[:transformation])
+            copy = copy.to_group if source.is_a?(Sketchup::Group) && copy.respond_to?(:to_group)
+            copy.make_unique if source.is_a?(Sketchup::Group) && copy.respond_to?(:make_unique)
+            copy.name = source.name if copy.respond_to?(:name=) && source.respond_to?(:name)
+            copy.material = source.material if copy.respond_to?(:material=) && source.respond_to?(:material)
+            copy.layer = source.layer if copy.respond_to?(:layer=) && source.respond_to?(:layer)
+            copy.visible = source.visible? if copy.respond_to?(:visible=) && source.respond_to?(:visible?)
+            copy
           end
         end
       end

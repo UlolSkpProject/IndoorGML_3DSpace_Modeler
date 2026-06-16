@@ -8,18 +8,15 @@ module ULOL
           begin
             model = Sketchup.active_model()
             original_active_path = active_path_snapshot(model)
-            groups = model.selection().grep(Sketchup::Group)
-            solid_groups = groups.select { |group| group.valid?() && group.manifold?() }
+            groups = model.selection().to_a.select { |entity| convertible_container?(entity) }
+            conversion_jobs = selected_cell_space_conversion_jobs(groups)
 
-            if solid_groups.empty?
+            if conversion_jobs.empty?
               UI.messagebox('Select one or more solid groups to convert to CellSpace.')
               return
             end
 
-            rm_groups = solid_groups.select { |group| rm_helper_cell_space_type_and_category(group) }
-            non_rm_groups = solid_groups - rm_groups
-
-            if non_rm_groups.any?
+            if conversion_jobs.any? { |job| job[:target].nil? }
               cell_type, category_code = prompt_cell_space_type_and_category('Convert Solid Groups to CellSpace')
               return if cell_type.nil?
             end
@@ -30,9 +27,8 @@ module ULOL
 
             model.start_operation('Convert Solid Groups to CellSpace', true)
             indoor_model.with_active_path_enforcement_suspended do
-              root_solid_groups = move_groups_to_root_context(model, solid_groups)
               activate_root_context(model)
-              if root_solid_groups.empty?
+              if conversion_jobs.empty?
                 restore_active_path(model, original_active_path)
                 model.abort_operation()
                 UI.messagebox('No valid solid groups were available for conversion.')
@@ -40,7 +36,7 @@ module ULOL
               end
 
               scheduled = indoor_model.run_batched(
-                root_solid_groups,
+                conversion_jobs,
                 message: 'Converting CellSpaces...',
                 batch_size: 20,
                 complete: proc do
@@ -58,18 +54,17 @@ module ULOL
                   model.abort_operation()
                   UI.messagebox("CellSpace conversion failed:\n#{error.message}")
                 end
-              ) do |group, _index|
+              ) do |job, _index|
                 begin
-                  target_cell_type, target_category_code = RmHelperAdapter.resolve_cell_space_type_and_category(
-                    group,
-                    cell_type,
-                    category_code
-                  )
-                  indoor_model.convert_single_group_to_cell_space(group, target_cell_type, target_category_code)
+                  target_cell_type, target_category_code = job[:target] || [cell_type, category_code]
+                  source = copy_job_source_to_root(model, job)
+                  indoor_model.convert_single_group_to_cell_space(source, target_cell_type, target_category_code)
+                  job[:source].erase! if job[:source]&.valid?
                   converted_count += 1
                 rescue StandardError => e
                   Logger.puts "[IndoorGML] CellSpace conversion failed: #{e.class}: #{e.message}"
-                  errors << { group: ConversionMessageFormatter.group_label(group), reason: e.message }
+                  source.erase! if source&.valid? && indoor_feature(source) != 'CellSpace'
+                  errors << { group: ConversionMessageFormatter.group_label(job[:source]), reason: e.message }
                 end
               end
               unless scheduled
@@ -91,7 +86,7 @@ module ULOL
 
         def change_selected_cell_space_type
           model = Sketchup.active_model
-          groups = model.selection.grep(Sketchup::Group)
+          groups = model.selection.to_a.select { |entity| convertible_container?(entity) }
 
           if groups.empty?
             UI.messagebox('Select one or more CellSpace groups to change type.')
@@ -105,7 +100,7 @@ module ULOL
           end
 
           unless cell_space_type_change_available?(cell_space_groups)
-            UI.messagebox('Selected CellSpace type is locked by RM_helper and already matches the mapped type.')
+            UI.messagebox('Selected CellSpace type is locked by Tag and already matches the mapped type.')
             return
           end
 
@@ -134,6 +129,77 @@ module ULOL
         rescue StandardError => e
           model.abort_operation if model
           UI.messagebox("CellSpace type change failed:\n#{e.message}")
+        end
+
+        private
+
+        def selected_cell_space_conversion_jobs(groups)
+          parent_target = active_context_parent_tag_target
+          groups.each_with_object([]) do |group, jobs|
+            collect_cell_space_conversion_jobs(
+              group,
+              Utils::Transformation.entity_transformation_in_active_context(group),
+              parent_target,
+              jobs
+            )
+          end
+        end
+
+        def active_context_parent_tag_target
+          parent = Sketchup.active_model&.active_path&.last
+          parent ? tag_cell_space_type_and_category(parent) : nil
+        rescue StandardError
+          nil
+        end
+
+        def collect_cell_space_conversion_jobs(entity, world_transformation, parent_target, jobs)
+          return unless entity&.valid?
+          return unless convertible_container?(entity)
+          return if indoor_feature(entity) == 'CellSpace'
+
+          if entity.respond_to?(:manifold?) && entity.manifold?
+            jobs << {
+              source: entity,
+              transformation: world_transformation,
+              target: target_for_selected_entity(entity, parent_target)
+            }
+            return
+          end
+
+          entity_target = tag_cell_space_type_and_category(entity)
+          return unless entity.respond_to?(:definition) && entity.definition&.valid?
+
+          entity.definition.entities.to_a.each do |child|
+            next unless child&.valid?
+            next unless convertible_container?(child)
+
+            collect_cell_space_conversion_jobs(
+              child,
+              world_transformation * child.transformation,
+              entity_target,
+              jobs
+            )
+          end
+        end
+
+        def target_for_selected_entity(entity, parent_target)
+          entity_target = tag_cell_space_type_and_category(entity)
+          return entity_target if entity_target
+          return parent_target unless tag_assigned?(entity)
+
+          nil
+        end
+
+        def copy_job_source_to_root(model, job)
+          source = job[:source]
+          copy = model.entities.add_instance(source.definition, job[:transformation])
+          copy = copy.to_group if source.is_a?(Sketchup::Group) && copy.respond_to?(:to_group)
+          copy.make_unique if source.is_a?(Sketchup::Group) && copy.respond_to?(:make_unique)
+          copy.name = source.name if copy.respond_to?(:name=) && source.respond_to?(:name)
+          copy.material = source.material if copy.respond_to?(:material=) && source.respond_to?(:material)
+          copy.layer = source.layer if copy.respond_to?(:layer=) && source.respond_to?(:layer)
+          copy.visible = source.visible? if copy.respond_to?(:visible=) && source.respond_to?(:visible?)
+          copy
         end
       end
     end
