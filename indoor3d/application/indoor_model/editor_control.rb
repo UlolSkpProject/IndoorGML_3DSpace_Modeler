@@ -228,6 +228,7 @@ module ULOL
                   source = copy_conversion_job_to_model_root(job)
                   convert_single_group_to_cell_space(source, target_cell_type, target_category_code)
                   job[:source].erase! if job[:source]&.valid?
+                  cleanup_empty_conversion_ancestors(job)
                   converted_count += 1
                 rescue StandardError => e
                   IndoorCore::Logger.puts "[IndoorGML] Selected solid group conversion failed: #{e.class}: #{e.message}"
@@ -426,6 +427,7 @@ module ULOL
             return [] unless selection
 
             parent_target = active_context_parent_tag_target
+            active_ancestors = active_context_conversion_ancestors
             selection.to_a.each_with_object([]) do |entity, jobs|
               next unless convertible_cell_space_container?(entity)
 
@@ -433,6 +435,7 @@ module ULOL
                 entity,
                 Utils::Transformation.entity_transformation_in_active_context(entity),
                 parent_target,
+                active_ancestors,
                 jobs
               )
             end
@@ -445,7 +448,13 @@ module ULOL
             nil
           end
 
-          def collect_selected_cell_space_conversion_jobs(entity, world_transformation, parent_target, jobs)
+          def active_context_conversion_ancestors
+            (Sketchup.active_model&.active_path || []).select { |entity| cleanup_candidate_container?(entity) }
+          rescue StandardError
+            []
+          end
+
+          def collect_selected_cell_space_conversion_jobs(entity, world_transformation, parent_target, ancestors, jobs)
             return unless entity&.valid?
             return unless convertible_cell_space_container?(entity)
             return if indoor_feature(entity) == 'CellSpace'
@@ -454,6 +463,7 @@ module ULOL
               jobs << {
                 source: entity,
                 transformation: world_transformation,
+                ancestors: ancestors.dup,
                 target: selected_entity_tag_target(entity, parent_target)
               }
               return
@@ -462,6 +472,7 @@ module ULOL
             entity_target = IndoorCore.tag_cell_space_type_and_category(entity)
             return unless entity.respond_to?(:definition) && entity.definition&.valid?
 
+            child_ancestors = cleanup_candidate_container?(entity) ? ancestors + [entity] : ancestors
             entity.definition.entities.to_a.each do |child|
               next unless child&.valid?
               next unless convertible_cell_space_container?(child)
@@ -470,6 +481,7 @@ module ULOL
                 child,
                 world_transformation * child.transformation,
                 entity_target,
+                child_ancestors,
                 jobs
               )
             end
@@ -493,6 +505,32 @@ module ULOL
             copy.layer = source.layer if copy.respond_to?(:layer=) && source.respond_to?(:layer)
             copy.visible = source.visible? if copy.respond_to?(:visible=) && source.respond_to?(:visible?)
             copy
+          end
+
+          def cleanup_empty_conversion_ancestors(job)
+            Array(job[:ancestors]).reverse_each do |entity|
+              cleanup_empty_conversion_container(entity)
+            end
+          end
+
+          def cleanup_empty_conversion_container(entity)
+            return false unless cleanup_candidate_container?(entity)
+            return false unless entity.respond_to?(:definition) && entity.definition&.valid?
+            return false unless entity.definition.entities.to_a.empty?
+
+            entity.erase!
+            true
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Empty source group cleanup failed: #{e.class}: #{e.message}"
+            false
+          end
+
+          def cleanup_candidate_container?(entity)
+            entity&.valid? &&
+              convertible_cell_space_container?(entity) &&
+              indoor_feature(entity).to_s.empty?
+          rescue StandardError
+            false
           end
         end
       end
