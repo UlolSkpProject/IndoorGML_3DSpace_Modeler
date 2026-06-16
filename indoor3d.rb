@@ -5,16 +5,6 @@ require 'extensions.rb'
 
 module ULOL
   module Indoor3DGmlModeler
-    
-    RM_HELPER_DICT = 'RM_helper'.freeze
-    RM_HELPER_SPACE_TYPE_KEY = 'SpaceType'.freeze
-    RM_HELPER_SPACE_TYPE_TO_CATEGORY_CODE = {
-      'RM' => 'Room',
-      'DR' => 'Door',
-      'ST' => 'Stair',
-      'EV' => 'Elevator',
-      'ES' => 'Escalator'
-    }.freeze
 
     unless const_defined?(:EXTENSION, false)
       EXTENSION_NAME = "IndoorGML 3D Modeler"

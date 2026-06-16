@@ -18,7 +18,7 @@ module ULOL
     require_relative 'domain/cell_space'
     require_relative 'domain/state'
     require_relative 'domain/transition'
-    require_relative 'integration/rm_helper_adapter'
+    require_relative 'integration/tag_cell_space_adapter'
     require_relative 'infrastructure/observers/observer_helpers'
     require_relative 'infrastructure/observers/cell_space_observer'
     require_relative 'infrastructure/observers/space_features_observer'
@@ -51,12 +51,16 @@ module ULOL
     require_relative 'ui/command_dispatcher'
 
     module IndoorCore
-      def self.rm_helper_cell_space_type_and_category(group)
-        RmHelperAdapter.cell_space_type_and_category(group)
+      def self.tag_cell_space_type_and_category(entity)
+        TagCellSpaceAdapter.cell_space_type_and_category(entity)
       end
 
-      def self.resolve_cell_space_type_and_category(group, cell_type, category_code)
-        RmHelperAdapter.resolve_cell_space_type_and_category(group, cell_type, category_code)
+      def self.resolve_cell_space_type_and_category(entity, cell_type, category_code)
+        TagCellSpaceAdapter.resolve_cell_space_type_and_category(entity, cell_type, category_code)
+      end
+
+      def self.tag_assigned?(entity)
+        TagCellSpaceAdapter.tag_assigned?(entity)
       end
     end
 
@@ -71,8 +75,8 @@ module ULOL
       end
     end
 
-    def self.rm_helper_cell_space_type_and_category(group)
-      IndoorCore.rm_helper_cell_space_type_and_category(group)
+    def self.tag_cell_space_type_and_category(entity)
+      IndoorCore.tag_cell_space_type_and_category(entity)
     end
 
     def self.command_dispatcher

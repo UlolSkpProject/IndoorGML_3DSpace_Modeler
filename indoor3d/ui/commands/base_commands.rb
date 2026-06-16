@@ -27,13 +27,17 @@ module ULOL
           cell_space_groups = Array(groups).select { |group| indoor_feature(group) == 'CellSpace' }
           return false if cell_space_groups.empty?
 
-          !cell_space_groups.all? { |group| rm_helper_cell_space_type_matches_indoor_attributes?(group) }
+          !cell_space_groups.all? { |group| tag_cell_space_type_matches_indoor_attributes?(group) }
         end
 
         private
 
-        def rm_helper_cell_space_type_and_category(group)
-          RmHelperAdapter.cell_space_type_and_category(group)
+        def tag_cell_space_type_and_category(entity)
+          TagCellSpaceAdapter.cell_space_type_and_category(entity)
+        end
+
+        def tag_assigned?(entity)
+          TagCellSpaceAdapter.tag_assigned?(entity)
         end
 
         def prompt_cell_space_type_and_category(title)
@@ -51,8 +55,8 @@ module ULOL
           [option[:cell_type], option[:category_code]]
         end
 
-        def rm_helper_cell_space_type_matches_indoor_attributes?(group)
-          target = rm_helper_cell_space_type_and_category(group)
+        def tag_cell_space_type_matches_indoor_attributes?(group)
+          target = tag_cell_space_type_and_category(group)
           return false if target.nil?
 
           current_type = CellSpaceType.from_label(
@@ -65,6 +69,10 @@ module ULOL
           current_type == target[0] && current_category_code == target[1]
         rescue StandardError
           false
+        end
+
+        def convertible_container?(entity)
+          entity.is_a?(Sketchup::Group) || entity.is_a?(Sketchup::ComponentInstance)
         end
 
         def active_path_snapshot(model)

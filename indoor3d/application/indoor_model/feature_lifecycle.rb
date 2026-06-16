@@ -37,12 +37,37 @@ module ULOL
             end
           end
 
+          def auto_create_tagged_cell_spaces_in_primal
+            with_indoor_model_operation('IndoorGML Auto Create Tagged CellSpaces') do
+              ensure_space_features_groups
+              next 0 unless @primal_group&.valid?
+
+              converted_count = 0
+              begin
+                @relocating_entity = true
+                @primal_group.entities.to_a.each do |entity|
+                  next unless entity&.valid?
+                  next if indoor_feature(entity) == 'CellSpace'
+
+                  if auto_convert_tagged_primal_entity(entity)
+                    converted_count += 1
+                  elsif convertible_cell_space_container?(entity)
+                    converted_count += 1 if auto_convert_direct_tagged_children(entity)
+                  end
+                end
+              ensure
+                @relocating_entity = false
+              end
+              converted_count
+            end
+          end
+
           def change_cell_space_type(sketchup_group, cell_type, category_code = nil)
             with_indoor_model_operation('IndoorGML Change CellSpace Type') do
               cell_space = find_cell_space_for_entity(sketchup_group)
               raise ArgumentError, 'Selected entity is not a registered CellSpace' if cell_space.nil?
               raise ArgumentError, 'CellSpace is no longer valid' unless cell_space.valid?
-              cell_type, category_code = rm_helper_cell_space_type_change_target(cell_space, cell_type, category_code)
+              cell_type, category_code = tag_cell_space_type_change_target(cell_space, cell_type, category_code)
 
               sync do
                 cell_space.cell_type = cell_type
@@ -130,15 +155,94 @@ module ULOL
 
           private
 
-          def rm_helper_cell_space_type_change_target(cell_space, cell_type, category_code)
-            target = IndoorCore.rm_helper_cell_space_type_and_category(cell_space.sketchup_group)
+          def tag_cell_space_type_change_target(cell_space, cell_type, category_code)
+            target = IndoorCore.tag_cell_space_type_and_category(cell_space.sketchup_group)
             return [cell_type, category_code] if target.nil?
 
             if cell_space.cell_type == target[0] && cell_space.category_code == target[1]
-              raise ArgumentError, 'CellSpace type is locked by RM_helper and already matches the mapped type'
+              raise ArgumentError, 'CellSpace type is locked by Tag and already matches the mapped type'
             end
 
             target
+          end
+
+          def auto_convert_tagged_primal_entity(entity)
+            return false unless convertible_cell_space_container?(entity)
+            return false if converted_group?(entity)
+
+            target = IndoorCore.tag_cell_space_type_and_category(entity)
+            return false unless target
+            return false unless solid_container?(entity)
+
+            convert_single_group_to_cell_space(entity, target[0], target[1])
+            true
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Tagged CellSpace auto conversion failed: #{e.class}: #{e.message}"
+            false
+          end
+
+          def auto_convert_direct_tagged_children(container)
+            return false unless convertible_cell_space_container?(container)
+            return false unless container.respond_to?(:definition) && container.definition&.valid?
+
+            auto_convert_tagged_descendants(container, container.transformation)
+          end
+
+          def auto_convert_tagged_descendants(container, accumulated_transformation)
+            parent_target = IndoorCore.tag_cell_space_type_and_category(container)
+            converted_any = false
+            container.definition.entities.to_a.each do |child|
+              next unless child&.valid?
+              next unless convertible_cell_space_container?(child)
+              next if converted_group?(child)
+
+              if solid_container?(child)
+                child_target = target_for_tagged_child(child, parent_target)
+                converted_any = convert_primal_child_to_cell_space(child, child_target, accumulated_transformation) || converted_any if child_target
+              else
+                child_transformation = accumulated_transformation * child.transformation
+                converted_any = auto_convert_tagged_descendants(child, child_transformation) || converted_any
+              end
+            end
+            converted_any
+          end
+
+          def target_for_tagged_child(child, parent_target)
+            child_target = IndoorCore.tag_cell_space_type_and_category(child)
+            return child_target if child_target
+            return parent_target unless IndoorCore.tag_assigned?(child)
+
+            nil
+          end
+
+          def convert_primal_child_to_cell_space(child, target, parent_transformation)
+            copy = @primal_group.entities.add_instance(
+              child.definition,
+              parent_transformation * child.transformation
+            )
+            copy = copy.to_group if child.is_a?(Sketchup::Group) && copy.respond_to?(:to_group)
+            copy.make_unique if child.is_a?(Sketchup::Group) && copy.respond_to?(:make_unique)
+            copy.name = child.name if copy.respond_to?(:name=) && child.respond_to?(:name)
+            copy.material = child.material if copy.respond_to?(:material=) && child.respond_to?(:material)
+            copy.layer = child.layer if copy.respond_to?(:layer=) && child.respond_to?(:layer)
+            copy.visible = child.visible? if copy.respond_to?(:visible=) && child.respond_to?(:visible?)
+            convert_single_group_to_cell_space(copy, target[0], target[1])
+            child.erase! if child.valid?
+            true
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Tagged child CellSpace auto conversion failed: #{e.class}: #{e.message}"
+            copy.erase! if copy&.valid? && indoor_feature(copy) != 'CellSpace'
+            false
+          end
+
+          def convertible_cell_space_container?(entity)
+            entity.is_a?(Sketchup::Group) || entity.is_a?(Sketchup::ComponentInstance)
+          end
+
+          def solid_container?(entity)
+            entity.respond_to?(:manifold?) && entity.manifold?
+          rescue StandardError
+            false
           end
 
           def register_cell_space(cell_space)
