@@ -201,7 +201,9 @@ module ULOL
                 converted_any = convert_primal_child_to_cell_space(child, child_target, accumulated_transformation) || converted_any if child_target
               else
                 child_transformation = accumulated_transformation * child.transformation
-                converted_any = auto_convert_tagged_descendants(child, child_transformation) || converted_any
+                child_converted = auto_convert_tagged_descendants(child, child_transformation)
+                cleanup_empty_tag_source_container(child) if child_converted
+                converted_any = child_converted || converted_any
               end
             end
             converted_any
@@ -232,6 +234,26 @@ module ULOL
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Tagged child CellSpace auto conversion failed: #{e.class}: #{e.message}"
             copy.erase! if copy&.valid? && indoor_feature(copy) != 'CellSpace'
+            false
+          end
+
+          def cleanup_empty_tag_source_container(entity)
+            return false unless cleanup_candidate_source_container?(entity)
+            return false unless entity.respond_to?(:definition) && entity.definition&.valid?
+            return false unless entity.definition.entities.to_a.empty?
+
+            entity.erase!
+            true
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Empty tagged source group cleanup failed: #{e.class}: #{e.message}"
+            false
+          end
+
+          def cleanup_candidate_source_container?(entity)
+            entity&.valid? &&
+              convertible_cell_space_container?(entity) &&
+              indoor_feature(entity).to_s.empty?
+          rescue StandardError
             false
           end
 

@@ -60,6 +60,7 @@ module ULOL
                   source = copy_job_source_to_root(model, job)
                   indoor_model.convert_single_group_to_cell_space(source, target_cell_type, target_category_code)
                   job[:source].erase! if job[:source]&.valid?
+                  cleanup_empty_conversion_ancestors(job)
                   converted_count += 1
                 rescue StandardError => e
                   Logger.puts "[IndoorGML] CellSpace conversion failed: #{e.class}: #{e.message}"
@@ -135,11 +136,13 @@ module ULOL
 
         def selected_cell_space_conversion_jobs(groups)
           parent_target = active_context_parent_tag_target
+          active_ancestors = active_context_conversion_ancestors
           groups.each_with_object([]) do |group, jobs|
             collect_cell_space_conversion_jobs(
               group,
               Utils::Transformation.entity_transformation_in_active_context(group),
               parent_target,
+              active_ancestors,
               jobs
             )
           end
@@ -152,7 +155,13 @@ module ULOL
           nil
         end
 
-        def collect_cell_space_conversion_jobs(entity, world_transformation, parent_target, jobs)
+        def active_context_conversion_ancestors
+          (Sketchup.active_model&.active_path || []).select { |entity| cleanup_candidate_container?(entity) }
+        rescue StandardError
+          []
+        end
+
+        def collect_cell_space_conversion_jobs(entity, world_transformation, parent_target, ancestors, jobs)
           return unless entity&.valid?
           return unless convertible_container?(entity)
           return if indoor_feature(entity) == 'CellSpace'
@@ -161,6 +170,7 @@ module ULOL
             jobs << {
               source: entity,
               transformation: world_transformation,
+              ancestors: ancestors.dup,
               target: target_for_selected_entity(entity, parent_target)
             }
             return
@@ -169,6 +179,7 @@ module ULOL
           entity_target = tag_cell_space_type_and_category(entity)
           return unless entity.respond_to?(:definition) && entity.definition&.valid?
 
+          child_ancestors = cleanup_candidate_container?(entity) ? ancestors + [entity] : ancestors
           entity.definition.entities.to_a.each do |child|
             next unless child&.valid?
             next unless convertible_container?(child)
@@ -177,6 +188,7 @@ module ULOL
               child,
               world_transformation * child.transformation,
               entity_target,
+              child_ancestors,
               jobs
             )
           end
@@ -200,6 +212,32 @@ module ULOL
           copy.layer = source.layer if copy.respond_to?(:layer=) && source.respond_to?(:layer)
           copy.visible = source.visible? if copy.respond_to?(:visible=) && source.respond_to?(:visible?)
           copy
+        end
+
+        def cleanup_empty_conversion_ancestors(job)
+          Array(job[:ancestors]).reverse_each do |entity|
+            cleanup_empty_conversion_container(entity)
+          end
+        end
+
+        def cleanup_empty_conversion_container(entity)
+          return false unless cleanup_candidate_container?(entity)
+          return false unless entity.respond_to?(:definition) && entity.definition&.valid?
+          return false unless entity.definition.entities.to_a.empty?
+
+          entity.erase!
+          true
+        rescue StandardError => e
+          Logger.puts "[IndoorGML] Empty source group cleanup failed: #{e.class}: #{e.message}"
+          false
+        end
+
+        def cleanup_candidate_container?(entity)
+          entity&.valid? &&
+            convertible_container?(entity) &&
+            indoor_feature(entity).to_s.empty?
+        rescue StandardError
+          false
         end
       end
     end
