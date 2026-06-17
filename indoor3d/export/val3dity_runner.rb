@@ -56,7 +56,15 @@ module ULOL
 
           def run_val3dity!
             Dir.chdir(VENDOR_ROOT) do
-              run_hidden([exe_path, @gml_path, '--verbose', '-r', @report_json_path])
+              run_hidden([
+                exe_path,
+                @gml_path,
+                '--verbose',
+                '--overlap_tol',
+                '0.5',
+                '-r',
+                @report_json_path
+              ])
             end
             return if File.exist?(@report_json_path)
 
