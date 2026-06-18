@@ -5,8 +5,26 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="title">Export IndoorGML</div>
+  <div class="title">IndoorGML Validity Check</div>
   <ul id="steps"></ul>
+  <div id="detail" class="detail hidden">
+    <div class="detail-header">
+      <span id="detail-phase">Waiting</span>
+      <span id="detail-percent">0%</span>
+    </div>
+
+    <div class="bar">
+      <div id="detail-bar" class="bar-fill"></div>
+    </div>
+
+    <div id="detail-message" class="detail-message"></div>
+    <div id="detail-current" class="detail-current"></div>
+  </div>
+  <div id="result" class="result hidden">
+    <div id="result-title" class="result-title"></div>
+    <div id="result-message" class="result-message"></div>
+    <div id="result-actions" class="result-actions"></div>
+  </div>
   <script src="app.js"></script>
 </body>
 </html>
