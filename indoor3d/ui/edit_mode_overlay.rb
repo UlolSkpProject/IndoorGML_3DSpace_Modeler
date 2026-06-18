@@ -18,7 +18,11 @@ module ULOL
         PROGRESS_TRACK_COLOR = Sketchup::Color.new(75, 85, 99, 220)
         PROGRESS_FILL_COLOR = Sketchup::Color.new(22, 130, 82, 235)
         PROGRESS_TEXT_COLOR = Sketchup::Color.new(255, 255, 255, 255)
-        STATE_CIRCLE_SEGMENTS = 12
+        STATE_CIRCLE_SEGMENTS = 8
+        UNIT_CIRCLE = (0...STATE_CIRCLE_SEGMENTS).map do |i|
+          angle = (2.0 * Math::PI * i) / STATE_CIRCLE_SEGMENTS
+          [Math.cos(angle), Math.sin(angle)]
+        end.freeze
         OVERLAY_RADIUS_SCALE = 1.0
         TRANSITION_DEPTH_OFFSET_PIXELS = 2.0
         TRANSITION_CURVE_SEGMENTS = 3
@@ -433,22 +437,18 @@ module ULOL
         end
 
         def billboard_disk_triangle_points(center, right_axis, up_axis, radius)
-          points = circle_points(center, right_axis, up_axis, radius)
+            points = UNIT_CIRCLE.map do |cos_a, sin_a|
+              Geom::Point3d.new(
+                center.x + (right_axis.x * cos_a * radius) + (up_axis.x * sin_a * radius),
+                center.y + (right_axis.y * cos_a * radius) + (up_axis.y * sin_a * radius),
+                center.z + (right_axis.z * cos_a * radius) + (up_axis.z * sin_a * radius)
+              )
+            end
           points.each_with_index.flat_map do |point, index|
-            [center, point, points[(index + 1) % points.length]]
+              [center, point, points[(index + 1) % STATE_CIRCLE_SEGMENTS]]
           end
         end
 
-        def circle_points(center, axis1, axis2, radius)
-          (0...STATE_CIRCLE_SEGMENTS).map do |index|
-            angle = (2.0 * Math::PI * index) / STATE_CIRCLE_SEGMENTS
-            Geom::Point3d.new(
-              center.x + (axis1.x * Math.cos(angle) * radius) + (axis2.x * Math.sin(angle) * radius),
-              center.y + (axis1.y * Math.cos(angle) * radius) + (axis2.y * Math.sin(angle) * radius),
-              center.z + (axis1.z * Math.cos(angle) * radius) + (axis2.z * Math.sin(angle) * radius)
-            )
-          end
-        end
 
         def camera_billboard_axes(view)
           up_axis = view.camera.up.clone
