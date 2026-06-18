@@ -20,9 +20,29 @@ module ULOL
           WAIT_TIMEOUT           = 258
           STDOUT_READ_BUFFER_SIZE = 4096
           ERROR_BROKEN_PIPE      = 109
-          TERMINATE_EXIT_CODE    = 0xC000013A
+          TERMINATE_EXIT_CODE    = 1
+          TERMINATE_WAIT_MS      = 200
 
           attr_reader :report_json_path, :report_html_path
+
+          def self.active_sessions
+            @active_sessions ||= []
+          end
+
+          def self.register_session(session)
+            active_sessions << session unless active_sessions.include?(session)
+          end
+
+          def self.unregister_session(session)
+            active_sessions.delete(session)
+          end
+
+          def self.terminate_all(wait_ms: TERMINATE_WAIT_MS)
+            active_sessions.dup.each { |session| session.terminate(wait_ms: wait_ms) }
+            active_sessions.clear
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] val3dity terminate_all failed: #{e.class}: #{e.message}"
+          end
 
           class Val3dityResult
             attr_reader :valid, :report, :report_json_path, :report_html_path, :error
@@ -56,12 +76,14 @@ module ULOL
               @current_dir = current_dir
               @process_handle = 0
               @thread_handle = 0
+              @process_id = nil
               @stdout_read = 0
               @stdout_write = 0
               @reader_thread = nil
               @progress_queue = Queue.new
               @finished = false
               @exit_code = nil
+              @terminated = false
               @closed = false
             end
 
@@ -83,7 +105,7 @@ module ULOL
               )
               raise "CreateProcessW failed: #{Fiddle.last_error}" if created == 0
 
-              @process_handle, @thread_handle = process_info.unpack('Q<Q<')
+              @process_handle, @thread_handle, @process_id = process_info.unpack('Q<Q<L<')
 
               close_handle.call(@stdout_write)
               @stdout_write = 0
@@ -116,6 +138,10 @@ module ULOL
               @reader_thread&.join(1.0)
             end
 
+            def terminated?
+              @terminated == true
+            end
+
             def close
               return if @closed
 
@@ -128,12 +154,21 @@ module ULOL
               @closed = true
             end
 
-            def terminate
-              return if @closed || @process_handle.to_i <= 0 || finished?
+            def terminate(wait_ms: TERMINATE_WAIT_MS)
+              return if @closed
+              return close if @process_handle.to_i <= 0
 
-              terminate_process.call(@process_handle, TERMINATE_EXIT_CODE)
+              unless finished?
+                ok = terminate_process.call(@process_handle, TERMINATE_EXIT_CODE)
+                IndoorCore::Logger.puts "[IndoorGML] TerminateProcess failed: #{Fiddle.last_error}" if ok == 0
+                wait_result = wait_ms.to_i.positive? ? wait_for_single_object.call(@process_handle, wait_ms.to_i) : WAIT_TIMEOUT
+                kill_process_tree if wait_ms.to_i.positive? && wait_result == WAIT_TIMEOUT
+              end
+
+              @terminated = true
               @finished = true
               @exit_code = TERMINATE_EXIT_CODE
+              join_reader if wait_ms.to_i.positive?
             rescue StandardError => e
               @progress_queue << {
                 percent: nil,
@@ -304,6 +339,14 @@ module ULOL
                 [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
                 Fiddle::TYPE_INT
               )
+            end
+
+            def kill_process_tree
+              return unless @process_id.to_i.positive?
+
+              system('taskkill', '/PID', @process_id.to_s, '/T', '/F')
+            rescue StandardError => e
+              IndoorCore::Logger.puts "[IndoorGML] taskkill fallback failed: #{e.class}: #{e.message}"
             end
 
             def command_quote(value)
@@ -509,6 +552,7 @@ module ULOL
               total_states: indoor_model.states.count(&:valid?),
               total_transitions: indoor_model.transitions.count(&:valid?)
             )
+            self.class.register_session(session)
 
             completed = false
 
@@ -524,9 +568,13 @@ module ULOL
 
               result = nil
               begin
+                if session.terminated?
+                  completed = true
+                  next
+                end
+
                 session.join_reader
                 drain_val3dity_progress(session, progress)
-                session.close
 
                 progress&.complete(:val3dity)
 
@@ -540,6 +588,8 @@ module ULOL
                   error: e
                 )
               ensure
+                session.close
+                self.class.unregister_session(session)
                 completed = true
               end
 
@@ -548,6 +598,7 @@ module ULOL
 
             session
           rescue StandardError => e
+            self.class.unregister_session(session) if session
             session&.close
             raise unless callback
 
