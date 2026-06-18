@@ -18,7 +18,7 @@ module ULOL
         PROGRESS_TRACK_COLOR = Sketchup::Color.new(75, 85, 99, 220)
         PROGRESS_FILL_COLOR = Sketchup::Color.new(22, 130, 82, 235)
         PROGRESS_TEXT_COLOR = Sketchup::Color.new(255, 255, 255, 255)
-        CIRCLE_SEGMENTS = 16
+        STATE_CIRCLE_SEGMENTS = 12
         OVERLAY_RADIUS_SCALE = 1.0
         TRANSITION_DEPTH_OFFSET_PIXELS = 2.0
         TRANSITION_CURVE_SEGMENTS = 12
@@ -436,8 +436,8 @@ module ULOL
         end
 
         def circle_points(center, axis1, axis2, radius)
-          (0...CIRCLE_SEGMENTS).map do |index|
-            angle = (2.0 * Math::PI * index) / CIRCLE_SEGMENTS
+          (0...STATE_CIRCLE_SEGMENTS).map do |index|
+            angle = (2.0 * Math::PI * index) / STATE_CIRCLE_SEGMENTS
             Geom::Point3d.new(
               center.x + (axis1.x * Math.cos(angle) * radius) + (axis2.x * Math.sin(angle) * radius),
               center.y + (axis1.y * Math.cos(angle) * radius) + (axis2.y * Math.sin(angle) * radius),
