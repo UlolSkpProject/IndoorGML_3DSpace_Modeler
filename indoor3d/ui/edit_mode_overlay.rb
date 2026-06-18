@@ -21,7 +21,7 @@ module ULOL
         STATE_CIRCLE_SEGMENTS = 12
         OVERLAY_RADIUS_SCALE = 1.0
         TRANSITION_DEPTH_OFFSET_PIXELS = 2.0
-        TRANSITION_CURVE_SEGMENTS = 12
+        TRANSITION_CURVE_SEGMENTS = 3
 
         def initialize(indoor_model)
           @indoor_model = indoor_model
@@ -397,7 +397,7 @@ module ULOL
 
         def polyline_segments(points)
           points.each_cons(2).flat_map do |from, to|
-            next [] if from.distance(to) <= 0.001
+            # next [] if from.distance(to) <= 0.001
             [from, to]
           end
         end
