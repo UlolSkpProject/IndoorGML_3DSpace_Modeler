@@ -21,7 +21,7 @@ module ULOL
               ensure
                 @relocating_entity = false
               end
-              refresh_runtime_data
+              # refresh_runtime_data
               Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
             end
           rescue StandardError => e
