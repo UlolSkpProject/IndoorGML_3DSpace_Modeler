@@ -437,15 +437,15 @@ module ULOL
         end
 
         def billboard_disk_triangle_points(center, right_axis, up_axis, radius)
-            points = UNIT_CIRCLE.map do |cos_a, sin_a|
-              Geom::Point3d.new(
-                center.x + (right_axis.x * cos_a * radius) + (up_axis.x * sin_a * radius),
-                center.y + (right_axis.y * cos_a * radius) + (up_axis.y * sin_a * radius),
-                center.z + (right_axis.z * cos_a * radius) + (up_axis.z * sin_a * radius)
-              )
-            end
+          points = UNIT_CIRCLE.map do |cos_a, sin_a|
+            Geom::Point3d.new(
+              center.x + (right_axis.x * cos_a * radius) + (up_axis.x * sin_a * radius),
+              center.y + (right_axis.y * cos_a * radius) + (up_axis.y * sin_a * radius),
+              center.z + (right_axis.z * cos_a * radius) + (up_axis.z * sin_a * radius)
+            )
+          end
           points.each_with_index.flat_map do |point, index|
-              [center, point, points[(index + 1) % STATE_CIRCLE_SEGMENTS]]
+            [center, point, points[(index + 1) % STATE_CIRCLE_SEGMENTS]]
           end
         end
 
