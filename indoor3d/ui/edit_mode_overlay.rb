@@ -119,12 +119,8 @@ module ULOL
 
         def draw_dual_space_overlay(view)
           begin
-            t0 = Time.now
             draw_overlay_transitions(view)
-            t1 = Time.now
             draw_overlay_states(view)
-            t2 = Time.now
-            puts "[perf] transition draw: #{((t1 - t0) * 1000).round(2)}ms | transition draw: #{((t2 - t1) * 1000).round(2)}ms"
           ensure
             view.line_width = 1 if view.respond_to?(:line_width=)
           end
