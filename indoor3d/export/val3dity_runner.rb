@@ -708,33 +708,194 @@ module ULOL
 
           def prepare_html_report(raw_report)
             FileUtils.rm_rf(@report_dir)
-            if Dir.exist?(report_template_dir)
-              FileUtils.cp_r(report_template_dir, @report_dir)
-              File.write(File.join(@report_dir, 'report.js'), "var report = #{JSON.pretty_generate(to_report_js(raw_report))}\n", encoding: 'UTF-8')
-            else
-              FileUtils.mkdir_p(@report_dir)
-              File.write(@report_html_path, fallback_report_html(raw_report), encoding: 'UTF-8')
-            end
+            FileUtils.mkdir_p(@report_dir)
+            File.write(@report_html_path, fallback_report_html(raw_report), encoding: 'UTF-8')
           end
 
           def fallback_report_html(raw_report)
-            escaped_report = JSON.pretty_generate(raw_report)
-                                 .gsub('&', '&amp;')
-                                 .gsub('<', '&lt;')
-                                 .gsub('>', '&gt;')
             <<~HTML
               <!doctype html>
               <html>
               <head>
                 <meta charset="utf-8">
                 <title>val3dity report</title>
+                <style>
+                  :root { color-scheme: light; font-family: Arial, sans-serif; color: #172033; background: #f5f7fb; }
+                  body { margin: 0; padding: 28px; }
+                  main { max-width: 980px; margin: 0 auto; }
+                  h1 { margin: 0 0 6px; font-size: 28px; }
+                  h2 { margin: 0 0 14px; font-size: 18px; }
+                  .subtitle { margin: 0 0 22px; color: #667085; }
+                  .card { background: #fff; border: 1px solid #e4e7ec; border-radius: 8px; padding: 18px; margin-bottom: 16px; }
+                  .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+                  .metric { background: #f8fafc; border-radius: 6px; padding: 10px 12px; }
+                  .metric .label { color: #667085; font-size: 12px; }
+                  .metric .value { margin-top: 4px; font-weight: 700; overflow-wrap: anywhere; }
+                  .valid { color: #067647; }
+                  .invalid { color: #b42318; }
+                  table { width: 100%; border-collapse: collapse; }
+                  th, td { border-bottom: 1px solid #eaecf0; padding: 9px 8px; text-align: left; vertical-align: top; }
+                  th { color: #475467; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+                  code { background: #f2f4f7; border-radius: 4px; padding: 2px 5px; }
+                  .empty { color: #667085; margin: 0; }
+                  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+                </style>
               </head>
               <body>
-                <h1>val3dity report</h1>
-                <pre>#{escaped_report}</pre>
+                <main>
+                  <h1>val3dity report</h1>
+                  <p class="subtitle">IndoorGML validation result</p>
+                  #{report_version_section(raw_report)}
+                  #{report_error_kinds_section(raw_report)}
+                  #{report_error_items_section(raw_report)}
+                  #{report_summary_section(raw_report)}
+                </main>
               </body>
               </html>
             HTML
+          end
+
+          def report_version_section(raw_report)
+            validity = raw_report['validity'] == true
+            <<~HTML
+              <section class="card">
+                <h2>val3dity version</h2>
+                <div class="meta">
+                  #{metric_html('Version', raw_report['val3dity_version'] || 'unknown')}
+                  #{metric_html('Result', validity ? 'VALID' : 'INVALID', validity ? 'valid' : 'invalid')}
+                  #{metric_html('Input type', raw_report['input_file_type'] || '-')}
+                  #{metric_html('Checked at', raw_report['time'] || '-')}
+                </div>
+              </section>
+            HTML
+          end
+
+          def report_error_kinds_section(raw_report)
+            rows = error_kind_rows(raw_report)
+            body = if rows.empty?
+                     '<p class="empty">No errors.</p>'
+                   else
+                     <<~HTML
+                       <table>
+                         <thead><tr><th>Code</th><th>Error</th><th>Count</th></tr></thead>
+                         <tbody>
+                           #{rows.map { |row| "<tr><td><code>#{html_escape(row[:code])}</code></td><td>#{html_escape(row[:description])}</td><td>#{row[:count]}</td></tr>" }.join}
+                         </tbody>
+                       </table>
+                     HTML
+                   end
+            <<~HTML
+              <section class="card">
+                <h2>Error 종류</h2>
+                #{body}
+              </section>
+            HTML
+          end
+
+          def report_error_items_section(raw_report)
+            rows = error_item_rows(raw_report)
+            body = if rows.empty?
+                     '<p class="empty">No error items.</p>'
+                   else
+                     <<~HTML
+                       <table>
+                         <thead><tr><th>Scope</th><th>Item</th><th>Code</th><th>Error</th></tr></thead>
+                         <tbody>
+                           #{rows.map { |row| error_item_row_html(row) }.join}
+                         </tbody>
+                       </table>
+                     HTML
+                   end
+            <<~HTML
+              <section class="card">
+                <h2>Error에 걸린 항목</h2>
+                #{body}
+              </section>
+            HTML
+          end
+
+          def report_summary_section(raw_report)
+            <<~HTML
+              <section class="card">
+                <h2>요약</h2>
+                <div class="summary-grid">
+                  #{metric_html('Features', "#{valid_count(raw_report['features_overview'])} / #{total_count(raw_report['features_overview'])} valid")}
+                  #{metric_html('Primitives', "#{valid_count(raw_report['primitives_overview'])} / #{total_count(raw_report['primitives_overview'])} valid")}
+                  #{metric_html('snap_tol', raw_report.dig('parameters', 'snap_tol') || '-')}
+                  #{metric_html('overlap_tol', raw_report.dig('parameters', 'overlap_tol') || '-')}
+                  #{metric_html('planarity_d2p_tol', raw_report.dig('parameters', 'planarity_d2p_tol') || '-')}
+                  #{metric_html('planarity_n_tol', raw_report.dig('parameters', 'planarity_n_tol') || '-')}
+                </div>
+                <p class="subtitle">#{html_escape(raw_report['input_file'])}</p>
+              </section>
+            HTML
+          end
+
+          def metric_html(label, value, class_name = nil)
+            value_class = ['value', class_name].compact.join(' ')
+            <<~HTML
+              <div class="metric">
+                <div class="label">#{html_escape(label)}</div>
+                <div class="#{value_class}">#{html_escape(value)}</div>
+              </div>
+            HTML
+          end
+
+          def error_kind_rows(raw_report)
+            counts = Hash.new { |hash, key| hash[key] = { code: key, description: 'UNKNOWN', count: 0 } }
+            error_item_rows(raw_report).each do |row|
+              item = counts[row[:code]]
+              item[:description] = row[:description]
+              item[:count] += 1
+            end
+            counts.values.sort_by { |row| row[:code].to_s }
+          end
+
+          def error_item_rows(raw_report)
+            rows = []
+            Array(raw_report['dataset_errors']).each do |error|
+              rows << error_row('Dataset', raw_report['input_file'], error)
+            end
+            Array(raw_report['features']).each do |feature|
+              Array(feature['errors']).each do |error|
+                rows << error_row('Feature', error['id'].to_s.empty? ? feature['id'] : error['id'], error)
+              end
+              Array(feature['primitives']).each do |primitive|
+                Array(primitive['errors']).each do |error|
+                  rows << error_row('Primitive', primitive['id'], error)
+                end
+              end
+            end
+            rows
+          end
+
+          def error_row(scope, item, error)
+            {
+              scope: scope,
+              item: item,
+              code: error['code'],
+              description: error['description'] || error['type'] || 'UNKNOWN'
+            }
+          end
+
+          def error_item_row_html(row)
+            <<~HTML
+              <tr>
+                <td>#{html_escape(row[:scope])}</td>
+                <td><code>#{html_escape(row[:item])}</code></td>
+                <td><code>#{html_escape(row[:code])}</code></td>
+                <td>#{html_escape(row[:description])}</td>
+              </tr>
+            HTML
+          end
+
+          def html_escape(value)
+            value.to_s
+                 .gsub('&', '&amp;')
+                 .gsub('<', '&lt;')
+                 .gsub('>', '&gt;')
+                 .gsub('"', '&quot;')
+                 .gsub("'", '&#39;')
           end
 
           def to_report_js(raw_report)
