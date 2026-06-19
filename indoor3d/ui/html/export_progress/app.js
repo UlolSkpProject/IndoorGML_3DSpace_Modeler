@@ -6,7 +6,6 @@ var icons = {
 };
 
 var defaultSteps = [
-  { key: 'runtime', label: 'runtime data refresh' },
   { key: 'temp_file', label: '\uC784\uC2DC\uD30C\uC77C \uC0DD\uC131' },
   { key: 'val3dity', label: 'val3dity \uC2E4\uD589 (version2.2.0)' },
   { key: 'report', label: 'report \uC0DD\uC131' },

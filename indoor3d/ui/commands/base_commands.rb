@@ -5,8 +5,22 @@ module ULOL
     module IndoorCore
       module BaseCommands
         def refresh_runtime_data
-          IndoorModel.current.refresh_runtime_data
-          UI.messagebox('IndoorGML runtime data refreshed.')
+          indoor_model = IndoorModel.current
+          scheduled = indoor_model.run_batched(
+            [:refresh_runtime_data],
+            message: 'Refreshing...',
+            batch_size: 1,
+            complete: proc do
+              UI.messagebox('IndoorGML runtime data refreshed.')
+            end,
+            failure: proc do |error|
+              UI.messagebox("Runtime refresh failed:\n#{error.message}")
+            end
+          ) do
+            indoor_model.refresh_runtime_data
+          end
+
+          indoor_model.refresh_runtime_data unless scheduled
         rescue StandardError => e
           UI.messagebox("Runtime refresh failed:\n#{e.message}")
         end

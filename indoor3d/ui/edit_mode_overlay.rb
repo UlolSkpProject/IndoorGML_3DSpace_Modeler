@@ -41,7 +41,7 @@ module ULOL
               draw_screen_border(view)
               draw_banner(view)
             end
-            draw_dual_space_overlay(view)
+            draw_dual_space_overlay(view) if draw_dual_overlay?
             draw_progress_bar(view) if @indoor_model.progress_active?()
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Edit mode overlay draw failed: #{e.class}: #{e.message}"
@@ -51,7 +51,7 @@ module ULOL
         def getExtents
           begin
             bounds = Geom::BoundingBox.new
-            add_dual_overlay_bounds(bounds)
+            add_dual_overlay_bounds(bounds) if draw_dual_overlay?
             bounds
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Edit mode overlay extents failed: #{e.class}: #{e.message}"
@@ -60,6 +60,12 @@ module ULOL
         end
 
         private
+
+        def draw_dual_overlay?
+          return false if @indoor_model.respond_to?(:cell_space_geometry_editing?) && @indoor_model.cell_space_geometry_editing?()
+
+          @indoor_model.editing?() || @indoor_model.dual_overlay_visible?()
+        end
 
         def add_dual_overlay_bounds(bounds)
           @indoor_model.states.each do |state|

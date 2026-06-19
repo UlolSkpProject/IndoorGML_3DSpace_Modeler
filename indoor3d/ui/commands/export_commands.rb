@@ -45,15 +45,9 @@ module ULOL
         end
 
         def perform_check_validity(progress, state = validation_close_state)
-          current_step = :runtime
-
+          current_step = :temp_file
           indoor_model = IndoorModel.current
 
-          progress.running(:runtime)
-          indoor_model.refresh_runtime_data
-          progress.complete(:runtime)
-
-          current_step = :temp_file
           progress.running(:temp_file)
           state[:temp_file_running] = true
           temp_path = nil

@@ -11,6 +11,7 @@ module ULOL
 
         class GmlExporter
           ROOT_ID                    = 'IF_001'
+          EXPORT_SNAP_GRID           = 0.001
           CORE_NAMESPACE             = 'http://www.opengis.net/indoorgml/1.0/core'
           NAVIGATION_NAMESPACE       = 'http://www.opengis.net/indoorgml/1.0/navigation'
           CORE_SCHEMA_LOCATION       = 'http://schemas.opengis.net/indoorgml/1.0/indoorgmlcore.xsd'
@@ -327,7 +328,15 @@ module ULOL
           end
 
           def export_point(point)
-            Geom::Point3d.new(point.x, point.y, point.z)
+            Geom::Point3d.new(
+              snap_export_coordinate(point.x),
+              snap_export_coordinate(point.y),
+              snap_export_coordinate(point.z)
+            )
+          end
+
+          def snap_export_coordinate(value)
+            (value.to_f / EXPORT_SNAP_GRID).round * EXPORT_SNAP_GRID
           end
 
           def format_number(value)

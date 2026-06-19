@@ -11,7 +11,6 @@ module ULOL
           include Utils::HtmlHelpers
 
           STEPS = [
-            [:runtime, 'runtime data refresh'],
             [:temp_file, "\uC784\uC2DC\uD30C\uC77C \uC0DD\uC131"],
             [:val3dity, "val3dity \uC2E4\uD589 (version2.2.0)"],
             [:report, "report \uC0DD\uC131"],
