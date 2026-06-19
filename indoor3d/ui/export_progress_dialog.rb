@@ -179,6 +179,8 @@ module ULOL
               return
             end
 
+            IndoorGmlConverter::Val3dityRunner.shutting_down!
+
             if @request_close_callback&.call == :keep_open
               @dialog = nil
               @dom_ready = false
