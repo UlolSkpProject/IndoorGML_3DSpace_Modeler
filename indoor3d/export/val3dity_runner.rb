@@ -11,7 +11,7 @@ module ULOL
       module IndoorGmlConverter
 
         class Val3dityRunner
-          VENDOR_ROOT = File.expand_path('../assets/vendor/val3dity2.3.0', __dir__)
+          VENDOR_ROOT = File.expand_path('../assets/vendor/val3dity-windows-x64-v2.2.0', __dir__)
           LEGACY_VENDOR_ROOT = File.expand_path('../assets/vendor/val3dity2.1.0', __dir__)
           WINDOWS_ONLY_MESSAGE = 'Val3dity validity check is currently supported only on Windows because the bundled runtime is val3dity-windows-x64-v2.2.0.'
           CREATE_NO_WINDOW       = 0x08000000
@@ -398,6 +398,7 @@ module ULOL
 
             def finish
               parse_line(@buffer.strip) unless @buffer.strip.empty?
+              @phase = :finished
               emit(force: true, ratio_override: 1.0, message: 'val3dity finished')
             end
 
@@ -506,6 +507,7 @@ module ULOL
               when :overlap then 'Overlap test'
               when :dual_vertex then 'Dual vertex check'
               when :primal_dual then "Primal-dual link check (#{@link_done} / #{@total_transitions})"
+              when :finished then 'Finished'
               else 'Starting val3dity'
               end
             end
@@ -545,8 +547,8 @@ module ULOL
               exe_path,
               @gml_path,
               '--verbose',
-              '--overlap_tol',
-              '0.5',
+              # '--overlap_tol',
+              # '0.5',
               '-r',
               @report_json_path
             ]
@@ -556,9 +558,10 @@ module ULOL
               current_dir: VENDOR_ROOT
             )
             indoor_model = IndoorModel.current
+            totals = validation_progress_totals(indoor_model)
             session.start(
-              total_states: indoor_model.states.count(&:valid?),
-              total_transitions: indoor_model.transitions.count(&:valid?)
+              total_states: totals[:states],
+              total_transitions: totals[:transitions]
             )
             self.class.register_session(session)
 
@@ -622,6 +625,30 @@ module ULOL
           end
 
           private
+
+          def validation_progress_totals(indoor_model)
+            exportable_cell_spaces = indoor_model.cell_spaces.select do |cell_space|
+              cell_space&.valid_sketchup_group && cell_space.duality_state&.valid?
+            end
+            exportable_transitions = indoor_model.transitions.select do |transition|
+              transition&.valid? &&
+                transition.state1&.valid? &&
+                transition.state2&.valid? &&
+                exportable_cell_spaces.include?(transition.state1.duality_cell) &&
+                exportable_cell_spaces.include?(transition.state2.duality_cell)
+            end
+
+            {
+              states: exportable_cell_spaces.length,
+              transitions: exportable_transitions.length
+            }
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] val3dity progress totals failed: #{e.class}: #{e.message}"
+            {
+              states: indoor_model.states.count(&:valid?),
+              transitions: indoor_model.transitions.count(&:valid?)
+            }
+          end
 
           def ensure_supported_platform!
             raise WINDOWS_ONLY_MESSAGE unless windows?
