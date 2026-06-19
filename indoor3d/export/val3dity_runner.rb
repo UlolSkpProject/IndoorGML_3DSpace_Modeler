@@ -11,7 +11,8 @@ module ULOL
       module IndoorGmlConverter
 
         class Val3dityRunner
-          VENDOR_ROOT = File.expand_path('../assets/vendor/val3dity-windows-x64-v2.2.0', __dir__)
+          VENDOR_ROOT = File.expand_path('../assets/vendor/val3dity2.3.0', __dir__)
+          LEGACY_VENDOR_ROOT = File.expand_path('../assets/vendor/val3dity2.1.0', __dir__)
           WINDOWS_ONLY_MESSAGE = 'Val3dity validity check is currently supported only on Windows because the bundled runtime is val3dity-windows-x64-v2.2.0.'
           CREATE_NO_WINDOW       = 0x08000000
           STARTF_USESTDHANDLES   = 0x00000100
@@ -37,6 +38,13 @@ module ULOL
             active_sessions.delete(session)
           end
 
+          def self.shutting_down?
+            @shutting_down == true
+          end
+
+          def self.shutting_down!
+            @shutting_down = true
+          end
           def self.terminate_all(wait_ms: TERMINATE_WAIT_MS)
             active_sessions.dup.each { |session| session.terminate(wait_ms: wait_ms) }
             active_sessions.clear

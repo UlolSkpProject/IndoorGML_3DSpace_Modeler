@@ -108,7 +108,12 @@ module ULOL
               state[:close_after_temp] = true
               :close
             elsif state[:val_running] && !state[:completed]
-              if UI.messagebox("Validation is still running.\nCancel validation?", MB_YESNO) == IDYES
+              if IndoorGmlConverter::Val3dityRunner.shutting_down?
+                state[:cancelled] = true
+                state[:val_running] = false
+                state[:val_session]&.terminate(wait_ms: 0)
+                :close
+              elsif UI.messagebox("Validation is still running.\nCancel validation?", MB_YESNO) == IDYES
                 state[:cancelled] = true
                 state[:val_running] = false
                 state[:val_session]&.terminate
