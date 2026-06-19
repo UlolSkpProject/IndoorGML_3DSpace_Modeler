@@ -8,7 +8,10 @@ module ULOL
       module ExportCommands
         def create_temp_indoorgml
           begin
-            output_path = IndoorGmlConverter::GmlExporter.new(IndoorModel.current).export
+            output_path = IndoorGmlConverter::GmlExporter.new(
+              IndoorModel.current,
+              global_snapping: choose_global_snapping
+            ).export
             UI.messagebox("IndoorGML temp.gml created:\n#{output_path}")
           rescue StandardError => e
             UI.messagebox("IndoorGML temp.gml creation failed:\n#{e.message}")
@@ -21,7 +24,10 @@ module ULOL
 
           path = "#{path}.gml" unless File.extname(path).downcase == '.gml'
           FileUtils.mkdir_p(File.dirname(path))
-          IndoorGmlConverter::GmlExporter.new(IndoorModel.current).export(output_path: path)
+          IndoorGmlConverter::GmlExporter.new(
+            IndoorModel.current,
+            global_snapping: choose_global_snapping
+          ).export(output_path: path)
           UI.messagebox("GML exported:\n#{path}")
         rescue StandardError => e
           UI.messagebox("GML export failed:\n#{e.message}")
@@ -30,6 +36,7 @@ module ULOL
         def check_validity
           progress = IndoorGmlConverter::ExportProgressDialog.new
           state = validation_close_state
+          state[:global_snapping] = choose_global_snapping
           configure_validation_close_handler(progress, state)
           progress.show
           UI.start_timer(0.1, false) do
@@ -54,7 +61,8 @@ module ULOL
           begin
             temp_path = IndoorGmlConverter::GmlExporter.new(
               indoor_model,
-              refresh_runtime_data: false
+              refresh_runtime_data: false,
+              global_snapping: state.fetch(:global_snapping, true)
             ).export
           ensure
             state[:temp_file_running] = false
@@ -92,7 +100,8 @@ module ULOL
             val_running: false,
             val_session: nil,
             completed: false,
-            cancelled: false
+            cancelled: false,
+            global_snapping: true
           }
         end
 
@@ -185,6 +194,15 @@ module ULOL
 
         def open_local_file(path)
           UI.openURL("file:///#{File.expand_path(path).tr('\\', '/')}")
+        end
+
+        def choose_global_snapping
+          UI.messagebox(
+            "Use global vertex snapping during IndoorGML export?\n\n" \
+            'Yes: canonicalize near shared vertices before validation/export.' \
+            "\nNo: export raw world coordinates.",
+            MB_YESNO
+          ) == IDYES
         end
       end
     end
