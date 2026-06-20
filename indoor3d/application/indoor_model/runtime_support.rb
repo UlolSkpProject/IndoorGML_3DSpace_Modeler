@@ -18,6 +18,7 @@ module ULOL
                 @runtime_restorer.restore(primal_group: @primal_group)
                 rebuild_runtime_transitions_from_cell_adjacency
               end
+              invalidate_overlay_transition_points
               apply_indoor_lock_policy()
               @editor_session.apply_display_state()
               IndoorCore::Logger.puts "[IndoorGML] Runtime refreshed: cells=#{@cell_spaces.length}, states=#{@states.length}, transitions=#{@transitions.length}"

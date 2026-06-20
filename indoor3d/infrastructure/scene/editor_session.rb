@@ -265,6 +265,12 @@ module ULOL
           end
         end
 
+        def invalidate_overlay_transition_points
+          @overlay&.invalidate_transition_points
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Overlay transition cache invalidation failed: #{e.class}: #{e.message}"
+        end
+
         def recover_unlocked_primal_after_transaction(model)
           begin
             return false if @editing

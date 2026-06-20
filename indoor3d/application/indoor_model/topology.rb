@@ -50,6 +50,7 @@ module ULOL
               end
             end
             Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
+            invalidate_overlay_transition_points
           rescue StandardError => e
             @cell_space_sync_scheduled = false
             IndoorCore::Logger.puts "[IndoorGML] Dirty CellSpace sync failed: #{e.class}: #{e.message}"
@@ -82,6 +83,7 @@ module ULOL
 
             register_transition_with_states(transition)
             write_transition_attributes(transition)
+            invalidate_overlay_transition_points
             transition
           end
 
@@ -99,6 +101,7 @@ module ULOL
             unregister_transition_from_states(transition)
             transition.erase!
             @feature_registry.remove_transition(transition)
+            invalidate_overlay_transition_points
           end
 
           def cell_pair_key(cell1, cell2)
