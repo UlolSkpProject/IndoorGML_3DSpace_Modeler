@@ -18,10 +18,14 @@ module ULOL
         PROGRESS_TRACK_COLOR = Sketchup::Color.new(75, 85, 99, 220)
         PROGRESS_FILL_COLOR = Sketchup::Color.new(22, 130, 82, 235)
         PROGRESS_TEXT_COLOR = Sketchup::Color.new(255, 255, 255, 255)
-        CIRCLE_SEGMENTS = 16
+        STATE_CIRCLE_SEGMENTS = 8
+        UNIT_CIRCLE = (0...STATE_CIRCLE_SEGMENTS).map do |i|
+          angle = (2.0 * Math::PI * i) / STATE_CIRCLE_SEGMENTS
+          [Math.cos(angle), Math.sin(angle)]
+        end.freeze
         OVERLAY_RADIUS_SCALE = 1.0
         TRANSITION_DEPTH_OFFSET_PIXELS = 2.0
-        TRANSITION_CURVE_SEGMENTS = 12
+        TRANSITION_CURVE_SEGMENTS = 3
 
         def initialize(indoor_model)
           @indoor_model = indoor_model
@@ -37,7 +41,7 @@ module ULOL
               draw_screen_border(view)
               draw_banner(view)
             end
-            draw_dual_space_overlay(view)
+            draw_dual_space_overlay(view) if draw_dual_overlay?
             draw_progress_bar(view) if @indoor_model.progress_active?()
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Edit mode overlay draw failed: #{e.class}: #{e.message}"
@@ -47,7 +51,7 @@ module ULOL
         def getExtents
           begin
             bounds = Geom::BoundingBox.new
-            add_dual_overlay_bounds(bounds)
+            add_dual_overlay_bounds(bounds) if draw_dual_overlay?
             bounds
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Edit mode overlay extents failed: #{e.class}: #{e.message}"
@@ -56,6 +60,12 @@ module ULOL
         end
 
         private
+
+        def draw_dual_overlay?
+          return false if @indoor_model.respond_to?(:cell_space_geometry_editing?) && @indoor_model.cell_space_geometry_editing?()
+
+          @indoor_model.editing?() || @indoor_model.dual_overlay_visible?()
+        end
 
         def add_dual_overlay_bounds(bounds)
           @indoor_model.states.each do |state|
@@ -194,18 +204,24 @@ module ULOL
 
         def draw_overlay_transitions(view)
           view.line_width = overlay_transition_line_width if view.respond_to?(:line_width=)
+        
+          primal_tf = @indoor_model.primal_group&.valid? ? @indoor_model.primal_group.transformation : nil
+          camera_direction = view.camera.direction.clone
+          camera_direction.normalize!
+          depth_distance = view.pixels_to_model(TRANSITION_DEPTH_OFFSET_PIXELS, Geom::Point3d.new(0, 0, 0))
+        
           points = []
           @indoor_model.transitions.each do |transition|
             next unless transition&.valid?()
             next unless transition.state1&.valid?() && transition.state2&.valid?()
-
-            segments = transition_curve_segments(view, transition)
+        
+            segments = transition_curve_segments(view, transition, primal_tf, camera_direction, depth_distance)
             points.concat(segments[:default])
             points.concat(segments[:first])
             points.concat(segments[:second])
           end
           return if points.empty?
-
+        
           view.drawing_color = DUAL_TRANSITION_COLOR
           view.draw(GL_LINES, points)
         end
@@ -226,23 +242,19 @@ module ULOL
           [(@indoor_model.overlay_min_radius_pixels.to_f * 1.25).round, 2].max
         end
 
-        def transition_curve_segments(view, transition)
-          control_points = transition_control_points(transition)
+        def transition_curve_segments(view, transition, primal_tf, camera_direction, depth_distance)
+          control_points = transition_control_points(transition, primal_tf)
           return empty_transition_segment_groups if control_points.length < 2
-
+        
           curve_point_groups = cached_transition_curve_point_groups(transition, control_points)
           {
-            default: polyline_segments(offset_transition_points_behind_states(view, curve_point_groups[:default]), view),
-            first: polyline_segments(offset_transition_points_behind_states(view, curve_point_groups[:first]), view),
-            second: polyline_segments(offset_transition_points_behind_states(view, curve_point_groups[:second]), view)
+            default: polyline_segments(offset_points(curve_point_groups[:default], camera_direction, depth_distance)),
+            first:   polyline_segments(offset_points(curve_point_groups[:first],   camera_direction, depth_distance)),
+            second:  polyline_segments(offset_points(curve_point_groups[:second],  camera_direction, depth_distance))
           }
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Transition curve draw failed: #{e.class}: #{e.message}"
-          {
-            default: polyline_segments(control_points || []),
-            first: [],
-            second: []
-          }
+          { default: polyline_segments(control_points || []), first: [], second: [] }
         end
 
         def empty_transition_segment_groups
@@ -354,48 +366,46 @@ module ULOL
           vector
         end
 
-        def transition_control_points(transition)
-          point1 = overlay_state_point(transition.state1)
-          point2 = overlay_state_point(transition.state2)
+        def transition_control_points(transition, primal_tf)
+          point1 = overlay_state_point_with_tf(transition.state1, primal_tf)
+          point2 = overlay_state_point_with_tf(transition.state2, primal_tf)
           return [] if point1.distance(point2) <= 0.001
-
-          waypoint = overlay_transition_waypoint(transition.selected_waypoint)
+        
+          waypoint = overlay_transition_waypoint_with_tf(transition.selected_waypoint, primal_tf)
           waypoint ? [point1, waypoint, point2] : [point1, point2]
         end
 
-        def polyline_segments(points, view = nil)
-          points.each_cons(2).flat_map do |from, to|
-            next [] if from.distance(to) <= 0.001
-
-            view ? extended_line_segment(view, from, to) : [from, to]
-          end
+        def overlay_state_point_with_tf(state, primal_tf)
+          point = state.position
+          return point.transform(primal_tf) if primal_tf
+          point
+        rescue StandardError
+          state.position
         end
 
-        def extended_line_segment(view, from, to)
-          direction = from.vector_to(to)
-          return [from, to] if direction.length <= 0.001
-
-          extension = view.pixels_to_model(overlay_transition_line_width * 0.55, from)
-          direction.length = extension
-          [
-            Geom::Point3d.new(from.x - direction.x, from.y - direction.y, from.z - direction.z),
-            Geom::Point3d.new(to.x + direction.x, to.y + direction.y, to.z + direction.z)
-          ]
+        def overlay_transition_waypoint_with_tf(point, primal_tf)
+          return nil unless point.is_a?(Geom::Point3d)
+          return point.transform(primal_tf) if primal_tf
+          point
+        rescue StandardError
+          point
         end
-
-        def offset_transition_points_behind_states(view, points)
-          direction = view.camera.direction.clone
-          direction.normalize!
+        
+        def offset_points(points, camera_direction, depth_distance)
           points.map do |point|
-            distance = view.pixels_to_model(TRANSITION_DEPTH_OFFSET_PIXELS, point)
             Geom::Point3d.new(
-              point.x + (direction.x * distance),
-              point.y + (direction.y * distance),
-              point.z + (direction.z * distance)
+              point.x + (camera_direction.x * depth_distance),
+              point.y + (camera_direction.y * depth_distance),
+              point.z + (camera_direction.z * depth_distance)
             )
           end
-        rescue StandardError
-          points
+        end
+
+        def polyline_segments(points)
+          points.each_cons(2).flat_map do |from, to|
+            # next [] if from.distance(to) <= 0.001
+            [from, to]
+          end
         end
 
         def offset_state_point_in_front_of_transitions(view, point)
@@ -429,22 +439,18 @@ module ULOL
         end
 
         def billboard_disk_triangle_points(center, right_axis, up_axis, radius)
-          points = circle_points(center, right_axis, up_axis, radius)
+          points = UNIT_CIRCLE.map do |cos_a, sin_a|
+            Geom::Point3d.new(
+              center.x + (right_axis.x * cos_a * radius) + (up_axis.x * sin_a * radius),
+              center.y + (right_axis.y * cos_a * radius) + (up_axis.y * sin_a * radius),
+              center.z + (right_axis.z * cos_a * radius) + (up_axis.z * sin_a * radius)
+            )
+          end
           points.each_with_index.flat_map do |point, index|
-            [center, point, points[(index + 1) % points.length]]
+            [center, point, points[(index + 1) % STATE_CIRCLE_SEGMENTS]]
           end
         end
 
-        def circle_points(center, axis1, axis2, radius)
-          (0...CIRCLE_SEGMENTS).map do |index|
-            angle = (2.0 * Math::PI * index) / CIRCLE_SEGMENTS
-            Geom::Point3d.new(
-              center.x + (axis1.x * Math.cos(angle) * radius) + (axis2.x * Math.sin(angle) * radius),
-              center.y + (axis1.y * Math.cos(angle) * radius) + (axis2.y * Math.sin(angle) * radius),
-              center.z + (axis1.z * Math.cos(angle) * radius) + (axis2.z * Math.sin(angle) * radius)
-            )
-          end
-        end
 
         def camera_billboard_axes(view)
           up_axis = view.camera.up.clone

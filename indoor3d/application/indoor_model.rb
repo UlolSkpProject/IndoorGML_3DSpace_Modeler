@@ -59,6 +59,7 @@ module ULOL
         end
 
         def cleanup_for_model_close
+          IndoorGmlConverter::Val3dityRunner.terminate_all(wait_ms: 0)
           @editor_session.close_dialog_only()
           detach_edit_selection_observer(@model)
           reset_runtime_collections

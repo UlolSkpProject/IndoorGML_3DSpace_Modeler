@@ -74,9 +74,9 @@ module ULOL
 
         def begin_editing
           return false if @editing
-
-          @indoor_model.refresh_runtime_data()
           model = Sketchup.active_model()
+
+          # @indoor_model.refresh_runtime_data()
           primal_group = @indoor_model.primal_group
           return false unless primal_group&.valid?()
 

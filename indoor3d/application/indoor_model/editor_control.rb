@@ -62,6 +62,10 @@ module ULOL
             @editor_session.progress_message()
           end
 
+          def cell_space_geometry_editing?
+            @editor_session.cell_space_geometry_editing?()
+          end
+
           def run_batched(items, message:, batch_size: 20, complete: nil, failure: nil, &block)
             @editor_session.run_batched(
               items,

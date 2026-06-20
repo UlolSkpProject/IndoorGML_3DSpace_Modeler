@@ -43,7 +43,10 @@ module ULOL
         end
 
         def onQuit
-          cleanup_before_quit()
+          IndoorGmlConverter::Val3dityRunner.shutting_down!
+          IndoorGmlConverter::Val3dityRunner.terminate_all(wait_ms: 0)
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Quit cleanup failed: #{e.class}: #{e.message}"
         end
 
         private
