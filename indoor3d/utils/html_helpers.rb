@@ -9,7 +9,7 @@ module ULOL
                .gsub('&', '&amp;')
                .gsub('<', '&lt;')
                .gsub('>', '&gt;')
-               .gsub('"', '&quot;')
+              #  .gsub('"', '&quot;')
         end
       end
     end
