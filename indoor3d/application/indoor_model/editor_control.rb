@@ -66,6 +66,10 @@ module ULOL
             @editor_session.cell_space_geometry_editing?()
           end
 
+          def invalidate_overlay_transition_points
+            @editor_session.invalidate_overlay_transition_points
+          end
+
           def run_batched(items, message:, batch_size: 20, complete: nil, failure: nil, &block)
             @editor_session.run_batched(
               items,

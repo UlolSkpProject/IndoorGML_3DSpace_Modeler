@@ -26,11 +26,19 @@ module ULOL
         OVERLAY_RADIUS_SCALE = 1.0
         TRANSITION_DEPTH_OFFSET_PIXELS = 2.0
         TRANSITION_CURVE_SEGMENTS = 3
+        MIN_TRANSITION_CURVE_CACHE_LIMIT = 2048
 
         def initialize(indoor_model)
           @indoor_model = indoor_model
           @transition_curve_cache = {}
+          @transition_line_points = nil
+          @transition_draw_points = []
           super(OVERLAY_ID, OVERLAY_NAME, description: 'Shows when IndoorGML editing is active.')
+        end
+
+        def invalidate_transition_points
+          @transition_curve_cache&.clear
+          @transition_line_points = nil
         end
 
         def draw(view)
@@ -126,7 +134,7 @@ module ULOL
         def draw_dual_space_overlay(view)
           begin
             draw_overlay_transitions(view)
-            draw_overlay_states(view)
+            # draw_overlay_states(view)
           ensure
             view.line_width = 1 if view.respond_to?(:line_width=)
           end
@@ -205,25 +213,34 @@ module ULOL
         def draw_overlay_transitions(view)
           view.line_width = overlay_transition_line_width if view.respond_to?(:line_width=)
         
-          primal_tf = @indoor_model.primal_group&.valid? ? @indoor_model.primal_group.transformation : nil
           camera_direction = view.camera.direction.clone
           camera_direction.normalize!
           depth_distance = view.pixels_to_model(TRANSITION_DEPTH_OFFSET_PIXELS, Geom::Point3d.new(0, 0, 0))
-        
+          base_points = transition_line_points
+          return if base_points.empty?
+
+          points = offset_transition_line_points(base_points, camera_direction, depth_distance)
+          view.drawing_color = DUAL_TRANSITION_COLOR
+          view.draw(GL_LINES, points)
+        end
+
+        def transition_line_points
+          @transition_line_points ||= build_transition_line_points
+        end
+
+        def build_transition_line_points
+          primal_tf = @indoor_model.primal_group&.valid? ? @indoor_model.primal_group.transformation : nil
           points = []
           @indoor_model.transitions.each do |transition|
             next unless transition&.valid?()
             next unless transition.state1&.valid?() && transition.state2&.valid?()
         
-            segments = transition_curve_segments(view, transition, primal_tf, camera_direction, depth_distance)
+            segments = transition_curve_segments(transition, primal_tf)
             points.concat(segments[:default])
             points.concat(segments[:first])
             points.concat(segments[:second])
           end
-          return if points.empty?
-        
-          view.drawing_color = DUAL_TRANSITION_COLOR
-          view.draw(GL_LINES, points)
+          points
         end
 
         def overlay_state_radius(view, center, state)
@@ -242,15 +259,15 @@ module ULOL
           [(@indoor_model.overlay_min_radius_pixels.to_f * 1.25).round, 2].max
         end
 
-        def transition_curve_segments(view, transition, primal_tf, camera_direction, depth_distance)
+        def transition_curve_segments(transition, primal_tf)
           control_points = transition_control_points(transition, primal_tf)
           return empty_transition_segment_groups if control_points.length < 2
         
           curve_point_groups = cached_transition_curve_point_groups(transition, control_points)
           {
-            default: polyline_segments(offset_points(curve_point_groups[:default], camera_direction, depth_distance)),
-            first:   polyline_segments(offset_points(curve_point_groups[:first],   camera_direction, depth_distance)),
-            second:  polyline_segments(offset_points(curve_point_groups[:second],  camera_direction, depth_distance))
+            default: polyline_segments(curve_point_groups[:default]),
+            first:   polyline_segments(curve_point_groups[:first]),
+            second:  polyline_segments(curve_point_groups[:second])
           }
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Transition curve draw failed: #{e.class}: #{e.message}"
@@ -265,41 +282,23 @@ module ULOL
           return { default: control_points, first: [], second: [] } if control_points.length < 3
 
           @transition_curve_cache ||= {}
-          key = transition_curve_cache_key(transition, control_points)
+          key = transition.id
           cached = @transition_curve_cache[key]
           return cached if cached
 
-          @transition_curve_cache.clear if @transition_curve_cache.length > 512
-          @transition_curve_cache[key] = transition.selected_waypoint_normal1 && transition.selected_waypoint_normal2 ?
+          @transition_curve_cache.clear if @transition_curve_cache.length > transition_curve_cache_limit
+          groups = transition.selected_waypoint_normal1 && transition.selected_waypoint_normal2 ?
             hermite_transition_curve_point_groups(transition, control_points) :
             { default: control_points, first: [], second: [] }
+          @transition_curve_cache[key] = groups
+          groups
         end
 
-        def transition_curve_cache_key(transition, control_points)
-          [
-            transition.id,
-            control_points.map { |point| point_key(point) },
-            vector_key(transition.selected_waypoint_normal1),
-            vector_key(transition.selected_waypoint_normal2)
-          ]
-        end
-
-        def point_key(point)
-          [
-            point.x.to_f.round(6),
-            point.y.to_f.round(6),
-            point.z.to_f.round(6)
-          ]
-        end
-
-        def vector_key(vector)
-          return nil unless vector.is_a?(Geom::Vector3d)
-
-          [
-            vector.x.to_f.round(6),
-            vector.y.to_f.round(6),
-            vector.z.to_f.round(6)
-          ]
+        def transition_curve_cache_limit
+          transition_count = @indoor_model.transitions.length
+          [transition_count * 2, MIN_TRANSITION_CURVE_CACHE_LIMIT].max
+        rescue StandardError
+          MIN_TRANSITION_CURVE_CACHE_LIMIT
         end
 
         def hermite_transition_curve_point_groups(transition, control_points)
@@ -399,6 +398,19 @@ module ULOL
               point.z + (camera_direction.z * depth_distance)
             )
           end
+        end
+
+        def offset_transition_line_points(points, camera_direction, depth_distance)
+          @transition_draw_points ||= []
+          @transition_draw_points.clear
+          points.each do |point|
+            @transition_draw_points << Geom::Point3d.new(
+              point.x + (camera_direction.x * depth_distance),
+              point.y + (camera_direction.y * depth_distance),
+              point.z + (camera_direction.z * depth_distance)
+            )
+          end
+          @transition_draw_points
         end
 
         def polyline_segments(points)
