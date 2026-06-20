@@ -136,7 +136,7 @@ module ULOL
           end
           progress&.on_open_report do
             begin
-              open_local_file(result.report_html_path)
+              open_report_dialog(result.report_html_path)
             rescue StandardError => e
               progress&.set_result_message("Opening report failed:\n#{e.message}")
             end
@@ -157,8 +157,8 @@ module ULOL
             progress&.result(
               status: :success,
               title: 'IndoorGML validation succeeded',
-              message: 'Validation completed. Create the GML file when ready.',
-              actions: [:createGml, :close]
+              message: 'Validation completed. Open the report or create the GML file when ready.',
+              actions: [:openReport, :createGml, :close]
             )
           else
             progress&.result(
@@ -192,8 +192,21 @@ module ULOL
           progress&.set_result_message("GML export failed:\n#{e.message}")
         end
 
-        def open_local_file(path)
-          UI.openURL("file:///#{File.expand_path(path).tr('\\', '/')}")
+        def open_report_dialog(path)
+          raise "Report file was not found:\n#{path}" unless File.exist?(path)
+
+          @validation_report_dialog&.close if @validation_report_dialog&.visible?
+          @validation_report_dialog = UI::HtmlDialog.new(
+            dialog_title: 'val3dity report',
+            preferences_key: 'ULOL.Indoor3DGmlModeler.Val3dityReport',
+            scrollable: true,
+            resizable: true,
+            width: 980,
+            height: 720,
+            style: UI::HtmlDialog::STYLE_DIALOG
+          )
+          @validation_report_dialog.set_file(File.expand_path(path))
+          @validation_report_dialog.show
         end
 
         def choose_global_snapping
