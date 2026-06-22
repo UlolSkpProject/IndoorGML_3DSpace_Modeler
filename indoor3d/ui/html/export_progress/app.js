@@ -12,6 +12,15 @@ var defaultSteps = [
   { key: 'report_view', label: 'report view \uC0DD\uC131' }
 ];
 
+var validationSubsteps = [
+  { key: 'xsd', label: 'XSD Validation' },
+  { key: 'geometry', label: 'Geometry Primal Cells' },
+  { key: 'xlinks', label: 'XLinks Errors' },
+  { key: 'overlap', label: 'Overlap Primal Cells' },
+  { key: 'dual_vertex', label: 'Dual Vertex Inside Cells' },
+  { key: 'adjacency', label: 'Adjacency in Primal / Dual' }
+];
+
 function init(steps) {
   var list = document.getElementById('steps');
   list.innerHTML = '';
@@ -28,11 +37,45 @@ function init(steps) {
     label.className = 'label';
     label.textContent = step.label;
 
+    var content = document.createElement('span');
+    content.className = 'step-content';
+    content.appendChild(label);
+
+    if (step.key === 'val3dity') {
+      content.appendChild(createValidationSubsteps());
+    }
+
+    row.appendChild(icon);
+    row.appendChild(content);
+    list.appendChild(row);
+  });
+  fitDialogToContent();
+}
+
+function createValidationSubsteps() {
+  var list = document.createElement('ul');
+  list.id = 'val3dity-substeps';
+  list.className = 'substeps';
+
+  validationSubsteps.forEach(function (substep) {
+    var row = document.createElement('li');
+    row.id = 'substep-' + substep.key;
+    row.className = 'pending';
+
+    var icon = document.createElement('span');
+    icon.className = 'sub-icon';
+    icon.textContent = icons.pending;
+
+    var label = document.createElement('span');
+    label.className = 'sub-label';
+    label.textContent = substep.label;
+
     row.appendChild(icon);
     row.appendChild(label);
     list.appendChild(row);
   });
-  fitDialogToContent();
+
+  return list;
 }
 
 function setStatus(step, status) {
@@ -40,6 +83,7 @@ function setStatus(step, status) {
   if (!row) return;
   row.className = status;
   row.querySelector('.icon').textContent = icons[status] || icons.pending;
+  updateValidationSubstepsForStatus(step, status);
   fitDialogToContent();
 }
 
@@ -67,7 +111,87 @@ function setDetail(payload) {
 
   document.getElementById('detail-current').textContent =
     payload.current ? ('Current: ' + payload.current) : '';
+
+  if (payload.step === 'val3dity') {
+    updateValidationSubsteps(payload.phase);
+  }
+
   fitDialogToContent();
+}
+
+function updateValidationSubstepsForStatus(step, status) {
+  if (step !== 'val3dity') return;
+
+  if (status === 'pending') {
+    setAllValidationSubsteps('pending');
+  } else if (status === 'running') {
+    updateValidationSubsteps('XSD Validation');
+  } else if (status === 'complete') {
+    setAllValidationSubsteps('complete');
+  } else if (status === 'failed') {
+    markCurrentValidationSubstepFailed();
+  }
+}
+
+function setAllValidationSubsteps(status) {
+  validationSubsteps.forEach(function (substep) {
+    setValidationSubstepStatus(substep.key, status);
+  });
+}
+
+function updateValidationSubsteps(phase) {
+  if (normalizePhase(phase) === 'Finished') {
+    setAllValidationSubsteps('complete');
+    return;
+  }
+
+  var index = validationSubstepIndex(phase);
+  if (index < 0) return;
+
+  validationSubsteps.forEach(function (substep, substepIndex) {
+    if (substepIndex < index) {
+      setValidationSubstepStatus(substep.key, 'complete');
+    } else if (substepIndex === index) {
+      setValidationSubstepStatus(substep.key, 'running');
+    } else {
+      setValidationSubstepStatus(substep.key, 'pending');
+    }
+  });
+}
+
+function markCurrentValidationSubstepFailed() {
+  var running = document.querySelector('#val3dity-substeps li.running');
+  if (!running) return;
+  running.className = 'failed';
+  running.querySelector('.sub-icon').textContent = icons.failed;
+}
+
+function setValidationSubstepStatus(key, status) {
+  var row = document.getElementById('substep-' + key);
+  if (!row) return;
+  row.className = status;
+  row.querySelector('.sub-icon').textContent = icons[status] || icons.pending;
+}
+
+function validationSubstepIndex(phase) {
+  var normalized = normalizePhase(phase);
+  if (!normalized) return -1;
+
+  for (var i = 0; i < validationSubsteps.length; i += 1) {
+    if (normalized.indexOf(validationSubsteps[i].label) === 0) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+function normalizePhase(phase) {
+  if (!phase) return '';
+  return String(phase)
+    .replace(/^\d+\.\s*/, '')
+    .replace(/\s*\(\d+\s*\/\s*\d+\)\s*$/, '')
+    .trim();
 }
 
 var actionConfig = {
