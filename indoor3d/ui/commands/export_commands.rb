@@ -32,8 +32,12 @@ module ULOL
         end
 
         def check_validity
+          overlap_tol = prompt_validation_overlap_tol
+          return if overlap_tol.nil?
+
           progress = IndoorGmlConverter::ExportProgressDialog.new
           state = validation_close_state
+          state[:overlap_tol] = overlap_tol
           configure_validation_close_handler(progress, state)
           progress.show
           UI.start_timer(0.1, false) do
@@ -66,7 +70,10 @@ module ULOL
           progress.complete(:temp_file)
           return if state[:close_after_temp] || state[:cancelled]
 
-          validator = IndoorGmlConverter::Val3dityRunner.new(temp_path)
+          validator = IndoorGmlConverter::Val3dityRunner.new(
+            temp_path,
+            overlap_tol: state[:overlap_tol] || IndoorGmlConverter::Val3dityRunner::DEFAULT_OVERLAP_TOL
+          )
 
           current_step = :val3dity
           state[:val_running] = true
@@ -96,8 +103,27 @@ module ULOL
             val_running: false,
             val_session: nil,
             completed: false,
-            cancelled: false
+            cancelled: false,
+            overlap_tol: IndoorGmlConverter::Val3dityRunner::DEFAULT_OVERLAP_TOL
           }
+        end
+
+        def prompt_validation_overlap_tol
+          default_value = format('%.15g', IndoorGmlConverter::Val3dityRunner::DEFAULT_OVERLAP_TOL)
+          values = UI.inputbox(
+            ['overlap_tol'],
+            [default_value],
+            'val3dity validation options'
+          )
+          return nil unless values
+
+          overlap_tol = Float(values[0])
+          raise ArgumentError, 'overlap_tol must be greater than or equal to 0.' if overlap_tol.negative?
+
+          overlap_tol
+        rescue ArgumentError, TypeError
+          UI.messagebox('Invalid overlap_tol. Enter a number greater than or equal to 0.')
+          nil
         end
 
         def configure_validation_close_handler(progress, state)
