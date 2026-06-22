@@ -51,7 +51,7 @@ module ULOL
             true
           ensure
             with_indoor_model_operation('IndoorGML SpaceFeatures Lock', transparent: true) do
-              apply_indoor_lock_policy if entity&.valid?
+              apply_indoor_lock_policy if entity&.valid? && !editing?
             end
           end
 
@@ -59,10 +59,6 @@ module ULOL
             IndoorCore::Logger.puts "[IndoorGML] SpaceFeatures change ignored as etc: entity_id=#{entity.entityID} name=#{entity.name}"
             remember_space_features_change_snapshot(entity)
             false
-          ensure
-            with_indoor_model_operation('IndoorGML SpaceFeatures Lock', transparent: true) do
-              apply_indoor_lock_policy if entity&.valid?
-            end
           end
 
           def with_transparent_space_features_operation(name)

@@ -20,8 +20,11 @@ module ULOL
 
               ensure_space_features_groups
               cell_group = place_cell_group(sketchup_group)
-              recenter_cell_space_geometry(cell_group)
               cell_space = CellSpace.new(cell_group, cell_type, category_code)
+              recenter_cell_space_geometry(
+                cell_group,
+                fixed_z_offset_from_bottom: fixed_state_height_offset(cell_space)
+              )
               name_cell_space_entity(cell_space)
               apply_cell_space_material(cell_space)
               state = cell_space.create_duality_state(nil)
