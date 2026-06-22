@@ -367,10 +367,12 @@ module ULOL
 
           class Val3dityOutputProgress
             PHASE_WEIGHTS = {
-              primitive:    [0.00, 0.10],
-              overlap:      [0.10, 0.40],
-              dual_vertex:  [0.40, 0.42],
-              primal_dual:  [0.42, 1.00]
+              xsd:          [0.00, 0.02],
+              primitive:    [0.02, 0.07],
+              xlinks:       [0.07, 0.10],
+              overlap:      [0.10, 0.44],
+              dual_vertex:  [0.44, 0.49],
+              primal_dual:  [0.49, 1.00]
             }.freeze
 
             def initialize(queue, total_states:, total_transitions:)
@@ -378,10 +380,11 @@ module ULOL
               @total_states = total_states
               @total_transitions = total_transitions
               @buffer = +''
-              @phase = :startup
+              @phase = :xsd
               @primitive_done = 0
               @dual_done = 0
               @link_done = 0
+              @xlinks_emitted = false
               @last_emit_at = Time.at(0)
             end
 
@@ -405,9 +408,12 @@ module ULOL
 
             def parse_line(line)
               case line
+              when /XSD|schema/i
+                @phase = :xsd
+                emit(force: true, message: 'Validating IndoorGML schema')
               when /======== Validating Primitive ========/
                 @phase = :primitive
-                emit(message: 'Validating geometry')
+                emit(force: true, message: 'Validating CellSpace solids')
               when /^id:\s+solid_(cell_[^\s]+)/
                 emit(current: Regexp.last_match(1), message: "Geometry #{Regexp.last_match(1)}")
               when /^========= VALID =========/
@@ -415,9 +421,14 @@ module ULOL
                   @primitive_done += 1
                   emit(message: "Geometry validated #{@primitive_done}")
                 end
+              when /XLink/i
+                @phase = :xlinks
+                @xlinks_emitted = true
+                emit(force: true, message: 'Checking XLink references')
               when /^--- Overlapping tests between Cells ---/
+                emit_xlinks_checkpoint
                 @phase = :overlap
-                emit(force: true, ratio_override: phase_start(:overlap), message: 'Checking cell overlaps')
+                emit(force: true, ratio_override: phase_start(:overlap), message: 'Checking CellSpace overlaps')
               when /^--- Constructing Nef Polyhedra ---/
                 emit(force: true, ratio_override: phase_ratio(:overlap, 0.30), message: 'Constructing Nef polyhedra')
               when /^--- Constructing AABB tree ---/
@@ -426,13 +437,13 @@ module ULOL
                 emit(force: true, ratio_override: phase_ratio(:overlap, 0.90), message: 'Testing cell intersections')
               when /^======== Validating Dual Vertex/
                 @phase = :dual_vertex
-                emit(force: true, ratio_override: phase_start(:dual_vertex), message: 'Checking State inside CellSpace')
+                emit(force: true, ratio_override: phase_start(:dual_vertex), message: 'Checking State points inside CellSpaces')
               when /^Cell \(.*\) id=(cell_[^\s]+)\s+--> ok/
                 @dual_done += 1
                 emit(current: Regexp.last_match(1), message: "Dual vertex #{@dual_done}")
               when /^======== Validating Primal-Dual links/
                 @phase = :primal_dual
-                emit(force: true, ratio_override: phase_start(:primal_dual), message: 'Checking primal-dual links')
+                emit(force: true, ratio_override: phase_start(:primal_dual), message: 'Checking primal/dual adjacencies')
               when /^Cells id=(cell_[^\s]+) id=(cell_[^\s]+)/
                 @link_done += 1
                 emit(
@@ -463,9 +474,13 @@ module ULOL
 
             def current_ratio
               case @phase
+              when :xsd
+                phase_ratio(:xsd, 0.50)
               when :primitive
                 start, finish = PHASE_WEIGHTS[:primitive]
                 bounded_ratio(start + @primitive_done * 0.01, start, finish)
+              when :xlinks
+                phase_ratio(:xlinks, 0.50)
               when :overlap
                 phase_ratio(:overlap, 0.50)
               when :dual_vertex
@@ -502,13 +517,23 @@ module ULOL
 
             def phase_label
               case @phase
-              when :primitive then 'Geometry validation'
-              when :overlap then 'Overlap test'
-              when :dual_vertex then 'Dual vertex check'
-              when :primal_dual then "Primal-dual link check (#{@link_done} / #{@total_transitions})"
+              when :xsd then '1. XSD Validation'
+              when :primitive then '2. Geometry Primal Cells'
+              when :xlinks then '3. XLinks Errors'
+              when :overlap then '4. Overlap Primal Cells'
+              when :dual_vertex then '5. Dual Vertex Inside Cells'
+              when :primal_dual then "6. Adjacency in Primal / Dual (#{@link_done} / #{@total_transitions})"
               when :finished then 'Finished'
               else 'Starting val3dity'
               end
+            end
+
+            def emit_xlinks_checkpoint
+              return if @xlinks_emitted
+
+              @phase = :xlinks
+              @xlinks_emitted = true
+              emit(force: true, ratio_override: phase_ratio(:xlinks, 0.95), message: 'Checking XLink references')
             end
 
             def decode_chunk(chunk)
@@ -543,6 +568,13 @@ module ULOL
             FileUtils.rm_f(@report_json_path)
 
             progress&.running(progress_step)
+            progress&.detail(
+              progress_step,
+              percent: 0,
+              phase: '1. XSD Validation',
+              message: 'Starting val3dity schema validation',
+              current: File.basename(@gml_path)
+            )
 
             args = [
               exe_path,
@@ -578,6 +610,8 @@ module ULOL
               next true unless session.finished?
 
               result = nil
+              exit_code = nil
+              build_report_later = false
               begin
                 if session.terminated?
                   completed = true
@@ -588,13 +622,9 @@ module ULOL
                 drain_val3dity_progress(session, progress, progress_step)
 
                 progress&.complete(progress_step)
-
-                result = build_result_after_process(
-                  session.exit_code,
-                  progress,
-                  report_step: report_step,
-                  report_view_step: report_view_step
-                )
+                progress&.running(report_step) if report_step
+                exit_code = session.exit_code
+                build_report_later = true
               rescue StandardError => e
                 result = Val3dityResult.new(
                   valid: false,
@@ -609,7 +639,31 @@ module ULOL
                 completed = true
               end
 
-              callback.call(result)
+              if build_report_later
+                UI.start_timer(0.05, false) do
+                  begin
+                    result = build_result_after_process(
+                      exit_code,
+                      progress,
+                      report_step: report_step,
+                      report_view_step: report_view_step
+                    )
+                  rescue StandardError => e
+                    result = Val3dityResult.new(
+                      valid: false,
+                      report: nil,
+                      report_json_path: @report_json_path,
+                      report_html_path: @report_html_path,
+                      error: e
+                    )
+                  end
+
+                  callback.call(result)
+                  false
+                end
+              else
+                callback.call(result) if result
+              end
               false
             end
 
