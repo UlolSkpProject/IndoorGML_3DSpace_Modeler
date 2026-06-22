@@ -23,6 +23,7 @@ module ULOL
           ERROR_BROKEN_PIPE      = 109
           TERMINATE_EXIT_CODE    = 1
           TERMINATE_WAIT_MS      = 200
+          DEFAULT_OVERLAP_TOL    = 0.5
 
           attr_reader :report_json_path, :report_html_path
 
@@ -522,12 +523,13 @@ module ULOL
             end
           end
 
-          def initialize(gml_path)
+          def initialize(gml_path, overlap_tol: DEFAULT_OVERLAP_TOL)
             @gml_path = File.expand_path(gml_path)
             @work_dir = GmlExporter.output_root
             @report_json_path = File.join(@work_dir, 'report.json')
             @report_dir = File.join(@work_dir, 'report')
             @report_html_path = File.join(@report_dir, 'report.html')
+            @overlap_tol = normalize_overlap_tol(overlap_tol)
           end
 
           def validate(progress: nil)
@@ -547,8 +549,8 @@ module ULOL
               exe_path,
               @gml_path,
               '--verbose',
-              # '--overlap_tol',
-              # '0.5',
+              '--overlap_tol',
+              format_tolerance(@overlap_tol),
               '-r',
               @report_json_path
             ]
@@ -625,6 +627,19 @@ module ULOL
           end
 
           private
+
+          def normalize_overlap_tol(value)
+            tolerance = Float(value)
+            raise ArgumentError, 'overlap_tol must be greater than or equal to 0.' if tolerance.negative?
+
+            tolerance
+          rescue ArgumentError, TypeError
+            raise ArgumentError, "Invalid overlap_tol: #{value.inspect}"
+          end
+
+          def format_tolerance(value)
+            format('%.15g', value.to_f)
+          end
 
           def validation_progress_totals(indoor_model)
             exportable_cell_spaces = indoor_model.cell_spaces.select do |cell_space|
