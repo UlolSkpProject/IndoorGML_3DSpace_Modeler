@@ -523,11 +523,12 @@ module ULOL
             end
           end
 
-          def initialize(gml_path, overlap_tol: DEFAULT_OVERLAP_TOL)
+          def initialize(gml_path, overlap_tol: DEFAULT_OVERLAP_TOL, report_name: 'report')
             @gml_path = File.expand_path(gml_path)
             @work_dir = GmlExporter.output_root
-            @report_json_path = File.join(@work_dir, 'report.json')
-            @report_dir = File.join(@work_dir, 'report')
+            @report_name = sanitize_report_name(report_name)
+            @report_json_path = File.join(@work_dir, "#{@report_name}.json")
+            @report_dir = File.join(@work_dir, @report_name)
             @report_html_path = File.join(@report_dir, 'report.html')
             @overlap_tol = normalize_overlap_tol(overlap_tol)
           end
@@ -536,24 +537,22 @@ module ULOL
             raise 'Val3dityRunner#validate is deprecated. Use #start with a completion callback.'
           end
 
-          def start(progress: nil, &callback)
+          def start(progress: nil, progress_step: :val3dity, report_step: :report, report_view_step: :report_view, &callback)
             raise ArgumentError, 'callback is required' unless callback
 
             ensure_supported_platform!
             ensure_runtime_files!
             FileUtils.rm_f(@report_json_path)
 
-            progress&.running(:val3dity)
+            progress&.running(progress_step)
 
             args = [
               exe_path,
               @gml_path,
-              '--verbose',
-              '--overlap_tol',
-              format_tolerance(@overlap_tol),
-              '-r',
-              @report_json_path
+              '--verbose'
             ]
+            args.concat(['--overlap_tol', format_tolerance(@overlap_tol)]) unless @overlap_tol.nil?
+            args.concat(['-r', @report_json_path])
 
             session = Val3dityProcessSession.new(
               args: args,
@@ -572,7 +571,7 @@ module ULOL
             UI.start_timer(0.1, true) do
               next if completed
 
-              drain_val3dity_progress(session, progress)
+              drain_val3dity_progress(session, progress, progress_step)
             end
 
             UI.start_timer(0.2, true) do
@@ -587,11 +586,16 @@ module ULOL
                 end
 
                 session.join_reader
-                drain_val3dity_progress(session, progress)
+                drain_val3dity_progress(session, progress, progress_step)
 
-                progress&.complete(:val3dity)
+                progress&.complete(progress_step)
 
-                result = build_result_after_process(session.exit_code, progress)
+                result = build_result_after_process(
+                  session.exit_code,
+                  progress,
+                  report_step: report_step,
+                  report_view_step: report_view_step
+                )
               rescue StandardError => e
                 result = Val3dityResult.new(
                   valid: false,
@@ -629,8 +633,10 @@ module ULOL
           private
 
           def normalize_overlap_tol(value)
+            return nil if value.nil?
+
             tolerance = Float(value)
-            raise ArgumentError, 'overlap_tol must be greater than or equal to 0.' if tolerance.negative?
+            return nil if tolerance.negative?
 
             tolerance
           rescue ArgumentError, TypeError
@@ -639,6 +645,11 @@ module ULOL
 
           def format_tolerance(value)
             format('%.15g', value.to_f)
+          end
+
+          def sanitize_report_name(value)
+            name = value.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')
+            name.empty? ? 'report' : name
           end
 
           def validation_progress_totals(indoor_model)
@@ -676,12 +687,12 @@ module ULOL
             FileUtils.mkdir_p(@work_dir)
           end
 
-          def drain_val3dity_progress(session, progress)
+          def drain_val3dity_progress(session, progress, progress_step)
             return unless progress
 
             while (payload = session.pop_progress)
               progress.detail(
-                :val3dity,
+                progress_step,
                 percent: payload[:percent],
                 phase: payload[:phase],
                 message: payload[:message],
@@ -692,19 +703,19 @@ module ULOL
             IndoorCore::Logger.puts "[IndoorGML] val3dity progress drain failed: #{e.class}: #{e.message}"
           end
 
-          def build_result_after_process(exit_code, progress = nil)
+          def build_result_after_process(exit_code, progress = nil, report_step: :report, report_view_step: :report_view)
             raise "val3dity failed: exit code #{exit_code}" unless exit_code == 0
             raise 'val3dity failed to create report.json.' unless File.exist?(@report_json_path)
 
             normalize_report_encoding
 
-            progress&.running(:report)
+            progress&.running(report_step) if report_step
             raw_report = JSON.parse(File.read(@report_json_path, encoding: 'UTF-8'))
-            progress&.complete(:report)
+            progress&.complete(report_step) if report_step
 
-            progress&.running(:report_view)
+            progress&.running(report_view_step) if report_view_step
             prepare_html_report(raw_report)
-            progress&.complete(:report_view)
+            progress&.complete(report_view_step) if report_view_step
 
             Val3dityResult.new(
               valid: raw_report['validity'] == true,
