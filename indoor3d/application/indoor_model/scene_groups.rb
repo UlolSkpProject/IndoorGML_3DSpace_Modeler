@@ -5,6 +5,8 @@ module ULOL
     module IndoorCore
       class IndoorModel
         module SceneGroups
+          STATE_FIXED_HEIGHT_OFFSET = 1000.mm unless const_defined?(:STATE_FIXED_HEIGHT_OFFSET, false)
+
           private
 
           def ensure_space_features_groups(transparent: false)
@@ -82,13 +84,13 @@ module ULOL
             cell_space_entity.make_unique if cell_space_entity.respond_to?(:make_unique)
 
             sketchup_group.erase! if sketchup_group.valid?
-            recenter_cell_space_geometry(cell_space_entity)
             cell_space_entity
           end
 
-          def recenter_cell_space_geometry(cell_space_entity)
+          def recenter_cell_space_geometry(cell_space_entity, fixed_z_offset_from_bottom: nil)
             with_indoor_model_operation('IndoorGML Recenter CellSpace Geometry', transparent: true) do
-              center = Utils::Geometry.find_shell_inner_centroid(cell_space_entity)
+              fixed_z = fixed_z_offset_from_bottom.nil? ? nil : cell_space_entity.definition.bounds.min.z + fixed_z_offset_from_bottom
+              center = Utils::Geometry.find_shell_inner_centroid(cell_space_entity, fixed_z: fixed_z)
               IndoorCore::Logger.puts "[IndoorGML] recenter_cell_space_geometry center=#{center} distance=#{center.distance(ORIGIN)}"
               next if center.distance(ORIGIN) <= 0.001
 
@@ -107,7 +109,10 @@ module ULOL
             return unless cell_space&.valid?
 
             ensure_cell_space_is_child_of_primal_space!(cell_space)
-            recenter_cell_space_geometry(cell_space.sketchup_group)
+            recenter_cell_space_geometry(
+              cell_space.sketchup_group,
+              fixed_z_offset_from_bottom: fixed_state_height_offset(cell_space)
+            )
           end
 
           def attach_space_features_observer(group, expected_name)
@@ -210,6 +215,13 @@ module ULOL
                 group.transform!(group.transformation.inverse * transformation)
               end
             end
+          end
+
+          def fixed_state_height_offset(cell_space)
+            category = cell_space&.category_code.to_s.downcase
+            return STATE_FIXED_HEIGHT_OFFSET if category.include?('room') || category.include?('door')
+
+            nil
           end
 
           def inside_primal_group?(sketchup_group)

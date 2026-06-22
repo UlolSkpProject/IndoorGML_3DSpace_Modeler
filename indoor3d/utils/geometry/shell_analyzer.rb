@@ -4,12 +4,42 @@ module ULOL
   module Indoor3DGmlModeler
     module Utils
       module Geometry
-        def self.find_shell_inner_centroid(cell_space_entity)
+        def self.find_shell_inner_centroid(cell_space_entity, fixed_z: nil)
           center = cell_space_entity.definition.bounds.center
           faces = local_shell_faces(cell_space_entity)
           return center if faces.empty?
 
           tolerance = SHELL_CENTER_TOLERANCE
+          if fixed_z
+            fixed_center = point_with_fixed_z(center, fixed_z)
+            if fixed_z_inside_bounds?(cell_space_entity.definition.bounds, fixed_z) &&
+               shell_contains_point?(faces, fixed_center, tolerance) &&
+               shell_distance(faces, fixed_center) > tolerance
+              return fixed_center
+            end
+
+            best_point, best_distance = best_inner_sample(
+              faces,
+              cell_space_entity.definition.bounds,
+              SHELL_CENTER_COARSE_DIVISIONS,
+              tolerance,
+              fixed_z: fixed_z
+            )
+            return find_shell_inner_centroid(cell_space_entity) unless best_point
+
+            refined_point = refined_inner_sample(
+              faces,
+              cell_space_entity.definition.bounds,
+              best_point,
+              best_distance,
+              SHELL_CENTER_COARSE_DIVISIONS,
+              SHELL_CENTER_REFINE_DIVISIONS,
+              tolerance,
+              fixed_z: fixed_z
+            ).first
+            return refined_point || best_point
+          end
+
           return center if shell_contains_point?(faces, center, tolerance) && shell_distance(faces, center) > tolerance
 
           best_point, best_distance = best_inner_sample(
@@ -106,12 +136,16 @@ module ULOL
         end
         private_class_method :unique_sorted_distances
 
-        def self.best_inner_sample(faces, bounds, divisions, tolerance)
-          best_inner_point(faces, shell_sample_points(bounds.min, bounds.max, divisions, include_edges: false), tolerance)
+        def self.best_inner_sample(faces, bounds, divisions, tolerance, fixed_z: nil)
+          best_inner_point(
+            faces,
+            shell_sample_points(bounds.min, bounds.max, divisions, include_edges: false, fixed_z: fixed_z),
+            tolerance
+          )
         end
         private_class_method :best_inner_sample
 
-        def self.refined_inner_sample(faces, bounds, point, distance, coarse_divisions, refine_divisions, tolerance)
+        def self.refined_inner_sample(faces, bounds, point, distance, coarse_divisions, refine_divisions, tolerance, fixed_z: nil)
           step = shell_sample_step(bounds, coarse_divisions)
           min_point = clamp_point_to_bounds(
             Geom::Point3d.new(point.x - step.x, point.y - step.y, point.z - step.z),
@@ -123,7 +157,7 @@ module ULOL
           )
           best_inner_point(
             faces,
-            shell_sample_points(min_point, max_point, refine_divisions, include_edges: true),
+            shell_sample_points(min_point, max_point, refine_divisions, include_edges: true, fixed_z: fixed_z),
             tolerance,
             point,
             distance
@@ -147,10 +181,14 @@ module ULOL
         end
         private_class_method :best_inner_point
 
-        def self.shell_sample_points(min_point, max_point, divisions, include_edges:)
+        def self.shell_sample_points(min_point, max_point, divisions, include_edges:, fixed_z: nil)
+          return [] if fixed_z && (fixed_z < min_point.z || fixed_z > max_point.z)
+
           ranges = [:x, :y, :z].map do |axis|
             min = min_point.public_send(axis).to_f
             max = max_point.public_send(axis).to_f
+            next [fixed_z.to_f] if axis == :z && fixed_z
+
             if include_edges
               (0..divisions).map { |index| min + ((max - min) * index / divisions.to_f) }
             else
@@ -161,6 +199,16 @@ module ULOL
           ranges[0].product(ranges[1], ranges[2]).map { |x, y, z| Geom::Point3d.new(x, y, z) }
         end
         private_class_method :shell_sample_points
+
+        def self.point_with_fixed_z(point, fixed_z)
+          Geom::Point3d.new(point.x, point.y, fixed_z)
+        end
+        private_class_method :point_with_fixed_z
+
+        def self.fixed_z_inside_bounds?(bounds, fixed_z)
+          fixed_z >= bounds.min.z && fixed_z <= bounds.max.z
+        end
+        private_class_method :fixed_z_inside_bounds?
 
         def self.shell_sample_step(bounds, divisions)
           Geom::Vector3d.new(

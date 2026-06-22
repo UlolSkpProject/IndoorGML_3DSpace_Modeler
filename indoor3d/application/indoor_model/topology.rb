@@ -172,9 +172,18 @@ module ULOL
 
             world_candidates = AdjacencyService::GeometryQuery.common_face_waypoint_candidates(
               transition.cell1.sketchup_group,
-              transition.cell2.sketchup_group
+              transition.cell2.sketchup_group,
+              state1_point: primal_local_point_to_world(state_local_position(transition.state1)),
+              state2_point: primal_local_point_to_world(state_local_position(transition.state2))
             )
             world_candidates.filter_map { |candidate| waypoint_candidate_to_primal_local(candidate) }
+          end
+
+          def primal_local_point_to_world(point)
+            return point unless point.is_a?(Geom::Point3d)
+            return point unless @primal_group&.valid?
+
+            point.transform(@primal_group.transformation)
           end
 
           def world_point_to_primal_local(point)
