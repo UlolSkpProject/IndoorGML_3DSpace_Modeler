@@ -4,8 +4,6 @@ require 'fileutils'
 require 'rexml/document'
 require 'rexml/formatters/pretty'
 
-require_relative 'global_snapping_map'
-
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -13,7 +11,6 @@ module ULOL
 
         class GmlExporter
           ROOT_ID                    = 'IF_001'
-          EXPORT_SNAP_TOLERANCE      = 0.000001
           CORE_NAMESPACE             = 'http://www.opengis.net/indoorgml/1.0/core'
           NAVIGATION_NAMESPACE       = 'http://www.opengis.net/indoorgml/1.0/navigation'
           CORE_SCHEMA_LOCATION       = 'http://schemas.opengis.net/indoorgml/1.0/indoorgmlcore.xsd'
@@ -25,10 +22,9 @@ module ULOL
             # CellSpaceType::ANCHOR => 'navi:AnchorSpace'
           }.freeze
 
-          def initialize(indoor_model, refresh_runtime_data: true, global_snapping: true)
+          def initialize(indoor_model, refresh_runtime_data: true)
             @indoor_model = indoor_model
             @refresh_runtime_data = refresh_runtime_data
-            @global_snapping = global_snapping
           end
 
           def export(output_path: self.class.default_temp_gml_path)
@@ -36,13 +32,11 @@ module ULOL
               export_started_at = monotonic_time
               reset_export_cache
               measure_export_step('refresh runtime data') { @indoor_model.refresh_runtime_data } if @refresh_runtime_data
-              @snapping_map = measure_export_step('build global snapping map') { build_global_snapping_map } if global_snapping?
               output_path = File.expand_path(output_path)
               FileUtils.mkdir_p(File.dirname(output_path))
               xml = measure_export_step('build XML document') { document }
               measure_export_step('write GML file') { File.write(output_path, xml) }
               @export_total_elapsed = monotonic_time - export_started_at
-              log_global_snapping_summary
               log_export_timing_summary
               output_path
             end
@@ -60,8 +54,6 @@ module ULOL
 
           def reset_export_cache
             @exportable_cell_spaces = nil
-            @snapping_map = nil
-            @degenerate_rings = []
             @export_timings = []
             @export_total_elapsed = nil
           end
@@ -272,7 +264,7 @@ module ULOL
 
           def loop_points(loop, transform)
             loop.vertices.map do |vertex|
-              export_geometry_point(vertex.position.transform(transform))
+              vertex.position.transform(transform)
             end
           end
 
@@ -295,7 +287,6 @@ module ULOL
 
           def oriented_ring_points(loop, transform, normal, align_with_normal)
             ring = loop_points(loop, transform)
-            track_degenerate_ring(loop, ring)
             polygon_normal = polygon_normal(ring)
             if normal && polygon_normal
               same_direction = polygon_normal.dot(normal) >= 0.0
@@ -303,20 +294,6 @@ module ULOL
             end
             ring << ring.first if ring.first
             ring
-          end
-
-          def track_degenerate_ring(loop, ring)
-            unique_vertices = ring.each_with_object({}) do |point, index|
-              index[[point.x, point.y, point.z]] = true
-            end
-            return if unique_vertices.length >= 3
-
-            @degenerate_rings << {
-              face_id: loop.face.respond_to?(:persistent_id) ? loop.face.persistent_id : loop.face.entityID,
-              unique_vertices: unique_vertices.length
-            }
-          rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] Export ring degeneracy check failed: #{e.class}: #{e.message}"
           end
 
           def transformed_face_normal(face, transform)
@@ -371,61 +348,6 @@ module ULOL
             [format_number(point.x), format_number(point.y), format_number(point.z)].join(' ')
           end
 
-          def export_geometry_point(point)
-            return point unless global_snapping?
-
-            canonical_export_point(point)
-          end
-
-          def canonical_export_point(point)
-            canonical = @snapping_map.canonical_point(point)
-            Geom::Point3d.new(
-              canonical.x,
-              canonical.y,
-              canonical.z
-            )
-          end
-
-          def build_global_snapping_map
-            snapping_map = GlobalSnappingMap.new(tolerance: EXPORT_SNAP_TOLERANCE)
-            exportable_cell_spaces.each do |cell_space|
-              group = cell_space.valid_sketchup_group
-              next unless group
-
-              transform = cell_space_world_transformation(group)
-              group.definition.entities.grep(Sketchup::Face).each do |face|
-                face.loops.each do |loop|
-                  loop.vertices.each do |vertex|
-                    snapping_map.canonicalize(vertex.position.transform(transform))
-                  end
-                end
-              end
-            end
-            snapping_map
-          end
-
-          def log_global_snapping_summary
-            unless global_snapping?
-              IndoorCore::Logger.puts('[IndoorGML] Export global snapping: disabled')
-              return
-            end
-            return unless @snapping_map
-
-            IndoorCore::Logger.puts(
-              '[IndoorGML] Export global snapping: ' \
-              "tolerance=#{format('%.17g', @snapping_map.tolerance)} " \
-              "input_vertices=#{@snapping_map.input_vertex_count} " \
-              "canonical_vertices=#{@snapping_map.canonical_vertex_count} " \
-              "merged_vertices=#{@snapping_map.merged_vertex_count} " \
-              "max_displacement=#{format('%.17g', @snapping_map.max_displacement)}"
-            )
-            return if @degenerate_rings.empty?
-
-            IndoorCore::Logger.puts(
-              "[IndoorGML] Export global snapping warning: #{@degenerate_rings.length} degenerate rings detected"
-            )
-          end
-
           def log_export_timing_summary
             return if @export_timings.nil? || @export_timings.empty?
 
@@ -434,10 +356,6 @@ module ULOL
             end
             total = @export_total_elapsed ? " total=#{format('%.4fs', @export_total_elapsed)}" : ''
             IndoorCore::Logger.puts("[IndoorGML] Export timing: #{timings.join(', ')}#{total}")
-          end
-
-          def global_snapping?
-            @global_snapping != false
           end
 
           def format_number(value)
