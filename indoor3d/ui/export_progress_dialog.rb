@@ -36,6 +36,7 @@ module ULOL
             @open_report_callback = nil
             @open_temp_gml_callback = nil
             @request_close_callback = nil
+            @ready_callback = nil
             @suppress_close_callback = false
           end
 
@@ -112,6 +113,11 @@ module ULOL
             @request_close_callback = block
           end
 
+          def on_ready(&block)
+            @ready_callback = block
+            block.call if @dom_ready && block
+          end
+
           def request_close
             return if @request_close_callback&.call == :keep_open
 
@@ -148,6 +154,7 @@ module ULOL
               dialog.execute_script(init_script)
               replay_state
               @pending_scripts.clear
+              @ready_callback&.call
             end
             dialog.add_action_callback('fitContentHeight') do |_context, content_height|
               fit_content_height(content_height)
