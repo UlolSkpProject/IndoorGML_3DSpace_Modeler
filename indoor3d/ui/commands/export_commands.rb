@@ -7,14 +7,34 @@ module ULOL
     module IndoorCore
       module ExportCommands
         def create_temp_indoorgml
-          begin
-            output_path = IndoorGmlConverter::GmlExporter.new(
-              IndoorModel.current
-            ).export
-            UI.messagebox("IndoorGML temp.gml created:\n#{output_path}")
-          rescue StandardError => e
-            UI.messagebox("IndoorGML temp.gml creation failed:\n#{e.message}")
+          progress = IndoorGmlConverter::ExportProgressDialog.new
+          state = validation_close_state
+          configure_validation_close_handler(progress, state)
+          state[:after_temp_export] = proc do |temp_path|
+            progress.on_create_gml do
+              create_gml_from_temp(temp_path, progress)
+            end
+            progress.result(
+              status: :success,
+              title: 'IndoorGML temp GML created',
+              message: "Temporary GML created:\n#{temp_path}",
+              actions: [:createGml, :close]
+            )
           end
+          progress.on_ready do
+            next if state[:started]
+
+            state[:started] = true
+            start_temp_file_creation(progress, state)
+          end
+          progress.show
+        rescue StandardError => e
+          progress&.result(
+            status: :error,
+            title: 'IndoorGML temp GML creation failed',
+            message: e.message,
+            actions: [:close]
+          )
         end
 
         def export_gml
@@ -32,58 +52,62 @@ module ULOL
         end
 
         def check_validity
+          overlap_tol = prompt_validation_overlap_tol
+          return if overlap_tol == :cancelled
+
           progress = IndoorGmlConverter::ExportProgressDialog.new
           state = validation_close_state
+          state[:overlap_tol] = overlap_tol
           configure_validation_close_handler(progress, state)
-          progress.show
-          UI.start_timer(0.1, false) do
+          progress.on_ready do
+            next if state[:started]
+
+            state[:started] = true
             perform_check_validity(progress, state)
           end
+          progress.show
         rescue StandardError => e
           progress&.result(
             status: :error,
-            title: 'IndoorGML validity check failed',
+            title: 'IndoorGML temp GML creation failed',
             message: e.message,
             actions: [:close]
           )
         end
 
         def perform_check_validity(progress, state = validation_close_state)
-          current_step = :temp_file
+          state[:after_temp_export] = proc do |temp_path|
+            start_val3dity_validation(progress, state, temp_path)
+          end
+          start_temp_file_creation(progress, state, step: :temp_file)
+        end
+
+        def start_temp_file_creation(progress, state, output_path: nil, step: :temp_file)
           indoor_model = IndoorModel.current
 
-          progress.running(:temp_file)
+          progress.running(step)
+          progress.detail(
+            step,
+            percent: 0,
+            phase: 'Starting GML export',
+            message: 'Preparing temporary IndoorGML file'
+          )
           state[:temp_file_running] = true
-          temp_path = nil
-          begin
-            temp_path = IndoorGmlConverter::GmlExporter.new(
-              indoor_model,
-              refresh_runtime_data: false
-            ).export
-          ensure
-            state[:temp_file_running] = false
-          end
-          progress.complete(:temp_file)
-          return if state[:close_after_temp] || state[:cancelled]
-
-          validator = IndoorGmlConverter::Val3dityRunner.new(temp_path)
-
-          current_step = :val3dity
-          state[:val_running] = true
-          state[:val_session] = validator.start(progress: progress) do |result|
-            next if state[:cancelled]
-
-            state[:val_running] = false
-            state[:completed] = true
-            handle_validation_result(result, progress, temp_path)
-          end
+          exporter = IndoorGmlConverter::GmlExporter.new(
+            indoor_model,
+            refresh_runtime_data: false
+          )
+          export_options = {}
+          export_options[:output_path] = output_path if output_path
+          temp_path = exporter.export(**export_options)
+          finish_temp_gml_export(progress, state, temp_path, step)
         rescue StandardError => e
-          state[:val_running] = false
+          state[:temp_file_running] = false
           state[:completed] = true
-          progress&.fail(current_step)
+          progress&.fail(step)
           progress&.result(
             status: :error,
-            title: 'IndoorGML validity check failed',
+            title: 'IndoorGML temp GML creation failed',
             message: e.message,
             actions: [:close]
           )
@@ -95,9 +119,62 @@ module ULOL
             close_after_temp: false,
             val_running: false,
             val_session: nil,
+            after_temp_export: nil,
+            started: false,
             completed: false,
-            cancelled: false
+            cancelled: false,
+            overlap_tol: IndoorGmlConverter::Val3dityRunner::DEFAULT_OVERLAP_TOL
           }
+        end
+
+        def prompt_validation_overlap_tol
+          default_value = format('%.15g', IndoorGmlConverter::Val3dityRunner::DEFAULT_OVERLAP_TOL)
+          values = UI.inputbox(
+            ['overlap_tol'],
+            [default_value],
+            'val3dity validation options'
+          )
+          return :cancelled unless values
+
+          overlap_tol = Float(values[0])
+          overlap_tol.negative? ? nil : overlap_tol
+        rescue ArgumentError, TypeError
+          UI.messagebox('Invalid overlap_tol. Enter a number.')
+          :cancelled
+        end
+
+        def finish_temp_gml_export(progress, state, temp_path, step)
+          state[:temp_file_running] = false
+          progress.complete(step)
+          return if state[:close_after_temp] || state[:cancelled]
+
+          state[:after_temp_export]&.call(temp_path)
+        end
+
+        def start_val3dity_validation(progress, state, temp_path)
+          validator = IndoorGmlConverter::Val3dityRunner.new(
+            temp_path,
+            overlap_tol: state[:overlap_tol]
+          )
+
+          state[:val_running] = true
+          state[:val_session] = validator.start(progress: progress) do |result|
+            next if state[:cancelled]
+
+            state[:val_running] = false
+            state[:completed] = true
+            handle_validation_result(result, progress, temp_path)
+          end
+        rescue StandardError => e
+          state[:val_running] = false
+          state[:completed] = true
+          progress&.fail(:val3dity)
+          progress&.result(
+            status: :error,
+            title: 'IndoorGML validity check failed',
+            message: e.message,
+            actions: [:close]
+          )
         end
 
         def configure_validation_close_handler(progress, state)

@@ -85,8 +85,12 @@ module ULOL
           @editing = true
           @indoor_model.attach_edit_selection_observer(model)
           mark_editable_primal_entities()
-          apply_lock_policy()
-          unless activate_edit_context(model, [primal_group])
+          activated = false
+          @indoor_model.send(:with_guard_flag, :@constraining_space_features) do
+            apply_lock_policy()
+            activated = activate_edit_context(model, [primal_group])
+          end
+          unless activated
             @editing = false
             @editable_entity_ids = {}
             @editing_active_path_target = nil

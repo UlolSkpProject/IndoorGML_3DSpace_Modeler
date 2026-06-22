@@ -12,7 +12,6 @@ module ULOL
 
         class Val3dityRunner
           VENDOR_ROOT = File.expand_path('../assets/vendor/val3dity-windows-x64-v2.2.0', __dir__)
-          LEGACY_VENDOR_ROOT = File.expand_path('../assets/vendor/val3dity2.1.0', __dir__)
           WINDOWS_ONLY_MESSAGE = 'Val3dity validity check is currently supported only on Windows because the bundled runtime is val3dity-windows-x64-v2.2.0.'
           CREATE_NO_WINDOW       = 0x08000000
           STARTF_USESTDHANDLES   = 0x00000100
@@ -20,9 +19,9 @@ module ULOL
           WAIT_OBJECT_0          = 0
           WAIT_TIMEOUT           = 258
           STDOUT_READ_BUFFER_SIZE = 4096
-          ERROR_BROKEN_PIPE      = 109
           TERMINATE_EXIT_CODE    = 1
           TERMINATE_WAIT_MS      = 200
+          DEFAULT_OVERLAP_TOL    = 0.5
 
           attr_reader :report_json_path, :report_html_path
 
@@ -368,10 +367,12 @@ module ULOL
 
           class Val3dityOutputProgress
             PHASE_WEIGHTS = {
-              primitive:    [0.00, 0.10],
-              overlap:      [0.10, 0.40],
-              dual_vertex:  [0.40, 0.42],
-              primal_dual:  [0.42, 1.00]
+              xsd:          [0.00, 0.02],
+              primitive:    [0.02, 0.07],
+              xlinks:       [0.07, 0.10],
+              overlap:      [0.10, 0.44],
+              dual_vertex:  [0.44, 0.49],
+              primal_dual:  [0.49, 1.00]
             }.freeze
 
             def initialize(queue, total_states:, total_transitions:)
@@ -379,10 +380,11 @@ module ULOL
               @total_states = total_states
               @total_transitions = total_transitions
               @buffer = +''
-              @phase = :startup
+              @phase = :xsd
               @primitive_done = 0
               @dual_done = 0
               @link_done = 0
+              @xlinks_emitted = false
               @last_emit_at = Time.at(0)
             end
 
@@ -406,9 +408,12 @@ module ULOL
 
             def parse_line(line)
               case line
+              when /XSD|schema/i
+                @phase = :xsd
+                emit(force: true, message: 'Validating IndoorGML schema')
               when /======== Validating Primitive ========/
                 @phase = :primitive
-                emit(message: 'Validating geometry')
+                emit(force: true, message: 'Validating CellSpace solids')
               when /^id:\s+solid_(cell_[^\s]+)/
                 emit(current: Regexp.last_match(1), message: "Geometry #{Regexp.last_match(1)}")
               when /^========= VALID =========/
@@ -416,9 +421,14 @@ module ULOL
                   @primitive_done += 1
                   emit(message: "Geometry validated #{@primitive_done}")
                 end
+              when /XLink/i
+                @phase = :xlinks
+                @xlinks_emitted = true
+                emit(force: true, message: 'Checking XLink references')
               when /^--- Overlapping tests between Cells ---/
+                emit_xlinks_checkpoint
                 @phase = :overlap
-                emit(force: true, ratio_override: phase_start(:overlap), message: 'Checking cell overlaps')
+                emit(force: true, ratio_override: phase_start(:overlap), message: 'Checking CellSpace overlaps')
               when /^--- Constructing Nef Polyhedra ---/
                 emit(force: true, ratio_override: phase_ratio(:overlap, 0.30), message: 'Constructing Nef polyhedra')
               when /^--- Constructing AABB tree ---/
@@ -427,13 +437,13 @@ module ULOL
                 emit(force: true, ratio_override: phase_ratio(:overlap, 0.90), message: 'Testing cell intersections')
               when /^======== Validating Dual Vertex/
                 @phase = :dual_vertex
-                emit(force: true, ratio_override: phase_start(:dual_vertex), message: 'Checking State inside CellSpace')
+                emit(force: true, ratio_override: phase_start(:dual_vertex), message: 'Checking State points inside CellSpaces')
               when /^Cell \(.*\) id=(cell_[^\s]+)\s+--> ok/
                 @dual_done += 1
                 emit(current: Regexp.last_match(1), message: "Dual vertex #{@dual_done}")
               when /^======== Validating Primal-Dual links/
                 @phase = :primal_dual
-                emit(force: true, ratio_override: phase_start(:primal_dual), message: 'Checking primal-dual links')
+                emit(force: true, ratio_override: phase_start(:primal_dual), message: 'Checking primal/dual adjacencies')
               when /^Cells id=(cell_[^\s]+) id=(cell_[^\s]+)/
                 @link_done += 1
                 emit(
@@ -464,9 +474,13 @@ module ULOL
 
             def current_ratio
               case @phase
+              when :xsd
+                phase_ratio(:xsd, 0.50)
               when :primitive
                 start, finish = PHASE_WEIGHTS[:primitive]
                 bounded_ratio(start + @primitive_done * 0.01, start, finish)
+              when :xlinks
+                phase_ratio(:xlinks, 0.50)
               when :overlap
                 phase_ratio(:overlap, 0.50)
               when :dual_vertex
@@ -503,13 +517,23 @@ module ULOL
 
             def phase_label
               case @phase
-              when :primitive then 'Geometry validation'
-              when :overlap then 'Overlap test'
-              when :dual_vertex then 'Dual vertex check'
-              when :primal_dual then "Primal-dual link check (#{@link_done} / #{@total_transitions})"
+              when :xsd then '1. XSD Validation'
+              when :primitive then '2. Geometry Primal Cells'
+              when :xlinks then '3. XLinks Errors'
+              when :overlap then '4. Overlap Primal Cells'
+              when :dual_vertex then '5. Dual Vertex Inside Cells'
+              when :primal_dual then "6. Adjacency in Primal / Dual (#{@link_done} / #{@total_transitions})"
               when :finished then 'Finished'
               else 'Starting val3dity'
               end
+            end
+
+            def emit_xlinks_checkpoint
+              return if @xlinks_emitted
+
+              @phase = :xlinks
+              @xlinks_emitted = true
+              emit(force: true, ratio_override: phase_ratio(:xlinks, 0.95), message: 'Checking XLink references')
             end
 
             def decode_chunk(chunk)
@@ -522,36 +546,43 @@ module ULOL
             end
           end
 
-          def initialize(gml_path)
+          def initialize(gml_path, overlap_tol: DEFAULT_OVERLAP_TOL, report_name: 'report')
             @gml_path = File.expand_path(gml_path)
             @work_dir = GmlExporter.output_root
-            @report_json_path = File.join(@work_dir, 'report.json')
-            @report_dir = File.join(@work_dir, 'report')
+            @report_name = sanitize_report_name(report_name)
+            @report_json_path = File.join(@work_dir, "#{@report_name}.json")
+            @report_dir = File.join(@work_dir, @report_name)
             @report_html_path = File.join(@report_dir, 'report.html')
+            @overlap_tol = normalize_overlap_tol(overlap_tol)
           end
 
           def validate(progress: nil)
             raise 'Val3dityRunner#validate is deprecated. Use #start with a completion callback.'
           end
 
-          def start(progress: nil, &callback)
+          def start(progress: nil, progress_step: :val3dity, report_step: :report, report_view_step: :report_view, &callback)
             raise ArgumentError, 'callback is required' unless callback
 
             ensure_supported_platform!
             ensure_runtime_files!
             FileUtils.rm_f(@report_json_path)
 
-            progress&.running(:val3dity)
+            progress&.running(progress_step)
+            progress&.detail(
+              progress_step,
+              percent: 0,
+              phase: '1. XSD Validation',
+              message: 'Starting val3dity schema validation',
+              current: File.basename(@gml_path)
+            )
 
             args = [
               exe_path,
               @gml_path,
-              '--verbose',
-              # '--overlap_tol',
-              # '0.5',
-              '-r',
-              @report_json_path
+              '--verbose'
             ]
+            args.concat(['--overlap_tol', format_tolerance(@overlap_tol)]) unless @overlap_tol.nil?
+            args.concat(['-r', @report_json_path])
 
             session = Val3dityProcessSession.new(
               args: args,
@@ -568,16 +599,19 @@ module ULOL
             completed = false
 
             UI.start_timer(0.1, true) do
-              next if completed
+              next false if completed
 
-              drain_val3dity_progress(session, progress)
+              drain_val3dity_progress(session, progress, progress_step)
+              true
             end
 
             UI.start_timer(0.2, true) do
-              next if completed
-              next unless session.finished?
+              next false if completed
+              next true unless session.finished?
 
               result = nil
+              exit_code = nil
+              build_report_later = false
               begin
                 if session.terminated?
                   completed = true
@@ -585,11 +619,12 @@ module ULOL
                 end
 
                 session.join_reader
-                drain_val3dity_progress(session, progress)
+                drain_val3dity_progress(session, progress, progress_step)
 
-                progress&.complete(:val3dity)
-
-                result = build_result_after_process(session.exit_code, progress)
+                progress&.complete(progress_step)
+                progress&.running(report_step) if report_step
+                exit_code = session.exit_code
+                build_report_later = true
               rescue StandardError => e
                 result = Val3dityResult.new(
                   valid: false,
@@ -604,7 +639,32 @@ module ULOL
                 completed = true
               end
 
-              callback.call(result)
+              if build_report_later
+                UI.start_timer(0.05, false) do
+                  begin
+                    result = build_result_after_process(
+                      exit_code,
+                      progress,
+                      report_step: report_step,
+                      report_view_step: report_view_step
+                    )
+                  rescue StandardError => e
+                    result = Val3dityResult.new(
+                      valid: false,
+                      report: nil,
+                      report_json_path: @report_json_path,
+                      report_html_path: @report_html_path,
+                      error: e
+                    )
+                  end
+
+                  callback.call(result)
+                  false
+                end
+              else
+                callback.call(result) if result
+              end
+              false
             end
 
             session
@@ -625,6 +685,26 @@ module ULOL
           end
 
           private
+
+          def normalize_overlap_tol(value)
+            return nil if value.nil?
+
+            tolerance = Float(value)
+            return nil if tolerance.negative?
+
+            tolerance
+          rescue ArgumentError, TypeError
+            raise ArgumentError, "Invalid overlap_tol: #{value.inspect}"
+          end
+
+          def format_tolerance(value)
+            format('%.15g', value.to_f)
+          end
+
+          def sanitize_report_name(value)
+            name = value.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')
+            name.empty? ? 'report' : name
+          end
 
           def validation_progress_totals(indoor_model)
             exportable_cell_spaces = indoor_model.cell_spaces.select do |cell_space|
@@ -661,12 +741,12 @@ module ULOL
             FileUtils.mkdir_p(@work_dir)
           end
 
-          def drain_val3dity_progress(session, progress)
+          def drain_val3dity_progress(session, progress, progress_step)
             return unless progress
 
             while (payload = session.pop_progress)
               progress.detail(
-                :val3dity,
+                progress_step,
                 percent: payload[:percent],
                 phase: payload[:phase],
                 message: payload[:message],
@@ -677,19 +757,19 @@ module ULOL
             IndoorCore::Logger.puts "[IndoorGML] val3dity progress drain failed: #{e.class}: #{e.message}"
           end
 
-          def build_result_after_process(exit_code, progress = nil)
+          def build_result_after_process(exit_code, progress = nil, report_step: :report, report_view_step: :report_view)
             raise "val3dity failed: exit code #{exit_code}" unless exit_code == 0
             raise 'val3dity failed to create report.json.' unless File.exist?(@report_json_path)
 
             normalize_report_encoding
 
-            progress&.running(:report)
+            progress&.running(report_step) if report_step
             raw_report = JSON.parse(File.read(@report_json_path, encoding: 'UTF-8'))
-            progress&.complete(:report)
+            progress&.complete(report_step) if report_step
 
-            progress&.running(:report_view)
+            progress&.running(report_view_step) if report_view_step
             prepare_html_report(raw_report)
-            progress&.complete(:report_view)
+            progress&.complete(report_view_step) if report_view_step
 
             Val3dityResult.new(
               valid: raw_report['validity'] == true,
@@ -739,6 +819,11 @@ module ULOL
                   code { background: #f2f4f7; border-radius: 4px; padding: 2px 5px; }
                   .empty { color: #667085; margin: 0; }
                   .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+                  .error-group { border-top: 1px solid #eaecf0; padding-top: 14px; margin-top: 14px; }
+                  .error-group:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+                  .error-title { margin: 0 0 8px; font-weight: 700; }
+                  .error-items { margin: 0; padding-left: 22px; }
+                  .error-items li { margin: 5px 0; overflow-wrap: anywhere; }
                 </style>
               </head>
               <body>
@@ -764,7 +849,7 @@ module ULOL
                   #{metric_html('Version', raw_report['val3dity_version'] || 'unknown')}
                   #{metric_html('Result', validity ? 'VALID' : 'INVALID', validity ? 'valid' : 'invalid')}
                   #{metric_html('Input type', raw_report['input_file_type'] || '-')}
-                  #{metric_html('Checked at', raw_report['time'] || '-')}
+                  #{metric_html('Checked at', report_checked_at(raw_report['time']))}
                 </div>
               </section>
             HTML
@@ -797,14 +882,7 @@ module ULOL
             body = if rows.empty?
                      '<p class="empty">No error items.</p>'
                    else
-                     <<~HTML
-                       <table>
-                         <thead><tr><th>Scope</th><th>Item</th><th>Code</th><th>Error</th></tr></thead>
-                         <tbody>
-                           #{rows.map { |row| error_item_row_html(row) }.join}
-                         </tbody>
-                       </table>
-                     HTML
+                     error_item_groups_html(rows)
                    end
             <<~HTML
               <section class="card">
@@ -826,7 +904,6 @@ module ULOL
                   #{metric_html('planarity_d2p_tol', raw_report.dig('parameters', 'planarity_d2p_tol') || '-')}
                   #{metric_html('planarity_n_tol', raw_report.dig('parameters', 'planarity_n_tol') || '-')}
                 </div>
-                <p class="subtitle">#{html_escape(raw_report['input_file'])}</p>
               </section>
             HTML
           end
@@ -839,6 +916,13 @@ module ULOL
                 <div class="#{value_class}">#{html_escape(value)}</div>
               </div>
             HTML
+          end
+
+          def report_checked_at(value)
+            text = value.to_s.strip
+            return '-' if text.empty?
+
+            text.gsub('대한민국 표준시', 'KST')
           end
 
           def error_kind_rows(raw_report)
@@ -878,15 +962,26 @@ module ULOL
             }
           end
 
-          def error_item_row_html(row)
-            <<~HTML
-              <tr>
-                <td>#{html_escape(row[:scope])}</td>
-                <td><code>#{html_escape(row[:item])}</code></td>
-                <td><code>#{html_escape(row[:code])}</code></td>
-                <td>#{html_escape(row[:description])}</td>
-              </tr>
-            HTML
+          def error_item_groups_html(rows)
+            grouped = rows.group_by { |row| [row[:code], row[:description]] }
+            grouped.sort_by { |(code, description), _items| [code.to_s, description.to_s] }.map do |(code, description), items|
+              <<~HTML
+                <div class="error-group">
+                  <p class="error-title"><code>#{html_escape(code)}</code> : #{html_escape(description)}</p>
+                  <ul class="error-items">
+                    #{items.map { |row| "<li>#{html_escape(error_item_label(row))}</li>" }.join}
+                  </ul>
+                </div>
+              HTML
+            end.join
+          end
+
+          def error_item_label(row)
+            item = row[:item].to_s
+            cells = item.scan(/cell_[A-Za-z0-9_.-]+/)
+            return cells.uniq.join(' and ') if cells.length >= 2
+
+            row[:scope].to_s == 'Dataset' ? item : "#{row[:scope]} #{item}"
           end
 
           def html_escape(value)
@@ -896,50 +991,6 @@ module ULOL
                  .gsub('>', '&gt;')
                  .gsub('"', '&quot;')
                  .gsub("'", '&#39;')
-          end
-
-          def to_report_js(raw_report)
-            features = Array(raw_report['features']).map do |feature|
-              feature.merge(
-                'errors_feature' => empty_to_nil(feature['errors']),
-                'primitives' => convert_primitives(feature['primitives'])
-              )
-            end
-
-            {
-              'errors_dataset' => empty_to_nil(raw_report['dataset_errors']),
-              'features' => features,
-              'input_file' => raw_report['input_file'],
-              'invalid_features' => invalid_count(raw_report['features_overview']),
-              'invalid_primitives' => invalid_count(raw_report['primitives_overview']),
-              'overlap_tol' => raw_report.dig('parameters', 'overlap_tol'),
-              'overview_errors' => empty_to_nil(raw_report['all_errors']),
-              'overview_features' => overview_types(raw_report['features_overview']),
-              'overview_primitives' => overview_types(raw_report['primitives_overview']),
-              'planarity_d2p_tol' => raw_report.dig('parameters', 'planarity_d2p_tol'),
-              'planarity_n_tol' => raw_report.dig('parameters', 'planarity_n_tol'),
-              'snap_tol' => raw_report.dig('parameters', 'snap_tol'),
-              'time' => raw_report['time'],
-              'total_features' => total_count(raw_report['features_overview']),
-              'total_primitives' => total_count(raw_report['primitives_overview']),
-              'type' => 'val3dity report',
-              'val3dity_version' => raw_report['val3dity_version'],
-              'valid_features' => valid_count(raw_report['features_overview']),
-              'valid_primitives' => valid_count(raw_report['primitives_overview'])
-            }
-          end
-
-          def convert_primitives(primitives)
-            return nil if primitives.nil?
-
-            primitives.map do |primitive|
-              primitive.merge('errors' => empty_to_nil(primitive['errors']))
-            end
-          end
-
-          def overview_types(overview)
-            types = Array(overview).map { |item| item['type'] }
-            types.empty? ? nil : types
           end
 
           def total_count(overview)
@@ -952,10 +1003,6 @@ module ULOL
 
           def invalid_count(overview)
             total_count(overview) - valid_count(overview)
-          end
-
-          def empty_to_nil(value)
-            value.respond_to?(:empty?) && value.empty? ? nil : value
           end
 
           def decode_report_content(content)
@@ -977,10 +1024,6 @@ module ULOL
 
           def exe_path
             File.join(VENDOR_ROOT, 'val3dity.exe')
-          end
-
-          def report_template_dir
-            File.join(VENDOR_ROOT, 'report')
           end
 
           def windows?

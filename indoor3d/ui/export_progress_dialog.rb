@@ -34,8 +34,8 @@ module ULOL
             @pending_scripts = []
             @create_gml_callback = nil
             @open_report_callback = nil
-            @open_temp_gml_callback = nil
             @request_close_callback = nil
+            @ready_callback = nil
             @suppress_close_callback = false
           end
 
@@ -104,12 +104,13 @@ module ULOL
             @open_report_callback = block
           end
 
-          def on_open_temp_gml(&block)
-            @open_temp_gml_callback = block
-          end
-
           def on_request_close(&block)
             @request_close_callback = block
+          end
+
+          def on_ready(&block)
+            @ready_callback = block
+            block.call if @dom_ready && block
           end
 
           def request_close
@@ -148,6 +149,7 @@ module ULOL
               dialog.execute_script(init_script)
               replay_state
               @pending_scripts.clear
+              @ready_callback&.call
             end
             dialog.add_action_callback('fitContentHeight') do |_context, content_height|
               fit_content_height(content_height)
@@ -157,9 +159,6 @@ module ULOL
             end
             dialog.add_action_callback('openReport') do |_context|
               @open_report_callback&.call
-            end
-            dialog.add_action_callback('openTempGml') do |_context|
-              @open_temp_gml_callback&.call
             end
             dialog.add_action_callback('closeDialog') do |_context|
               request_close
