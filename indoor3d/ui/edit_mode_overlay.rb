@@ -134,7 +134,7 @@ module ULOL
         def draw_dual_space_overlay(view)
           begin
             draw_overlay_transitions(view)
-            # draw_overlay_states(view)
+            draw_overlay_states(view)
           ensure
             view.line_width = 1 if view.respond_to?(:line_width=)
           end
