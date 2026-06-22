@@ -151,18 +151,6 @@ module ULOL
           state[:after_temp_export]&.call(temp_path)
         end
 
-        def fail_temp_gml_export(progress, state, message)
-          state[:temp_file_running] = false
-          state[:completed] = true
-          progress.fail(:temp_file)
-          progress.result(
-            status: :error,
-            title: 'IndoorGML temp GML creation failed',
-            message: message,
-            actions: [:close]
-          )
-        end
-
         def start_val3dity_validation(progress, state, temp_path)
           validator = IndoorGmlConverter::Val3dityRunner.new(
             temp_path,

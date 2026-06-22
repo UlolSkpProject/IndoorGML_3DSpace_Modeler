@@ -73,7 +73,6 @@ function setDetail(payload) {
 var actionConfig = {
   createGml: { label: 'Create GML file', callback: 'createGml' },
   openReport: { label: 'Open report', callback: 'openReport' },
-  openTempGml: { label: 'Open temporary GML', callback: 'openTempGml' },
   close: { label: 'Close', callback: 'closeDialog' }
 };
 

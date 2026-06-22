@@ -12,7 +12,6 @@ module ULOL
 
         class Val3dityRunner
           VENDOR_ROOT = File.expand_path('../assets/vendor/val3dity-windows-x64-v2.2.0', __dir__)
-          LEGACY_VENDOR_ROOT = File.expand_path('../assets/vendor/val3dity2.1.0', __dir__)
           WINDOWS_ONLY_MESSAGE = 'Val3dity validity check is currently supported only on Windows because the bundled runtime is val3dity-windows-x64-v2.2.0.'
           CREATE_NO_WINDOW       = 0x08000000
           STARTF_USESTDHANDLES   = 0x00000100
@@ -20,7 +19,6 @@ module ULOL
           WAIT_OBJECT_0          = 0
           WAIT_TIMEOUT           = 258
           STDOUT_READ_BUFFER_SIZE = 4096
-          ERROR_BROKEN_PIPE      = 109
           TERMINATE_EXIT_CODE    = 1
           TERMINATE_WAIT_MS      = 200
           DEFAULT_OVERLAP_TOL    = 0.5
@@ -569,14 +567,15 @@ module ULOL
             completed = false
 
             UI.start_timer(0.1, true) do
-              next if completed
+              next false if completed
 
               drain_val3dity_progress(session, progress, progress_step)
+              true
             end
 
             UI.start_timer(0.2, true) do
-              next if completed
-              next unless session.finished?
+              next false if completed
+              next true unless session.finished?
 
               result = nil
               begin
@@ -611,6 +610,7 @@ module ULOL
               end
 
               callback.call(result)
+              false
             end
 
             session
@@ -765,6 +765,11 @@ module ULOL
                   code { background: #f2f4f7; border-radius: 4px; padding: 2px 5px; }
                   .empty { color: #667085; margin: 0; }
                   .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+                  .error-group { border-top: 1px solid #eaecf0; padding-top: 14px; margin-top: 14px; }
+                  .error-group:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+                  .error-title { margin: 0 0 8px; font-weight: 700; }
+                  .error-items { margin: 0; padding-left: 22px; }
+                  .error-items li { margin: 5px 0; overflow-wrap: anywhere; }
                 </style>
               </head>
               <body>
@@ -790,7 +795,7 @@ module ULOL
                   #{metric_html('Version', raw_report['val3dity_version'] || 'unknown')}
                   #{metric_html('Result', validity ? 'VALID' : 'INVALID', validity ? 'valid' : 'invalid')}
                   #{metric_html('Input type', raw_report['input_file_type'] || '-')}
-                  #{metric_html('Checked at', raw_report['time'] || '-')}
+                  #{metric_html('Checked at', report_checked_at(raw_report['time']))}
                 </div>
               </section>
             HTML
@@ -823,14 +828,7 @@ module ULOL
             body = if rows.empty?
                      '<p class="empty">No error items.</p>'
                    else
-                     <<~HTML
-                       <table>
-                         <thead><tr><th>Scope</th><th>Item</th><th>Code</th><th>Error</th></tr></thead>
-                         <tbody>
-                           #{rows.map { |row| error_item_row_html(row) }.join}
-                         </tbody>
-                       </table>
-                     HTML
+                     error_item_groups_html(rows)
                    end
             <<~HTML
               <section class="card">
@@ -852,7 +850,6 @@ module ULOL
                   #{metric_html('planarity_d2p_tol', raw_report.dig('parameters', 'planarity_d2p_tol') || '-')}
                   #{metric_html('planarity_n_tol', raw_report.dig('parameters', 'planarity_n_tol') || '-')}
                 </div>
-                <p class="subtitle">#{html_escape(raw_report['input_file'])}</p>
               </section>
             HTML
           end
@@ -865,6 +862,13 @@ module ULOL
                 <div class="#{value_class}">#{html_escape(value)}</div>
               </div>
             HTML
+          end
+
+          def report_checked_at(value)
+            text = value.to_s.strip
+            return '-' if text.empty?
+
+            text.gsub('대한민국 표준시', 'KST')
           end
 
           def error_kind_rows(raw_report)
@@ -904,15 +908,26 @@ module ULOL
             }
           end
 
-          def error_item_row_html(row)
-            <<~HTML
-              <tr>
-                <td>#{html_escape(row[:scope])}</td>
-                <td><code>#{html_escape(row[:item])}</code></td>
-                <td><code>#{html_escape(row[:code])}</code></td>
-                <td>#{html_escape(row[:description])}</td>
-              </tr>
-            HTML
+          def error_item_groups_html(rows)
+            grouped = rows.group_by { |row| [row[:code], row[:description]] }
+            grouped.sort_by { |(code, description), _items| [code.to_s, description.to_s] }.map do |(code, description), items|
+              <<~HTML
+                <div class="error-group">
+                  <p class="error-title"><code>#{html_escape(code)}</code> : #{html_escape(description)}</p>
+                  <ul class="error-items">
+                    #{items.map { |row| "<li>#{html_escape(error_item_label(row))}</li>" }.join}
+                  </ul>
+                </div>
+              HTML
+            end.join
+          end
+
+          def error_item_label(row)
+            item = row[:item].to_s
+            cells = item.scan(/cell_[A-Za-z0-9_.-]+/)
+            return cells.uniq.join(' and ') if cells.length >= 2
+
+            row[:scope].to_s == 'Dataset' ? item : "#{row[:scope]} #{item}"
           end
 
           def html_escape(value)
@@ -922,50 +937,6 @@ module ULOL
                  .gsub('>', '&gt;')
                  .gsub('"', '&quot;')
                  .gsub("'", '&#39;')
-          end
-
-          def to_report_js(raw_report)
-            features = Array(raw_report['features']).map do |feature|
-              feature.merge(
-                'errors_feature' => empty_to_nil(feature['errors']),
-                'primitives' => convert_primitives(feature['primitives'])
-              )
-            end
-
-            {
-              'errors_dataset' => empty_to_nil(raw_report['dataset_errors']),
-              'features' => features,
-              'input_file' => raw_report['input_file'],
-              'invalid_features' => invalid_count(raw_report['features_overview']),
-              'invalid_primitives' => invalid_count(raw_report['primitives_overview']),
-              'overlap_tol' => raw_report.dig('parameters', 'overlap_tol'),
-              'overview_errors' => empty_to_nil(raw_report['all_errors']),
-              'overview_features' => overview_types(raw_report['features_overview']),
-              'overview_primitives' => overview_types(raw_report['primitives_overview']),
-              'planarity_d2p_tol' => raw_report.dig('parameters', 'planarity_d2p_tol'),
-              'planarity_n_tol' => raw_report.dig('parameters', 'planarity_n_tol'),
-              'snap_tol' => raw_report.dig('parameters', 'snap_tol'),
-              'time' => raw_report['time'],
-              'total_features' => total_count(raw_report['features_overview']),
-              'total_primitives' => total_count(raw_report['primitives_overview']),
-              'type' => 'val3dity report',
-              'val3dity_version' => raw_report['val3dity_version'],
-              'valid_features' => valid_count(raw_report['features_overview']),
-              'valid_primitives' => valid_count(raw_report['primitives_overview'])
-            }
-          end
-
-          def convert_primitives(primitives)
-            return nil if primitives.nil?
-
-            primitives.map do |primitive|
-              primitive.merge('errors' => empty_to_nil(primitive['errors']))
-            end
-          end
-
-          def overview_types(overview)
-            types = Array(overview).map { |item| item['type'] }
-            types.empty? ? nil : types
           end
 
           def total_count(overview)
@@ -978,10 +949,6 @@ module ULOL
 
           def invalid_count(overview)
             total_count(overview) - valid_count(overview)
-          end
-
-          def empty_to_nil(value)
-            value.respond_to?(:empty?) && value.empty? ? nil : value
           end
 
           def decode_report_content(content)
@@ -1003,10 +970,6 @@ module ULOL
 
           def exe_path
             File.join(VENDOR_ROOT, 'val3dity.exe')
-          end
-
-          def report_template_dir
-            File.join(VENDOR_ROOT, 'report')
           end
 
           def windows?
