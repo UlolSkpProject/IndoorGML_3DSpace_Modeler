@@ -29,6 +29,7 @@ module ULOL
         include EditorControl
 
         attr_reader :cell_spaces
+        attr_reader :storeys
         attr_reader :states
         attr_reader :transitions
         attr_reader :model

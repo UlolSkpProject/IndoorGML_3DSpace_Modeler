@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'json'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -31,6 +33,44 @@ module ULOL
           feature(sketchup_group) == 'CellSpace'
         end
 
+        def default_storey_id(model)
+          attribute(model, 'default_storey_id')
+        end
+
+        def read_storeys(model)
+          raw = attribute(model, 'storeys_json')
+          rows = raw.to_s.empty? ? [] : JSON.parse(raw)
+          rows.map do |row|
+            Storey.restore(
+              id: row['id'],
+              name: row['name'],
+              elevation: row['elevation'],
+              height: row['height']
+            )
+          end
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Storey read failed: #{e.class}: #{e.message}"
+          []
+        end
+
+        def write_storeys(model, storeys, default_storey_id)
+          return false unless valid_entity?(model)
+
+          payload = storeys.map do |storey|
+            {
+              id: storey.id,
+              name: storey.name,
+              elevation: storey.elevation,
+              height: storey.height
+            }
+          end
+          write_attributes(model) do
+            model.set_attribute(@dictionary_name, 'storeys_json', JSON.generate(payload))
+            model.set_attribute(@dictionary_name, 'default_storey_id', default_storey_id)
+            model.set_attribute(@dictionary_name, 'indoor_gml_version', @indoor_gml_version)
+          end
+        end
+
         def write_space_features(group, feature)
           return false unless valid_entity?(group)
 
@@ -59,6 +99,11 @@ module ULOL
             group.set_attribute(@dictionary_name, 'category_label', cell_space.category_label)
             group.set_attribute(@dictionary_name, 'category_code_space', cell_space.category_code_space)
             group.set_attribute(@dictionary_name, 'category_standard', cell_space.category_standard)
+            group.set_attribute(@dictionary_name, 'navigation_class', cell_space.navigation_class)
+            group.set_attribute(@dictionary_name, 'navigation_function', cell_space.navigation_function)
+            group.set_attribute(@dictionary_name, 'navigation_usage', cell_space.navigation_usage)
+            group.set_attribute(@dictionary_name, 'navigation_code_space', cell_space.navigation_code_space)
+            group.set_attribute(@dictionary_name, 'storey_id', cell_space.storey_id)
             group.set_attribute(@dictionary_name, 'duality_state_id', cell_space.duality_state.id) if cell_space.duality_state
             if cell_space.duality_state
               group.set_attribute(@dictionary_name, 'state_transition_ids', cell_space.duality_state.transition_ids)
@@ -99,7 +144,10 @@ module ULOL
         private
 
         def valid_entity?(entity)
-          entity&.valid? == true
+          return false if entity.nil?
+          return true unless entity.respond_to?(:valid?)
+
+          entity.valid? == true
         rescue StandardError
           false
         end

@@ -11,12 +11,19 @@ module ULOL
           @callbacks = callbacks
         end
 
-        def restore(primal_group:)
+        def restore(model:, primal_group:)
+          restore_storeys_from_model(model)
           restore_cell_spaces_from_primal_group(primal_group)
           restore_states_from_cell_spaces
         end
 
         private
+
+        def restore_storeys_from_model(model)
+          @serializer.read_storeys(model).each do |storey|
+            @registry.add_storey(storey)
+          end
+        end
 
         def restore_cell_spaces_from_primal_group(primal_group)
           return unless primal_group&.valid?
@@ -50,7 +57,12 @@ module ULOL
             category_code: @serializer.attribute(entity, 'category_code'),
             category_label: @serializer.attribute(entity, 'category_label'),
             category_code_space: @serializer.attribute(entity, 'category_code_space'),
-            category_standard: @serializer.attribute(entity, 'category_standard')
+            category_standard: @serializer.attribute(entity, 'category_standard'),
+            navigation_class: @serializer.attribute(entity, 'navigation_class'),
+            navigation_function: @serializer.attribute(entity, 'navigation_function'),
+            navigation_usage: @serializer.attribute(entity, 'navigation_usage'),
+            navigation_code_space: @serializer.attribute(entity, 'navigation_code_space'),
+            storey_id: @serializer.attribute(entity, 'storey_id')
           )
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] CellSpace restore failed: #{e.class}: #{e.message}"

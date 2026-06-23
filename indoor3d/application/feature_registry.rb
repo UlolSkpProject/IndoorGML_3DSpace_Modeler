@@ -6,6 +6,7 @@ module ULOL
 
       class FeatureRegistry
         attr_reader :cell_spaces
+        attr_reader :storeys
         attr_reader :states
         attr_reader :transitions
         attr_reader :transitions_by_cell_pair
@@ -16,6 +17,7 @@ module ULOL
 
         def reset!
           @cell_spaces = []
+          @storeys = []
           @states = []
           @transitions = []
           @cell_spaces_by_entity_object = {}
@@ -23,6 +25,18 @@ module ULOL
           @cell_spaces_by_entity_id_for_removed_callback = {}
           @adjacent_cell_space_pairs = {}
           @transitions_by_cell_pair = {}
+        end
+
+        def add_storey(storey)
+          @storeys << storey unless @storeys.include?(storey)
+        end
+
+        def remove_storey(storey)
+          @storeys.delete(storey)
+        end
+
+        def find_storey_by_id(id)
+          @storeys.find { |storey| storey&.id == id }
         end
 
         def add_cell_space(cell_space)

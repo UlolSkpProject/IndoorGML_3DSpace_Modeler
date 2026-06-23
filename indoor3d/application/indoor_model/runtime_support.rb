@@ -15,7 +15,10 @@ module ULOL
                 find_existing_space_features_groups
                 attach_existing_space_features_observers
                 reset_runtime_collections
-                @runtime_restorer.restore(primal_group: @primal_group)
+                @runtime_restorer.restore(model: @model, primal_group: @primal_group)
+                ensure_default_storey
+                assign_default_storey_to_unassigned_cell_spaces
+                write_storey_attributes
                 rebuild_runtime_transitions_from_cell_adjacency
               end
               invalidate_overlay_transition_points
@@ -57,6 +60,7 @@ module ULOL
 
           def bind_registry_collections
             @cell_spaces = @feature_registry.cell_spaces
+            @storeys = @feature_registry.storeys
             @states = @feature_registry.states
             @transitions = @feature_registry.transitions
           end
@@ -121,6 +125,10 @@ module ULOL
             remember_cell_space_change_snapshot(cell_space.sketchup_group) if cell_space&.valid?
           end
 
+          def write_storey_attributes
+            @attribute_serializer.write_storeys(@model, @storeys, default_storey&.id)
+          end
+
           def write_state_attributes(state)
             @attribute_serializer.write_state(state)
           end
@@ -151,6 +159,50 @@ module ULOL
 
           def find_cell_space_for_entity(entity)
             @feature_registry.find_cell_space_for_entity(entity)
+          end
+
+          public
+
+          def add_storey(storey)
+            @feature_registry.add_storey(storey)
+            write_storey_attributes
+            storey
+          end
+
+          def remove_storey(storey)
+            @feature_registry.remove_storey(storey)
+            ensure_default_storey
+            write_storey_attributes
+          end
+
+          def find_storey_by_id(id)
+            @feature_registry.find_storey_by_id(id)
+          end
+
+          def default_storey
+            @default_storey_id ||= @attribute_serializer.default_storey_id(@model)
+            find_storey_by_id(@default_storey_id) || @storeys.first
+          end
+
+          private
+
+          def ensure_default_storey
+            if @storeys.empty?
+              @feature_registry.add_storey(Storey.new(Storey::DEFAULT_NAME))
+            end
+            @default_storey_id = (@default_storey_id && find_storey_by_id(@default_storey_id)&.id) || @storeys.first&.id
+            default_storey
+          end
+
+          def assign_default_storey_to_unassigned_cell_spaces
+            fallback = ensure_default_storey
+            @cell_spaces.each do |cell_space|
+              next unless cell_space
+              next if find_storey_by_id(cell_space.storey_id)
+
+              cell_space.storey_id = fallback&.id
+              write_cell_space_attributes(cell_space) if cell_space.valid?
+            end
           end
 
           def with_unlocked(entity)
