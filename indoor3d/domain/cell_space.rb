@@ -102,10 +102,10 @@ module ULOL
           @sketchup_group_id = sketchup_group.persistent_id
           @cell_type = cell_type
           set_category(category_code, category_label, category_code_space, category_standard)
-          @navigation_class = blank_to_nil(navigation_class)
-          @navigation_function = blank_to_nil(navigation_function)
-          @navigation_usage = blank_to_nil(navigation_usage)
-          @navigation_code_space = blank_to_nil(navigation_code_space)
+          @navigation_class = blank_to_nil(navigation_class) || @navigation_class
+          @navigation_function = blank_to_nil(navigation_function) || @navigation_function
+          @navigation_usage = blank_to_nil(navigation_usage) || @navigation_usage
+          @navigation_code_space = blank_to_nil(navigation_code_space) || @navigation_code_space
           @storey_id = blank_to_nil(storey_id)
           @editable = false
           @duality_state = nil
