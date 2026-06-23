@@ -182,7 +182,7 @@ module ULOL
             shell.add_attribute('gml:id', "shell_#{cell_id}")
             append_cell_surfaces(shell, cell_space, cell_id)
             duality = cell.add_element('core:duality')
-            duality.add_attribute('xlink:href', state_gml_id(cell_space.duality_state))
+            duality.add_attribute('xlink:href', internal_href(state_gml_id(cell_space.duality_state)))
             append_navigable_space_codes(cell, cell_space)
           end
 
@@ -213,12 +213,13 @@ module ULOL
               member = nodes.add_element('core:stateMember')
               state_element = member.add_element('core:State')
               state_element.add_attribute('gml:id', state_gml_id(state))
+              state_element.add_element('gml:description').text = state_description(state)
               state_element.add_element('gml:name').text = state_export_name(state)
               duality = state_element.add_element('core:duality')
-              duality.add_attribute('xlink:href', cell_gml_id(cell_space))
+              duality.add_attribute('xlink:href', internal_href(cell_gml_id(cell_space)))
               state_connected_transition_ids(state).each do |transition_id|
                 connects = state_element.add_element('core:connects')
-                connects.add_attribute('xlink:href', transition_id)
+                connects.add_attribute('xlink:href', internal_href(transition_id))
               end
               geometry = state_element.add_element('core:geometry')
               point = geometry.add_element('gml:Point')
@@ -235,9 +236,9 @@ module ULOL
               transition_element = member.add_element('core:Transition')
               transition_element.add_attribute('gml:id', transition_gml_id(transition))
               connects1 = transition_element.add_element('core:connects')
-              connects1.add_attribute('xlink:href', state_gml_id(transition.state1))
+              connects1.add_attribute('xlink:href', internal_href(state_gml_id(transition.state1)))
               connects2 = transition_element.add_element('core:connects')
-              connects2.add_attribute('xlink:href', state_gml_id(transition.state2))
+              connects2.add_attribute('xlink:href', internal_href(state_gml_id(transition.state2)))
               geometry = transition_element.add_element('core:geometry')
               line = geometry.add_element('gml:LineString')
               line.add_attribute('gml:id', "line_#{transition_gml_id(transition)}")
@@ -377,6 +378,10 @@ module ULOL
             "transition_#{safe_id(transition.id)}"
           end
 
+          def internal_href(gml_id)
+            "##{gml_id}"
+          end
+
           def safe_id(value)
             value.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')
           end
@@ -394,7 +399,17 @@ module ULOL
           end
 
           def cell_space_description(cell_space)
-            %(storey="floor_1":indoor=#{indoor_description_type(cell_space)})
+            %(storey="#{storey_name_for(cell_space)}":indoor=#{indoor_description_type(cell_space)})
+          end
+
+          def state_description(state)
+            %(storey="#{storey_name_for(state&.duality_cell)}")
+          end
+
+          def storey_name_for(cell_space)
+            storey = @indoor_model.find_storey_by_id(cell_space&.storey_id) if @indoor_model.respond_to?(:find_storey_by_id)
+            storey ||= @indoor_model.default_storey if @indoor_model.respond_to?(:default_storey)
+            storey&.name.to_s.empty? ? Storey::DEFAULT_NAME : storey.name
           end
 
           def indoor_description_type(cell_space)
@@ -426,12 +441,14 @@ module ULOL
           end
 
           def append_navigable_space_codes(cell, cell_space)
-            append_code(cell, 'navi:class', CellSpaceType.label(cell_space.cell_type), cell_space.category_code_space)
-            append_code(cell, 'navi:function', cell_space.category_code, cell_space.category_code_space)
-            append_code(cell, 'navi:usage', cell_space.category_code, cell_space.category_code_space)
+            append_code(cell, 'navi:class', cell_space.navigation_class, cell_space.navigation_code_space)
+            append_code(cell, 'navi:function', cell_space.navigation_function, cell_space.navigation_code_space)
+            append_code(cell, 'navi:usage', cell_space.navigation_usage, cell_space.navigation_code_space)
           end
 
           def append_code(parent, tag, value, code_space)
+            return if value.to_s.empty?
+
             element = parent.add_element(tag)
             element.add_attribute('codeSpace', code_space) unless code_space.to_s.empty?
             element.text = value.to_s

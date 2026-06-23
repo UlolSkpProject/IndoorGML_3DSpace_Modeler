@@ -21,6 +21,7 @@ module ULOL
               ensure_space_features_groups
               cell_group = place_cell_group(sketchup_group)
               cell_space = CellSpace.new(cell_group, cell_type, category_code)
+              cell_space.storey_id = ensure_default_storey&.id
               recenter_cell_space_geometry(
                 cell_group,
                 fixed_z_offset_from_bottom: fixed_state_height_offset(cell_space)
@@ -347,6 +348,7 @@ module ULOL
               indoor_attribute(entity, 'category_code_space'),
               indoor_attribute(entity, 'category_standard')
             )
+            cell_space.storey_id = ensure_default_storey&.id
             cell_space
           end
 

@@ -15,6 +15,7 @@ module ULOL
     require_relative 'domain/abstract_feature'
     require_relative 'domain/cell_space_type'
     require_relative 'domain/cell_space_category'
+    require_relative 'domain/storey'
     require_relative 'domain/cell_space'
     require_relative 'domain/state'
     require_relative 'domain/transition'
