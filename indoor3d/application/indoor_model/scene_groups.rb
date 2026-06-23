@@ -89,7 +89,7 @@ module ULOL
 
           def recenter_cell_space_geometry(cell_space_entity, fixed_z_offset_from_bottom: nil)
             with_indoor_model_operation('IndoorGML Recenter CellSpace Geometry', transparent: true) do
-              fixed_z = fixed_z_offset_from_bottom.nil? ? nil : cell_space_entity.definition.bounds.min.z + fixed_z_offset_from_bottom
+              fixed_z = fixed_z_offset_from_bottom.nil? ? nil : fixed_local_z_from_world_offset(cell_space_entity, fixed_z_offset_from_bottom)
               center = Utils::Geometry.find_shell_inner_centroid(cell_space_entity, fixed_z: fixed_z)
               IndoorCore::Logger.puts "[IndoorGML] recenter_cell_space_geometry center=#{center} distance=#{center.distance(ORIGIN)}"
               next if center.distance(ORIGIN) <= 0.001
@@ -103,6 +103,32 @@ module ULOL
                 cell_space_entity.definition.entities.to_a
               )
             end
+          end
+
+          def fixed_local_z_from_world_offset(cell_space_entity, offset_from_world_bottom)
+            bounds = cell_space_entity.definition.bounds
+            transform = cell_space_entity.transformation
+            world_min_z = bounds_corners(bounds).map { |point| point.transform(transform).z }.min
+            world_target = Geom::Point3d.new(transform.origin.x, transform.origin.y, world_min_z + offset_from_world_bottom)
+            world_target.transform(transform.inverse).z
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] fixed local z from world offset failed: #{e.class}: #{e.message}"
+            cell_space_entity.definition.bounds.min.z + offset_from_world_bottom
+          end
+
+          def bounds_corners(bounds)
+            min = bounds.min
+            max = bounds.max
+            [
+              Geom::Point3d.new(min.x, min.y, min.z),
+              Geom::Point3d.new(min.x, min.y, max.z),
+              Geom::Point3d.new(min.x, max.y, min.z),
+              Geom::Point3d.new(min.x, max.y, max.z),
+              Geom::Point3d.new(max.x, min.y, min.z),
+              Geom::Point3d.new(max.x, min.y, max.z),
+              Geom::Point3d.new(max.x, max.y, min.z),
+              Geom::Point3d.new(max.x, max.y, max.z)
+            ]
           end
 
           def recenter_cell_space_origin(cell_space)
