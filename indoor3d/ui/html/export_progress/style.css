@@ -16,17 +16,44 @@ ul {
   margin: 0;
   padding: 0;
 }
-li {
+#steps > li {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
-  height: 34px;
+  min-height: 34px;
   font-size: 13px;
 }
 .icon {
   width: 22px;
   text-align: center;
   font-size: 15px;
+  line-height: 20px;
+}
+.step-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding-top: 1px;
+}
+.substeps {
+  margin: 2px 0 7px;
+}
+.substeps li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 22px;
+  font-size: 12px;
+  font-weight: 400;
+}
+.sub-icon {
+  width: 18px;
+  text-align: center;
+  font-size: 13px;
+}
+.sub-label {
+  line-height: 18px;
 }
 .pending { color: #6b7684; }
 .running { color: #0f5da8; font-weight: 700; }
