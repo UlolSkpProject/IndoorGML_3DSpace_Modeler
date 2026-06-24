@@ -20,9 +20,13 @@ module ULOL
             )
           end
 
-          def self.generate_segment(p0, p1, tangent0, tangent1, segments = 8, include_start: true)
+          def self.generate_segment(p0, p1, tangent0, tangent1, segments = 8, include_start: true, refine: true)
             # 1단계: 기본 t값들 생성
             base_ts = (0..segments).map { |i| i.to_f / segments }
+            unless refine
+              start_index = include_start ? 0 : 1
+              return base_ts[start_index..-1].map { |t| point(p0, p1, tangent0, tangent1, t) }
+            end
             
             # 2단계: 각 구간의 "꺾임 정도"로 가중치 계산
             points = base_ts.map { |t| point(p0, p1, tangent0, tangent1, t) }

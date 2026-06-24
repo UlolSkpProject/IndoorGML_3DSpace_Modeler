@@ -26,12 +26,6 @@ module ULOL
         def onTransactionRedo(model)
           handle_transaction_replayed(model, source: :redo)
         end
-        def onPreSaveModel(_model)
-          IndoorGmlConverter::Val3dityRunner.shutting_down!
-          IndoorGmlConverter::Val3dityRunner.terminate_all(wait_ms: 0)
-        rescue StandardError => e
-          IndoorCore::Logger.puts "[IndoorGML] Pre-save val3dity cleanup failed: #{e.class}: #{e.message}"
-        end
 
         def forget_model(model)
           key = model&.object_id
