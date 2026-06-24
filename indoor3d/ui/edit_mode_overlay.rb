@@ -25,7 +25,9 @@ module ULOL
         end.freeze
         OVERLAY_RADIUS_SCALE = 1.0
         TRANSITION_DEPTH_OFFSET_PIXELS = 2.0
-        TRANSITION_CURVE_SEGMENTS = 3
+        TRANSITION_MIN_CURVE_SEGMENTS = 3
+        TRANSITION_RIGHT_ANGLE_CURVE_SEGMENTS = 6
+        TRANSITION_CURVE_SEGMENTS = 9
         MIN_TRANSITION_CURVE_CACHE_LIMIT = 2048
 
         def initialize(indoor_model)
@@ -325,20 +327,22 @@ module ULOL
           first_end_tangent = first_waypoint_tangent
           second_start_tangent = scaled_vector(point2, waypoint, 2.0)
           second_end_tangent = second_waypoint_tangent
+          first_segment_count = transition_curve_segment_count(dir1, normal1)
+          second_segment_count = transition_curve_segment_count(dir2, normal2)
 
           first_segment = Utils::Math::HermiteSpline.generate_segment(
             point1,
             waypoint,
             first_start_tangent,
             first_end_tangent,
-            TRANSITION_CURVE_SEGMENTS
+            first_segment_count
           )
           second_segment = Utils::Math::HermiteSpline.generate_segment(
             point2,
             waypoint,
             second_start_tangent,
             second_end_tangent,
-            TRANSITION_CURVE_SEGMENTS
+            second_segment_count
           )
           { default: [], first: first_segment, second: second_segment }
         end
@@ -357,6 +361,33 @@ module ULOL
           norm.normalize!
           dot = [[dir.dot(norm), -1.0].max, 1.0].min
           0.55 - (0.45 * dot)
+        end
+
+        def transition_curve_segment_count(direction, waypoint_direction)
+          angle = vector_angle_degrees(direction, waypoint_direction)
+          return TRANSITION_CURVE_SEGMENTS if angle.nil?
+
+          segments =
+            if angle <= 90.0
+              TRANSITION_MIN_CURVE_SEGMENTS +
+                ((angle / 90.0) * (TRANSITION_RIGHT_ANGLE_CURVE_SEGMENTS - TRANSITION_MIN_CURVE_SEGMENTS))
+            else
+              TRANSITION_RIGHT_ANGLE_CURVE_SEGMENTS -
+                (((angle - 90.0) / 90.0) * (TRANSITION_RIGHT_ANGLE_CURVE_SEGMENTS - TRANSITION_CURVE_SEGMENTS))
+            end
+          segments.round.clamp(TRANSITION_MIN_CURVE_SEGMENTS, TRANSITION_CURVE_SEGMENTS)
+        end
+
+        def vector_angle_degrees(vector1, vector2)
+          return nil unless vector1.is_a?(Geom::Vector3d) && vector2.is_a?(Geom::Vector3d)
+          return nil if vector1.length <= 0.001 || vector2.length <= 0.001
+
+          first = vector1.clone
+          second = vector2.clone
+          first.normalize!
+          second.normalize!
+          dot = [[first.dot(second), -1.0].max, 1.0].min
+          Math.acos(dot) * 180.0 / Math::PI
         end
 
         def scaled_vector(from, to, scale)

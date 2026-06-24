@@ -4,7 +4,7 @@ module ULOL
   module Indoor3DGmlModeler
     module Utils
       module Geometry
-        def self.adjacency_axis(entity1, entity2, tolerance: 1.mm)
+        def self.adjacency_axis(entity1, entity2, tolerance: DEFAULT_TOLERANCE)
           return nil unless entity1&.valid? && entity2&.valid?
           return nil unless touching_bounds?(entity1.bounds, entity2.bounds, tolerance)
 
@@ -23,7 +23,7 @@ module ULOL
           deep_freeze(snapshot)
         end
 
-        def self.adjacency_axis_from_snapshots(snapshot1, snapshot2, tolerance: 1.mm)
+        def self.adjacency_axis_from_snapshots(snapshot1, snapshot2, tolerance: DEFAULT_TOLERANCE)
           return nil unless snapshot1 && snapshot2
           return nil unless touching_snapshot_bounds?(snapshot1[:bounds], snapshot2[:bounds], tolerance)
 

@@ -40,7 +40,7 @@ module ULOL
           entries = adjacency_snapshot_entries
           return if entries.empty?
 
-          pair_results = compute_pair_results(entries, tolerance: 1.mm)
+          pair_results = compute_pair_results(entries, tolerance: Utils::Geometry::DEFAULT_TOLERANCE)
           apply_pair_results(entries, pair_results)
         end
 
