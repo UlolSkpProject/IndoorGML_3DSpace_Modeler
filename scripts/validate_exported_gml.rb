@@ -40,6 +40,21 @@ REXML::XPath.each(doc, '//core:State', { 'core' => 'http://www.opengis.net/indoo
   state_storeys[state_id] = description[/storey="([^"]+)"/, 1]
 end
 
+REXML::XPath.each(doc, '//core:Transition', { 'core' => 'http://www.opengis.net/indoorgml/1.0/core' }) do |transition|
+  weight = REXML::XPath.first(transition, 'core:weight', { 'core' => 'http://www.opengis.net/indoorgml/1.0/core' })
+  errors << "Transition missing weight: #{transition.attributes['gml:id']}" if weight&.text.to_s.empty?
+end
+
+navi_ns = { 'navi' => 'http://www.opengis.net/indoorgml/1.0/navigation' }
+%w[GeneralSpace TransitionSpace ConnectionSpace].each do |space_type|
+  REXML::XPath.each(doc, "//navi:#{space_type}", navi_ns) do |space|
+    %w[class function usage].each do |code_name|
+      code = REXML::XPath.first(space, "navi:#{code_name}", navi_ns)
+      errors << "#{space_type} missing navi:#{code_name}: #{space.attributes['gml:id']}" if code&.text.to_s.empty?
+    end
+  end
+end
+
 REXML::XPath.each(doc, '//*[starts-with(local-name(), "GeneralSpace") or starts-with(local-name(), "TransitionSpace") or starts-with(local-name(), "ConnectionSpace")]') do |cell|
   description = REXML::XPath.first(cell, 'gml:description', { 'gml' => 'http://www.opengis.net/gml/3.2' })&.text.to_s
   cell_storey = description[/storey="([^"]+)"/, 1]

@@ -114,16 +114,12 @@ module ULOL
         end
 
         def apply_default_navigation_semantics
-          @navigation_class = nil
-          @navigation_function = nil
-          @navigation_usage = nil
+          default_code = @category_label.to_s.empty? ? @category_code.to_s : @category_label.to_s
+          default_code = CellSpaceType.label(@cell_type) if default_code.empty?
+          @navigation_class = default_code
+          @navigation_function = default_code
+          @navigation_usage = default_code
           @navigation_code_space = @category_code_space
-          return unless @cell_type == CellSpaceType::CONNECTION
-          return unless @category_code.to_s.casecmp('Door').zero?
-
-          @navigation_class = 'Door'
-          @navigation_function = 'Door'
-          @navigation_usage = 'Door'
         end
 
         def blank_to_nil(value)
