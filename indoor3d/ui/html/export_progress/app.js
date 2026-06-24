@@ -9,8 +9,7 @@ var defaultSteps = [
   { key: 'temp_file', label: '\uC784\uC2DC\uD30C\uC77C \uC0DD\uC131' },
   { key: 'val3dity', label: 'val3dity \uC2E4\uD589 (version2.2.0)' },
   { key: 'extension_recheck', label: '2\uCC28 overlap recheck' },
-  { key: 'report', label: 'report \uC0DD\uC131' },
-  { key: 'report_view', label: 'report view \uC0DD\uC131' }
+  { key: 'report', label: 'Report \uC0DD\uC131' }
 ];
 
 var validationSubsteps = [
@@ -21,6 +20,17 @@ var validationSubsteps = [
   { key: 'dual_vertex', label: 'Dual Vertex Inside Cells' },
   { key: 'adjacency', label: 'Adjacency in Primal / Dual' }
 ];
+
+var extensionRecheckSubsteps = [
+  { key: 'collect', label: 'Collect 701/704 errors' },
+  { key: 'pairs', label: 'Recheck reported cell pairs' },
+  { key: 'policy', label: 'Apply extension policy' }
+];
+
+var substepGroups = {
+  val3dity: validationSubsteps,
+  extension_recheck: extensionRecheckSubsteps
+};
 
 var terminalResultShown = false;
 
@@ -45,8 +55,8 @@ function init(steps) {
     content.className = 'step-content';
     content.appendChild(label);
 
-    if (step.key === 'val3dity') {
-      content.appendChild(createValidationSubsteps());
+    if (substepGroups[step.key]) {
+      content.appendChild(createSubsteps(step.key));
     }
 
     row.appendChild(icon);
@@ -56,14 +66,14 @@ function init(steps) {
   fitDialogToContent();
 }
 
-function createValidationSubsteps() {
+function createSubsteps(stepKey) {
   var list = document.createElement('ul');
-  list.id = 'val3dity-substeps';
+  list.id = stepKey + '-substeps';
   list.className = 'substeps';
 
-  validationSubsteps.forEach(function (substep) {
+  substepGroups[stepKey].forEach(function (substep) {
     var row = document.createElement('li');
-    row.id = 'substep-' + substep.key;
+    row.id = 'substep-' + stepKey + '-' + substep.key;
     row.className = 'pending';
 
     var icon = document.createElement('span');
@@ -87,7 +97,7 @@ function setStatus(step, status) {
   if (!row) return;
   row.className = status;
   row.querySelector('.icon').textContent = icons[status] || icons.pending;
-  updateValidationSubstepsForStatus(step, status);
+  updateSubstepsForStatus(step, status);
   updateCancelVisibility();
   fitDialogToContent();
 }
@@ -117,74 +127,74 @@ function setDetail(payload) {
   document.getElementById('detail-current').textContent =
     payload.current ? ('Current: ' + payload.current) : '';
 
-  if (payload.step === 'val3dity') {
-    updateValidationSubsteps(payload.phase);
+  if (substepGroups[payload.step]) {
+    updateSubsteps(payload.step, payload.phase);
   }
 
   updateCancelVisibility();
   fitDialogToContent();
 }
 
-function updateValidationSubstepsForStatus(step, status) {
-  if (step !== 'val3dity') return;
+function updateSubstepsForStatus(step, status) {
+  if (!substepGroups[step]) return;
 
   if (status === 'pending') {
-    setAllValidationSubsteps('pending');
+    setAllSubsteps(step, 'pending');
   } else if (status === 'running') {
-    updateValidationSubsteps('XSD Validation');
+    updateSubsteps(step, substepGroups[step][0].label);
   } else if (status === 'complete') {
-    setAllValidationSubsteps('complete');
+    setAllSubsteps(step, 'complete');
   } else if (status === 'failed') {
-    markCurrentValidationSubstepFailed();
+    markCurrentSubstepFailed(step);
   }
 }
 
-function setAllValidationSubsteps(status) {
-  validationSubsteps.forEach(function (substep) {
-    setValidationSubstepStatus(substep.key, status);
+function setAllSubsteps(step, status) {
+  substepGroups[step].forEach(function (substep) {
+    setSubstepStatus(step, substep.key, status);
   });
 }
 
-function updateValidationSubsteps(phase) {
+function updateSubsteps(step, phase) {
   if (normalizePhase(phase) === 'Finished') {
-    setAllValidationSubsteps('complete');
+    setAllSubsteps(step, 'complete');
     return;
   }
 
-  var index = validationSubstepIndex(phase);
+  var index = substepIndex(step, phase);
   if (index < 0) return;
 
-  validationSubsteps.forEach(function (substep, substepIndex) {
+  substepGroups[step].forEach(function (substep, substepIndex) {
     if (substepIndex < index) {
-      setValidationSubstepStatus(substep.key, 'complete');
+      setSubstepStatus(step, substep.key, 'complete');
     } else if (substepIndex === index) {
-      setValidationSubstepStatus(substep.key, 'running');
+      setSubstepStatus(step, substep.key, 'running');
     } else {
-      setValidationSubstepStatus(substep.key, 'pending');
+      setSubstepStatus(step, substep.key, 'pending');
     }
   });
 }
 
-function markCurrentValidationSubstepFailed() {
-  var running = document.querySelector('#val3dity-substeps li.running');
+function markCurrentSubstepFailed(step) {
+  var running = document.querySelector('#' + step + '-substeps li.running');
   if (!running) return;
   running.className = 'failed';
   running.querySelector('.sub-icon').textContent = icons.failed;
 }
 
-function setValidationSubstepStatus(key, status) {
-  var row = document.getElementById('substep-' + key);
+function setSubstepStatus(step, key, status) {
+  var row = document.getElementById('substep-' + step + '-' + key);
   if (!row) return;
   row.className = status;
   row.querySelector('.sub-icon').textContent = icons[status] || icons.pending;
 }
 
-function validationSubstepIndex(phase) {
+function substepIndex(step, phase) {
   var normalized = normalizePhase(phase);
   if (!normalized) return -1;
 
-  for (var i = 0; i < validationSubsteps.length; i += 1) {
-    if (normalized.indexOf(validationSubsteps[i].label) === 0) {
+  for (var i = 0; i < substepGroups[step].length; i += 1) {
+    if (normalized.indexOf(substepGroups[step][i].label) === 0) {
       return i;
     }
   }

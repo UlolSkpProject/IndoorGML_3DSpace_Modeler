@@ -593,7 +593,7 @@ module ULOL
             raise 'Val3dityRunner#validate is deprecated. Use #start with a completion callback.'
           end
 
-          def start(progress: nil, progress_step: :val3dity, recheck_step: :extension_recheck, report_step: :report, report_view_step: :report_view, &callback)
+          def start(progress: nil, progress_step: :val3dity, recheck_step: :extension_recheck, report_step: :report, report_view_step: nil, &callback)
             raise ArgumentError, 'callback is required' unless callback
 
             ensure_supported_platform!
@@ -796,7 +796,7 @@ module ULOL
             IndoorCore::Logger.puts "[IndoorGML] val3dity progress drain failed: #{e.class}: #{e.message}"
           end
 
-          def build_result_after_process(exit_code, progress = nil, recheck_step: :extension_recheck, report_step: :report, report_view_step: :report_view)
+          def build_result_after_process(exit_code, progress = nil, recheck_step: :extension_recheck, report_step: :report, report_view_step: nil)
             raise "val3dity failed: exit code #{exit_code}" unless exit_code == 0
             raise 'val3dity failed to create report.json.' unless File.exist?(@report_json_path)
 
@@ -809,7 +809,7 @@ module ULOL
               progress&.detail(
                 recheck_step,
                 percent: 0,
-                phase: 'Extension overlap recheck',
+                phase: 'Collect 701/704 errors',
                 message: 'Rechecking val3dity 701/704 errors against exported GML geometry',
                 current: File.basename(@gml_path)
               )
@@ -824,20 +824,44 @@ module ULOL
               progress&.detail(
                 recheck_step,
                 percent: 100,
-                phase: 'Extension overlap recheck',
+                phase: 'Apply extension policy',
                 message: 'Extension overlap recheck finished',
                 current: File.basename(@gml_path)
               )
               progress&.complete(recheck_step)
             end
 
-            progress&.running(report_step) if report_step
+            if report_step
+              progress&.running(report_step)
+              progress&.detail(
+                report_step,
+                percent: 0,
+                phase: 'Report generation',
+                message: 'Writing final report JSON',
+                current: File.basename(@report_json_path)
+              )
+            end
             File.write(@report_json_path, JSON.pretty_generate(raw_report), encoding: 'UTF-8')
-            progress&.complete(report_step) if report_step
-
-            progress&.running(report_view_step) if report_view_step
+            if report_step
+              progress&.detail(
+                report_step,
+                percent: 50,
+                phase: 'Report generation',
+                message: 'Generating report view',
+                current: File.basename(@report_html_path)
+              )
+            end
             prepare_html_report(raw_report)
-            progress&.complete(report_view_step) if report_view_step
+            if report_step
+              progress&.detail(
+                report_step,
+                percent: 100,
+                phase: 'Report generation',
+                message: 'Report generated',
+                current: File.basename(@report_html_path)
+              )
+              progress&.complete(report_step)
+            end
 
             Val3dityResult.new(
               valid: raw_report['validity'] == true,
@@ -1160,7 +1184,11 @@ module ULOL
               progress: progress,
               progress_step: progress_step
             }
-            emit_overlap_recheck_progress(tracker, message: 'Preparing extension overlap recheck')
+            emit_overlap_recheck_progress(
+              tracker,
+              message: 'Collecting val3dity 701/704 errors',
+              phase: 'Collect 701/704 errors'
+            )
 
             remove_rechecked_errors!(
               Array(raw_report['dataset_errors']),
@@ -1181,7 +1209,11 @@ module ULOL
                 )
               end
             end
-            emit_overlap_recheck_progress(tracker, message: 'Extension overlap recheck finished')
+            emit_overlap_recheck_progress(
+              tracker,
+              message: 'Applying extension validation policy',
+              phase: 'Apply extension policy'
+            )
 
             raw_report[OVERLAP_RECHECK_REPORT_KEY] = results unless results.empty?
             refresh_rechecked_validity!(raw_report)
@@ -1214,7 +1246,7 @@ module ULOL
             [701, 704].include?(error_code_number(error && error['code']))
           end
 
-          def emit_overlap_recheck_progress(tracker, result = nil, message: nil)
+          def emit_overlap_recheck_progress(tracker, result = nil, message: nil, phase: nil)
             return unless tracker && tracker[:progress] && tracker[:progress_step]
 
             total = tracker[:total].to_i
@@ -1233,7 +1265,7 @@ module ULOL
             tracker[:progress].detail(
               tracker[:progress_step],
               percent: percent,
-              phase: 'Extension overlap recheck',
+              phase: phase || 'Recheck reported cell pairs',
               message: message || default_message,
               current: cells || File.basename(@gml_path)
             )
