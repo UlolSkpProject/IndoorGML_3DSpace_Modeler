@@ -187,7 +187,7 @@ module ULOL
         def self.coplanar_area_overlapping_faces?(face1, face2, tolerance)
           normal1 = face1[:normal]
           normal2 = face2[:normal]
-          return false unless normals_parallel?(normal1, normal2)
+          return false unless normals_opposite?(normal1, normal2)
           return false unless points_on_plane?(face2[:points], normal1, face1[:points].first, tolerance)
 
           metrics = coplanar_overlap_metrics(face1, face2, tolerance)
@@ -215,7 +215,7 @@ module ULOL
         def self.coplanar_area_overlapping_snapshot_faces?(face1, face2, tolerance)
           normal1 = face1[:normal]
           normal2 = face2[:normal]
-          return false unless snapshot_normals_parallel?(normal1, normal2)
+          return false unless snapshot_normals_opposite?(normal1, normal2)
           return false unless snapshot_points_on_plane?(face2[:points], normal1, face1[:points].first, tolerance)
 
           snapshot_coplanar_overlap_area(face1, face2) > area_tolerance(tolerance)
@@ -245,11 +245,22 @@ module ULOL
           (1.0 - dot) <= 0.000001
         end
 
+        def self.normals_opposite?(normal1, normal2)
+          dot = dot_product(normal1, normal2)
+          (dot + 1.0).abs <= 0.000001
+        end
+
         def self.snapshot_normals_parallel?(normal1, normal2)
           dot = snapshot_dot_product(normal1, normal2).abs
           (1.0 - dot) <= 0.000001
         end
         private_class_method :snapshot_normals_parallel?
+
+        def self.snapshot_normals_opposite?(normal1, normal2)
+          dot = snapshot_dot_product(normal1, normal2)
+          (dot + 1.0).abs <= 0.000001
+        end
+        private_class_method :snapshot_normals_opposite?
 
         def self.points_on_plane?(points, normal, plane_point, tolerance)
           points.all? do |point|

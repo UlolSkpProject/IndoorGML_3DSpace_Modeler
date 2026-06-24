@@ -31,7 +31,7 @@ module ULOL
             faces2 = Utils::Geometry.world_faces(entity2)
             faces1.each_with_object([]) do |face1, candidates|
               faces2.each do |face2|
-                next unless Utils::Geometry.normals_parallel?(face1[:normal], face2[:normal])
+                next unless Utils::Geometry.normals_opposite?(face1[:normal], face2[:normal])
                 next unless Utils::Geometry.points_on_plane?(face2[:points], face1[:normal], face1[:points].first, tolerance)
 
                 overlap = coplanar_overlap_candidate(face1, face2, tolerance)
