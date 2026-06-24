@@ -892,65 +892,76 @@ module ULOL
                 <meta charset="utf-8">
                 <title>val3dity report</title>
                 <style>
-                  :root { color-scheme: light; font-family: Arial, sans-serif; color: #172033; background: #f5f7fb; }
-                  body { margin: 0; padding: 28px; }
-                  main { max-width: 1180px; margin: 0 auto; }
-                  h1 { margin: 0 0 6px; font-size: 28px; }
-                  h2 { margin: 0 0 14px; font-size: 18px; }
-                  .subtitle { margin: 0 0 22px; color: #667085; }
-                  .result-hero { background: #fff; border: 1px solid #e4e7ec; border-left: 5px solid #12b76a; border-radius: 8px; padding: 24px; margin-bottom: 12px; }
-                  .result-hero.result-invalid { border-left-color: #d92d20; }
-                  .result-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
-                  .eyebrow { display: block; margin-bottom: 6px; color: #667085; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-                  .result-heading h1 { margin: 0; font-size: 28px; color: #101828; }
-                  .result-heading p { margin: 8px 0 0; color: #475467; }
-                  .result-badge { display: inline-flex; align-items: center; padding: 7px 12px; border-radius: 999px; font-size: 13px; font-weight: 700; white-space: nowrap; }
-                  .result-badge.valid { color: #067647; background: #ecfdf3; border: 1px solid #abefc6; }
-                  .result-badge.invalid { color: #b42318; background: #fef3f2; border: 1px solid #fecdca; }
-                  .result-metrics { display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: 12px; margin-top: 22px; }
-                  .result-metric { padding: 14px 16px; background: #f8fafc; border: 1px solid #eaecf0; border-radius: 8px; }
-                  .result-metric.danger { background: #fffbfa; border-color: #fecdca; }
-                  .result-metric.success { background: #f6fef9; border-color: #abefc6; }
-                  .result-metric.warning { background: #fffcf5; border-color: #fedf89; }
-                  .metric-value { display: block; font-size: 22px; font-weight: 700; color: #101828; overflow-wrap: anywhere; }
-                  .metric-label { display: block; margin-top: 4px; color: #667085; font-size: 12px; }
-                  .report-meta-line { margin: 0 0 18px; color: #667085; font-size: 13px; }
-                  .card { background: #fff; border: 1px solid #e4e7ec; border-radius: 8px; padding: 18px; margin-bottom: 16px; }
-                  .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
-                  .metric { background: #f8fafc; border-radius: 6px; padding: 10px 12px; }
-                  .metric .label { color: #667085; font-size: 12px; }
-                  .metric .value { margin-top: 4px; font-weight: 700; overflow-wrap: anywhere; }
-                  .valid { color: #067647; }
-                  .invalid { color: #b42318; }
-                  .suppressed { color: #067647; font-weight: 700; }
-                  .kept { color: #b42318; font-weight: 700; }
-                  table { width: 100%; border-collapse: collapse; }
-                  th, td { border-bottom: 1px solid #eaecf0; padding: 9px 8px; text-align: left; vertical-align: top; }
-                  th { color: #475467; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
-                  code { background: #f2f4f7; border-radius: 4px; padding: 2px 5px; }
-                  .empty { color: #667085; margin: 0; }
-                  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-                  .error-group { border-top: 1px solid #eaecf0; padding-top: 14px; margin-top: 14px; }
+                  :root {
+                    color-scheme: dark;
+                    font-family: Arial, sans-serif;
+                    color: #d8d6d0;
+                    background: #1c1c1b;
+                  }
+                  * { box-sizing: border-box; }
+                  body { margin: 0; padding: 10px; background: #1c1c1b; }
+                  main { max-width: 430px; margin: 0 auto; }
+                  .hero { padding: 10px 0 16px; border-bottom: 1px solid #373633; }
+                  .hero-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+                  .top-meta { margin-bottom: 12px; color: #85827b; font-size: 11px; line-height: 1.55; }
+                  .eyebrow { margin-bottom: 6px; color: #85827b; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+                  h1 { margin: 0; color: #e8e6e0; font-size: 22px; line-height: 1.15; }
+                  .result-message { margin: 8px 0 0; color: #b9b6ae; font-size: 12px; line-height: 1.5; }
+                  .result-badge { display: inline-flex; align-items: center; padding: 5px 13px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+                  .result-badge.valid { color: #3ebc71; background: #12261a; border: 1px solid #327a4f; }
+                  .result-badge.invalid { color: #f97066; background: #351918; border: 1px solid #7a2e2a; }
+                  .result-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
+                  .result-metric { min-height: 64px; padding: 11px 14px; background: #242422; border-radius: 8px; }
+                  .metric-value { display: block; color: #3ebc71; font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+                  .metric-value.info { color: #8ab4f8; }
+                  .metric-label { display: block; margin-top: 5px; color: #85827b; font-size: 11px; }
+                  .section { padding-top: 18px; margin-top: 0; }
+                  .section + .section { border-top: 1px solid #373633; margin-top: 18px; }
+                  .section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+                  h2 { margin: 0; color: #a8a49d; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+                  .section-count { color: #85827b; font-size: 12px; white-space: nowrap; }
+                  .params-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+                  .param { min-width: 0; padding: 10px 12px; background: #242422; border-radius: 8px; }
+                  .param-label { color: #85827b; font-family: Consolas, Monaco, monospace; font-size: 10px; letter-spacing: .03em; }
+                  .param-value { margin-top: 3px; color: #e8e6e0; font-family: Consolas, Monaco, monospace; font-size: 13px; overflow-wrap: anywhere; }
+                  .filter-row { display: flex; gap: 7px; margin-bottom: 10px; overflow-x: auto; padding-bottom: 2px; }
+                  .filter-btn { flex: 0 0 auto; padding: 8px 13px; border: 1px solid #4a4945; border-radius: 8px; background: transparent; color: #b9b6ae; font-size: 12px; font-weight: 700; }
+                  .filter-btn.active { border-color: #327a4f; background: #12261a; color: #d8d6d0; }
+                  .recheck-list { display: grid; gap: 8px; }
+                  .recheck-row { background: #242422; border: 1px solid #2f2e2b; border-radius: 8px; }
+                  .recheck-row summary { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 8px 9px; cursor: pointer; list-style: none; }
+                  .recheck-row summary::-webkit-details-marker { display: none; }
+                  .recheck-row[open] summary { border-bottom: 1px solid #33322f; }
+                  .recheck-summary-main { display: flex; align-items: center; gap: 7px; min-width: 0; }
+                  .summary-distance { color: #e8e6e0; font-family: Consolas, Monaco, monospace; font-size: 11px; text-align: right; white-space: nowrap; }
+                  .recheck-detail { display: grid; gap: 6px; padding: 8px 9px 9px; }
+                  .code-badge { display: inline-flex; align-items: center; padding: 3px 7px; border-radius: 5px; background: #1d355d; color: #8ab4f8; font-family: Consolas, Monaco, monospace; font-size: 11px; font-weight: 700; }
+                  .code-badge.c704 { background: #443815; color: #e5c567; }
+                  .status-badge { color: #3ebc71; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+                  .status-badge.kept, .status-badge.inconclusive { color: #f9b84e; }
+                  .cell-pair { display: grid; gap: 3px; min-width: 0; color: #d8d6d0; font-family: Consolas, Monaco, monospace; font-size: 11px; line-height: 1.35; }
+                  .cell-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+                  .reason { color: #a8a49d; font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+                  .empty { color: #85827b; margin: 0; font-size: 12px; }
+                  .error-group { border-top: 1px solid #373633; padding-top: 12px; margin-top: 12px; }
                   .error-group:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
-                  .error-title { margin: 0 0 8px; font-weight: 700; }
-                  .error-items { margin: 0; padding-left: 22px; }
+                  .error-title { margin: 0 0 8px; color: #d8d6d0; font-size: 12px; font-weight: 700; }
+                  .error-items { margin: 0; padding-left: 18px; color: #b9b6ae; font-size: 12px; }
                   .error-items li { margin: 5px 0; overflow-wrap: anywhere; }
-                  @media (max-width: 760px) {
-                    body { padding: 16px; }
-                    .result-heading { display: block; }
-                    .result-badge { margin-top: 14px; }
-                    .result-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+                  code { background: #242422; border-radius: 4px; padding: 1px 4px; color: #d8d6d0; }
+                  @media (min-width: 700px) {
+                    body { padding: 20px; }
+                    main { max-width: 520px; }
                   }
                 </style>
               </head>
               <body>
                 <main>
+                  #{report_top_meta_section(raw_report)}
                   #{report_result_hero_section(raw_report)}
-                  #{report_metadata_line(raw_report)}
                   #{report_summary_section(raw_report)}
                   #{report_overlap_recheck_section(raw_report)}
                   #{report_error_items_section(raw_report)}
-                  #{report_error_kinds_section(raw_report)}
                 </main>
               </body>
               </html>
@@ -964,43 +975,47 @@ module ULOL
             kept = overlap_recheck_kept_count(raw_report)
             inconclusive = overlap_recheck_inconclusive_count(raw_report)
             primitive_value = "#{valid_count(raw_report['primitives_overview'])} / #{total_count(raw_report['primitives_overview'])}"
-            result_class = validity ? 'result-hero' : 'result-hero result-invalid'
             badge_class = validity ? 'result-badge valid' : 'result-badge invalid'
             heading = validation_status_label(raw_report)
             message = result_hero_message(raw_report, final_errors, suppressed, kept, inconclusive)
             <<~HTML
-              <section class="#{result_class}">
-                <div class="result-heading">
+              <section class="hero">
+                <div class="hero-top">
                   <div>
-                    <span class="eyebrow">IndoorGML Validation</span>
+                    <div class="eyebrow">IndoorGML · val3dity #{html_escape(raw_report['val3dity_version'] || 'unknown')}</div>
                     <h1>#{html_escape(heading)}</h1>
-                    <p>#{html_escape(message)}</p>
+                    <p class="result-message">#{html_escape(message)}</p>
                   </div>
                   <span class="#{badge_class}">#{validity ? 'VALID' : 'INVALID'}</span>
                 </div>
                 <div class="result-metrics">
-                  <div class="result-metric #{final_errors.zero? ? 'success' : 'danger'}">
+                  <div class="result-metric">
                     <span class="metric-value">#{final_errors}</span>
                     <span class="metric-label">최종 오류</span>
                   </div>
-                  <div class="result-metric success">
+                  <div class="result-metric">
                     <span class="metric-value">#{suppressed}</span>
                     <span class="metric-label">억제됨</span>
                   </div>
-                  <div class="result-metric #{kept.zero? ? 'success' : 'warning'}">
+                  <div class="result-metric">
                     <span class="metric-value">#{kept}</span>
                     <span class="metric-label">유지됨</span>
                   </div>
-                  <div class="result-metric #{inconclusive.zero? ? 'success' : 'warning'}">
-                    <span class="metric-value">#{inconclusive}</span>
-                    <span class="metric-label">불명확</span>
-                  </div>
-                  <div class="result-metric neutral">
-                    <span class="metric-value">#{html_escape(primitive_value)}</span>
-                    <span class="metric-label">유효한 Primitive</span>
+                  <div class="result-metric">
+                    <span class="metric-value info">#{html_escape(primitive_value)}</span>
+                    <span class="metric-label">유효 Primitive</span>
                   </div>
                 </div>
               </section>
+            HTML
+          end
+
+          def report_top_meta_section(raw_report)
+            <<~HTML
+              <div class="top-meta">
+                <div>#{html_escape(report_checked_at(raw_report['time']))}</div>
+                <div>strict: #{html_escape(raw_report[STRICT_VALIDITY_KEY] == true ? 'valid' : 'invalid')} · extension policy: #{html_escape(raw_report[EXTENSION_VALIDITY_KEY] == true ? 'valid' : 'invalid')} · features #{valid_count(raw_report['features_overview'])}/#{total_count(raw_report['features_overview'])}</div>
+              </div>
             HTML
           end
 
@@ -1039,35 +1054,38 @@ module ULOL
 
           def report_error_items_section(raw_report)
             rows = error_item_rows(raw_report)
-            body = if rows.empty?
-                     '<p class="empty">No error items.</p>'
-                   else
-                     error_item_groups_html(rows)
-                   end
+            return '' if rows.empty?
+
             <<~HTML
-              <section class="card">
+              <section class="section">
                 <h2>Error에 걸린 항목</h2>
-                #{body}
+                #{error_item_groups_html(rows)}
               </section>
             HTML
           end
 
           def report_summary_section(raw_report)
             <<~HTML
-              <section class="card">
-                <h2>요약</h2>
-                <div class="summary-grid">
-                  #{metric_html('Strict val3dity', raw_report[STRICT_VALIDITY_KEY] == true ? 'valid' : 'invalid')}
-                  #{metric_html('Extension policy', raw_report[EXTENSION_VALIDITY_KEY] == true ? 'valid' : 'invalid')}
-                  #{metric_html('Status', validation_status_label(raw_report))}
-                  #{metric_html('Features', "#{valid_count(raw_report['features_overview'])} / #{total_count(raw_report['features_overview'])} valid")}
-                  #{metric_html('Primitives', "#{valid_count(raw_report['primitives_overview'])} / #{total_count(raw_report['primitives_overview'])} valid")}
-                  #{metric_html('snap_tol', raw_report.dig('parameters', 'snap_tol') || '-')}
-                  #{metric_html('overlap_tol', raw_report.dig('parameters', 'overlap_tol') || '-')}
-                  #{metric_html('planarity_d2p_tol', raw_report.dig('parameters', 'planarity_d2p_tol') || '-')}
-                  #{metric_html('planarity_n_tol', raw_report.dig('parameters', 'planarity_n_tol') || '-')}
+              <section class="section">
+                <div class="section-head">
+                  <h2>파라미터</h2>
+                </div>
+                <div class="params-grid">
+                  #{parameter_html('snap_tol', raw_report.dig('parameters', 'snap_tol') || '-')}
+                  #{parameter_html('overlap_tol', raw_report.dig('parameters', 'overlap_tol') || '-')}
+                  #{parameter_html('planarity_d2p', raw_report.dig('parameters', 'planarity_d2p_tol') || '-')}
+                  #{parameter_html('planarity_n', raw_report.dig('parameters', 'planarity_n_tol') || '-')}
                 </div>
               </section>
+            HTML
+          end
+
+          def parameter_html(label, value)
+            <<~HTML
+              <div class="param">
+                <div class="param-label">#{html_escape(label)}</div>
+                <div class="param-value">#{html_escape(value)}</div>
+              </div>
             HTML
           end
 
@@ -1132,44 +1150,91 @@ module ULOL
             rows = Array(raw_report[OVERLAP_RECHECK_REPORT_KEY])
             return '' if rows.empty?
 
+            code_701_count = overlap_recheck_code_count(rows, 701)
+            code_704_count = overlap_recheck_code_count(rows, 704)
             <<~HTML
-              <section class="card">
-                <h2>Overlap Recheck</h2>
-                <table>
-                  <thead>
-                    <tr><th>Code</th><th>Cells</th><th>Status</th><th>Tolerance</th><th>Signed Distance</th><th>Normal Thickness</th><th>Face Overlap</th><th>Components</th><th>Intersection Volume</th><th>Reason</th></tr>
-                  </thead>
-                  <tbody>
-                    #{rows.map { |row| overlap_recheck_row_html(row) }.join}
-                  </tbody>
-                </table>
+              <section class="section">
+                <div class="section-head">
+                  <h2>Overlap 재검사</h2>
+                  <span class="section-count">#{rows.length}건</span>
+                </div>
+                <div class="filter-row">
+                  <button class="filter-btn active" type="button" data-filter="all">전체 #{rows.length}</button>
+                  <button class="filter-btn" type="button" data-filter="701">701 (#{code_701_count})</button>
+                  <button class="filter-btn" type="button" data-filter="704">704 (#{code_704_count})</button>
+                </div>
+                <div class="recheck-list">
+                  #{rows.map { |row| overlap_recheck_row_html(row) }.join}
+                </div>
               </section>
+              #{overlap_recheck_filter_script}
             HTML
           end
 
           def overlap_recheck_row_html(row)
-            cells = Array(row['cells']).join(' and ')
+            cells = Array(row['cells'])
+            code = row['code'].to_s
             distance = row['distance_mm'].nil? ? '-' : "#{format('%.6g', row['distance_mm'])} mm"
-            thickness = row['normal_thickness_mm'].nil? ? '-' : "#{format('%.6g', row['normal_thickness_mm'])} mm"
-            overlap = row['overlap_area_mm2'].nil? ? '-' : "#{format('%.6g', row['overlap_area_mm2'])} mm2"
-            volume = row['actual_overlap_volume_mm3'].nil? ? '-' : "#{format('%.6g', row['actual_overlap_volume_mm3'])} mm3"
-            tolerance = row['tolerance_mm'].nil? ? '-' : "#{format('%.6g', row['tolerance_mm'])} mm"
-            components = row['intersection_component_count'].nil? ? '-' : row['intersection_component_count'].to_s
             status = row['status'] || (row['tolerated'] ? 'suppressed' : 'kept')
-            status_class = status == 'suppressed' ? 'suppressed' : 'kept'
+            status_class = status == 'suppressed' ? 'suppressed' : status
+            status_label = status == 'suppressed' ? '억제' : status
             <<~HTML
-              <tr>
-                <td><code>#{html_escape(row['code'])}</code></td>
-                <td>#{html_escape(cells.empty? ? '-' : cells)}</td>
-                <td class="#{status_class}">#{html_escape(status.upcase)}</td>
-                <td>#{html_escape(tolerance)}</td>
-                <td>#{html_escape(distance)}</td>
-                <td>#{html_escape(thickness)}</td>
-                <td>#{html_escape(overlap)}</td>
-                <td>#{html_escape(components)}</td>
-                <td>#{html_escape(volume)}</td>
-                <td>#{html_escape(row['reason'])}</td>
-              </tr>
+              <details class="recheck-row" data-code="#{html_escape(code)}">
+                <summary>
+                  <span class="code-badge #{code == '704' ? 'c704' : ''}">#{html_escape(code)}</span>
+                  <span class="recheck-summary-main">
+                    <span class="status-badge #{html_escape(status_class)}">#{html_escape(status_label)}</span>
+                    <span class="cell-name" title="#{html_escape(cells.join(' / '))}">#{html_escape(compact_cell_pair(cells))}</span>
+                  </span>
+                  <span class="summary-distance">#{html_escape(distance)}</span>
+                </summary>
+                <div class="recheck-detail">
+                  <div class="cell-pair">
+                    <span class="cell-name" title="#{html_escape(cells[0] || '-')}">#{html_escape(cells[0] || '-')}</span>
+                    <span class="cell-name" title="#{html_escape(cells[1] || '-')}">#{html_escape(cells[1] || '-')}</span>
+                  </div>
+                  <div class="reason">#{html_escape(compact_overlap_reason(row['reason']))}</div>
+                </div>
+              </details>
+            HTML
+          end
+
+          def compact_cell_pair(cells)
+            first = cells[0].to_s
+            second = cells[1].to_s
+            return '-' if first.empty? && second.empty?
+
+            "#{first} / #{second}"
+          end
+
+          def overlap_recheck_code_count(rows, code)
+            rows.count { |row| row['code'].to_s == code.to_s }
+          end
+
+          def compact_overlap_reason(reason)
+            text = reason.to_s
+            return 'GML 기하 스냅샷에서 실제 교차 없음' if text.include?('actual intersection is empty')
+            return '공유면 인접 거리 허용 오차 이내' if text.include?('near-coplanar shared-face')
+
+            text
+          end
+
+          def overlap_recheck_filter_script
+            <<~HTML
+              <script>
+                document.querySelectorAll('.filter-btn').forEach(function(button) {
+                  button.addEventListener('click', function() {
+                    var filter = button.getAttribute('data-filter');
+                    document.querySelectorAll('.filter-btn').forEach(function(item) {
+                      item.classList.remove('active');
+                    });
+                    button.classList.add('active');
+                    document.querySelectorAll('.recheck-row').forEach(function(row) {
+                      row.style.display = filter === 'all' || row.getAttribute('data-code') === filter ? '' : 'none';
+                    });
+                  });
+                });
+              </script>
             HTML
           end
 

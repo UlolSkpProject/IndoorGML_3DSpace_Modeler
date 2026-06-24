@@ -17,9 +17,9 @@ module ULOL
             [:report, "Report \uC0DD\uC131"]
           ].freeze
 
-          INITIAL_WIDTH = 460
-          INITIAL_HEIGHT = 650
-          MIN_DIALOG_HEIGHT = 560
+          INITIAL_WIDTH = 430
+          INITIAL_HEIGHT = 590
+          MIN_DIALOG_HEIGHT = 520
           MAX_DIALOG_HEIGHT = 760
           CONTENT_PADDING_HEIGHT = 8
           DIALOG_WINDOW_CHROME_HEIGHT = 44

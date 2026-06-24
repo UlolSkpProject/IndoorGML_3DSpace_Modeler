@@ -1,8 +1,8 @@
 var icons = {
-  pending: String.fromCodePoint(0x23F3),
-  running: String.fromCodePoint(0x1F504),
-  complete: String.fromCodePoint(0x2705),
-  failed: String.fromCodePoint(0x274C)
+  pending: '\u25CB',
+  running: '\u25CF',
+  complete: '\u2713',
+  failed: '\u00D7'
 };
 
 var defaultSteps = [
