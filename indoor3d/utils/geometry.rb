@@ -7,7 +7,7 @@ module ULOL
         SHELL_CENTER_COARSE_DIVISIONS = 8 unless const_defined?(:SHELL_CENTER_COARSE_DIVISIONS, false)
         SHELL_CENTER_REFINE_DIVISIONS = 4 unless const_defined?(:SHELL_CENTER_REFINE_DIVISIONS, false)
         SHELL_CENTER_TOLERANCE = 0.001 unless const_defined?(:SHELL_CENTER_TOLERANCE, false)
-        DEFAULT_TOLERANCE = 0.5.mm unless const_defined?(:DEFAULT_TOLERANCE, false)
+        DEFAULT_TOLERANCE = 0.001 unless const_defined?(:DEFAULT_TOLERANCE, false)
       end
     end
   end
