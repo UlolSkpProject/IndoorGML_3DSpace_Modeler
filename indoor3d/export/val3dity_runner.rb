@@ -814,7 +814,12 @@ module ULOL
                 current: File.basename(@gml_path)
               )
             end
-            recheck_overlap_errors!(raw_report)
+            begin
+              recheck_overlap_errors!(raw_report, progress: progress, progress_step: recheck_step)
+            rescue StandardError
+              progress&.fail(recheck_step) if recheck_step && progress&.respond_to?(:fail)
+              raise
+            end
             if recheck_step
               progress&.detail(
                 recheck_step,
@@ -1144,24 +1149,39 @@ module ULOL
             HTML
           end
 
-          def recheck_overlap_errors!(raw_report)
+          def recheck_overlap_errors!(raw_report, progress: nil, progress_step: nil)
             @overlap_recheck_pair_analysis = {}
             @overlap_recheck_701_decisions = {}
             raw_report.delete(OVERLAP_RECHECK_REPORT_KEY)
             results = []
-            remove_rechecked_errors!(Array(raw_report['dataset_errors']), results, raw_report['input_file'])
+            tracker = {
+              total: count_recheckable_overlap_errors(raw_report),
+              processed: 0,
+              progress: progress,
+              progress_step: progress_step
+            }
+            emit_overlap_recheck_progress(tracker, message: 'Preparing extension overlap recheck')
+
+            remove_rechecked_errors!(
+              Array(raw_report['dataset_errors']),
+              results,
+              raw_report['input_file'],
+              tracker: tracker
+            )
 
             Array(raw_report['features']).each do |feature|
-              remove_rechecked_errors!(Array(feature['errors']), results, feature['id'])
+              remove_rechecked_errors!(Array(feature['errors']), results, feature['id'], tracker: tracker)
               Array(feature['primitives']).each do |primitive|
                 remove_rechecked_errors!(
                   Array(primitive['errors']),
                   results,
                   feature['id'],
-                  primitive['id']
+                  primitive['id'],
+                  tracker: tracker
                 )
               end
             end
+            emit_overlap_recheck_progress(tracker, message: 'Extension overlap recheck finished')
 
             raw_report[OVERLAP_RECHECK_REPORT_KEY] = results unless results.empty?
             refresh_rechecked_validity!(raw_report)
@@ -1179,12 +1199,58 @@ module ULOL
             end
           end
 
-          def remove_rechecked_errors!(errors, results, *context)
+          def count_recheckable_overlap_errors(raw_report)
+            count = Array(raw_report['dataset_errors']).count { |error| recheckable_overlap_error?(error) }
+            Array(raw_report['features']).each do |feature|
+              count += Array(feature['errors']).count { |error| recheckable_overlap_error?(error) }
+              Array(feature['primitives']).each do |primitive|
+                count += Array(primitive['errors']).count { |error| recheckable_overlap_error?(error) }
+              end
+            end
+            count
+          end
+
+          def recheckable_overlap_error?(error)
+            [701, 704].include?(error_code_number(error && error['code']))
+          end
+
+          def emit_overlap_recheck_progress(tracker, result = nil, message: nil)
+            return unless tracker && tracker[:progress] && tracker[:progress_step]
+
+            total = tracker[:total].to_i
+            processed = tracker[:processed].to_i
+            percent = total.zero? ? 100 : ((processed.to_f / total) * 100).round
+            cells = result ? Array(result['cells']).join(' and ') : nil
+            status = result && result['status']
+            default_message = if total.zero?
+                                'No 701/704 errors to recheck'
+                              elsif result
+                                "Rechecked #{processed} / #{total} overlap errors (#{status || 'checked'})"
+                              else
+                                "Rechecked #{processed} / #{total} overlap errors"
+                              end
+
+            tracker[:progress].detail(
+              tracker[:progress_step],
+              percent: percent,
+              phase: 'Extension overlap recheck',
+              message: message || default_message,
+              current: cells || File.basename(@gml_path)
+            )
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] overlap recheck progress failed: #{e.class}: #{e.message}"
+          end
+
+          def remove_rechecked_errors!(errors, results, *context, tracker: nil)
             errors.delete_if do |error|
               result = overlap_error_recheck_result(error, *context)
               next false unless result
 
               results << result
+              if tracker
+                tracker[:processed] = tracker[:processed].to_i + 1
+                emit_overlap_recheck_progress(tracker, result)
+              end
               result['tolerated'] == true
             end
           end
