@@ -24,8 +24,8 @@ module ULOL
           TERMINATE_WAIT_MS      = 200
           DEFAULT_OVERLAP_TOL    = 0.5
           STRICT_OVERLAP_TOL     = -1
-          OVERLAP_RECHECK_TOLERANCE_MM = 0.5
-          OVERLAP_RECHECK_TOLERANCE = OVERLAP_RECHECK_TOLERANCE_MM / 25.4
+          OVERLAP_RECHECK_TOLERANCE = Utils::Geometry::DEFAULT_TOLERANCE
+          OVERLAP_RECHECK_TOLERANCE_MM = OVERLAP_RECHECK_TOLERANCE * 25.4
           OVERLAP_RECHECK_VOLUME_TOLERANCE = OVERLAP_RECHECK_TOLERANCE**3
           OVERLAP_RECHECK_REPORT_KEY = 'indoorgml_modeler_overlap_recheck'
 
@@ -890,10 +890,10 @@ module ULOL
                 <main>
                   #{report_result_hero_section(raw_report)}
                   #{report_metadata_line(raw_report)}
+                  #{report_summary_section(raw_report)}
+                  #{report_overlap_recheck_section(raw_report)}
                   #{report_error_items_section(raw_report)}
                   #{report_error_kinds_section(raw_report)}
-                  #{report_overlap_recheck_section(raw_report)}
-                  #{report_summary_section(raw_report)}
                 </main>
               </body>
               </html>
@@ -901,8 +901,8 @@ module ULOL
           end
 
           def report_result_hero_section(raw_report)
-            validity = raw_report['validity'] == true
             final_errors = final_error_count(raw_report)
+            validity = final_errors.zero?
             suppressed = overlap_recheck_suppressed_count(raw_report)
             kept = overlap_recheck_kept_count(raw_report)
             primitive_value = "#{valid_count(raw_report['primitives_overview'])} / #{total_count(raw_report['primitives_overview'])}"
@@ -1056,7 +1056,7 @@ module ULOL
                 <h2>Overlap Recheck</h2>
                 <table>
                   <thead>
-                    <tr><th>Code</th><th>Cells</th><th>Actual Volume</th><th>Effective Penetration</th><th>Plane Distance</th><th>Planar Gap</th><th>Face Overlap</th><th>Status</th><th>Reason</th></tr>
+                    <tr><th>Code</th><th>Cells</th><th>Actual Volume</th><th>Signed Distance</th><th>Face Overlap</th><th>Status</th><th>Reason</th></tr>
                   </thead>
                   <tbody>
                     #{rows.map { |row| overlap_recheck_row_html(row) }.join}
@@ -1069,10 +1069,8 @@ module ULOL
           def overlap_recheck_row_html(row)
             cells = Array(row['cells']).join(' and ')
             distance = row['distance_mm'].nil? ? '-' : "#{format('%.6g', row['distance_mm'])} mm"
-            gap = row['gap_mm'].nil? ? '-' : "#{format('%.6g', row['gap_mm'])} mm"
             overlap = row['overlap_area_mm2'].nil? ? '-' : "#{format('%.6g', row['overlap_area_mm2'])} mm2"
             volume = row['actual_overlap_volume_mm3'].nil? ? '-' : "#{format('%.6g', row['actual_overlap_volume_mm3'])} mm3"
-            effective_penetration = row['effective_penetration_mm'].nil? ? '-' : "#{format('%.6g', row['effective_penetration_mm'])} mm"
             status = row['tolerated'] ? 'SUPPRESSED' : 'KEPT'
             status_class = row['tolerated'] ? 'suppressed' : 'kept'
             <<~HTML
@@ -1080,9 +1078,7 @@ module ULOL
                 <td><code>#{html_escape(row['code'])}</code></td>
                 <td>#{html_escape(cells.empty? ? '-' : cells)}</td>
                 <td>#{html_escape(volume)}</td>
-                <td>#{html_escape(effective_penetration)}</td>
                 <td>#{html_escape(distance)}</td>
-                <td>#{html_escape(gap)}</td>
                 <td>#{html_escape(overlap)}</td>
                 <td class="#{status_class}">#{html_escape(status)}</td>
                 <td>#{html_escape(row['reason'])}</td>
@@ -1107,7 +1103,7 @@ module ULOL
             end
 
             raw_report[OVERLAP_RECHECK_REPORT_KEY] = results unless results.empty?
-            raw_report['validity'] = true if !results.empty? && error_item_rows(raw_report).empty?
+            refresh_rechecked_validity!(raw_report)
           end
 
           def remove_rechecked_errors!(errors, results, *context)
@@ -1117,6 +1113,38 @@ module ULOL
 
               results << result
               result['tolerated'] == true
+            end
+          end
+
+          def refresh_rechecked_validity!(raw_report)
+            Array(raw_report['features']).each do |feature|
+              Array(feature['primitives']).each do |primitive|
+                primitive['validity'] = Array(primitive['errors']).empty?
+              end
+
+              feature['validity'] = Array(feature['errors']).empty? &&
+                                    Array(feature['primitives']).all? { |primitive| primitive['validity'] == true }
+            end
+
+            raw_report['validity'] = error_item_rows(raw_report).empty?
+            refresh_overview_counts!(raw_report, 'features_overview', Array(raw_report['features']))
+            refresh_overview_counts!(
+              raw_report,
+              'primitives_overview',
+              Array(raw_report['features']).flat_map { |feature| Array(feature['primitives']) }
+            )
+            raw_report['all_errors'] = error_item_rows(raw_report).map { |row| row[:code] }.uniq
+          end
+
+          def refresh_overview_counts!(raw_report, key, items)
+            overview = Array(raw_report[key])
+            return if overview.empty?
+
+            overview.each do |row|
+              type = row['type']
+              matching = items.select { |item| type.to_s.empty? || item['type'] == type }
+              row['total'] = matching.length
+              row['valid'] = matching.count { |item| item['validity'] == true }
             end
           end
 
@@ -1162,10 +1190,8 @@ module ULOL
               decision[:tolerated],
               decision[:reason],
               distance: decision[:candidate][:distance],
-              gap: decision[:candidate][:gap],
               overlap_area: decision[:candidate][:overlap_area],
-              actual_overlap_volume: decision[:actual_overlap_volume],
-              effective_penetration: decision[:effective_penetration]
+              actual_overlap_volume: decision[:actual_overlap_volume]
             )
           end
 
@@ -1175,18 +1201,17 @@ module ULOL
               faces2.each do |face2|
                 next unless overlap_recheck_face_direction_valid?(code, face1, face2)
 
-                distance = face_pair_plane_distance(face1, face2)
-                overlap_area = if distance <= OVERLAP_RECHECK_TOLERANCE
-                                 Utils::Geometry.coplanar_overlap_metrics(face1, face2, OVERLAP_RECHECK_TOLERANCE)&.dig(:area).to_f
-                               else
-                                 0.0
-                               end
-                gap = if distance <= OVERLAP_RECHECK_TOLERANCE && overlap_area <= Utils::Geometry.area_tolerance(OVERLAP_RECHECK_TOLERANCE)
-                        projected_face_gap_distance(face1, face2)
-                      else
-                        0.0
-                      end
-                candidate = { distance: distance, gap: gap, overlap_area: overlap_area }
+                distance = face_pair_signed_distance(face1, face2)
+                next unless distance.abs <= OVERLAP_RECHECK_TOLERANCE
+
+                overlap_area = Utils::Geometry.coplanar_overlap_metrics(face1, face2, OVERLAP_RECHECK_TOLERANCE)&.dig(:area).to_f
+                next unless overlap_area > Utils::Geometry.area_tolerance(OVERLAP_RECHECK_TOLERANCE)
+
+                candidate = {
+                  distance: distance,
+                  overlap_area: overlap_area,
+                  axis: Utils::Geometry.dominant_axis(face1[:normal])
+                }
                 best = better_overlap_recheck_candidate(code, best, candidate)
               end
             end
@@ -1194,22 +1219,11 @@ module ULOL
           end
 
           def overlap_recheck_face_direction_valid?(code, face1, face2)
-            if code == 704
-              Utils::Geometry.normals_opposite?(face1[:normal], face2[:normal])
-            else
-              Utils::Geometry.normals_parallel?(face1[:normal], face2[:normal])
-            end
+            Utils::Geometry.normals_opposite?(face1[:normal], face2[:normal])
           end
 
           def better_overlap_recheck_candidate(code, current, candidate)
             return candidate unless current
-
-            if code == 701
-              return candidate if candidate[:overlap_area] > current[:overlap_area]
-              return candidate if candidate[:overlap_area] == current[:overlap_area] && candidate[:distance] < current[:distance]
-
-              return current
-            end
 
             candidate_tolerable = overlap_recheck_candidate_tolerable?(candidate, code)
             current_tolerable = overlap_recheck_candidate_tolerable?(current, code)
@@ -1217,11 +1231,11 @@ module ULOL
             return current if current_tolerable && !candidate_tolerable
             return candidate if candidate_tolerable && candidate[:overlap_area] > current[:overlap_area]
 
-            return candidate if candidate[:distance] < current[:distance]
-            return candidate if candidate[:distance] == current[:distance] && candidate[:gap].to_f < current[:gap].to_f
-            return candidate if candidate[:distance] == current[:distance] &&
-                                candidate[:gap].to_f == current[:gap].to_f &&
+            return candidate if candidate[:distance].abs == current[:distance].abs &&
                                 candidate[:overlap_area] > current[:overlap_area]
+            return candidate if candidate[:overlap_area] > current[:overlap_area]
+            return candidate if candidate[:overlap_area] == current[:overlap_area] &&
+                                candidate[:distance].abs < current[:distance].abs
 
             current
           end
@@ -1232,12 +1246,12 @@ module ULOL
             tolerated = overlap_recheck_candidate_tolerable?(candidate, code)
             reason = if tolerated
                        overlap_recheck_tolerated_reason(code, candidate)
-                     elsif candidate[:distance] > OVERLAP_RECHECK_TOLERANCE
-                       "nearest #{overlap_recheck_face_pair_label(code)} face distance exceeds #{OVERLAP_RECHECK_TOLERANCE_MM} mm"
+                     elsif candidate[:distance].abs > OVERLAP_RECHECK_TOLERANCE
+                       "nearest #{overlap_recheck_face_pair_label(code)} signed distance exceeds #{OVERLAP_RECHECK_TOLERANCE_MM} mm"
                      else
                        "#{overlap_recheck_face_pair_label(code)} and near-coplanar, but overlap area was not detected"
                      end
-            { tolerated: tolerated, reason: reason, candidate: candidate, actual_overlap_volume: nil, effective_penetration: nil }
+            { tolerated: tolerated, reason: reason, candidate: candidate, actual_overlap_volume: nil }
           end
 
           def overlap_recheck_701_decision(candidate, faces1, faces2, group1, group2)
@@ -1247,8 +1261,7 @@ module ULOL
                 tolerated: false,
                 reason: 'actual solid intersection volume could not be computed',
                 candidate: candidate,
-                actual_overlap_volume: nil,
-                effective_penetration: nil
+                actual_overlap_volume: nil
               }
             end
 
@@ -1257,48 +1270,84 @@ module ULOL
                 tolerated: true,
                 reason: 'actual solid intersection volume is below tolerance',
                 candidate: candidate,
-                actual_overlap_volume: actual_volume,
-                effective_penetration: nil
+                actual_overlap_volume: actual_volume
               }
             end
 
-            opposite_candidate = best_overlap_recheck_face_pair(704, faces1, faces2)
-            if opposite_candidate && overlap_recheck_candidate_tolerable?(opposite_candidate, 704)
-              effective_penetration = actual_volume / opposite_candidate[:overlap_area].to_f
-              tolerated = effective_penetration <= OVERLAP_RECHECK_TOLERANCE
+            if overlap_recheck_near_zero_contact?(candidate, group1, group2)
               return {
-                tolerated: tolerated,
-                reason: tolerated ? "actual intersection effective penetration is within #{OVERLAP_RECHECK_TOLERANCE_MM} mm" : "actual intersection effective penetration exceeds #{OVERLAP_RECHECK_TOLERANCE_MM} mm",
-                candidate: opposite_candidate,
-                actual_overlap_volume: actual_volume,
-                effective_penetration: effective_penetration
+                tolerated: true,
+                reason: 'near-zero boundary contact; bounding-box intersection thickness is within tolerance',
+                candidate: candidate,
+                actual_overlap_volume: actual_volume
               }
             end
+
+            tolerated = overlap_recheck_candidate_tolerable?(candidate, 701)
 
             {
-              tolerated: false,
-              reason: 'actual solid intersection volume detected without opposite-normal shared face',
+              tolerated: tolerated,
+              reason: tolerated ? "signed overlap distance is within #{OVERLAP_RECHECK_TOLERANCE_MM} mm" : overlap_recheck_701_rejection_reason(candidate),
               candidate: candidate,
-              actual_overlap_volume: actual_volume,
-              effective_penetration: nil
+              actual_overlap_volume: actual_volume
             }
           end
 
           def overlap_recheck_candidate_tolerable?(candidate, code)
-            return false unless candidate[:distance] <= OVERLAP_RECHECK_TOLERANCE
+            return false unless candidate
+            return false unless candidate[:distance].to_f.abs <= OVERLAP_RECHECK_TOLERANCE
+            return false unless candidate[:overlap_area].to_f > Utils::Geometry.area_tolerance(OVERLAP_RECHECK_TOLERANCE)
+
             if code == 701
-              return candidate[:overlap_area] <= Utils::Geometry.area_tolerance(OVERLAP_RECHECK_TOLERANCE)
+              return candidate[:distance].to_f.negative?
             end
 
-            candidate[:overlap_area] > Utils::Geometry.area_tolerance(OVERLAP_RECHECK_TOLERANCE)
+            true
+          end
+
+          def overlap_recheck_candidate_expected_direction?(candidate, code)
+            return false unless candidate
+            return true if code == 704
+
+            distance = candidate[:distance].to_f
+            code == 701 ? distance.negative? : distance.positive?
           end
 
           def overlap_recheck_tolerated_reason(code, candidate)
-            if code == 701 && candidate[:overlap_area] <= Utils::Geometry.area_tolerance(OVERLAP_RECHECK_TOLERANCE)
-              'no overlap detected by SketchUp recheck'
-            else
-              "#{overlap_recheck_face_pair_label(code)} and same plane within #{OVERLAP_RECHECK_TOLERANCE_MM} mm"
+            direction = code == 701 ? 'overlap' : 'near-coplanar'
+            "#{overlap_recheck_face_pair_label(code)} face pair has signed #{direction} distance within #{OVERLAP_RECHECK_TOLERANCE_MM} mm"
+          end
+
+          def overlap_recheck_701_rejection_reason(candidate)
+            return "signed overlap distance exceeds #{OVERLAP_RECHECK_TOLERANCE_MM} mm" if candidate[:distance].to_f.abs > OVERLAP_RECHECK_TOLERANCE
+            return 'signed distance is not negative for overlap error' unless candidate[:distance].to_f.negative?
+            return 'face overlap area was not detected' if candidate[:overlap_area].to_f <= Utils::Geometry.area_tolerance(OVERLAP_RECHECK_TOLERANCE)
+
+            'actual solid intersection volume exceeds tolerance'
+          end
+
+          def overlap_recheck_near_zero_contact?(candidate, group1, group2)
+            return false unless candidate
+            return false unless candidate[:distance].to_f.abs <= OVERLAP_RECHECK_TOLERANCE
+            return false unless candidate[:overlap_area].to_f > Utils::Geometry.area_tolerance(OVERLAP_RECHECK_TOLERANCE)
+
+            thickness = bounds_intersection_thickness(group1.bounds, group2.bounds, candidate[:axis])
+            !thickness.nil? && thickness <= OVERLAP_RECHECK_TOLERANCE
+          end
+
+          def bounds_intersection_thickness(bounds1, bounds2, axis)
+            case axis
+            when :x
+              bounds_axis_intersection_length(bounds1.min.x, bounds1.max.x, bounds2.min.x, bounds2.max.x)
+            when :y
+              bounds_axis_intersection_length(bounds1.min.y, bounds1.max.y, bounds2.min.y, bounds2.max.y)
+            when :z
+              bounds_axis_intersection_length(bounds1.min.z, bounds1.max.z, bounds2.min.z, bounds2.max.z)
             end
+          end
+
+          def bounds_axis_intersection_length(min1, max1, min2, max2)
+            [[max1, max2].min - [min1, min2].max, 0.0].max.to_f
           end
 
           def actual_solid_intersection_volume(group1, group2)
@@ -1344,119 +1393,39 @@ module ULOL
             "#{overlap_recheck_face_pair_label(code)} face pair not found"
           end
 
-          def overlap_recheck_face_pair_label(code)
-            code == 704 ? 'opposite-normal' : 'parallel'
+          def overlap_recheck_face_pair_label(_code)
+            'opposite-normal'
           end
 
-          def face_pair_plane_distance(face1, face2)
-            distances = face2[:points].map { |point| point_plane_distance(point, face1[:normal], face1[:points].first) }
-            distances.concat(face1[:points].map { |point| point_plane_distance(point, face2[:normal], face2[:points].first) })
-            distances.max || Float::INFINITY
+          def face_pair_signed_distance(face1, face2)
+            centroid1 = face_centroid(face1)
+            centroid2 = face_centroid(face2)
+            return Float::INFINITY unless centroid1 && centroid2
+
+            vector = centroid1.vector_to(centroid2)
+            Utils::Geometry.dot_product(vector, face1[:normal]).to_f
           end
 
-          def point_plane_distance(point, normal, plane_point)
-            vector = plane_point.vector_to(point)
-            Utils::Geometry.dot_product(vector, normal).abs.to_f
+          def face_centroid(face)
+            points = Array(face[:points])
+            return nil if points.empty?
+
+            Geom::Point3d.new(
+              points.sum(&:x) / points.length.to_f,
+              points.sum(&:y) / points.length.to_f,
+              points.sum(&:z) / points.length.to_f
+            )
           end
 
-          def projected_face_gap_distance(face1, face2)
-            axis = Utils::Geometry.dominant_axis(face1[:normal])
-            polygon1 = Utils::Geometry.project_points_for_axis(face1[:points], axis)
-            polygon2 = Utils::Geometry.project_points_for_axis(face2[:points], axis)
-            polygon_gap_distance_2d(polygon1, polygon2)
-          end
-
-          def polygon_gap_distance_2d(polygon1, polygon2)
-            return 0.0 if polygon_points_intersect?(polygon1, polygon2)
-            return 0.0 if polygon_edges_intersect?(polygon1, polygon2)
-
-            edges1 = polygon_edges(polygon1)
-            edges2 = polygon_edges(polygon2)
-            distances = []
-            polygon1.each { |point| edges2.each { |edge| distances << point_segment_distance_2d(point, edge[0], edge[1]) } }
-            polygon2.each { |point| edges1.each { |edge| distances << point_segment_distance_2d(point, edge[0], edge[1]) } }
-            distances.min || Float::INFINITY
-          end
-
-          def polygon_points_intersect?(polygon1, polygon2)
-            polygon1.any? { |point| point_in_polygon_2d?(point, polygon2) } ||
-              polygon2.any? { |point| point_in_polygon_2d?(point, polygon1) }
-          end
-
-          def polygon_edges(polygon)
-            polygon.each_index.map { |index| [polygon[index], polygon[(index + 1) % polygon.length]] }
-          end
-
-          def polygon_edges_intersect?(polygon1, polygon2)
-            edges1 = polygon_edges(polygon1)
-            edges2 = polygon_edges(polygon2)
-            edges1.any? do |edge1|
-              edges2.any? { |edge2| segments_intersect_2d?(edge1[0], edge1[1], edge2[0], edge2[1]) }
-            end
-          end
-
-          def segments_intersect_2d?(a, b, c, d)
-            orientation1 = orientation_2d(a, b, c)
-            orientation2 = orientation_2d(a, b, d)
-            orientation3 = orientation_2d(c, d, a)
-            orientation4 = orientation_2d(c, d, b)
-            return true if orientation1 * orientation2 < 0.0 && orientation3 * orientation4 < 0.0
-            return true if orientation1.abs <= 1.0e-9 && point_on_segment_2d?(c, a, b)
-            return true if orientation2.abs <= 1.0e-9 && point_on_segment_2d?(d, a, b)
-            return true if orientation3.abs <= 1.0e-9 && point_on_segment_2d?(a, c, d)
-            return true if orientation4.abs <= 1.0e-9 && point_on_segment_2d?(b, c, d)
-
-            false
-          end
-
-          def orientation_2d(a, b, c)
-            ((b[0] - a[0]) * (c[1] - a[1])) - ((b[1] - a[1]) * (c[0] - a[0]))
-          end
-
-          def point_on_segment_2d?(point, segment_start, segment_end)
-            point[0] >= [segment_start[0], segment_end[0]].min - 1.0e-9 &&
-              point[0] <= [segment_start[0], segment_end[0]].max + 1.0e-9 &&
-              point[1] >= [segment_start[1], segment_end[1]].min - 1.0e-9 &&
-              point[1] <= [segment_start[1], segment_end[1]].max + 1.0e-9
-          end
-
-          def point_in_polygon_2d?(point, polygon)
-            inside = false
-            j = polygon.length - 1
-            polygon.each_with_index do |vertex, i|
-              previous = polygon[j]
-              if ((vertex[1] > point[1]) != (previous[1] > point[1])) &&
-                 (point[0] < (previous[0] - vertex[0]) * (point[1] - vertex[1]) / (previous[1] - vertex[1]) + vertex[0])
-                inside = !inside
-              end
-              j = i
-            end
-            inside
-          end
-
-          def point_segment_distance_2d(point, segment_start, segment_end)
-            dx = segment_end[0] - segment_start[0]
-            dy = segment_end[1] - segment_start[1]
-            length_squared = (dx * dx) + (dy * dy)
-            return Math.sqrt(((point[0] - segment_start[0])**2) + ((point[1] - segment_start[1])**2)) if length_squared <= 0.0
-
-            t = (((point[0] - segment_start[0]) * dx) + ((point[1] - segment_start[1]) * dy)) / length_squared
-            t = [[t, 0.0].max, 1.0].min
-            closest = [segment_start[0] + (t * dx), segment_start[1] + (t * dy)]
-            Math.sqrt(((point[0] - closest[0])**2) + ((point[1] - closest[1])**2))
-          end
-
-          def overlap_recheck_result(code, cell_ids, tolerated, reason, distance: nil, gap: nil, overlap_area: nil, actual_overlap_volume: nil, effective_penetration: nil)
+          def overlap_recheck_result(code, cell_ids, tolerated, reason, distance: nil, overlap_area: nil, actual_overlap_volume: nil)
             {
               'code' => code,
               'cells' => cell_ids,
               'tolerated' => tolerated,
               'reason' => reason,
               'distance_mm' => distance.nil? ? nil : distance.to_f * 25.4,
-              'gap_mm' => gap.nil? ? nil : gap.to_f * 25.4,
               'overlap_area_mm2' => overlap_area.nil? ? nil : overlap_area.to_f * 25.4 * 25.4,
-              'actual_overlap_volume_mm3' => actual_overlap_volume.nil? ? nil : actual_overlap_volume.to_f * 25.4 * 25.4 * 25.4,
-              'effective_penetration_mm' => effective_penetration.nil? ? nil : effective_penetration.to_f * 25.4
+              'actual_overlap_volume_mm3' => actual_overlap_volume.nil? ? nil : actual_overlap_volume.to_f * 25.4 * 25.4 * 25.4
             }
           end
 
