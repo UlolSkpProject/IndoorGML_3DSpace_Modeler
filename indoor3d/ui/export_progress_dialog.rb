@@ -14,14 +14,13 @@ module ULOL
             [:temp_file, "\uC784\uC2DC\uD30C\uC77C \uC0DD\uC131"],
             [:val3dity, "val3dity \uC2E4\uD589 (version2.2.0)"],
             [:extension_recheck, "2\uCC28 overlap recheck"],
-            [:report, "report \uC0DD\uC131"],
-            [:report_view, "report view \uC0DD\uC131"]
+            [:report, "Report \uC0DD\uC131"]
           ].freeze
 
           INITIAL_WIDTH = 460
-          INITIAL_HEIGHT = 430
-          MIN_DIALOG_HEIGHT = 320
-          MAX_DIALOG_HEIGHT = 720
+          INITIAL_HEIGHT = 650
+          MIN_DIALOG_HEIGHT = 560
+          MAX_DIALOG_HEIGHT = 760
           CONTENT_PADDING_HEIGHT = 8
           DIALOG_WINDOW_CHROME_HEIGHT = 44
 
@@ -209,6 +208,7 @@ module ULOL
 
             requested_height = content_height.to_i + CONTENT_PADDING_HEIGHT + DIALOG_WINDOW_CHROME_HEIGHT
             height = [[requested_height, MIN_DIALOG_HEIGHT].max, MAX_DIALOG_HEIGHT].min
+            height = [height, @dialog_height].max
             return if height == @dialog_height
 
             @dialog.set_size(INITIAL_WIDTH, height)
