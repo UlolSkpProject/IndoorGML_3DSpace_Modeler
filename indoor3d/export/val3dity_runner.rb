@@ -593,7 +593,7 @@ module ULOL
             raise 'Val3dityRunner#validate is deprecated. Use #start with a completion callback.'
           end
 
-          def start(progress: nil, progress_step: :val3dity, report_step: :report, report_view_step: :report_view, &callback)
+          def start(progress: nil, progress_step: :val3dity, recheck_step: :extension_recheck, report_step: :report, report_view_step: :report_view, &callback)
             raise ArgumentError, 'callback is required' unless callback
 
             ensure_supported_platform!
@@ -659,7 +659,6 @@ module ULOL
                   drain_val3dity_progress(session, progress, progress_step)
 
                   progress&.complete(progress_step)
-                  progress&.running(report_step) if report_step
                   exit_code = session.exit_code
                   build_report_later = true
                 end
@@ -683,6 +682,7 @@ module ULOL
                     result = build_result_after_process(
                       exit_code,
                       progress,
+                      recheck_step: recheck_step,
                       report_step: report_step,
                       report_view_step: report_view_step
                     )
@@ -796,16 +796,37 @@ module ULOL
             IndoorCore::Logger.puts "[IndoorGML] val3dity progress drain failed: #{e.class}: #{e.message}"
           end
 
-          def build_result_after_process(exit_code, progress = nil, report_step: :report, report_view_step: :report_view)
+          def build_result_after_process(exit_code, progress = nil, recheck_step: :extension_recheck, report_step: :report, report_view_step: :report_view)
             raise "val3dity failed: exit code #{exit_code}" unless exit_code == 0
             raise 'val3dity failed to create report.json.' unless File.exist?(@report_json_path)
 
             normalize_report_encoding
 
-            progress&.running(report_step) if report_step
             raw_report = JSON.parse(File.read(@report_json_path, encoding: 'UTF-8'))
             preserve_strict_validation!(raw_report)
+            if recheck_step
+              progress&.running(recheck_step)
+              progress&.detail(
+                recheck_step,
+                percent: 0,
+                phase: 'Extension overlap recheck',
+                message: 'Rechecking val3dity 701/704 errors against exported GML geometry',
+                current: File.basename(@gml_path)
+              )
+            end
             recheck_overlap_errors!(raw_report)
+            if recheck_step
+              progress&.detail(
+                recheck_step,
+                percent: 100,
+                phase: 'Extension overlap recheck',
+                message: 'Extension overlap recheck finished',
+                current: File.basename(@gml_path)
+              )
+              progress&.complete(recheck_step)
+            end
+
+            progress&.running(report_step) if report_step
             File.write(@report_json_path, JSON.pretty_generate(raw_report), encoding: 'UTF-8')
             progress&.complete(report_step) if report_step
 
