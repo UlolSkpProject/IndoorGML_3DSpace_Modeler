@@ -103,6 +103,11 @@ ul {
   color: #52606d;
   word-break: break-all;
 }
+.detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
 .result {
   margin-top: 14px;
   padding: 12px;
@@ -141,7 +146,8 @@ ul {
   flex-wrap: wrap;
   gap: 8px;
 }
-.result-actions button {
+.result-actions button,
+.detail-actions button {
   padding: 7px 10px;
   border: 1px solid #b8c4d0;
   border-radius: 6px;
@@ -150,6 +156,7 @@ ul {
   font-size: 12px;
   cursor: pointer;
 }
-.result-actions button:hover {
+.result-actions button:hover,
+.detail-actions button:hover {
   background: #edf2f7;
 }

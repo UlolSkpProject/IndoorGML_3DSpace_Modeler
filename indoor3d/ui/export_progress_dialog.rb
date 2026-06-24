@@ -34,6 +34,7 @@ module ULOL
             @pending_scripts = []
             @create_gml_callback = nil
             @open_report_callback = nil
+            @cancel_callback = nil
             @request_close_callback = nil
             @ready_callback = nil
             @suppress_close_callback = false
@@ -104,6 +105,10 @@ module ULOL
             @open_report_callback = block
           end
 
+          def on_cancel(&block)
+            @cancel_callback = block
+          end
+
           def on_request_close(&block)
             @request_close_callback = block
           end
@@ -159,6 +164,9 @@ module ULOL
             end
             dialog.add_action_callback('openReport') do |_context|
               @open_report_callback&.call
+            end
+            dialog.add_action_callback('cancelValidation') do |_context|
+              @cancel_callback&.call
             end
             dialog.add_action_callback('closeDialog') do |_context|
               request_close

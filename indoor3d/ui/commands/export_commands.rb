@@ -10,6 +10,7 @@ module ULOL
           progress = IndoorGmlConverter::ExportProgressDialog.new
           state = validation_close_state
           configure_validation_close_handler(progress, state)
+          configure_validation_cancel_handler(progress, state)
           state[:after_temp_export] = proc do |temp_path|
             progress.on_create_gml do
               create_gml_from_temp(temp_path, progress)
@@ -59,6 +60,7 @@ module ULOL
           state = validation_close_state
           state[:overlap_tol] = overlap_tol
           configure_validation_close_handler(progress, state)
+          configure_validation_cancel_handler(progress, state)
           progress.on_ready do
             next if state[:started]
 
@@ -198,6 +200,35 @@ module ULOL
               end
             else
               :close
+            end
+          end
+        end
+
+        def configure_validation_cancel_handler(progress, state)
+          progress.on_cancel do
+            if state[:val_running] && !state[:completed]
+              state[:cancelled] = true
+              state[:val_running] = false
+              state[:completed] = true
+              state[:val_session]&.terminate
+              progress&.fail(:val3dity)
+              progress&.result(
+                status: :error,
+                title: 'IndoorGML validation canceled',
+                message: 'Validation was canceled.',
+                actions: [:close]
+              )
+            elsif state[:temp_file_running]
+              state[:cancelled] = true
+              state[:temp_file_running] = false
+              state[:completed] = true
+              progress&.fail(:temp_file)
+              progress&.result(
+                status: :error,
+                title: 'IndoorGML temp GML creation canceled',
+                message: 'Temporary GML creation was canceled.',
+                actions: [:close]
+              )
             end
           end
         end

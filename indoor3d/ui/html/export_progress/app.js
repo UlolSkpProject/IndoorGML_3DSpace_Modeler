@@ -21,7 +21,10 @@ var validationSubsteps = [
   { key: 'adjacency', label: 'Adjacency in Primal / Dual' }
 ];
 
+var terminalResultShown = false;
+
 function init(steps) {
+  terminalResultShown = false;
   var list = document.getElementById('steps');
   list.innerHTML = '';
   steps.forEach(function (step) {
@@ -84,6 +87,7 @@ function setStatus(step, status) {
   row.className = status;
   row.querySelector('.icon').textContent = icons[status] || icons.pending;
   updateValidationSubstepsForStatus(step, status);
+  updateCancelVisibility();
   fitDialogToContent();
 }
 
@@ -116,6 +120,7 @@ function setDetail(payload) {
     updateValidationSubsteps(payload.phase);
   }
 
+  updateCancelVisibility();
   fitDialogToContent();
 }
 
@@ -201,6 +206,9 @@ var actionConfig = {
 };
 
 function setResult(payload) {
+  terminalResultShown = true;
+  updateCancelVisibility();
+
   var result = document.getElementById('result');
   if (!result) return;
 
@@ -244,11 +252,26 @@ function fitDialogToContent() {
   }, 0);
 }
 
+function updateCancelVisibility() {
+  var button = document.getElementById('cancel-validation');
+  if (!button) return;
+
+  var running = document.querySelector('#steps > li.running');
+  button.disabled = terminalResultShown || !running;
+  button.style.display = terminalResultShown || !running ? 'none' : 'inline-flex';
+}
+
 window.addEventListener('load', function () {
   sketchup.domReady();
   fitDialogToContent();
 });
 window.addEventListener('DOMContentLoaded', function () {
   init(defaultSteps);
+  updateCancelVisibility();
+  document.getElementById('cancel-validation').addEventListener('click', function () {
+    if (typeof sketchup !== 'undefined' && sketchup.cancelValidation) {
+      sketchup.cancelValidation();
+    }
+  });
 });
 window.addEventListener('resize', fitDialogToContent);
