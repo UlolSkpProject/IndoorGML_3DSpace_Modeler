@@ -282,15 +282,16 @@ module ULOL
           @validation_report_dialog&.close if @validation_report_dialog&.visible?
           @validation_report_dialog = UI::HtmlDialog.new(
             dialog_title: 'val3dity report',
-            preferences_key: 'ULOL.Indoor3DGmlModeler.Val3dityReport',
+            preferences_key: 'ULOL.Indoor3DGmlModeler.Val3dityReport.Compact',
             scrollable: true,
-            resizable: true,
-            width: 980,
-            height: 720,
+            resizable: false,
+            width: 470,
+            height: 680,
             style: UI::HtmlDialog::STYLE_DIALOG
           )
           @validation_report_dialog.set_file(File.expand_path(path))
           @validation_report_dialog.show
+          @validation_report_dialog.set_size(470, 680)
         end
       end
     end
