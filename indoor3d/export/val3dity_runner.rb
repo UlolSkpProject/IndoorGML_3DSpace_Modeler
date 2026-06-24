@@ -837,10 +837,27 @@ module ULOL
                 <style>
                   :root { color-scheme: light; font-family: Arial, sans-serif; color: #172033; background: #f5f7fb; }
                   body { margin: 0; padding: 28px; }
-                  main { max-width: 980px; margin: 0 auto; }
+                  main { max-width: 1180px; margin: 0 auto; }
                   h1 { margin: 0 0 6px; font-size: 28px; }
                   h2 { margin: 0 0 14px; font-size: 18px; }
                   .subtitle { margin: 0 0 22px; color: #667085; }
+                  .result-hero { background: #fff; border: 1px solid #e4e7ec; border-left: 5px solid #12b76a; border-radius: 8px; padding: 24px; margin-bottom: 12px; }
+                  .result-hero.result-invalid { border-left-color: #d92d20; }
+                  .result-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
+                  .eyebrow { display: block; margin-bottom: 6px; color: #667085; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+                  .result-heading h1 { margin: 0; font-size: 28px; color: #101828; }
+                  .result-heading p { margin: 8px 0 0; color: #475467; }
+                  .result-badge { display: inline-flex; align-items: center; padding: 7px 12px; border-radius: 999px; font-size: 13px; font-weight: 700; white-space: nowrap; }
+                  .result-badge.valid { color: #067647; background: #ecfdf3; border: 1px solid #abefc6; }
+                  .result-badge.invalid { color: #b42318; background: #fef3f2; border: 1px solid #fecdca; }
+                  .result-metrics { display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: 12px; margin-top: 22px; }
+                  .result-metric { padding: 14px 16px; background: #f8fafc; border: 1px solid #eaecf0; border-radius: 8px; }
+                  .result-metric.danger { background: #fffbfa; border-color: #fecdca; }
+                  .result-metric.success { background: #f6fef9; border-color: #abefc6; }
+                  .result-metric.warning { background: #fffcf5; border-color: #fedf89; }
+                  .metric-value { display: block; font-size: 22px; font-weight: 700; color: #101828; overflow-wrap: anywhere; }
+                  .metric-label { display: block; margin-top: 4px; color: #667085; font-size: 12px; }
+                  .report-meta-line { margin: 0 0 18px; color: #667085; font-size: 13px; }
                   .card { background: #fff; border: 1px solid #e4e7ec; border-radius: 8px; padding: 18px; margin-bottom: 16px; }
                   .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
                   .metric { background: #f8fafc; border-radius: 6px; padding: 10px 12px; }
@@ -861,16 +878,21 @@ module ULOL
                   .error-title { margin: 0 0 8px; font-weight: 700; }
                   .error-items { margin: 0; padding-left: 22px; }
                   .error-items li { margin: 5px 0; overflow-wrap: anywhere; }
+                  @media (max-width: 760px) {
+                    body { padding: 16px; }
+                    .result-heading { display: block; }
+                    .result-badge { margin-top: 14px; }
+                    .result-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+                  }
                 </style>
               </head>
               <body>
                 <main>
-                  <h1>val3dity report</h1>
-                  <p class="subtitle">IndoorGML validation result</p>
-                  #{report_version_section(raw_report)}
-                  #{report_overlap_recheck_section(raw_report)}
-                  #{report_error_kinds_section(raw_report)}
+                  #{report_result_hero_section(raw_report)}
+                  #{report_metadata_line(raw_report)}
                   #{report_error_items_section(raw_report)}
+                  #{report_error_kinds_section(raw_report)}
+                  #{report_overlap_recheck_section(raw_report)}
                   #{report_summary_section(raw_report)}
                 </main>
               </body>
@@ -878,18 +900,56 @@ module ULOL
             HTML
           end
 
-          def report_version_section(raw_report)
+          def report_result_hero_section(raw_report)
             validity = raw_report['validity'] == true
+            final_errors = final_error_count(raw_report)
+            suppressed = overlap_recheck_suppressed_count(raw_report)
+            kept = overlap_recheck_kept_count(raw_report)
+            primitive_value = "#{valid_count(raw_report['primitives_overview'])} / #{total_count(raw_report['primitives_overview'])}"
+            result_class = validity ? 'result-hero' : 'result-hero result-invalid'
+            badge_class = validity ? 'result-badge valid' : 'result-badge invalid'
+            heading = validity ? '검증 성공' : '검증 실패'
+            message = result_hero_message(validity, final_errors, suppressed, kept)
             <<~HTML
-              <section class="card">
-                <h2>val3dity version</h2>
-                <div class="meta">
-                  #{metric_html('Version', raw_report['val3dity_version'] || 'unknown')}
-                  #{metric_html('Result', validity ? 'VALID' : 'INVALID', validity ? 'valid' : 'invalid')}
-                  #{metric_html('Input type', raw_report['input_file_type'] || '-')}
-                  #{metric_html('Checked at', report_checked_at(raw_report['time']))}
+              <section class="#{result_class}">
+                <div class="result-heading">
+                  <div>
+                    <span class="eyebrow">IndoorGML Validation</span>
+                    <h1>#{html_escape(heading)}</h1>
+                    <p>#{html_escape(message)}</p>
+                  </div>
+                  <span class="#{badge_class}">#{validity ? 'VALID' : 'INVALID'}</span>
+                </div>
+                <div class="result-metrics">
+                  <div class="result-metric #{final_errors.zero? ? 'success' : 'danger'}">
+                    <span class="metric-value">#{final_errors}</span>
+                    <span class="metric-label">최종 오류</span>
+                  </div>
+                  <div class="result-metric success">
+                    <span class="metric-value">#{suppressed}</span>
+                    <span class="metric-label">억제됨</span>
+                  </div>
+                  <div class="result-metric #{kept.zero? ? 'success' : 'warning'}">
+                    <span class="metric-value">#{kept}</span>
+                    <span class="metric-label">유지됨</span>
+                  </div>
+                  <div class="result-metric neutral">
+                    <span class="metric-value">#{html_escape(primitive_value)}</span>
+                    <span class="metric-label">유효한 Primitive</span>
+                  </div>
                 </div>
               </section>
+            HTML
+          end
+
+          def report_metadata_line(raw_report)
+            parts = [
+              "val3dity #{raw_report['val3dity_version'] || 'unknown'}",
+              raw_report['input_file_type'] || 'IndoorGML',
+              report_checked_at(raw_report['time'])
+            ].reject { |part| part.to_s.strip.empty? || part == '-' }
+            <<~HTML
+              <p class="report-meta-line">#{html_escape(parts.join(' · '))}</p>
             HTML
           end
 
@@ -954,6 +1014,30 @@ module ULOL
                 <div class="#{value_class}">#{html_escape(value)}</div>
               </div>
             HTML
+          end
+
+          def result_hero_message(validity, final_errors, suppressed, kept)
+            total_rechecks = suppressed + kept
+            return "최종 오류가 없습니다. Overlap 재검사 후보 #{suppressed}건이 허용오차 이내로 억제되었습니다." if validity
+            return "실제 수정이 필요한 오류가 #{final_errors}건 남아 있습니다." if total_rechecks.zero?
+
+            "실제 수정이 필요한 오류가 #{final_errors}건 남아 있습니다. Overlap 재검사 후보 #{total_rechecks}건 중 #{suppressed}건은 억제되었고 #{kept}건은 유지되었습니다."
+          end
+
+          def final_error_count(raw_report)
+            error_item_rows(raw_report).length
+          end
+
+          def overlap_recheck_suppressed_count(raw_report)
+            overlap_recheck_rows(raw_report).count { |row| row['tolerated'] == true }
+          end
+
+          def overlap_recheck_kept_count(raw_report)
+            overlap_recheck_rows(raw_report).count { |row| row['tolerated'] != true }
+          end
+
+          def overlap_recheck_rows(raw_report)
+            Array(raw_report[OVERLAP_RECHECK_REPORT_KEY])
           end
 
           def report_checked_at(value)
