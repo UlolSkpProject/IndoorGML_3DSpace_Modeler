@@ -32,6 +32,7 @@ module ULOL
               export_started_at = monotonic_time
               reset_export_cache
               measure_export_step('refresh runtime data') { @indoor_model.refresh_runtime_data } if @refresh_runtime_data
+              validate_exportable_content!
               output_path = File.expand_path(output_path)
               FileUtils.mkdir_p(File.dirname(output_path))
               xml = measure_export_step('build XML document') { document }
@@ -56,6 +57,12 @@ module ULOL
             @exportable_cell_spaces = nil
             @export_timings = []
             @export_total_elapsed = nil
+          end
+
+          def validate_exportable_content!
+            return unless exportable_cell_spaces.empty?
+
+            raise 'No exportable CellSpace found. Create at least one valid CellSpace before exporting IndoorGML.'
           end
 
           def measure_export_step(label)
@@ -168,7 +175,8 @@ module ULOL
           def append_cell_space(parent, cell_space)
             cell_id = cell_gml_id(cell_space)
             member = parent.add_element('core:cellSpaceMember')
-            cell = member.add_element(cell_space_tag(cell_space))
+            tag = cell_space_tag(cell_space)
+            cell = member.add_element(tag)
             cell.add_attribute('gml:id', cell_id)
             cell.add_element('gml:description').text = cell_space_description(cell_space)
             cell.add_element('gml:name').text = cell_space_export_name(cell_space)
@@ -183,7 +191,7 @@ module ULOL
             append_cell_surfaces(shell, cell_space, cell_id)
             duality = cell.add_element('core:duality')
             duality.add_attribute('xlink:href', internal_href(state_gml_id(cell_space.duality_state)))
-            append_navigable_space_codes(cell, cell_space)
+            append_navigable_space_codes(cell, cell_space) if tag.start_with?('navi:')
           end
 
           def append_cell_surfaces(shell, cell_space, cell_id)
@@ -235,6 +243,7 @@ module ULOL
               member = edges.add_element('core:transitionMember')
               transition_element = member.add_element('core:Transition')
               transition_element.add_attribute('gml:id', transition_gml_id(transition))
+              transition_element.add_element('core:weight').text = '1'
               connects1 = transition_element.add_element('core:connects')
               connects1.add_attribute('xlink:href', internal_href(state_gml_id(transition.state1)))
               connects2 = transition_element.add_element('core:connects')
@@ -441,9 +450,10 @@ module ULOL
           end
 
           def append_navigable_space_codes(cell, cell_space)
-            append_code(cell, 'navi:class', cell_space.navigation_class, cell_space.navigation_code_space)
-            append_code(cell, 'navi:function', cell_space.navigation_function, cell_space.navigation_code_space)
-            append_code(cell, 'navi:usage', cell_space.navigation_usage, cell_space.navigation_code_space)
+            code_space = navigation_code_space(cell_space)
+            append_code(cell, 'navi:class', navigation_class(cell_space), code_space)
+            append_code(cell, 'navi:function', navigation_function(cell_space), code_space)
+            append_code(cell, 'navi:usage', navigation_usage(cell_space), code_space)
           end
 
           def append_code(parent, tag, value, code_space)
@@ -452,6 +462,32 @@ module ULOL
             element = parent.add_element(tag)
             element.add_attribute('codeSpace', code_space) unless code_space.to_s.empty?
             element.text = value.to_s
+          end
+
+          def navigation_class(cell_space)
+            navigation_code_value(cell_space.navigation_class, cell_space)
+          end
+
+          def navigation_function(cell_space)
+            navigation_code_value(cell_space.navigation_function, cell_space)
+          end
+
+          def navigation_usage(cell_space)
+            navigation_code_value(cell_space.navigation_usage, cell_space)
+          end
+
+          def navigation_code_value(value, cell_space)
+            return value.to_s unless value.to_s.empty?
+
+            category = cell_space.category_label.to_s.empty? ? cell_space.category_code.to_s : cell_space.category_label.to_s
+            category.empty? ? CellSpaceType.label(cell_space.cell_type) : category
+          end
+
+          def navigation_code_space(cell_space)
+            return cell_space.navigation_code_space.to_s unless cell_space.navigation_code_space.to_s.empty?
+            return cell_space.category_code_space.to_s unless cell_space.category_code_space.to_s.empty?
+
+            CellSpaceCategory::DEFAULT_CODE_SPACE
           end
 
           def state_connected_transition_ids(state)
