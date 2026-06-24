@@ -15,6 +15,14 @@ module ULOL
           NAVIGATION_NAMESPACE       = 'http://www.opengis.net/indoorgml/1.0/navigation'
           CORE_SCHEMA_LOCATION       = 'http://schemas.opengis.net/indoorgml/1.0/indoorgmlcore.xsd'
           NAVIGATION_SCHEMA_LOCATION = 'http://schemas.opengis.net/indoorgml/1.0/indoorgmlnavi.xsd'
+          # SketchUp stores geometric coordinates internally in inches.
+          EXPORT_COORDINATE_UNITS = {
+            0 => { unit: 'in', factor: 1.0, srs_name: 'urn:ulol:def:crs:local-in' },
+            1 => { unit: 'ft', factor: 1.0 / 12.0, srs_name: 'urn:ulol:def:crs:local-ft' },
+            2 => { unit: 'mm', factor: 25.4, srs_name: 'urn:ulol:def:crs:local-mm' },
+            3 => { unit: 'cm', factor: 2.54, srs_name: 'urn:ulol:def:crs:local-cm' },
+            4 => { unit: 'm', factor: 0.0254, srs_name: 'urn:ulol:def:crs:local-m' }
+          }.freeze
           CELL_SPACE_TAGS = {
             CellSpaceType::GENERAL => 'navi:GeneralSpace',
             CellSpaceType::TRANSITION => 'navi:TransitionSpace',
@@ -55,6 +63,7 @@ module ULOL
 
           def reset_export_cache
             @exportable_cell_spaces = nil
+            @export_coordinate_unit = nil
             @export_timings = []
             @export_total_elapsed = nil
           end
@@ -185,6 +194,7 @@ module ULOL
             geometry_3d = geometry.add_element('core:Geometry3D')
             solid = geometry_3d.add_element('gml:Solid')
             solid.add_attribute('gml:id', "solid_#{cell_id}")
+            append_local_crs_attributes(solid)
             exterior = solid.add_element('gml:exterior')
             shell = exterior.add_element('gml:Shell')
             shell.add_attribute('gml:id', "shell_#{cell_id}")
@@ -204,6 +214,7 @@ module ULOL
               surface_member = shell.add_element('gml:surfaceMember')
               polygon = surface_member.add_element('gml:Polygon')
               polygon.add_attribute('gml:id', "polygon_#{index}_#{cell_id}")
+              append_local_crs_attributes(polygon)
               exterior = polygon.add_element('gml:exterior')
               linear_ring = exterior.add_element('gml:LinearRing')
               exterior_ring_points(face, world_transform).each do |point|
@@ -232,6 +243,7 @@ module ULOL
               geometry = state_element.add_element('core:geometry')
               point = geometry.add_element('gml:Point')
               point.add_attribute('gml:id', "P#{index}")
+              append_local_crs_attributes(point)
               point.add_element('gml:pos').text = format_point(state_world_position(state))
             end
           end
@@ -251,6 +263,7 @@ module ULOL
               geometry = transition_element.add_element('core:geometry')
               line = geometry.add_element('gml:LineString')
               line.add_attribute('gml:id', "line_#{transition_gml_id(transition)}")
+              append_local_crs_attributes(line)
               line.add_element('gml:pos').text = format_point(state_world_position(transition.state1))
               line.add_element('gml:pos').text = format_point(state_world_position(transition.state2))
             end
@@ -355,7 +368,34 @@ module ULOL
           end
 
           def format_export_point(point)
-            [format_number(point.x), format_number(point.y), format_number(point.z)].join(' ')
+            [
+              format_number(export_coordinate_value(point.x)),
+              format_number(export_coordinate_value(point.y)),
+              format_number(export_coordinate_value(point.z))
+            ].join(' ')
+          end
+
+          def export_coordinate_value(value)
+            value.to_f * export_coordinate_unit[:factor]
+          end
+
+          def export_coordinate_unit
+            @export_coordinate_unit ||= begin
+              model = Sketchup.active_model
+              unit_key = model&.options&.[]('UnitsOptions')&.[]('LengthUnit').to_i
+              EXPORT_COORDINATE_UNITS[unit_key] || EXPORT_COORDINATE_UNITS[0]
+            rescue StandardError => e
+              IndoorCore::Logger.puts "[IndoorGML] Export unit lookup failed: #{e.class}: #{e.message}"
+              EXPORT_COORDINATE_UNITS[0]
+            end
+          end
+
+          def append_local_crs_attributes(element)
+            unit = export_coordinate_unit
+            element.add_attribute('srsName', unit[:srs_name])
+            element.add_attribute('srsDimension', '3')
+            element.add_attribute('axisLabels', 'x y z')
+            element.add_attribute('uomLabels', "#{unit[:unit]} #{unit[:unit]} #{unit[:unit]}")
           end
 
           def log_export_timing_summary

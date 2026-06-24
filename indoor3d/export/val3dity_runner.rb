@@ -18,6 +18,7 @@ module ULOL
           HANDLE_FLAG_INHERIT    = 0x00000001
           WAIT_OBJECT_0          = 0
           WAIT_TIMEOUT           = 258
+          STILL_ACTIVE           = 259
           STDOUT_READ_BUFFER_SIZE = 4096
           TERMINATE_EXIT_CODE    = 1
           TERMINATE_WAIT_MS      = 200
@@ -89,6 +90,7 @@ module ULOL
               @reader_thread = nil
               @progress_queue = Queue.new
               @finished = false
+              @output_finished = false
               @exit_code = nil
               @terminated = false
               @closed = false
@@ -124,7 +126,11 @@ module ULOL
               return true if @finished
 
               result = wait_for_single_object.call(@process_handle, 0)
-              return false if result == WAIT_TIMEOUT
+              if result == WAIT_TIMEOUT
+                return mark_finished_from_output if @output_finished
+
+                return false
+              end
 
               if result == WAIT_OBJECT_0
                 @exit_code = get_process_exit_code
@@ -132,6 +138,9 @@ module ULOL
                 return true
               end
 
+              return mark_finished_from_output if @output_finished
+
+              IndoorCore::Logger.puts "[IndoorGML] WaitForSingleObject returned #{result}; waiting for val3dity stdout EOF"
               false
             end
 
@@ -243,8 +252,21 @@ module ULOL
                     message: "stdout read failed: #{e.class}: #{e.message}",
                     current: nil
                   }
+                ensure
+                  @output_finished = true
                 end
               end
+            end
+
+            def mark_finished_from_output
+              @exit_code ||= begin
+                code = get_process_exit_code
+                code == STILL_ACTIVE ? 0 : code
+              rescue StandardError
+                0
+              end
+              @finished = true
+              true
             end
 
             def read_process_output
@@ -614,17 +636,22 @@ module ULOL
               build_report_later = false
               begin
                 if session.terminated?
-                  completed = true
-                  next
+                  result = Val3dityResult.new(
+                    valid: false,
+                    report: nil,
+                    report_json_path: @report_json_path,
+                    report_html_path: @report_html_path,
+                    error: RuntimeError.new('val3dity validation was canceled.')
+                  )
+                else
+                  session.join_reader
+                  drain_val3dity_progress(session, progress, progress_step)
+
+                  progress&.complete(progress_step)
+                  progress&.running(report_step) if report_step
+                  exit_code = session.exit_code
+                  build_report_later = true
                 end
-
-                session.join_reader
-                drain_val3dity_progress(session, progress, progress_step)
-
-                progress&.complete(progress_step)
-                progress&.running(report_step) if report_step
-                exit_code = session.exit_code
-                build_report_later = true
               rescue StandardError => e
                 result = Val3dityResult.new(
                   valid: false,

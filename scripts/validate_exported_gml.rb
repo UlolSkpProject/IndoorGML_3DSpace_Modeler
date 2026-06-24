@@ -33,6 +33,15 @@ end
   end
 end
 
+%w[Point LineString Solid Polygon].each do |geometry_name|
+  REXML::XPath.each(doc, "//gml:#{geometry_name}", { 'gml' => 'http://www.opengis.net/gml/3.2' }) do |geometry|
+    %w[srsName srsDimension axisLabels uomLabels].each do |attribute|
+      errors << "#{geometry_name} missing #{attribute}: #{geometry.attributes['gml:id']}" if geometry.attributes[attribute].to_s.empty?
+    end
+    errors << "#{geometry_name} srsDimension is not 3: #{geometry.attributes['gml:id']}" unless geometry.attributes['srsDimension'].to_s == '3'
+  end
+end
+
 state_storeys = {}
 REXML::XPath.each(doc, '//core:State', { 'core' => 'http://www.opengis.net/indoorgml/1.0/core' }) do |state|
   state_id = state.attributes['gml:id']
