@@ -45,6 +45,28 @@ module ULOL
             dialog.show
           end
 
+          def show_report(path)
+            dialog.set_file(File.expand_path(path))
+            dialog.show
+            dialog.set_size(INITIAL_WIDTH, MAX_DIALOG_HEIGHT)
+          end
+
+          def visible?
+            @dialog && @dialog.visible?
+          rescue StandardError
+            false
+          end
+
+          def bring_to_front
+            return unless visible?
+
+            if @dialog.respond_to?(:bring_to_front)
+              @dialog.bring_to_front
+            else
+              @dialog.show
+            end
+          end
+
           def running(step)
             set_status(step, 'running')
           end
@@ -141,9 +163,9 @@ module ULOL
 
           def build_dialog
             dialog = UI::HtmlDialog.new(
-              dialog_title: 'Run val3dity2.2',
+              dialog_title: 'IndoorGML Validity',
               preferences_key: 'ULOL.Indoor3DGmlModeler.ExportProgress',
-              scrollable: false,
+              scrollable: true,
               resizable: false,
               width: INITIAL_WIDTH,
               height: INITIAL_HEIGHT,
