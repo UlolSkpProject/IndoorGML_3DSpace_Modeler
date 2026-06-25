@@ -1102,7 +1102,9 @@ module ULOL
           def result_hero_message(raw_report, final_errors, suppressed, kept, inconclusive)
             total_rechecks = suppressed + kept + inconclusive
             return 'strict val3dity 오류가 없습니다.' if raw_report[VALIDATION_STATUS_KEY] == 'exact_valid'
-            return "strict val3dity 오류는 있었지만 최종 오류가 없습니다. Overlap 재검사 후보 #{suppressed}건이 허용오차 이내로 억제되었습니다." if raw_report[VALIDATION_STATUS_KEY] == 'tolerance_valid'
+            if %w[extension_policy_valid tolerance_valid].include?(raw_report[VALIDATION_STATUS_KEY])
+              return "strict val3dity 오류는 있었지만 최종 오류가 없습니다. Overlap 재검사 후보 #{suppressed}건이 extension policy로 억제되었습니다."
+            end
             return "실제 수정이 필요한 오류가 #{final_errors}건 남아 있습니다." if total_rechecks.zero?
 
             "실제 수정이 필요한 오류가 #{final_errors}건 남아 있습니다. Overlap 재검사 후보 #{total_rechecks}건 중 #{suppressed}건은 억제, #{kept}건은 유지, #{inconclusive}건은 불명확입니다."
@@ -1112,8 +1114,8 @@ module ULOL
             case raw_report[VALIDATION_STATUS_KEY]
             when 'exact_valid'
               'Exact Valid'
-            when 'tolerance_valid'
-              'Tolerance Valid'
+            when 'extension_policy_valid', 'tolerance_valid'
+              'Extension Policy Valid'
             else
               'Invalid'
             end
@@ -1213,7 +1215,8 @@ module ULOL
 
           def compact_overlap_reason(reason)
             text = reason.to_s
-            return 'GML 기하 스냅샷에서 실제 교차 없음' if text.include?('actual intersection is empty')
+            return 'SketchUp Boolean에서 유효한 intersection group 미반환' if text.include?('NO_VALID_INTERSECTION_GROUP_RETURNED')
+            return 'SketchUp Boolean에서 유효한 intersection 재현' if text.include?('REPRODUCED_AS_VALID_SKETCHUP_INTERSECTION')
             return '공유면 인접 거리 허용 오차 이내' if text.include?('near-coplanar shared-face')
 
             text
@@ -1367,7 +1370,7 @@ module ULOL
             raw_report[VALIDATION_STATUS_KEY] = if raw_report[STRICT_VALIDITY_KEY] == true
                                                   'exact_valid'
                                                 elsif raw_report[EXTENSION_VALIDITY_KEY] == true
-                                                  'tolerance_valid'
+                                                  'extension_policy_valid'
                                                 else
                                                   'invalid'
                                                 end
@@ -1443,13 +1446,13 @@ module ULOL
                 {
                   status: :inconclusive,
                   cells: [cell_id1, cell_id2],
-                  reason: 'cell pair not found in exported GML geometry snapshot'
+                  reason: 'GML_RECONSTRUCTION_FAILED'
                 }
               elsif cell1[:unsupported] || cell2[:unsupported]
                 {
                   status: :inconclusive,
                   cells: [cell_id1, cell_id2],
-                  reason: 'GML geometry snapshot is not usable for overlap recheck'
+                  reason: 'GML_RECONSTRUCTION_FAILED'
                 }
               else
                 adjacency_candidates = shared_face_candidates(cell1[:faces], cell2[:faces], mode: :adjacency)
@@ -1469,7 +1472,7 @@ module ULOL
               {
                 status: :inconclusive,
                 cells: [cell_id1, cell_id2],
-                reason: "GML geometry recheck failed: #{e.class}: #{e.message}"
+                reason: "GML_RECONSTRUCTION_FAILED: #{e.class}: #{e.message}"
               }
             end
           end
@@ -1487,7 +1490,7 @@ module ULOL
                 reason: overlap_recheck_missing_pair_reason(704),
                 candidate: nil,
                 actual_overlap_volume: analysis.dig(:intersection, :volume),
-                intersection_component_count: analysis.dig(:intersection, :components)&.length
+                intersection_component_count: analysis.dig(:intersection, :component_count)
               }
             end
 
@@ -1496,15 +1499,15 @@ module ULOL
               return overlap_decision.merge(
                 tolerated: false,
                 status: 'inconclusive',
-                reason: "gross-overlap check inconclusive; #{overlap_decision[:reason]}",
+                reason: overlap_decision[:reason],
                 candidate: candidate
               )
             end
-            if overlap_decision[:gross_overlap]
+            if overlap_decision[:sketchup_intersection_reproduced]
               return {
                 tolerated: false,
                 status: 'kept',
-                reason: 'shared-face candidate exists, but gross overlap remains for this CellSpace pair',
+                reason: 'REPRODUCED_AS_VALID_SKETCHUP_INTERSECTION',
                 candidate: candidate,
                 actual_overlap_volume: overlap_decision[:actual_overlap_volume],
                 intersection_component_count: overlap_decision[:intersection_component_count]
@@ -1534,51 +1537,33 @@ module ULOL
                 tolerated: false,
                 status: 'inconclusive',
                 reason: intersection[:reason],
-                candidate: best_overlap_recheck_candidate(analysis[:overlap_candidates], 701),
+                candidate: nil,
                 actual_overlap_volume: nil,
                 intersection_component_count: nil,
-                gross_overlap: nil
+                sketchup_intersection_reproduced: nil
               }
             end
 
-            if intersection[:empty]
+            if intersection[:status] == :not_reproduced
               return {
                 tolerated: true,
                 status: 'suppressed',
-                reason: 'actual intersection is empty in exported GML geometry snapshot',
+                reason: 'NO_VALID_INTERSECTION_GROUP_RETURNED',
                 candidate: best_overlap_recheck_candidate(analysis[:adjacency_candidates], 701),
                 actual_overlap_volume: 0.0,
                 intersection_component_count: 0,
-                gross_overlap: false
+                sketchup_intersection_reproduced: false
               }
             end
-
-            candidates = analysis[:overlap_candidates]
-            if candidates.empty?
-              return {
-                tolerated: false,
-                status: 'kept',
-                reason: 'actual intersection exists without a penetration-direction shared-face candidate',
-                candidate: best_overlap_recheck_candidate(analysis[:adjacency_candidates], 701),
-                actual_overlap_volume: intersection[:volume],
-                intersection_component_count: intersection[:components].length,
-                gross_overlap: true
-              }
-            end
-
-            matches = match_intersection_components_to_slabs(intersection[:components], candidates)
-            best_match = matches.compact.max_by { |match| match[:candidate][:overlap_area].to_f }
-            all_explained = matches.all?
 
             {
-              tolerated: all_explained,
-              status: all_explained ? 'suppressed' : 'kept',
-              reason: all_explained ? 'all intersection components are contained in shared-face tolerance slabs' : 'at least one intersection component is not explained by any shared-face tolerance slab',
-              candidate: best_match&.dig(:candidate) || best_overlap_recheck_candidate(candidates, 701),
-              normal_thickness: best_match&.dig(:normal_thickness),
+              tolerated: false,
+              status: 'kept',
+              reason: 'REPRODUCED_AS_VALID_SKETCHUP_INTERSECTION',
+              candidate: best_overlap_recheck_candidate(analysis[:adjacency_candidates], 701),
               actual_overlap_volume: intersection[:volume],
-              intersection_component_count: intersection[:components].length,
-              gross_overlap: !all_explained
+              intersection_component_count: intersection[:component_count],
+              sketchup_intersection_reproduced: true
             }
           end
 
@@ -1616,7 +1601,7 @@ module ULOL
           end
 
           def overlap_recheck_tolerated_reason(code, candidate)
-            direction = code == 701 ? 'thin shared-face overlap' : 'near-coplanar shared-face adjacency'
+            direction = code == 701 ? 'SketchUp Boolean non-reproduction' : 'near-coplanar shared-face adjacency'
             "#{overlap_recheck_face_pair_label(code)} face pair has signed #{direction} distance within #{OVERLAP_RECHECK_TOLERANCE_MM} mm"
           end
 
@@ -1692,7 +1677,7 @@ module ULOL
 
           def exported_solid_intersection(cell1, cell2)
             model = Sketchup.active_model
-            return { status: :inconclusive, reason: 'SketchUp model is not available for intersection recheck' } unless model
+            return { status: :inconclusive, reason: 'BOOLEAN_OPERATION_FAILED' } unless model
 
             started = false
             group1 = nil
@@ -1704,27 +1689,29 @@ module ULOL
 
             group1 = build_temp_solid_group(cell1)
             group2 = build_temp_solid_group(cell2)
-            return { status: :inconclusive, reason: 'temporary GML snapshot solid reconstruction failed' } unless group1 && group2
-            return { status: :inconclusive, reason: 'SketchUp group intersection is not available' } unless group1.respond_to?(:intersect)
+            return { status: :inconclusive, reason: 'GML_RECONSTRUCTION_FAILED' } unless group1 && group2
+            return { status: :inconclusive, reason: 'INPUT_NOT_MANIFOLD' } unless valid_manifold_group?(group1) && valid_manifold_group?(group2)
+            return { status: :inconclusive, reason: 'BOOLEAN_OPERATION_FAILED' } unless group1.respond_to?(:intersect)
 
             result = group1.intersect(group2)
-            return { status: :ok, empty: true, volume: 0.0, components: [] } if result.nil?
-            return { status: :inconclusive, reason: 'SketchUp intersection result is invalid' } unless result.valid?
+            return { status: :not_reproduced, reason: 'NO_VALID_INTERSECTION_GROUP_RETURNED', volume: 0.0, component_count: 0 } if result.nil?
+            return { status: :inconclusive, reason: 'INVALID_INTERSECTION_RESULT' } unless valid_manifold_group?(result)
 
             faces = result.definition.entities.grep(Sketchup::Face).select(&:valid?)
-            volume = result.respond_to?(:volume) ? result.volume.to_f.abs : 0.0
-            return { status: :ok, empty: true, volume: volume, components: [] } if faces.empty?
+            return { status: :inconclusive, reason: 'INVALID_INTERSECTION_RESULT' } if faces.empty?
 
-            components = intersection_components(faces)
+            volume = solid_group_volume(result)
+            return { status: :inconclusive, reason: 'INVALID_INTERSECTION_RESULT' } if volume.nil? || volume <= 0.0
+
             {
-              status: :ok,
-              empty: false,
+              status: :reproduced,
+              reason: 'REPRODUCED_AS_VALID_SKETCHUP_INTERSECTION',
               volume: volume,
-              components: components
+              component_count: face_components(faces).length
             }
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Exported solid intersection failed: #{e.class}: #{e.message}"
-            { status: :inconclusive, reason: "actual intersection could not be computed: #{e.class}: #{e.message}" }
+            { status: :inconclusive, reason: "BOOLEAN_OPERATION_FAILED: #{e.class}: #{e.message}" }
           ensure
             model.abort_operation if started
             [result, group1, group2].compact.each do |entity|
@@ -1748,6 +1735,27 @@ module ULOL
               end
             end
             group
+          end
+
+          def valid_manifold_group?(group)
+            return false unless group&.valid?
+            return false unless group.respond_to?(:manifold?) && group.manifold?
+
+            volume = solid_group_volume(group)
+            !volume.nil? && volume > 0.0
+          rescue StandardError
+            false
+          end
+
+          def solid_group_volume(group)
+            return nil unless group.respond_to?(:volume)
+
+            volume = group.volume
+            return nil if volume.nil?
+
+            volume.to_f.abs
+          rescue StandardError
+            nil
           end
 
           def intersection_components(faces)
