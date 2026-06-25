@@ -15,7 +15,6 @@ module ULOL
         PRIMARY_TRANSLUCENT_COLOR = Sketchup::Color.new(22, 130, 82, 210)
         FIX_PRIMARY_COLOR = Sketchup::Color.new(185, 28, 28, 255)
         FIX_PRIMARY_TRANSLUCENT_COLOR = Sketchup::Color.new(185, 28, 28, 210)
-        FIX_HIGHLIGHT_COLOR = Sketchup::Color.new(239, 68, 68, 255)
         HINT_COLOR = Sketchup::Color.new(214, 245, 229)
         FIX_HINT_COLOR = Sketchup::Color.new(254, 226, 226)
         DUAL_STATE_COLOR = Sketchup::Color.new(35, 120, 255, 255)
@@ -58,7 +57,6 @@ module ULOL
               draw_banner(view)
             end
             draw_dual_space_overlay(view) if draw_dual_overlay?
-            draw_validation_highlight_overlay(view) if validation_focus_active?
             draw_progress_bar(view) if @indoor_model.progress_active?()
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Edit mode overlay draw failed: #{e.class}: #{e.message}"
@@ -255,80 +253,6 @@ module ULOL
             points.concat(segments[:second])
           end
           points
-        end
-
-        def draw_validation_highlight_overlay(view)
-          return unless @indoor_model.respond_to?(:validation_focus_highlight_cell_spaces)
-
-          points = validation_highlight_line_points
-          return if points.empty?
-
-          view.line_width = 5 if view.respond_to?(:line_width=)
-          view.drawing_color = validation_highlight_color
-          view.draw(GL_LINES, points)
-        rescue StandardError => e
-          IndoorCore::Logger.puts "[IndoorGML] Validation highlight overlay failed: #{e.class}: #{e.message}"
-        ensure
-          view.line_width = 1 if view.respond_to?(:line_width=)
-        end
-
-        def validation_highlight_line_points
-          @indoor_model.validation_focus_highlight_cell_spaces.flat_map do |cell_space|
-            validation_cell_edge_points(cell_space)
-          end
-        rescue StandardError
-          []
-        end
-
-        def validation_cell_edge_points(cell_space)
-          group = cell_space&.sketchup_group
-          return [] unless group&.valid? && group.respond_to?(:definition)
-
-          transform = validation_cell_world_transformation(group)
-          group.definition.entities.grep(Sketchup::Edge).flat_map do |edge|
-            next [] unless edge.valid?
-
-            [
-              edge.start.position.transform(transform),
-              edge.end.position.transform(transform)
-            ]
-          end
-        rescue StandardError
-          []
-        end
-
-        def validation_cell_world_transformation(group)
-          primal_group = @indoor_model.primal_group
-          if primal_group&.valid?
-            Utils::Transformation.entity_world_transformation_under_root(group, primal_group)
-          else
-            group.transformation
-          end
-        end
-
-        def validation_highlight_color
-          code_text = @indoor_model.respond_to?(:validation_focus_highlight_code) ? @indoor_model.validation_focus_highlight_code.to_s[/\d+/] : nil
-          code = code_text ? code_text.to_i : 0
-          case code
-          when 100..199
-            Sketchup::Color.new(248, 113, 113, 255)
-          when 200..299
-            Sketchup::Color.new(116, 214, 111, 255)
-          when 300..399
-            Sketchup::Color.new(246, 180, 91, 255)
-          when 400..499
-            Sketchup::Color.new(34, 211, 238, 255)
-          when 500..599
-            Sketchup::Color.new(187, 247, 184, 255)
-          when 600..699
-            Sketchup::Color.new(214, 163, 109, 255)
-          when 700..799
-            Sketchup::Color.new(244, 114, 182, 255)
-          when 900..999
-            Sketchup::Color.new(254, 240, 138, 255)
-          else
-            FIX_HIGHLIGHT_COLOR
-          end
         end
 
         def overlay_state_visible?(state)

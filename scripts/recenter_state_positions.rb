@@ -23,24 +23,14 @@ module ULOL
 
         def run
           indoor_model = IndoorCore::IndoorModel.current
+          indoor_model.finish_editing if indoor_model.editing?
           indoor_model.refresh_runtime_data
 
           cell_spaces = indoor_model.cell_spaces.select { |cell_space| cell_space&.valid? }
-          changed = 0
+          transitions_updated = 0
           failed = []
 
-          indoor_model.send(:with_indoor_model_operation, 'IndoorGML Recenter State Positions') do
-            cell_spaces.each do |cell_space|
-              before = state_position(cell_space)
-              indoor_model.send(:recenter_cell_space_origin, cell_space)
-              indoor_model.send(:write_attributes, cell_space)
-              after = state_position(cell_space)
-
-              changed += 1 if before && after && before.distance(after) > 0.001
-            rescue StandardError => e
-              failed << [cell_space&.id, e]
-            end
-
+          indoor_model.send(:with_indoor_model_operation, 'IndoorGML Refresh State And Transition Positions') do
             cell_spaces.each do |cell_space|
               next unless cell_space&.valid?
 
@@ -48,25 +38,28 @@ module ULOL
             rescue StandardError => e
               failed << [cell_space&.id, e]
             end
+
+            indoor_model.transitions.each do |transition|
+              next unless transition&.valid?
+
+              indoor_model.send(:update_transition, transition)
+              indoor_model.send(:write_transition_attributes, transition)
+              transitions_updated += 1
+            rescue StandardError => e
+              failed << [transition&.id, e]
+            end
           end
 
           indoor_model.send(:invalidate_overlay_transition_points)
           Sketchup.active_model&.active_view&.invalidate
 
-          report(cell_spaces.length, changed, failed)
+          report(cell_spaces.length, transitions_updated, failed)
         end
 
-        def state_position(cell_space)
-          cell_space&.duality_state&.position&.clone
-        rescue StandardError
-          nil
-        end
-        private_class_method :state_position
-
-        def report(total, changed, failed)
-          message = +"Recenter State Positions finished.\n"
+        def report(total, transitions_updated, failed)
+          message = +"Refresh State And Transition Positions finished.\n"
           message << "CellSpaces checked: #{total}\n"
-          message << "State positions moved: #{changed}\n"
+          message << "Transitions updated: #{transitions_updated}\n"
           message << "Failures: #{failed.length}"
 
           failed.first(10).each do |id, error|
@@ -75,7 +68,7 @@ module ULOL
 
           UI.messagebox(message) if defined?(UI)
           puts message
-          { total: total, changed: changed, failed: failed.length }
+          { total: total, transitions_updated: transitions_updated, failed: failed.length }
         end
         private_class_method :report
       end
