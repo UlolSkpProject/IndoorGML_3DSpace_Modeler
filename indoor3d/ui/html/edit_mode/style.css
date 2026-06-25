@@ -2,6 +2,8 @@
 
 html {
   overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 body {
@@ -12,6 +14,12 @@ body {
   color: #d8d6d0;
   background: #1c1c1b;
   overflow: hidden;
+}
+
+.copyable-cell-id {
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 header {
@@ -141,6 +149,8 @@ select {
   background: #1c1c1b;
   color: #d8d6d0;
   outline: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 select:focus {

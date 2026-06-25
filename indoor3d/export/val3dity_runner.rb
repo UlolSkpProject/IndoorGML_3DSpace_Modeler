@@ -418,6 +418,7 @@ module ULOL
               @dual_done = 0
               @link_done = 0
               @xlinks_emitted = false
+              @last_ratio = 0.0
               @last_emit_at = Time.at(0)
             end
 
@@ -495,6 +496,8 @@ module ULOL
               return unless force || Time.now - @last_emit_at >= 0.10
 
               ratio = ratio_override || current_ratio
+              ratio = bounded_ratio(ratio, @last_ratio, 1.0)
+              @last_ratio = ratio
               @last_emit_at = Time.now
 
               @queue << {
@@ -900,6 +903,7 @@ module ULOL
                     scrollbar-gutter: stable;
                   }
                   * { box-sizing: border-box; }
+                  html { user-select: none; -webkit-user-select: none; }
                   body { margin: 0; padding: 10px 0; background: #1c1c1b; }
                   main { max-width: 450px; margin: 0 auto; padding: 0 10px; }
                   .hero { padding: 10px 0 16px; border-bottom: 1px solid #373633; }
@@ -964,7 +968,7 @@ module ULOL
                   .status-badge { color: #3ebc71; font-size: 11px; font-weight: 700; text-transform: uppercase; }
                   .status-badge.kept, .status-badge.inconclusive { color: #f9b84e; }
                   .cell-pair { display: grid; gap: 3px; min-width: 0; color: #d8d6d0; font-family: Consolas, Monaco, monospace; font-size: 11px; line-height: 1.35; }
-                  .cell-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+                  .cell-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; user-select: text; -webkit-user-select: text; }
                   .reason { color: #a8a49d; font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
                   .empty { color: #85827b; margin: 0; font-size: 12px; }
                   details.section > summary.section-head { cursor: pointer; list-style: none; }
@@ -1328,6 +1332,31 @@ module ULOL
                       row.style.display = filter === 'all' || row.getAttribute('data-code') === filter ? '' : 'none';
                     });
                   });
+                });
+                document.addEventListener('dragstart', function(event) {
+                  if (!event.target.closest('.cell-name')) {
+                    event.preventDefault();
+                  }
+                });
+                document.addEventListener('keydown', function(event) {
+                  if ((event.ctrlKey || event.metaKey) && String(event.key).toLowerCase() === 'a') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }
+                }, true);
+                document.addEventListener('selectionchange', function() {
+                  var selection = window.getSelection && window.getSelection();
+                  if (!selection || selection.rangeCount === 0) return;
+
+                  var anchor = selection.anchorNode && selection.anchorNode.nodeType === Node.ELEMENT_NODE ?
+                    selection.anchorNode :
+                    selection.anchorNode && selection.anchorNode.parentElement;
+                  var focus = selection.focusNode && selection.focusNode.nodeType === Node.ELEMENT_NODE ?
+                    selection.focusNode :
+                    selection.focusNode && selection.focusNode.parentElement;
+                  if ((anchor && anchor.closest('.cell-name')) && (focus && focus.closest('.cell-name'))) return;
+
+                  selection.removeAllRanges();
                 });
               </script>
             HTML

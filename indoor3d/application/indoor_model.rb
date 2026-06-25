@@ -96,8 +96,8 @@ module ULOL
           @relocating_entity = false
           @refreshing_runtime = false
           @constraining_space_features = false
-          @overlay_min_radius_pixels = 4.0
-          @overlay_max_radius_pixels = 12.0
+          @overlay_min_radius_pixels = 1.0
+          @overlay_max_radius_pixels = 7.0
           @primal_group = nil
           @attribute_serializer = AttributeSerializer.new(
             dictionary_name: ATTRIBUTE_DICTIONARY_NAME,
