@@ -903,6 +903,7 @@ module ULOL
                   main { max-width: 430px; margin: 0 auto; }
                   .hero { padding: 10px 0 16px; border-bottom: 1px solid #373633; }
                   .hero-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+                  .hero-title { display: flex; align-items: center; min-height: 31px; }
                   .top-meta { margin-bottom: 12px; color: #85827b; font-size: 11px; line-height: 1.55; }
                   .eyebrow { margin-bottom: 6px; color: #85827b; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
                   h1 { margin: 0; color: #e8e6e0; font-size: 22px; line-height: 1.15; }
@@ -925,15 +926,20 @@ module ULOL
                   .param-label { color: #85827b; font-family: Consolas, Monaco, monospace; font-size: 10px; letter-spacing: .03em; }
                   .param-value { margin-top: 3px; color: #e8e6e0; font-family: Consolas, Monaco, monospace; font-size: 13px; overflow-wrap: anywhere; }
                   .filter-row { display: flex; gap: 7px; margin-bottom: 10px; overflow-x: auto; padding-bottom: 2px; }
-                  .filter-btn { flex: 0 0 auto; padding: 8px 13px; border: 1px solid #4a4945; border-radius: 8px; background: transparent; color: #b9b6ae; font-size: 12px; font-weight: 700; }
+                  .filter-btn { flex: 0 0 auto; padding: 8px 13px; border: 1px solid #4a4945; border-radius: 8px; background: transparent; color: #b9b6ae; cursor: pointer; font-size: 12px; font-weight: 700; }
                   .filter-btn.active { border-color: #327a4f; background: #12261a; color: #d8d6d0; }
+                  .report-actions { display: flex; justify-content: flex-end; }
+                  .report-action { padding: 8px 12px; border: 1px solid #327a4f; border-radius: 7px; background: #12261a; color: #d8d6d0; cursor: pointer; font-size: 12px; font-weight: 700; }
+                  .report-action:hover { background: #173420; }
                   .recheck-list { display: grid; gap: 8px; }
                   .recheck-row { background: #242422; border: 1px solid #2f2e2b; border-radius: 8px; }
                   .recheck-row summary { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 8px 9px; cursor: pointer; list-style: none; }
                   .recheck-row summary::-webkit-details-marker { display: none; }
                   .recheck-row[open] summary { border-bottom: 1px solid #33322f; }
                   .recheck-summary-main { display: flex; align-items: center; gap: 7px; min-width: 0; }
+                  .recheck-summary-main .cell-name { font-size: 10px; }
                   .summary-distance { color: #e8e6e0; font-family: Consolas, Monaco, monospace; font-size: 11px; text-align: right; white-space: nowrap; }
+                  .summary-distance sup { font-size: 8px; line-height: 0; }
                   .recheck-detail { display: grid; gap: 6px; padding: 8px 9px 9px; }
                   .code-badge { display: inline-flex; align-items: center; padding: 3px 7px; border-radius: 5px; background: #1d355d; color: #8ab4f8; font-family: Consolas, Monaco, monospace; font-size: 11px; font-weight: 700; }
                   .code-badge.c704 { background: #443815; color: #e5c567; }
@@ -943,11 +949,10 @@ module ULOL
                   .cell-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
                   .reason { color: #a8a49d; font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
                   .empty { color: #85827b; margin: 0; font-size: 12px; }
-                  .error-group { border-top: 1px solid #373633; padding-top: 12px; margin-top: 12px; }
-                  .error-group:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
-                  .error-title { margin: 0 0 8px; color: #d8d6d0; font-size: 12px; font-weight: 700; }
-                  .error-items { margin: 0; padding-left: 18px; color: #b9b6ae; font-size: 12px; }
-                  .error-items li { margin: 5px 0; overflow-wrap: anywhere; }
+                  details.section > summary.section-head { cursor: pointer; list-style: none; }
+                  details.section > summary.section-head::-webkit-details-marker { display: none; }
+                  .toggle-triangle { display: inline-block; width: 0; height: 0; margin-right: 8px; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 7px solid #85827b; transition: transform .12s ease-out; }
+                  details[open] > summary .toggle-triangle { transform: rotate(90deg); }
                   code { background: #242422; border-radius: 4px; padding: 1px 4px; color: #d8d6d0; }
                   @media (min-width: 700px) {
                     body { padding: 20px; }
@@ -960,8 +965,8 @@ module ULOL
                   #{report_top_meta_section(raw_report)}
                   #{report_result_hero_section(raw_report)}
                   #{report_summary_section(raw_report)}
-                  #{report_overlap_recheck_section(raw_report)}
-                  #{report_error_items_section(raw_report)}
+                  #{report_issue_sections(raw_report)}
+                  #{report_filter_script}
                 </main>
               </body>
               </html>
@@ -976,17 +981,20 @@ module ULOL
             inconclusive = overlap_recheck_inconclusive_count(raw_report)
             primitive_value = "#{valid_count(raw_report['primitives_overview'])} / #{total_count(raw_report['primitives_overview'])}"
             badge_class = validity ? 'result-badge valid' : 'result-badge invalid'
-            heading = validation_status_label(raw_report)
             message = result_hero_message(raw_report, final_errors, suppressed, kept, inconclusive)
             <<~HTML
               <section class="hero">
                 <div class="hero-top">
                   <div>
                     <div class="eyebrow">IndoorGML · val3dity #{html_escape(raw_report['val3dity_version'] || 'unknown')}</div>
-                    <h1>#{html_escape(heading)}</h1>
+                    <div class="hero-title">
+                      <span class="#{badge_class}">#{validity ? 'VALID' : 'INVALID'}</span>
+                    </div>
                     <p class="result-message">#{html_escape(message)}</p>
                   </div>
-                  <span class="#{badge_class}">#{validity ? 'VALID' : 'INVALID'}</span>
+                  <div class="report-actions">
+                    <button class="report-action" type="button" onclick="if (window.sketchup && sketchup.createGml) { sketchup.createGml(); }">Export GML</button>
+                  </div>
                 </div>
                 <div class="result-metrics">
                   <div class="result-metric">
@@ -1052,14 +1060,34 @@ module ULOL
             HTML
           end
 
-          def report_error_items_section(raw_report)
-            rows = error_item_rows(raw_report)
+          def report_issue_sections(raw_report)
+            [
+              report_error_items_section(
+                error_item_rows(raw_report),
+                title: 'ERROR',
+                raw_report: raw_report
+              ),
+              report_overlap_recheck_section(
+                overlap_recheck_suppressed_rows(raw_report),
+                title: 'Suppressed',
+                collapsed: true
+              )
+            ].join
+          end
+
+          def report_error_items_section(rows, title:, raw_report: nil)
             return '' if rows.empty?
 
             <<~HTML
               <section class="section">
-                <h2>Error에 걸린 항목</h2>
-                #{error_item_groups_html(rows)}
+                <div class="section-head">
+                  <h2>#{html_escape(title)}</h2>
+                  <span class="section-count">#{rows.length}건</span>
+                </div>
+                #{report_filter_row(rows)}
+                <div class="recheck-list">
+                  #{error_item_rows_html(rows, raw_report)}
+                </div>
               </section>
             HTML
           end
@@ -1141,6 +1169,10 @@ module ULOL
             Array(raw_report[OVERLAP_RECHECK_REPORT_KEY])
           end
 
+          def overlap_recheck_suppressed_rows(raw_report)
+            overlap_recheck_rows(raw_report).select { |row| row['tolerated'] == true }
+          end
+
           def report_checked_at(value)
             text = value.to_s.strip
             return '-' if text.empty?
@@ -1148,47 +1180,48 @@ module ULOL
             text.gsub('대한민국 표준시', 'KST')
           end
 
-          def report_overlap_recheck_section(raw_report)
-            rows = Array(raw_report[OVERLAP_RECHECK_REPORT_KEY])
+          def report_overlap_recheck_section(rows, title:, collapsed: false)
             return '' if rows.empty?
 
-            code_701_count = overlap_recheck_code_count(rows, 701)
-            code_704_count = overlap_recheck_code_count(rows, 704)
+            body = <<~HTML
+              #{report_filter_row(rows)}
+              <div class="recheck-list">
+                #{rows.map { |row| overlap_recheck_row_html(row) }.join}
+              </div>
+            HTML
+            return <<~HTML if collapsed
+              <details class="section">
+                <summary class="section-head">
+                  <h2><span class="toggle-triangle" aria-hidden="true"></span>#{html_escape(title)}</h2>
+                  <span class="section-count">#{rows.length}건</span>
+                </summary>
+                #{body}
+              </details>
+            HTML
+
             <<~HTML
               <section class="section">
                 <div class="section-head">
-                  <h2>Overlap 재검사</h2>
+                  <h2>#{html_escape(title)}</h2>
                   <span class="section-count">#{rows.length}건</span>
                 </div>
-                <div class="filter-row">
-                  <button class="filter-btn active" type="button" data-filter="all">전체 #{rows.length}</button>
-                  <button class="filter-btn" type="button" data-filter="701">701 (#{code_701_count})</button>
-                  <button class="filter-btn" type="button" data-filter="704">704 (#{code_704_count})</button>
-                </div>
-                <div class="recheck-list">
-                  #{rows.map { |row| overlap_recheck_row_html(row) }.join}
-                </div>
+                #{body}
               </section>
-              #{overlap_recheck_filter_script}
             HTML
           end
 
           def overlap_recheck_row_html(row)
             cells = Array(row['cells'])
             code = row['code'].to_s
-            distance = row['distance_mm'].nil? ? '-' : "#{format('%.6g', row['distance_mm'])} mm"
-            status = row['status'] || (row['tolerated'] ? 'suppressed' : 'kept')
-            status_class = status == 'suppressed' ? 'suppressed' : status
-            status_label = status == 'suppressed' ? '억제' : status
+            distance = format_report_distance_mm(row['distance_mm'])
             <<~HTML
               <details class="recheck-row" data-code="#{html_escape(code)}">
                 <summary>
                   <span class="code-badge #{code == '704' ? 'c704' : ''}">#{html_escape(code)}</span>
                   <span class="recheck-summary-main">
-                    <span class="status-badge #{html_escape(status_class)}">#{html_escape(status_label)}</span>
                     <span class="cell-name" title="#{html_escape(cells.join(' / '))}">#{html_escape(compact_cell_pair(cells))}</span>
                   </span>
-                  <span class="summary-distance">#{html_escape(distance)}</span>
+                  <span class="summary-distance">#{distance}</span>
                 </summary>
                 <div class="recheck-detail">
                   <div class="cell-pair">
@@ -1201,16 +1234,67 @@ module ULOL
             HTML
           end
 
+          def report_filter_row(rows)
+            counts = Hash.new(0)
+            rows.each { |row| counts[report_row_code(row)] += 1 }
+            buttons = counts.keys.sort_by { |code| [error_code_number(code), code.to_s] }.map do |code|
+              <<~HTML
+                <button class="filter-btn" type="button" data-filter="#{html_escape(code)}">#{html_escape(code)} (#{counts[code]})</button>
+              HTML
+            end.join
+
+            <<~HTML
+              <div class="filter-row" aria-label="Error code filters">
+                <button class="filter-btn active" type="button" data-filter="all">전체 #{rows.length}</button>
+                #{buttons}
+              </div>
+            HTML
+          end
+
+          def report_row_code(row)
+            (row.respond_to?(:[]) && (row['code'] || row[:code])).to_s
+          end
+
+          def report_filter_script
+            <<~HTML
+              <script>
+                document.querySelectorAll('.section .filter-btn').forEach(function(button) {
+                  button.addEventListener('click', function() {
+                    var section = button.closest('.section');
+                    if (!section) return;
+                    var filter = button.getAttribute('data-filter');
+                    section.querySelectorAll('.filter-btn').forEach(function(item) {
+                      item.classList.remove('active');
+                    });
+                    button.classList.add('active');
+                    section.querySelectorAll('.recheck-row').forEach(function(row) {
+                      row.style.display = filter === 'all' || row.getAttribute('data-code') === filter ? '' : 'none';
+                    });
+                  });
+                });
+              </script>
+            HTML
+          end
+
+          def format_report_distance_mm(value)
+            return '-' if value.nil?
+
+            format_report_scientific(value, 'mm')
+          end
+
+          def format_report_scientific(value, unit_html)
+            text = format('%.3e', value.to_f)
+            mantissa, exponent = text.split('e')
+            exponent_value = exponent.to_i
+            "#{html_escape(mantissa)} × 10<sup>#{html_escape(exponent_value)}</sup> #{unit_html}"
+          end
+
           def compact_cell_pair(cells)
             first = cells[0].to_s
             second = cells[1].to_s
             return '-' if first.empty? && second.empty?
 
             "#{first} / #{second}"
-          end
-
-          def overlap_recheck_code_count(rows, code)
-            rows.count { |row| row['code'].to_s == code.to_s }
           end
 
           def compact_overlap_reason(reason)
@@ -1220,25 +1304,6 @@ module ULOL
             return '공유면 인접 거리 허용 오차 이내' if text.include?('near-coplanar shared-face')
 
             text
-          end
-
-          def overlap_recheck_filter_script
-            <<~HTML
-              <script>
-                document.querySelectorAll('.filter-btn').forEach(function(button) {
-                  button.addEventListener('click', function() {
-                    var filter = button.getAttribute('data-filter');
-                    document.querySelectorAll('.filter-btn').forEach(function(item) {
-                      item.classList.remove('active');
-                    });
-                    button.classList.add('active');
-                    document.querySelectorAll('.recheck-row').forEach(function(row) {
-                      row.style.display = filter === 'all' || row.getAttribute('data-code') === filter ? '' : 'none';
-                    });
-                  });
-                });
-              </script>
-            HTML
           end
 
           def recheck_overlap_errors!(raw_report, progress: nil, progress_step: nil)
@@ -2153,22 +2218,61 @@ module ULOL
               scope: scope,
               item: item,
               code: error['code'],
-              description: error['description'] || error['type'] || 'UNKNOWN'
+              description: error['description'] || error['type'] || 'UNKNOWN',
+              raw: error
             }
           end
 
-          def error_item_groups_html(rows)
-            grouped = rows.group_by { |row| [row[:code], row[:description]] }
-            grouped.sort_by { |(code, description), _items| [code.to_s, description.to_s] }.map do |(code, description), items|
-              <<~HTML
-                <div class="error-group">
-                  <p class="error-title"><code>#{html_escape(code)}</code> : #{html_escape(description)}</p>
-                  <ul class="error-items">
-                    #{items.map { |row| "<li>#{html_escape(error_item_label(row))}</li>" }.join}
-                  </ul>
+          def error_item_rows_html(rows, raw_report = nil)
+            sorted = rows.sort_by { |row| [row[:code].to_s, row[:description].to_s, error_item_label(row).to_s] }
+            sorted.map { |row| error_item_card_html(row, raw_report) }.join
+          end
+
+          def error_item_card_html(row, raw_report = nil)
+            code = row[:code].to_s
+            recheck_row = matching_error_recheck_row(row, raw_report)
+            distance = recheck_row ? format_report_recheck_measure(recheck_row) : ''
+            <<~HTML
+              <details class="recheck-row" data-code="#{html_escape(code)}">
+                <summary>
+                  <span class="code-badge #{code == '704' ? 'c704' : ''}">#{html_escape(code)}</span>
+                  <span class="recheck-summary-main">
+                    <span class="cell-name" title="#{html_escape(error_item_label(row))}">#{html_escape(error_item_label(row))}</span>
+                  </span>
+                  <span class="summary-distance">#{distance}</span>
+                </summary>
+                <div class="recheck-detail">
+                  <div class="reason">#{html_escape(row[:description])}</div>
+                  #{recheck_row ? "<div class=\"reason\">#{html_escape(compact_overlap_reason(recheck_row['reason']))}</div>" : ''}
                 </div>
-              HTML
-            end.join
+              </details>
+            HTML
+          end
+
+          def matching_error_recheck_row(row, raw_report)
+            code = error_code_number(row[:code])
+            return nil unless [701, 704].include?(code)
+            return nil unless raw_report
+
+            text = [row[:item], row[:description], row[:raw]].map do |value|
+              value.is_a?(Hash) ? value.to_json : value.to_s
+            end.join(' ')
+            cells = text.scan(/cell_[A-Za-z0-9_.-]+/).uniq
+            return nil if cells.length < 2
+
+            overlap_recheck_rows(raw_report).find do |recheck_row|
+              next false unless error_code_number(recheck_row['code']) == code
+              next false if recheck_row['tolerated'] == true
+
+              Array(recheck_row['cells']).map(&:to_s).sort == cells.sort
+            end
+          end
+
+          def format_report_recheck_measure(row)
+            return format_report_distance_mm(row['distance_mm']) unless row['distance_mm'].nil?
+            return format_report_scientific(row['actual_overlap_volume_mm3'], 'mm<sup>3</sup>') unless row['actual_overlap_volume_mm3'].nil?
+
+            ''
           end
 
           def error_item_label(row)

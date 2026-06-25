@@ -53,7 +53,13 @@ module ULOL
         end
 
         def check_validity
+          if validation_dialog_visible?
+            @validation_progress_dialog.bring_to_front
+            return
+          end
+
           progress = IndoorGmlConverter::ExportProgressDialog.new
+          @validation_progress_dialog = progress
           state = validation_close_state
           state[:overlap_tol] = IndoorGmlConverter::Val3dityRunner::STRICT_OVERLAP_TOL
           configure_validation_close_handler(progress, state)
@@ -220,7 +226,7 @@ module ULOL
           end
           progress&.on_open_report do
             begin
-              open_report_dialog(result.report_html_path)
+              open_report_dialog(result.report_html_path, progress)
             rescue StandardError => e
               progress&.set_result_message("Opening report failed:\n#{e.message}")
             end
@@ -241,15 +247,15 @@ module ULOL
             progress&.result(
               status: :success,
               title: 'IndoorGML validation succeeded',
-              message: 'Validation completed. Open the report or create the GML file when ready.',
-              actions: [:openReport, :createGml, :close]
+              message: 'Validation completed. Open the report when ready.',
+              actions: [:openReport, :close]
             )
           else
             progress&.result(
               status: :failed,
               title: 'IndoorGML validation failed',
-              message: 'Validation completed with errors. Open the report or create the GML file.',
-              actions: [:openReport, :createGml, :close]
+              message: 'Validation completed with errors. Open the report for details.',
+              actions: [:openReport, :close]
             )
           end
         rescue StandardError => e
@@ -276,22 +282,18 @@ module ULOL
           progress&.set_result_message("GML export failed:\n#{e.message}")
         end
 
-        def open_report_dialog(path)
+        def validation_dialog_visible?
+          @validation_progress_dialog&.visible?
+        rescue StandardError
+          false
+        end
+
+        def open_report_dialog(path, progress = nil)
           raise "Report file was not found:\n#{path}" unless File.exist?(path)
 
-          @validation_report_dialog&.close if @validation_report_dialog&.visible?
-          @validation_report_dialog = UI::HtmlDialog.new(
-            dialog_title: 'val3dity report',
-            preferences_key: 'ULOL.Indoor3DGmlModeler.Val3dityReport.Compact',
-            scrollable: true,
-            resizable: false,
-            width: 470,
-            height: 680,
-            style: UI::HtmlDialog::STYLE_DIALOG
-          )
-          @validation_report_dialog.set_file(File.expand_path(path))
-          @validation_report_dialog.show
-          @validation_report_dialog.set_size(470, 680)
+          dialog = progress || @validation_progress_dialog || IndoorGmlConverter::ExportProgressDialog.new
+          @validation_progress_dialog = dialog
+          dialog.show_report(path)
         end
       end
     end
