@@ -21,7 +21,7 @@ module ULOL
               ensure_space_features_groups
               cell_group = place_cell_group(sketchup_group)
               cell_space = CellSpace.new(cell_group, cell_type, category_code)
-              cell_space.storey_id = ensure_default_storey&.id
+              cell_space.set_storey(default_storey_name)
               recenter_cell_space_geometry(
                 cell_group,
                 fixed_z_offset_from_bottom: fixed_state_height_offset(cell_space)
@@ -101,6 +101,10 @@ module ULOL
               case change_kind
               when :cell_space_type
                 handle_cell_space_type_changed(cell_space)
+              when :navigation_semantics
+                handle_cell_space_navigation_semantics_changed(cell_space)
+              when :storey
+                handle_cell_space_storey_changed(cell_space)
               when :name
                 handle_cell_space_name_changed(cell_space)
               when :transform
@@ -300,7 +304,6 @@ module ULOL
           def make_cell_space_copy_independent(entity)
             original_id = indoor_attribute(entity, 'id').to_s
             original_state_id = indoor_attribute(entity, 'duality_state_id').to_s
-            original_transition_ids = indoor_attribute(entity, 'state_transition_ids')
             IndoorCore::Logger.puts "[IndoorGML] Duplicate CellSpace id detected: entity_id=#{entity.entityID} copied_id=#{original_id}"
 
             with_transparent_cell_space_operation('IndoorGML CellSpace Copy Independence') do
@@ -319,7 +322,7 @@ module ULOL
                 synchronize_adjacency_and_transitions_for_cell_space(cell_space)
                 remember_cell_space_change_snapshot(entity)
 
-                IndoorCore::Logger.puts "[IndoorGML] CellSpace copy independent: original_id=#{original_id} new_id=#{cell_space.id} original_state_id=#{original_state_id} new_state_id=#{state.id} make_unique=#{make_unique_performed} copied_transition_ids=#{original_transition_ids.inspect}"
+                IndoorCore::Logger.puts "[IndoorGML] CellSpace copy independent: original_id=#{original_id} new_id=#{cell_space.id} original_state_id=#{original_state_id} new_state_id=#{state.id} make_unique=#{make_unique_performed}"
               end
             end
 
@@ -342,13 +345,14 @@ module ULOL
           def build_independent_cell_space(entity)
             cell_type = CellSpaceType.from_label(indoor_attribute(entity, 'cell_type'))
             cell_space = CellSpace.new(entity, cell_type, indoor_attribute(entity, 'category_code'))
-            cell_space.set_category(
-              indoor_attribute(entity, 'category_code'),
-              indoor_attribute(entity, 'category_label'),
-              indoor_attribute(entity, 'category_code_space'),
-              indoor_attribute(entity, 'category_standard')
-            )
-            cell_space.storey_id = ensure_default_storey&.id
+            if cell_space.navigable?
+              cell_space.set_navigation_semantics(
+                navigation_class: indoor_attribute(entity, 'navigation_class'),
+                navigation_function: indoor_attribute(entity, 'navigation_function'),
+                navigation_usage: indoor_attribute(entity, 'navigation_usage')
+              )
+            end
+            cell_space.set_storey(indoor_attribute(entity, 'storey'))
             cell_space
           end
 
@@ -423,6 +427,28 @@ module ULOL
             true
           end
 
+          def handle_cell_space_navigation_semantics_changed(cell_space)
+            with_transparent_cell_space_operation('IndoorGML CellSpace Navigation Semantics Change') do
+              sync do
+                apply_cell_space_navigation_attributes(cell_space)
+                write_cell_space_attributes(cell_space)
+              end
+            end
+            remember_cell_space_change_snapshot(cell_space.sketchup_group)
+            true
+          end
+
+          def handle_cell_space_storey_changed(cell_space)
+            with_transparent_cell_space_operation('IndoorGML CellSpace Storey Change') do
+              sync do
+                cell_space.set_storey(indoor_attribute(cell_space.sketchup_group, 'storey'))
+                write_cell_space_attributes(cell_space)
+              end
+            end
+            remember_cell_space_change_snapshot(cell_space.sketchup_group)
+            true
+          end
+
           def handle_cell_space_etc_changed(cell_space)
             IndoorCore::Logger.puts "[IndoorGML] CellSpace change ignored as etc: entity_id=#{cell_space.sketchup_group.entityID} name=#{cell_space.sketchup_group.name}"
             with_transparent_cell_space_operation('IndoorGML CellSpace Etc Change') {}
@@ -433,11 +459,17 @@ module ULOL
           def apply_cell_space_type_attributes(cell_space)
             entity = cell_space.sketchup_group
             cell_space.cell_type = CellSpaceType.from_label(indoor_attribute(entity, 'cell_type'))
-            cell_space.set_category(
-              indoor_attribute(entity, 'category_code'),
-              indoor_attribute(entity, 'category_label'),
-              indoor_attribute(entity, 'category_code_space'),
-              indoor_attribute(entity, 'category_standard')
+            cell_space.set_category(indoor_attribute(entity, 'category_code'))
+          end
+
+          def apply_cell_space_navigation_attributes(cell_space)
+            return unless cell_space.navigable?
+
+            entity = cell_space.sketchup_group
+            cell_space.set_navigation_semantics(
+              navigation_class: indoor_attribute(entity, 'navigation_class'),
+              navigation_function: indoor_attribute(entity, 'navigation_function'),
+              navigation_usage: indoor_attribute(entity, 'navigation_usage')
             )
           end
 
@@ -465,9 +497,10 @@ module ULOL
               transformation: entity.transformation.to_a,
               cell_type: indoor_attribute(entity, 'cell_type').to_s,
               category_code: indoor_attribute(entity, 'category_code').to_s,
-              category_label: indoor_attribute(entity, 'category_label').to_s,
-              category_code_space: indoor_attribute(entity, 'category_code_space').to_s,
-              category_standard: indoor_attribute(entity, 'category_standard').to_s
+              storey: indoor_attribute(entity, 'storey').to_s,
+              navigation_class: indoor_attribute(entity, 'navigation_class').to_s,
+              navigation_function: indoor_attribute(entity, 'navigation_function').to_s,
+              navigation_usage: indoor_attribute(entity, 'navigation_usage').to_s
             }
           end
 
@@ -478,7 +511,9 @@ module ULOL
           end
 
           def cell_space_change_kind(changed_fields)
-            return :cell_space_type if (changed_fields & %i[cell_type category_code category_label category_code_space category_standard]).any?
+            return :cell_space_type if (changed_fields & %i[cell_type category_code]).any?
+            return :navigation_semantics if (changed_fields & %i[navigation_class navigation_function navigation_usage]).any?
+            return :storey if changed_fields.include?(:storey)
             return :name if changed_fields.include?(:name)
             return :transform if changed_fields.include?(:transformation)
 

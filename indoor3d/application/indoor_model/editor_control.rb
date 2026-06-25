@@ -155,30 +155,6 @@ module ULOL
             )
           end
 
-          def set_overlay_min_radius_pixels(radius_pixels)
-            radius_pixels = radius_pixels.to_f
-            return false unless radius_pixels.positive?
-
-            set_overlay_radius_pixel_range(radius_pixels, @overlay_max_radius_pixels)
-          end
-
-          def set_overlay_radius_pixel_range(min_radius_pixels, max_radius_pixels)
-            begin
-              min_radius_pixels = min_radius_pixels.to_f
-              max_radius_pixels = max_radius_pixels.to_f
-              return false unless min_radius_pixels.positive? && max_radius_pixels.positive?
-
-              min_radius_pixels, max_radius_pixels = [min_radius_pixels, max_radius_pixels].sort
-              @overlay_min_radius_pixels = min_radius_pixels
-              @overlay_max_radius_pixels = max_radius_pixels
-              Sketchup.active_model().active_view().invalidate() if Sketchup.active_model&.active_view
-              true
-            rescue StandardError => e
-              IndoorCore::Logger.puts "[IndoorGML] Overlay radius range update failed: #{e.class}: #{e.message}"
-              false
-            end
-          end
-
           def clear_all_indoor_gml_elements
             model = Sketchup.active_model()
             confirmed = UI.messagebox(
@@ -266,6 +242,11 @@ module ULOL
                 category_code: cell_space.category_code,
                 classification: CellSpaceCategory.selection_value(cell_space.cell_type, cell_space.category_code),
                 classification_locked: cell_space_type_change_locked_by_tag?([cell_space]),
+                storey: cell_space.storey,
+                navigation_semantics_enabled: cell_space.navigable?,
+                navigation_class: cell_space.navigation_class,
+                navigation_function: cell_space.navigation_function,
+                navigation_usage: cell_space.navigation_usage,
                 transition_count: cell_space.duality_state&.transition_ids&.length.to_i,
                 cell_geometry_editing: @editor_session.cell_space_geometry_editing?
               }
@@ -361,6 +342,61 @@ module ULOL
           def set_selected_cell_space_classification(selection_value)
             cell_type, category_code = CellSpaceCategory.parse_selection_value(selection_value)
             set_selected_cell_space_type(CellSpaceType.label(cell_type), category_code)
+          end
+
+          def set_selected_cell_space_navigation_semantics(navigation_class, navigation_function, navigation_usage)
+            begin
+              cell_space = selected_cell_space
+              cell_space = @editor_session.editing_cell_space if cell_space.nil?
+              return false unless cell_space&.valid?
+              return false unless cell_space.navigable?
+
+              model = Sketchup.active_model()
+              operation_started = false
+              model.start_operation('Change CellSpace Navigation Semantics', true)
+              operation_started = true
+              sync do
+                cell_space.set_navigation_semantics(
+                  navigation_class: navigation_class,
+                  navigation_function: navigation_function,
+                  navigation_usage: navigation_usage
+                )
+                write_cell_space_attributes(cell_space)
+              end
+              model.commit_operation()
+              remember_cell_space_change_snapshot(cell_space.sketchup_group)
+              @editor_session.selection_changed()
+              true
+            rescue StandardError => e
+              model.abort_operation() if operation_started
+              IndoorCore::Logger.puts "[IndoorGML] Selected CellSpace navigation semantics update failed: #{e.class}: #{e.message}"
+              false
+            end
+          end
+
+          def set_selected_cell_space_storey(storey)
+            begin
+              cell_space = selected_cell_space
+              cell_space = @editor_session.editing_cell_space if cell_space.nil?
+              return false unless cell_space&.valid?
+
+              model = Sketchup.active_model()
+              operation_started = false
+              model.start_operation('Change CellSpace Storey', true)
+              operation_started = true
+              sync do
+                cell_space.set_storey(storey)
+                write_cell_space_attributes(cell_space)
+              end
+              model.commit_operation()
+              remember_cell_space_change_snapshot(cell_space.sketchup_group)
+              @editor_session.selection_changed()
+              true
+            rescue StandardError => e
+              model.abort_operation() if operation_started
+              IndoorCore::Logger.puts "[IndoorGML] Selected CellSpace storey update failed: #{e.class}: #{e.message}"
+              false
+            end
           end
 
           def edit_selected_cell_space_geometry

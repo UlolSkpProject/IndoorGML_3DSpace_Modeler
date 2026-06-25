@@ -1,8 +1,3 @@
-var overlayMinRadius = document.getElementById('overlayMinRadius');
-var overlayMaxRadius = document.getElementById('overlayMaxRadius');
-var overlayRadiusValue = document.getElementById('overlayRadiusValue');
-var minRadiusPreview = document.getElementById('minRadiusPreview');
-var maxRadiusPreview = document.getElementById('maxRadiusPreview');
 var emptyPanel = document.getElementById('emptyPanel');
 var solidPanel = document.getElementById('solidPanel');
 var cellPanel = document.getElementById('cellPanel');
@@ -12,6 +7,15 @@ var selectedClassification = document.getElementById('selectedClassification');
 var selectedId = document.getElementById('selectedId');
 var selectedName = document.getElementById('selectedName');
 var transitionCount = document.getElementById('transitionCount');
+var storeyFields = document.getElementById('storeyFields');
+var storeyFromKind = document.getElementById('storeyFromKind');
+var storeyFromLevel = document.getElementById('storeyFromLevel');
+var storeyToKind = document.getElementById('storeyToKind');
+var storeyToLevel = document.getElementById('storeyToLevel');
+var navigationSemantics = document.getElementById('navigationSemantics');
+var navigationClass = document.getElementById('navigationClass');
+var navigationFunction = document.getElementById('navigationFunction');
+var navigationUsage = document.getElementById('navigationUsage');
 var singleCellInfo = document.getElementById('singleCellInfo');
 var multiCellInfo = document.getElementById('multiCellInfo');
 var cellSpaceCount = document.getElementById('cellSpaceCount');
@@ -34,13 +38,12 @@ function init(config) {
   setVisible(recheckErrors, fixMode);
   fillOptions(selectedClassification, config.classificationOptions);
   fillOptions(solidClassification, config.classificationOptions);
+  fillStoreyLevels(storeyFromLevel);
+  fillStoreyLevels(storeyToLevel);
   setIcon('convertIcon', config.assetRoot, 'create_cellspace.svg');
   setIcon('changeTypeIcon', config.assetRoot, 'change_cellspace_type.svg');
   applyOverlayColors(config.overlayColors);
-  overlayMinRadius.value = config.minRadius;
-  overlayMaxRadius.value = config.maxRadius;
   updateSelection(null);
-  normalizedOverlayRadiusRange();
   fitDialogToContent();
 }
 
@@ -67,10 +70,21 @@ function applyOverlayColors(colors) {
   document.documentElement.style.setProperty('--overlay-state-soft-color', colors.stateSoft);
 }
 
+function fillStoreyLevels(select) {
+  select.innerHTML = '';
+  for (var value = 1; value <= 99; value += 1) {
+    var element = document.createElement('option');
+    element.value = padLevel(value);
+    element.textContent = padLevel(value);
+    select.appendChild(element);
+  }
+}
+
 function updateSelection(snapshot) {
   var nextMode = snapshot && snapshot.mode ? snapshot.mode : 'empty';
   var nextKey = selectionKey(snapshot);
-  if (nextKey === currentSelectionKey) {
+  var selectionChanged = nextKey !== currentSelectionKey;
+  if (!selectionChanged) {
     return false;
   }
 
@@ -97,7 +111,7 @@ function updateSelection(snapshot) {
 
   currentSelectionKey = nextKey;
   suppressTypeChange = false;
-  return modeChanged;
+  return modeChanged || selectionChanged;
 }
 
 function updateSelectionAndFit(snapshot) {
@@ -114,6 +128,11 @@ function selectionKey(snapshot) {
     snapshot.name || '',
     snapshot.classification || '',
     snapshot.classificationLocked ? 'locked' : 'unlocked',
+    snapshot.storey || '',
+    snapshot.navigationSemanticsEnabled ? 'navi' : 'core',
+    snapshot.navigationClass || '',
+    snapshot.navigationFunction || '',
+    snapshot.navigationUsage || '',
     snapshot.transitionCount || 0,
     snapshot.cellSpaceCount || 0,
     snapshot.solidGroupCount || 0,
@@ -166,6 +185,8 @@ function showEmpty(snapshot) {
 function showCellSpaces(snapshot) {
   hide(singleCellInfo);
   show(multiCellInfo);
+  hide(storeyFields);
+  hide(navigationSemantics);
   cellSpaceCount.textContent = snapshot.cellSpaceCount || 0;
   selectedClassification.value = snapshot.classification || 'GeneralSpace|Room';
   setControlLocked(selectedClassification, document.getElementById('changeType'), snapshot.classificationLocked);
@@ -180,7 +201,28 @@ function showCellSpace(snapshot) {
   transitionCount.textContent = snapshot.transitionCount || 0;
   selectedClassification.value = snapshot.classification || 'GeneralSpace|Room';
   setControlLocked(selectedClassification, document.getElementById('changeType'), snapshot.classificationLocked);
+  setStorey(snapshot.storey || 'F01');
+  setNavigationSemantics(snapshot);
   show(cellPanel);
+}
+
+function setStorey(value) {
+  var parsed = parseStorey(value || 'F01');
+  setVisible(storeyFields, true);
+  storeyFromKind.value = parsed.from.kind;
+  storeyFromLevel.value = parsed.from.level;
+  storeyToKind.value = parsed.to.kind;
+  storeyToLevel.value = parsed.to.level;
+}
+
+function setNavigationSemantics(snapshot) {
+  var enabled = Boolean(snapshot.navigationSemanticsEnabled);
+  setVisible(navigationSemantics, enabled);
+  if (!enabled) return;
+
+  navigationClass.value = snapshot.navigationClass || '';
+  navigationFunction.value = snapshot.navigationFunction || '';
+  navigationUsage.value = snapshot.navigationUsage || '';
 }
 
 function setControlLocked(select, button, locked) {
@@ -197,40 +239,55 @@ function hide(element) {
   element.classList.add('hidden');
 }
 
-function normalizedOverlayRadiusRange() {
-  var minRadius = Number(overlayMinRadius.value);
-  var maxRadius = Number(overlayMaxRadius.value);
-  if (minRadius > maxRadius) {
-    var swap = minRadius;
-    minRadius = maxRadius;
-    maxRadius = swap;
-  }
-  overlayRadiusValue.textContent = minRadius + '-' + maxRadius + ' px';
-  minRadiusPreview.style.width = minRadius + 'px';
-  minRadiusPreview.style.height = minRadius + 'px';
-  maxRadiusPreview.style.width = maxRadius + 'px';
-  maxRadiusPreview.style.height = maxRadius + 'px';
-  return [minRadius, maxRadius];
-}
-
-function previewOverlayRadiusRange() {
-  normalizedOverlayRadiusRange();
-}
-
-function commitOverlayRadiusRange() {
-  var range = normalizedOverlayRadiusRange();
-  sketchup.setOverlayRadiusRange(range[0], range[1]);
-}
-
 function fitDialogToContent() {
   var contentHeight = document.body.scrollHeight;
   sketchup.fitContentHeight(contentHeight);
 }
 
-overlayMinRadius.addEventListener('input', previewOverlayRadiusRange);
-overlayMaxRadius.addEventListener('input', previewOverlayRadiusRange);
-overlayMinRadius.addEventListener('change', commitOverlayRadiusRange);
-overlayMaxRadius.addEventListener('change', commitOverlayRadiusRange);
+function padLevel(value) {
+  return String(value).padStart(2, '0');
+}
+
+function parseStoreyPart(value) {
+  var match = String(value || 'F01').toUpperCase().match(/^([FB])(\d{1,2})$/);
+  if (!match) return { kind: 'F', level: '01' };
+
+  var level = Math.max(1, Math.min(99, Number(match[2]) || 1));
+  return { kind: match[1], level: padLevel(level) };
+}
+
+function parseStorey(value) {
+  var parts = String(value || 'F01').split('~');
+  var from = parseStoreyPart(parts[0]);
+  var to = parseStoreyPart(parts[1] || parts[0]);
+  return { from: from, to: to };
+}
+
+function composeStorey() {
+  var from = storeyFromKind.value + storeyFromLevel.value;
+  var to = storeyToKind.value + storeyToLevel.value;
+  return from === to ? from : from + '~' + to;
+}
+
+function commitStorey() {
+  sketchup.setSelectedCellSpaceStorey(composeStorey());
+}
+
+function commitNavigationSemantics() {
+  sketchup.setSelectedCellSpaceNavigationSemantics(
+    navigationClass.value,
+    navigationFunction.value,
+    navigationUsage.value
+  );
+}
+
+storeyFromKind.addEventListener('change', commitStorey);
+storeyFromLevel.addEventListener('change', commitStorey);
+storeyToKind.addEventListener('change', commitStorey);
+storeyToLevel.addEventListener('change', commitStorey);
+navigationClass.addEventListener('change', commitNavigationSemantics);
+navigationFunction.addEventListener('change', commitNavigationSemantics);
+navigationUsage.addEventListener('change', commitNavigationSemantics);
 solidClassification.addEventListener('change', fitDialogToContent);
 document.getElementById('changeType').addEventListener('click', function () {
   sketchup.setSelectedCellSpaceClassification(selectedClassification.value);
@@ -253,12 +310,17 @@ document.addEventListener('dragstart', function (event) {
   }
 });
 document.addEventListener('keydown', function (event) {
+  if (event.target && event.target.matches('input, textarea')) return;
+
   if ((event.ctrlKey || event.metaKey) && String(event.key).toLowerCase() === 'a') {
     event.preventDefault();
     event.stopPropagation();
   }
 }, true);
 document.addEventListener('selectionchange', function () {
+  var activeElement = document.activeElement;
+  if (activeElement && activeElement.matches('input, textarea')) return;
+
   var selection = window.getSelection && window.getSelection();
   if (!selection || selection.rangeCount === 0) return;
 

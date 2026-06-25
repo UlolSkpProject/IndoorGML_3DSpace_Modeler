@@ -8,7 +8,7 @@ module ULOL
         attr_accessor :elevation
         attr_accessor :height
 
-        DEFAULT_NAME = 'floor_1'
+        DEFAULT_NAME = 'F01'
 
         def initialize(name = DEFAULT_NAME, elevation = nil, height = nil)
           super()

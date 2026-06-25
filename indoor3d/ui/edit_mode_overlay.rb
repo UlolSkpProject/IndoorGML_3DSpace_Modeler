@@ -29,6 +29,8 @@ module ULOL
           [Math.cos(angle), Math.sin(angle)]
         end.freeze
         OVERLAY_RADIUS_SCALE = 1.0
+        OVERLAY_MIN_RADIUS_PIXELS = 1.0
+        OVERLAY_MAX_RADIUS_PIXELS = 7.0
         TRANSITION_DEPTH_OFFSET_PIXELS = 2.0
         TRANSITION_MIN_CURVE_SEGMENTS = 3
         TRANSITION_RIGHT_ANGLE_CURVE_SEGMENTS = 6
@@ -302,7 +304,7 @@ module ULOL
         end
 
         def overlay_transition_line_width
-          [(@indoor_model.overlay_min_radius_pixels.to_f * 1.25).round, 2].max
+          [(OVERLAY_MIN_RADIUS_PIXELS * 1.25).round, 2].max
         end
 
         def transition_curve_segments(transition, primal_tf)
@@ -554,8 +556,8 @@ module ULOL
         end
 
         def clamp_overlay_radius(view, center, model_radius, pixel_scale: 1.0)
-          screen_min_radius = view.pixels_to_model(@indoor_model.overlay_min_radius_pixels * pixel_scale, center)
-          screen_max_radius = view.pixels_to_model(@indoor_model.overlay_max_radius_pixels * pixel_scale, center)
+          screen_min_radius = view.pixels_to_model(OVERLAY_MIN_RADIUS_PIXELS * pixel_scale, center)
+          screen_max_radius = view.pixels_to_model(OVERLAY_MAX_RADIUS_PIXELS * pixel_scale, center)
           [[model_radius, screen_min_radius].max, screen_max_radius].min
         end
 

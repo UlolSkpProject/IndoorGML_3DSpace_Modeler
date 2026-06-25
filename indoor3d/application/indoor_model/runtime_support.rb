@@ -207,14 +207,18 @@ module ULOL
           end
 
           def assign_default_storey_to_unassigned_cell_spaces
-            fallback = ensure_default_storey
+            fallback = default_storey_name
             @cell_spaces.each do |cell_space|
               next unless cell_space
-              next if find_storey_by_id(cell_space.storey_id)
+              next unless cell_space.storey.to_s.empty?
 
-              cell_space.storey_id = fallback&.id
+              cell_space.set_storey(fallback)
               write_cell_space_attributes(cell_space) if cell_space.valid?
             end
+          end
+
+          def default_storey_name
+            default_storey&.name || Storey::DEFAULT_NAME
           end
 
           def with_unlocked(entity)

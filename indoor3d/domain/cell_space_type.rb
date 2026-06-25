@@ -24,12 +24,23 @@ module ULOL
           CONNECTION
         ].freeze
 
+        remove_const(:NAVIGABLE_TYPES) if const_defined?(:NAVIGABLE_TYPES, false)
+        NAVIGABLE_TYPES = [
+          GENERAL,
+          TRANSITION,
+          CONNECTION
+        ].freeze
+
         def self.label(value)
           LABELS[value] || LABELS[GENERAL]
         end
 
         def self.from_label(label)
           LABELS.key(label) || GENERAL
+        end
+
+        def self.navigable?(value)
+          NAVIGABLE_TYPES.include?(value)
         end
 
         def self.selectable_labels
