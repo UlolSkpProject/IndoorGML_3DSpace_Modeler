@@ -61,8 +61,12 @@ module ULOL
           def finish_editing
             @finishing_editing = true
             @editor_session.restore_validation_focus_visibility if @editor_session.validation_focus_active?
-            normalize_primal_children_for_finish()
-            @editor_session.finish()
+            finished = @editor_session.finish()
+            if finished
+              normalize_primal_children_for_finish()
+            #   refresh_runtime_data()
+            end
+            finished
           ensure
             @finishing_editing = false
           end

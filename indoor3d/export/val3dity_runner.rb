@@ -908,7 +908,7 @@ module ULOL
                   main { max-width: 450px; margin: 0 auto; padding: 0 10px; }
                   .hero { padding: 10px 0 16px; border-bottom: 1px solid #373633; }
                   .hero-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-                  .hero-title { display: flex; align-items: center; min-height: 31px; }
+                  .hero-title { display: flex; align-items: center; gap: 7px; min-height: 31px; }
                   .top-meta { margin-bottom: 12px; color: #85827b; font-size: 11px; line-height: 1.55; }
                   .eyebrow { margin-bottom: 6px; color: #85827b; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
                   h1 { margin: 0; color: #e8e6e0; font-size: 22px; line-height: 1.15; }
@@ -916,6 +916,8 @@ module ULOL
                   .result-badge { display: inline-flex; align-items: center; padding: 5px 13px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
                   .result-badge.valid { color: #3ebc71; background: #12261a; border: 1px solid #327a4f; }
                   .result-badge.invalid { color: #f97066; background: #351918; border: 1px solid #7a2e2a; }
+                  .fix-action { display: inline-flex; align-items: center; padding: 5px 13px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; color: #8ab4f8; background: #17243b; border: 1px solid #315d9b; cursor: pointer; }
+                  .fix-action:hover { background: #1d2d4a; border-color: #4278c7; }
                   .result-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
                   .result-metric { min-height: 64px; padding: 11px 14px; background: #242422; border-radius: 8px; }
                   .metric-value { display: block; color: #3ebc71; font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
@@ -1003,6 +1005,7 @@ module ULOL
             inconclusive = overlap_recheck_inconclusive_count(raw_report)
             primitive_value = "#{valid_count(raw_report['primitives_overview'])} / #{total_count(raw_report['primitives_overview'])}"
             badge_class = validity ? 'result-badge valid' : 'result-badge invalid'
+            fix_button = validity ? '' : '<button class="fix-action" type="button" onclick="if (window.sketchup && sketchup.fixValidationErrors) { sketchup.fixValidationErrors(); }">FIX</button>'
             message = result_hero_message(raw_report, final_errors, suppressed, kept, inconclusive)
             <<~HTML
               <section class="hero">
@@ -1011,6 +1014,7 @@ module ULOL
                     <div class="eyebrow">IndoorGML · val3dity #{html_escape(raw_report['val3dity_version'] || 'unknown')}</div>
                     <div class="hero-title">
                       <span class="#{badge_class}">#{validity ? 'VALID' : 'INVALID'}</span>
+                      #{fix_button}
                     </div>
                     <p class="result-message">#{html_escape(message)}</p>
                   </div>
