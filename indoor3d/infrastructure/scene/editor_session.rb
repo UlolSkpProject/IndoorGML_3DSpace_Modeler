@@ -32,6 +32,7 @@ module ULOL
           @validation_highlight_cell_ids = nil
           @validation_highlight_code = nil
           @validation_focus_visibility = {}
+          @validation_focus_hide_rest_previous = nil
         end
 
         def editing?
@@ -113,8 +114,10 @@ module ULOL
           return false if ids.empty?
 
           @validation_focus_cell_ids = ids.each_with_object({}) { |id, memo| memo[id] = true }
+          capture_and_apply_validation_focus_rendering_options(ids.length)
           started = @editing ? true : begin_editing
           unless started
+            restore_validation_focus_rendering_options
             clear_validation_focus
             return false
           end
@@ -140,6 +143,7 @@ module ULOL
             @editing = false
             @editable_entity_ids = {}
             @editing_active_path_target = nil
+            restore_validation_focus_rendering_options
             clear_validation_focus
             @indoor_model.detach_edit_selection_observer(model)
             close_active_path(model)
@@ -377,6 +381,31 @@ module ULOL
           @validation_focus_visibility = {}
         end
 
+        def capture_and_apply_validation_focus_rendering_options(focus_cell_count)
+          return unless focus_cell_count.to_i >= 2
+
+          options = Sketchup.active_model&.rendering_options
+          return unless options
+
+          @validation_focus_hide_rest_previous = options['HideRestOfModel'] if @validation_focus_hide_rest_previous.nil?
+          options['HideRestOfModel'] = false
+          Sketchup.active_model&.active_view&.invalidate
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Validation focus rendering option update failed: #{e.class}: #{e.message}"
+        end
+
+        def restore_validation_focus_rendering_options
+          return if @validation_focus_hide_rest_previous.nil?
+
+          options = Sketchup.active_model&.rendering_options
+          options['HideRestOfModel'] = @validation_focus_hide_rest_previous unless options.nil?
+          @validation_focus_hide_rest_previous = nil
+          Sketchup.active_model&.active_view&.invalidate
+        rescue StandardError => e
+          @validation_focus_hide_rest_previous = nil
+          IndoorCore::Logger.puts "[IndoorGML] Validation focus rendering option restore failed: #{e.class}: #{e.message}"
+        end
+
         def validation_focus_cell_gml_id(cell_space)
           "cell_#{cell_space.id.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')}"
         end
@@ -432,6 +461,7 @@ module ULOL
             @editable_entity_ids = {}
             @editing_active_path_target = nil
             @previous_active_path = nil
+            restore_validation_focus_rendering_options
             clear_validation_focus
             @progress = nil
             set_overlay_enabled(false)

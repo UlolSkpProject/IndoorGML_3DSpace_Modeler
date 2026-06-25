@@ -327,7 +327,7 @@ module ULOL
           return { default: control_points, first: [], second: [] } if control_points.length < 3
 
           @transition_curve_cache ||= {}
-          key = transition.id
+          key = transition_curve_cache_key(transition, control_points)
           cached = @transition_curve_cache[key]
           return cached if cached
 
@@ -337,6 +337,29 @@ module ULOL
             { default: control_points, first: [], second: [] }
           @transition_curve_cache[key] = groups
           groups
+        end
+
+        def transition_curve_cache_key(transition, control_points)
+          [
+            transition.id,
+            control_points.map { |point| rounded_point_key(point) },
+            rounded_vector_key(transition.selected_waypoint_normal1),
+            rounded_vector_key(transition.selected_waypoint_normal2)
+          ]
+        rescue StandardError
+          [transition.id, Time.now.to_f]
+        end
+
+        def rounded_point_key(point)
+          return nil unless point.is_a?(Geom::Point3d)
+
+          [point.x.to_f.round(6), point.y.to_f.round(6), point.z.to_f.round(6)]
+        end
+
+        def rounded_vector_key(vector)
+          return nil unless vector.is_a?(Geom::Vector3d)
+
+          [vector.x.to_f.round(6), vector.y.to_f.round(6), vector.z.to_f.round(6)]
         end
 
         def transition_curve_cache_limit

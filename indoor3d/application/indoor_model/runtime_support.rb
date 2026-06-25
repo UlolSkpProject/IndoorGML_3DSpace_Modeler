@@ -19,6 +19,7 @@ module ULOL
                 ensure_default_storey
                 assign_default_storey_to_unassigned_cell_spaces
                 write_storey_attributes
+                recenter_runtime_cell_spaces
                 rebuild_runtime_transitions_from_cell_adjacency
               end
               invalidate_overlay_transition_points
@@ -72,6 +73,17 @@ module ULOL
             @dirty_cell_space_pids.clear
             @cell_space_sync_scheduled = false
             bind_registry_collections
+          end
+
+          def recenter_runtime_cell_spaces
+            @cell_spaces.each do |cell_space|
+              next unless cell_space&.valid?
+
+              recenter_cell_space_origin(cell_space)
+              write_cell_space_attributes(cell_space)
+            rescue StandardError => e
+              IndoorCore::Logger.puts "[IndoorGML] Runtime CellSpace recenter skipped: cell=#{cell_space&.id} #{e.class}: #{e.message}"
+            end
           end
 
           def clear_indoor_gml_groups

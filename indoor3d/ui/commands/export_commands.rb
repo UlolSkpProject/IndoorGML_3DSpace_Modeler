@@ -254,6 +254,9 @@ module ULOL
             refs = { cells: cell_ids, states: state_ids, transitions: transition_ids }
             IndoorModel.current.set_validation_focus_highlight(validation_focus_cell_ids_for_refs(refs), code)
           end
+          progress&.on_fix_validation_errors do
+            begin_validation_report_edit_mode(result.report) unless result.valid?
+          end
 
           if result.error?
             progress&.fail(:val3dity)
@@ -320,6 +323,8 @@ module ULOL
         end
 
         def begin_validation_report_edit_mode(report)
+          return false if IndoorModel.current.validation_focus_active?
+
           cell_ids = validation_report_error_focus_cell_ids(report)
           return false if cell_ids.empty?
 
