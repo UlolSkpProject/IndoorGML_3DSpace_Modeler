@@ -933,6 +933,15 @@ module ULOL
                   .report-action:hover { background: #173420; }
                   .recheck-list { display: grid; gap: 8px; }
                   .recheck-row { background: #242422; border: 1px solid #2f2e2b; border-radius: 8px; }
+                  .recheck-row.focused { border-color: #ef4444; box-shadow: inset 0 0 0 1px rgba(239, 68, 68, .55); }
+                  .recheck-row.c100.focused { border-color: #f87171; box-shadow: inset 0 0 0 1px rgba(248, 113, 113, .6); }
+                  .recheck-row.c200.focused { border-color: #74d66f; box-shadow: inset 0 0 0 1px rgba(116, 214, 111, .6); }
+                  .recheck-row.c300.focused { border-color: #f6b45b; box-shadow: inset 0 0 0 1px rgba(246, 180, 91, .6); }
+                  .recheck-row.c400.focused { border-color: #22d3ee; box-shadow: inset 0 0 0 1px rgba(34, 211, 238, .6); }
+                  .recheck-row.c500.focused { border-color: #bbf7b8; box-shadow: inset 0 0 0 1px rgba(187, 247, 184, .6); }
+                  .recheck-row.c600.focused { border-color: #d6a36d; box-shadow: inset 0 0 0 1px rgba(214, 163, 109, .6); }
+                  .recheck-row.c700.focused { border-color: #f472b6; box-shadow: inset 0 0 0 1px rgba(244, 114, 182, .6); }
+                  .recheck-row.c900.focused { border-color: #fef08a; box-shadow: inset 0 0 0 1px rgba(254, 240, 138, .6); }
                   .recheck-row summary { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 8px 9px; cursor: pointer; list-style: none; }
                   .recheck-row summary::-webkit-details-marker { display: none; }
                   .recheck-row[open] summary { border-bottom: 1px solid #33322f; }
@@ -943,6 +952,14 @@ module ULOL
                   .recheck-detail { display: grid; gap: 6px; padding: 8px 9px 9px; }
                   .code-badge { display: inline-flex; align-items: center; padding: 3px 7px; border-radius: 5px; background: #1d355d; color: #8ab4f8; font-family: Consolas, Monaco, monospace; font-size: 11px; font-weight: 700; }
                   .code-badge.c704 { background: #443815; color: #e5c567; }
+                  .code-badge.c100 { background: #451a1a; color: #fca5a5; }
+                  .code-badge.c200 { background: #16351a; color: #86efac; }
+                  .code-badge.c300 { background: #44270d; color: #fdba74; }
+                  .code-badge.c400 { background: #083344; color: #67e8f9; }
+                  .code-badge.c500 { background: #1b3a1b; color: #bbf7d0; }
+                  .code-badge.c600 { background: #3b2716; color: #d6a36d; }
+                  .code-badge.c700 { background: #4a1735; color: #f9a8d4; }
+                  .code-badge.c900 { background: #3f3b12; color: #fef08a; }
                   .status-badge { color: #3ebc71; font-size: 11px; font-weight: 700; text-transform: uppercase; }
                   .status-badge.kept, .status-badge.inconclusive { color: #f9b84e; }
                   .cell-pair { display: grid; gap: 3px; min-width: 0; color: #d8d6d0; font-family: Consolas, Monaco, monospace; font-size: 11px; line-height: 1.35; }
@@ -1215,9 +1232,9 @@ module ULOL
             code = row['code'].to_s
             distance = format_report_distance_mm(row['distance_mm'])
             <<~HTML
-              <details class="recheck-row" data-code="#{html_escape(code)}">
+              <details class="recheck-row #{error_code_color_class(code)}" data-code="#{html_escape(code)}">
                 <summary>
-                  <span class="code-badge #{code == '704' ? 'c704' : ''}">#{html_escape(code)}</span>
+                  <span class="code-badge #{error_code_color_class(code)}">#{html_escape(code)}</span>
                   <span class="recheck-summary-main">
                     <span class="cell-name" title="#{html_escape(cells.join(' / '))}">#{html_escape(compact_cell_pair(cells))}</span>
                   </span>
@@ -1255,9 +1272,48 @@ module ULOL
             (row.respond_to?(:[]) && (row['code'] || row[:code])).to_s
           end
 
+          def error_code_color_class(code)
+            number = error_code_number(code)
+            return 'c100' if (100..199).include?(number)
+            return 'c200' if (200..299).include?(number)
+            return 'c300' if (300..399).include?(number)
+            return 'c400' if (400..499).include?(number)
+            return 'c500' if (500..599).include?(number)
+            return 'c600' if (600..699).include?(number)
+            return 'c700' if (700..799).include?(number)
+            return 'c900' if (900..999).include?(number)
+
+            ''
+          end
+
           def report_filter_script
             <<~HTML
               <script>
+                document.querySelectorAll('.validation-error-row').forEach(function(row) {
+                  row.addEventListener('click', function(event) {
+                    event.stopPropagation();
+                    var cells = (row.getAttribute('data-cells') || '').split(',').filter(Boolean);
+                    var states = (row.getAttribute('data-states') || '').split(',').filter(Boolean);
+                    var transitions = (row.getAttribute('data-transitions') || '').split(',').filter(Boolean);
+                    var code = row.getAttribute('data-code') || '';
+                    document.querySelectorAll('.validation-error-row.focused').forEach(function(item) {
+                      item.classList.remove('focused');
+                    });
+                    row.classList.add('focused');
+                    if ((cells.length > 0 || states.length > 0 || transitions.length > 0) && typeof sketchup !== 'undefined' && sketchup.focusValidationCells) {
+                      sketchup.focusValidationCells(cells, code, states, transitions);
+                    }
+                  });
+                });
+                document.addEventListener('click', function(event) {
+                  if (event.target.closest('.validation-error-row') || event.target.closest('.filter-btn')) return;
+                  document.querySelectorAll('.validation-error-row.focused').forEach(function(item) {
+                    item.classList.remove('focused');
+                  });
+                  if (typeof sketchup !== 'undefined' && sketchup.focusValidationCells) {
+                    sketchup.focusValidationCells([], '', [], []);
+                  }
+                });
                 document.querySelectorAll('.section .filter-btn').forEach(function(button) {
                   button.addEventListener('click', function() {
                     var section = button.closest('.section');
@@ -2232,10 +2288,11 @@ module ULOL
             code = row[:code].to_s
             recheck_row = matching_error_recheck_row(row, raw_report)
             distance = recheck_row ? format_report_recheck_measure(recheck_row) : ''
+            refs = report_error_row_refs(row)
             <<~HTML
-              <details class="recheck-row" data-code="#{html_escape(code)}">
+              <details class="recheck-row validation-error-row #{error_code_color_class(code)}" data-code="#{html_escape(code)}" data-cells="#{html_escape(refs[:cells].join(','))}" data-states="#{html_escape(refs[:states].join(','))}" data-transitions="#{html_escape(refs[:transitions].join(','))}">
                 <summary>
-                  <span class="code-badge #{code == '704' ? 'c704' : ''}">#{html_escape(code)}</span>
+                  <span class="code-badge #{error_code_color_class(code)}">#{html_escape(code)}</span>
                   <span class="recheck-summary-main">
                     <span class="cell-name" title="#{html_escape(error_item_label(row))}">#{html_escape(error_item_label(row))}</span>
                   </span>
@@ -2254,10 +2311,7 @@ module ULOL
             return nil unless [701, 704].include?(code)
             return nil unless raw_report
 
-            text = [row[:item], row[:description], row[:raw]].map do |value|
-              value.is_a?(Hash) ? value.to_json : value.to_s
-            end.join(' ')
-            cells = text.scan(/cell_[A-Za-z0-9_.-]+/).uniq
+            cells = report_error_row_refs(row)[:cells]
             return nil if cells.length < 2
 
             overlap_recheck_rows(raw_report).find do |recheck_row|
@@ -2273,6 +2327,17 @@ module ULOL
             return format_report_scientific(row['actual_overlap_volume_mm3'], 'mm<sup>3</sup>') unless row['actual_overlap_volume_mm3'].nil?
 
             ''
+          end
+
+          def report_error_row_refs(row)
+            text = [row[:item], row[:description], row[:raw]].map do |value|
+              value.is_a?(Hash) ? value.to_json : value.to_s
+            end.join(' ')
+            {
+              cells: text.scan(/cell_[A-Za-z0-9_.-]+/).uniq,
+              states: text.scan(/state_[A-Za-z0-9_.-]+/).uniq,
+              transitions: text.scan(/transition_[A-Za-z0-9_.-]+/).uniq
+            }
           end
 
           def error_item_label(row)

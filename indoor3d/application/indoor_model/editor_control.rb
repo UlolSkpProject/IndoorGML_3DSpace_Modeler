@@ -9,8 +9,31 @@ module ULOL
             @editor_session.begin_editing()
           end
 
+          def begin_validation_focus_editing(cell_gml_ids)
+            @editor_session.begin_validation_focus_editing(cell_gml_ids)
+          end
+
+          def set_validation_focus_highlight(cell_gml_ids, code = nil)
+            @editor_session.set_validation_focus_highlight(cell_gml_ids, code)
+          end
+
+          def recheck_validation_focus_errors
+            focus = @editor_session.validation_focus_elements
+            UI.messagebox(
+              "오류 요소 재검사 대상\n" \
+              "CellSpace: #{focus[:cell_spaces].length}\n" \
+              "State: #{focus[:states].length}\n" \
+              "Transition: #{focus[:transitions].length}"
+            )
+            focus
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck failed: #{e.class}: #{e.message}"
+            nil
+          end
+
           def finish_editing
             @finishing_editing = true
+            @editor_session.restore_validation_focus_visibility if @editor_session.validation_focus_active?
             normalize_primal_children_for_finish()
             @editor_session.finish()
           ensure
@@ -64,6 +87,26 @@ module ULOL
 
           def cell_space_geometry_editing?
             @editor_session.cell_space_geometry_editing?()
+          end
+
+          def validation_focus_active?
+            @editor_session.validation_focus_active?
+          end
+
+          def validation_focus_cell_space?(cell_space)
+            @editor_session.validation_focus_cell_space?(cell_space)
+          end
+
+          def validation_focus_state?(state)
+            @editor_session.validation_focus_state?(state)
+          end
+
+          def validation_focus_highlight_cell_spaces
+            @editor_session.validation_focus_highlight_cell_spaces
+          end
+
+          def validation_focus_highlight_code
+            @editor_session.validation_focus_highlight_code
           end
 
           def invalidate_overlay_transition_points

@@ -219,6 +219,11 @@ button {
   text-align: left;
 }
 
+.command.no-icon {
+  grid-template-columns: minmax(0, 1fr);
+  text-align: center;
+}
+
 .command img {
   width: 18px;
   height: 18px;

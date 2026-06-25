@@ -63,7 +63,7 @@ module ULOL
         def build_dialog
           @suppress_close_callback = false
           dialog = UI::HtmlDialog.new(
-            dialog_title: 'IndoorGML Edit Mode',
+            dialog_title: @indoor_model.validation_focus_active? ? 'IndoorGML Fix Mode' : 'IndoorGML Edit Mode',
             preferences_key: 'ULOL.Indoor3DGmlModeler.EditMode',
             scrollable: false,
             resizable: false,
@@ -110,6 +110,12 @@ module ULOL
               @indoor_model.clear_all_indoor_gml_elements()
             end
           end
+          dialog.add_action_callback('recheckFixModeErrors') do |_context|
+            IndoorCore::Logger.puts '[IndoorGML] EditModeDialog#recheckFixModeErrors'
+            UI.start_timer(0, false) do
+              @indoor_model.recheck_validation_focus_errors()
+            end
+          end
           dialog.set_on_closed do
             IndoorCore::Logger.puts "[IndoorGML] set_on_closed called, editing=#{@indoor_model.editing?}"
             if @suppress_close_callback
@@ -148,7 +154,7 @@ module ULOL
             "{value: #{js_string(option[:value])}, label: #{js_string(option[:label])}}"
           end.join(', ')
 
-          "init({minRadius: #{overlay_min_radius}, maxRadius: #{overlay_max_radius}, classificationOptions: [#{options}], assetRoot: #{js_string(asset_root)}, overlayColors: #{overlay_colors_script}});"
+          "init({minRadius: #{overlay_min_radius}, maxRadius: #{overlay_max_radius}, classificationOptions: [#{options}], assetRoot: #{js_string(asset_root)}, overlayColors: #{overlay_colors_script}, fixMode: #{@indoor_model.validation_focus_active? ? 'true' : 'false'}});"
         end
 
         def overlay_colors_script
