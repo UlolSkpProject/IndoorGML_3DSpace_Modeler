@@ -276,6 +276,15 @@ window.addEventListener('load', function () {
   sketchup.domReady();
   fitDialogToContent();
 });
+document.addEventListener('dragstart', function (event) {
+  event.preventDefault();
+});
+document.addEventListener('keydown', function (event) {
+  if ((event.ctrlKey || event.metaKey) && String(event.key).toLowerCase() === 'a') {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+}, true);
 window.addEventListener('DOMContentLoaded', function () {
   init(defaultSteps);
   updateCancelVisibility();

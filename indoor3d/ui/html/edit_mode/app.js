@@ -247,6 +247,31 @@ document.getElementById('clearAll').addEventListener('click', function () {
 recheckErrors.addEventListener('click', function () {
   sketchup.recheckFixModeErrors();
 });
+document.addEventListener('dragstart', function (event) {
+  if (!event.target.closest('.copyable-cell-id')) {
+    event.preventDefault();
+  }
+});
+document.addEventListener('keydown', function (event) {
+  if ((event.ctrlKey || event.metaKey) && String(event.key).toLowerCase() === 'a') {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+}, true);
+document.addEventListener('selectionchange', function () {
+  var selection = window.getSelection && window.getSelection();
+  if (!selection || selection.rangeCount === 0) return;
+
+  var anchor = selection.anchorNode && selection.anchorNode.nodeType === Node.ELEMENT_NODE ?
+    selection.anchorNode :
+    selection.anchorNode && selection.anchorNode.parentElement;
+  var focus = selection.focusNode && selection.focusNode.nodeType === Node.ELEMENT_NODE ?
+    selection.focusNode :
+    selection.focusNode && selection.focusNode.parentElement;
+  if ((anchor && anchor.closest('.copyable-cell-id')) && (focus && focus.closest('.copyable-cell-id'))) return;
+
+  selection.removeAllRanges();
+});
 window.addEventListener('load', function () {
   sketchup.domReady();
 });
