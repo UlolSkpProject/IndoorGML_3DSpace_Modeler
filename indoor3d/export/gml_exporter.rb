@@ -460,9 +460,8 @@ module ULOL
           end
 
           def storey_name_for(cell_space)
-            storey = @indoor_model.find_storey_by_id(cell_space&.storey_id) if @indoor_model.respond_to?(:find_storey_by_id)
-            storey ||= @indoor_model.default_storey if @indoor_model.respond_to?(:default_storey)
-            storey&.name.to_s.empty? ? Storey::DEFAULT_NAME : storey.name
+            storey = cell_space&.storey.to_s
+            storey.empty? ? Storey::DEFAULT_NAME : storey
           end
 
           def indoor_description_type(cell_space)

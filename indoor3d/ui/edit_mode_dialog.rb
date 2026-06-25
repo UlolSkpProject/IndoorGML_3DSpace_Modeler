@@ -8,9 +8,9 @@ module ULOL
         include Utils::HtmlHelpers
         
         DIALOG_WIDTH = 280
-        INITIAL_DIALOG_HEIGHT = 320
+        INITIAL_DIALOG_HEIGHT = 360
         MIN_DIALOG_HEIGHT = 260
-        MAX_DIALOG_HEIGHT = 620
+        MAX_DIALOG_HEIGHT = 760
         CONTENT_PADDING_HEIGHT = 8
         DIALOG_WINDOW_CHROME_HEIGHT = 44
         def initialize(indoor_model)
@@ -77,20 +77,26 @@ module ULOL
           dialog.add_action_callback('domReady') do |_context|
             dialog.execute_script(init_script)
           end
-          dialog.add_action_callback('setOverlayMinRadius') do |_context, radius_pixels|
-            UI.start_timer(0, false) do
-              @indoor_model.set_overlay_min_radius_pixels(radius_pixels)
-            end
-          end
-          dialog.add_action_callback('setOverlayRadiusRange') do |_context, min_radius_pixels, max_radius_pixels|
-            UI.start_timer(0, false) do
-              @indoor_model.set_overlay_radius_pixel_range(min_radius_pixels, max_radius_pixels)
-            end
-          end
           dialog.add_action_callback('setSelectedCellSpaceClassification') do |_context, selection_value|
             IndoorCore::Logger.puts "[IndoorGML] EditModeDialog#setSelectedCellSpaceClassification value=#{selection_value}"
             UI.start_timer(0, false) do
               @indoor_model.set_selected_cell_space_classification(selection_value)
+            end
+          end
+          dialog.add_action_callback('setSelectedCellSpaceNavigationSemantics') do |_context, navigation_class, navigation_function, navigation_usage|
+            IndoorCore::Logger.puts '[IndoorGML] EditModeDialog#setSelectedCellSpaceNavigationSemantics'
+            UI.start_timer(0, false) do
+              @indoor_model.set_selected_cell_space_navigation_semantics(
+                navigation_class,
+                navigation_function,
+                navigation_usage
+              )
+            end
+          end
+          dialog.add_action_callback('setSelectedCellSpaceStorey') do |_context, storey|
+            IndoorCore::Logger.puts "[IndoorGML] EditModeDialog#setSelectedCellSpaceStorey value=#{storey}"
+            UI.start_timer(0, false) do
+              @indoor_model.set_selected_cell_space_storey(storey)
             end
           end
           dialog.add_action_callback('convertSelectedSolidGroups') do |_context, selection_value|
@@ -147,14 +153,12 @@ module ULOL
         end
 
         def init_script
-          overlay_min_radius = @indoor_model.overlay_min_radius_pixels.round
-          overlay_max_radius = @indoor_model.overlay_max_radius_pixels.round
           asset_root = File.expand_path('..', __dir__).tr('\\', '/')
           options = CellSpaceCategory.selection_options.map do |option|
             "{value: #{js_string(option[:value])}, label: #{js_string(option[:label])}}"
           end.join(', ')
 
-          "init({minRadius: #{overlay_min_radius}, maxRadius: #{overlay_max_radius}, classificationOptions: [#{options}], assetRoot: #{js_string(asset_root)}, overlayColors: #{overlay_colors_script}, fixMode: #{@indoor_model.validation_focus_active? ? 'true' : 'false'}});"
+          "init({classificationOptions: [#{options}], assetRoot: #{js_string(asset_root)}, overlayColors: #{overlay_colors_script}, fixMode: #{@indoor_model.validation_focus_active? ? 'true' : 'false'}});"
         end
 
         def overlay_colors_script
@@ -181,6 +185,11 @@ module ULOL
                 categoryCode: #{js_string(snapshot[:category_code])},
                 classification: #{snapshot[:classification].nil? ? 'null' : js_string(snapshot[:classification])},
                 classificationLocked: #{snapshot[:classification_locked] ? 'true' : 'false'},
+                storey: #{js_string(snapshot[:storey])},
+                navigationSemanticsEnabled: #{snapshot[:navigation_semantics_enabled] ? 'true' : 'false'},
+                navigationClass: #{js_string(snapshot[:navigation_class])},
+                navigationFunction: #{js_string(snapshot[:navigation_function])},
+                navigationUsage: #{js_string(snapshot[:navigation_usage])},
                 transitionCount: #{snapshot[:transition_count].to_i},
                 cellSpaceCount: #{snapshot[:cell_space_count].to_i},
                 solidGroupCount: #{snapshot[:solid_group_count].to_i},

@@ -16,9 +16,11 @@ module ULOL
         attr_accessor :navigation_function
         attr_accessor :navigation_usage
         attr_accessor :navigation_code_space
-        attr_accessor :storey_id
+        attr_accessor :storey
         attr_accessor :editable
         attr_reader :duality_state
+
+        DEFAULT_STOREY = Storey::DEFAULT_NAME
 
         def initialize(sketchup_group, cell_type = CellSpaceType::GENERAL, category_code = nil)
           self.class.validate_sketchup_group!(sketchup_group)
@@ -30,6 +32,7 @@ module ULOL
           @cell_type = cell_type
           set_category(category_code)
           apply_default_navigation_semantics
+          @storey = DEFAULT_STOREY
           @editable = false
           @duality_state = nil
         end
@@ -73,11 +76,28 @@ module ULOL
           @sketchup_group.erase! if valid?
         end
 
-        def self.restore(sketchup_group, cell_type, id: nil, name: nil, category_code: nil, category_label: nil, category_code_space: nil, category_standard: nil, navigation_class: nil, navigation_function: nil, navigation_usage: nil, navigation_code_space: nil, storey_id: nil)
+        def navigable?
+          CellSpaceType.navigable?(@cell_type)
+        end
+
+        def set_navigation_semantics(navigation_class:, navigation_function:, navigation_usage:)
+          return false unless navigable?
+
+          @navigation_class = normalize_navigation_semantic(navigation_class, fallback: @navigation_class)
+          @navigation_function = normalize_navigation_semantic(navigation_function, fallback: @navigation_function)
+          @navigation_usage = normalize_navigation_semantic(navigation_usage, fallback: @navigation_usage)
+          true
+        end
+
+        def set_storey(value)
+          @storey = normalize_storey(value)
+        end
+
+        def self.restore(sketchup_group, cell_type, id: nil, name: nil, category_code: nil, category_label: nil, category_code_space: nil, category_standard: nil, navigation_class: nil, navigation_function: nil, navigation_usage: nil, navigation_code_space: nil, storey: nil, storey_id: nil)
           validate_sketchup_group!(sketchup_group)
 
           cell_space = allocate
-          cell_space.send(:initialize_restored, sketchup_group, cell_type, id, name, category_code, category_label, category_code_space, category_standard, navigation_class, navigation_function, navigation_usage, navigation_code_space, storey_id)
+          cell_space.send(:initialize_restored, sketchup_group, cell_type, id, name, category_code, category_label, category_code_space, category_standard, navigation_class, navigation_function, navigation_usage, navigation_code_space, storey, storey_id)
           cell_space
         end
 
@@ -97,7 +117,7 @@ module ULOL
 
         private
 
-        def initialize_restored(sketchup_group, cell_type, id, name, category_code, category_label, category_code_space, category_standard, navigation_class, navigation_function, navigation_usage, navigation_code_space, storey_id)
+        def initialize_restored(sketchup_group, cell_type, id, name, category_code, category_label, category_code_space, category_standard, navigation_class, navigation_function, navigation_usage, navigation_code_space, storey, storey_id)
           @sketchup_group = sketchup_group
           @sketchup_group_id = sketchup_group.persistent_id
           @cell_type = cell_type
@@ -106,7 +126,7 @@ module ULOL
           @navigation_function = blank_to_nil(navigation_function) || @navigation_function
           @navigation_usage = blank_to_nil(navigation_usage) || @navigation_usage
           @navigation_code_space = blank_to_nil(navigation_code_space) || @navigation_code_space
-          @storey_id = blank_to_nil(storey_id)
+          @storey = normalize_storey(blank_to_nil(storey) || legacy_storey_value(storey_id))
           @editable = false
           @duality_state = nil
           @id = id unless id.to_s.empty?
@@ -114,12 +134,40 @@ module ULOL
         end
 
         def apply_default_navigation_semantics
+          return clear_navigation_semantics unless navigable?
+
           default_code = @category_label.to_s.empty? ? @category_code.to_s : @category_label.to_s
           default_code = CellSpaceType.label(@cell_type) if default_code.empty?
           @navigation_class = default_code
           @navigation_function = default_code
           @navigation_usage = default_code
           @navigation_code_space = @category_code_space
+        end
+
+        def clear_navigation_semantics
+          @navigation_class = nil
+          @navigation_function = nil
+          @navigation_usage = nil
+          @navigation_code_space = nil
+        end
+
+        def normalize_navigation_semantic(value, fallback:)
+          normalized = value.to_s.strip
+          normalized.empty? ? fallback.to_s : normalized
+        end
+
+        def normalize_storey(value)
+          normalized = value.to_s.strip.upcase
+          return DEFAULT_STOREY if normalized.empty?
+
+          normalized = normalized.gsub(/\AFLOOR_?(\d{1,2})\z/, 'F\1')
+          normalized = normalized.gsub(/\A([FB])(\d{1})\z/) { "#{$1}0#{$2}" }
+          normalized = normalized.gsub(/~([FB])(\d{1})\z/) { "~#{$1}0#{$2}" }
+          normalized.match?(/\A[FB](0[1-9]|[1-9][0-9])(?:~[FB](0[1-9]|[1-9][0-9]))?\z/) ? normalized : DEFAULT_STOREY
+        end
+
+        def legacy_storey_value(value)
+          value.to_s.match?(/\A[FB]\d{1,2}(?:~[FB]\d{1,2})?\z/i) ? value : DEFAULT_STOREY
         end
 
         def blank_to_nil(value)

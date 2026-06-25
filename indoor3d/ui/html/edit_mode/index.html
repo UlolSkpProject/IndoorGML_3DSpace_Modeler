@@ -48,20 +48,29 @@
         <img id="changeTypeIcon" alt="">
         <span>선택한 CellSpace 타입 변경</span>
       </button>
-    </section>
-
-    <section class="mode-panel">
-      <div class="range-header">
-        <label class="field-label" for="overlayMinRadius">Overlay 반지름 범위</label>
-        <output id="overlayRadiusValue"></output>
+      <div id="storeyFields" class="storey-fields hidden">
+        <div class="field-label">층 범위</div>
+        <div class="storey-range">
+          <select id="storeyFromKind">
+            <option value="F">지상</option>
+            <option value="B">지하</option>
+          </select>
+          <select id="storeyFromLevel"></select>
+          <span>~</span>
+          <select id="storeyToKind">
+            <option value="F">지상</option>
+            <option value="B">지하</option>
+          </select>
+          <select id="storeyToLevel"></select>
+        </div>
       </div>
-      <div class="radius-preview" aria-hidden="true">
-        <span id="maxRadiusPreview" class="radius-circle max"></span>
-        <span id="minRadiusPreview" class="radius-circle min"></span>
-      </div>
-      <div class="range-row">
-        <input id="overlayMinRadius" type="range" min="1" max="15" step="1">
-        <input id="overlayMaxRadius" type="range" min="7" max="25" step="1">
+      <div id="navigationSemantics" class="semantic-fields hidden">
+        <label class="field-label" for="navigationClass">Class <small>공간 분류</small></label>
+        <input id="navigationClass" type="text" spellcheck="false">
+        <label class="field-label" for="navigationFunction">Function <small>설계상 역할</small></label>
+        <input id="navigationFunction" type="text" spellcheck="false">
+        <label class="field-label" for="navigationUsage">Usage <small>사용/접근 성격</small></label>
+        <input id="navigationUsage" type="text" spellcheck="false">
       </div>
     </section>
 

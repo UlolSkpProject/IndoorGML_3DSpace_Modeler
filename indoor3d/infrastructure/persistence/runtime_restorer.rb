@@ -49,20 +49,21 @@ module ULOL
         end
 
         def restore_cell_space(entity)
+          storey = @serializer.attribute(entity, 'storey')
+          if storey.to_s.empty?
+            legacy_storey = @registry.find_storey_by_id(@serializer.attribute(entity, 'storey_id'))
+            storey = legacy_storey&.name
+          end
+
           CellSpace.restore(
             entity,
             CellSpaceType.from_label(@serializer.attribute(entity, 'cell_type')),
             id: @serializer.attribute(entity, 'id'),
-            name: @serializer.attribute(entity, 'name'),
             category_code: @serializer.attribute(entity, 'category_code'),
-            category_label: @serializer.attribute(entity, 'category_label'),
-            category_code_space: @serializer.attribute(entity, 'category_code_space'),
-            category_standard: @serializer.attribute(entity, 'category_standard'),
             navigation_class: @serializer.attribute(entity, 'navigation_class'),
             navigation_function: @serializer.attribute(entity, 'navigation_function'),
             navigation_usage: @serializer.attribute(entity, 'navigation_usage'),
-            navigation_code_space: @serializer.attribute(entity, 'navigation_code_space'),
-            storey_id: @serializer.attribute(entity, 'storey_id')
+            storey: storey
           )
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] CellSpace restore failed: #{e.class}: #{e.message}"

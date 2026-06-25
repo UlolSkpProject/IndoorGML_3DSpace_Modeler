@@ -91,24 +91,14 @@ module ULOL
 
           write_attributes(group) do
             remove_state_position_attributes(group)
+            remove_cell_space_legacy_attributes(group)
             group.set_attribute(@dictionary_name, 'feature', 'CellSpace')
             group.set_attribute(@dictionary_name, 'id', cell_space.id)
-            group.set_attribute(@dictionary_name, 'name', group.name)
             group.set_attribute(@dictionary_name, 'cell_type', CellSpaceType.label(cell_space.cell_type))
             group.set_attribute(@dictionary_name, 'category_code', cell_space.category_code)
-            group.set_attribute(@dictionary_name, 'category_label', cell_space.category_label)
-            group.set_attribute(@dictionary_name, 'category_code_space', cell_space.category_code_space)
-            group.set_attribute(@dictionary_name, 'category_standard', cell_space.category_standard)
-            group.set_attribute(@dictionary_name, 'navigation_class', cell_space.navigation_class)
-            group.set_attribute(@dictionary_name, 'navigation_function', cell_space.navigation_function)
-            group.set_attribute(@dictionary_name, 'navigation_usage', cell_space.navigation_usage)
-            group.set_attribute(@dictionary_name, 'navigation_code_space', cell_space.navigation_code_space)
-            group.set_attribute(@dictionary_name, 'storey_id', cell_space.storey_id)
+            write_navigation_attributes(group, cell_space)
+            group.set_attribute(@dictionary_name, 'storey', cell_space.storey)
             group.set_attribute(@dictionary_name, 'duality_state_id', cell_space.duality_state.id) if cell_space.duality_state
-            if cell_space.duality_state
-              group.set_attribute(@dictionary_name, 'state_transition_ids', cell_space.duality_state.transition_ids)
-            end
-            group.set_attribute(@dictionary_name, 'indoor_gml_version', @indoor_gml_version)
           end
         end
 
@@ -166,6 +156,33 @@ module ULOL
           %w[state_position_x state_position_y state_position_z].each do |key|
             entity.delete_attribute(@dictionary_name, key) if entity.respond_to?(:delete_attribute)
           end
+        end
+
+        def remove_cell_space_legacy_attributes(entity)
+          %w[
+            name
+            category_label
+            category_code_space
+            category_standard
+            state_transition_ids
+            indoor_gml_version
+            storey_id
+          ].each do |key|
+            entity.delete_attribute(@dictionary_name, key) if entity.respond_to?(:delete_attribute)
+          end
+        end
+
+        def write_navigation_attributes(group, cell_space)
+          if cell_space.navigable?
+            group.set_attribute(@dictionary_name, 'navigation_class', cell_space.navigation_class)
+            group.set_attribute(@dictionary_name, 'navigation_function', cell_space.navigation_function)
+            group.set_attribute(@dictionary_name, 'navigation_usage', cell_space.navigation_usage)
+          else
+            %w[navigation_class navigation_function navigation_usage].each do |key|
+              group.delete_attribute(@dictionary_name, key) if group.respond_to?(:delete_attribute)
+            end
+          end
+          group.delete_attribute(@dictionary_name, 'navigation_code_space') if group.respond_to?(:delete_attribute)
         end
       end
 

@@ -35,8 +35,6 @@ module ULOL
         attr_reader :model
         attr_reader :primal_group
         attr_reader :editor_session
-        attr_reader :overlay_min_radius_pixels
-        attr_reader :overlay_max_radius_pixels
 
         def self.for(model = Sketchup.active_model)
           @instances ||= {}
@@ -96,8 +94,6 @@ module ULOL
           @relocating_entity = false
           @refreshing_runtime = false
           @constraining_space_features = false
-          @overlay_min_radius_pixels = 1.0
-          @overlay_max_radius_pixels = 7.0
           @primal_group = nil
           @attribute_serializer = AttributeSerializer.new(
             dictionary_name: ATTRIBUTE_DICTIONARY_NAME,
