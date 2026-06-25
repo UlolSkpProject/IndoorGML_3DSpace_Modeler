@@ -1695,10 +1695,11 @@ module ULOL
 
             result = group1.intersect(group2)
             return { status: :not_reproduced, reason: 'NO_VALID_INTERSECTION_GROUP_RETURNED', volume: 0.0, component_count: 0 } if result.nil?
-            return { status: :inconclusive, reason: 'INVALID_INTERSECTION_RESULT' } unless valid_manifold_group?(result)
 
             faces = result.definition.entities.grep(Sketchup::Face).select(&:valid?)
-            return { status: :inconclusive, reason: 'INVALID_INTERSECTION_RESULT' } if faces.empty?
+            edges = result.definition.entities.grep(Sketchup::Edge).select(&:valid?)
+            return { status: :not_reproduced, reason: 'NO_VALID_INTERSECTION_GROUP_RETURNED', volume: 0.0, component_count: 0 } if faces.empty? && edges.empty?
+            return { status: :inconclusive, reason: 'INVALID_INTERSECTION_RESULT' } unless valid_manifold_group?(result)
 
             volume = solid_group_volume(result)
             return { status: :inconclusive, reason: 'INVALID_INTERSECTION_RESULT' } if volume.nil? || volume <= 0.0
