@@ -19,6 +19,7 @@ module ULOL
                 @primal_group = entities.add_group
                 @primal_group.name = PRIMAL_GROUP_NAME
               end
+              ensure_primal_group_world_aligned
               attach_space_features_observer(@primal_group, PRIMAL_GROUP_NAME)
               write_space_features_attributes(@primal_group, PRIMAL_GROUP_FEATURE)
               ensure_space_features_origin_point(@primal_group)
@@ -30,6 +31,7 @@ module ULOL
           def find_existing_space_features_groups
             entities = (@model || Sketchup.active_model).entities
             @primal_group = find_group(entities, PRIMAL_GROUP_NAME)
+            ensure_primal_group_world_aligned
             IndoorCore::Logger.puts '[IndoorGML] PrimalSpaceFeatures group not found during refresh.' unless @primal_group&.valid?
           end
 
@@ -181,6 +183,7 @@ module ULOL
             case feature
             when PRIMAL_GROUP_FEATURE
               @primal_group = entity
+              ensure_primal_group_world_aligned
               attach_space_features_observer(@primal_group, PRIMAL_GROUP_NAME)
               write_space_features_attributes(@primal_group, PRIMAL_GROUP_FEATURE)
               ensure_space_features_origin_point(@primal_group)
@@ -215,6 +218,7 @@ module ULOL
 
           def enforce_space_features_constraints
             ensure_space_features_guard_tracking
+            ensure_primal_group_world_aligned
             @scene_group_guard.enforce(ordered_space_features_groups)
           end
 
@@ -224,6 +228,57 @@ module ULOL
 
           def ensure_space_features_guard_tracking
             @scene_group_guard.ensure_expected_name(@primal_group, PRIMAL_GROUP_NAME) if @primal_group&.valid?
+          end
+
+          def ensure_primal_group_world_aligned
+            return false unless @primal_group&.valid?
+            return true if Utils::Transformation.same?(@primal_group.transformation, Geom::Transformation.new)
+
+            absorb_primal_group_transformation
+            true
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Primal world alignment failed: #{e.class}: #{e.message}"
+            false
+          end
+
+          def absorb_primal_group_transformation
+            transformation = @primal_group.transformation
+            IndoorCore::Logger.puts '[IndoorGML] Primal transform is non-identity; absorbing into children.'
+            with_guard_flag(:@constraining_space_features) do
+              with_unlocked(@primal_group) do
+                @primal_group.entities.to_a.each do |entity|
+                  absorb_primal_child_transformation(entity, transformation)
+                end
+                @primal_group.transformation = Geom::Transformation.new
+              end
+            end
+            remember_space_features_change_snapshot(@primal_group)
+            refresh_after_primal_world_alignment
+          end
+
+          def absorb_primal_child_transformation(entity, transformation)
+            return unless entity&.valid?
+
+            if entity.respond_to?(:transformation) && entity.respond_to?(:transformation=)
+              with_unlocked(entity) do
+                entity.transformation = transformation * entity.transformation
+              end
+            else
+              @primal_group.entities.transform_entities(transformation, [entity])
+            end
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Primal child transform absorption failed: #{e.class}: #{e.message}"
+          end
+
+          def refresh_after_primal_world_alignment
+            @cell_spaces.each do |cell_space|
+              remember_cell_space_change_snapshot(cell_space.sketchup_group) if cell_space&.valid?
+            end
+            rebuild_runtime_transitions_from_cell_adjacency if @cell_spaces.any?
+            invalidate_overlay_transition_points
+            (@model || Sketchup.active_model)&.active_view&.invalidate
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Primal world alignment refresh failed: #{e.class}: #{e.message}"
           end
 
           def expected_space_features_name_for(entity)

@@ -15,6 +15,8 @@ module ULOL
             case change_kind
             when :name
               handle_space_features_name_changed(entity)
+            when :transform
+              handle_space_features_transform_changed(entity)
             else
               handle_space_features_etc_changed(entity)
             end
@@ -36,13 +38,34 @@ module ULOL
             end
 
             changed_fields = changed_space_features_snapshot_fields(previous_snapshot, current_snapshot)
-            change_kind = changed_fields.include?(:name) ? :name : :etc
+            change_kind =
+              if changed_fields.include?(:name)
+                :name
+              elsif changed_fields.include?(:transformation)
+                :transform
+              else
+                :etc
+              end
             log_space_features_change(entity, change_kind, changed_fields, previous_snapshot, current_snapshot)
             change_kind
           end
 
           def handle_space_features_name_changed(entity)
             with_transparent_space_features_operation('IndoorGML SpaceFeatures Name Change') do
+              with_guard_flag(:@constraining_space_features) do
+                enforce_space_features_constraints()
+              end
+            end
+            remember_space_features_change_snapshot(entity)
+            true
+          ensure
+            with_indoor_model_operation('IndoorGML SpaceFeatures Lock', transparent: true) do
+              apply_indoor_lock_policy if entity&.valid? && !editing?
+            end
+          end
+
+          def handle_space_features_transform_changed(entity)
+            with_transparent_space_features_operation('IndoorGML SpaceFeatures Transform Change') do
               with_guard_flag(:@constraining_space_features) do
                 enforce_space_features_constraints()
               end
