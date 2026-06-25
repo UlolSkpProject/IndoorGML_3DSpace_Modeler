@@ -119,6 +119,9 @@ module ULOL
       ) do
         dispatcher.convert_selected_solid_groups_to_cell_spaces()
       end
+      create_cell_space_command.set_validation_proc do
+        dispatcher.validation_operation_running? ? MF_GRAYED : MF_ENABLED
+      end
       change_type_command = create_command(
         'Change CellSpace Type',
         'Change selected CellSpace type',
@@ -143,6 +146,8 @@ module ULOL
       end
 
       @edit_property_command.set_validation_proc do
+        next MF_GRAYED if dispatcher.validation_operation_running?
+
         IndoorCore::IndoorModel.current.editing? ? MF_CHECKED : MF_UNCHECKED
       end
       @geometry_command = create_command(
@@ -176,12 +181,18 @@ module ULOL
       ) do
         dispatcher.export_gml()
       end
+      export_command.set_validation_proc do
+        dispatcher.validation_operation_running? ? MF_GRAYED : MF_ENABLED
+      end
       check_validity_command = create_command(
         'Check Validity',
         'Create temp GML and run validity check',
         icon: 'check_validity.svg'
       ) do
         dispatcher.check_validity()
+      end
+      check_validity_command.set_validation_proc do
+        dispatcher.validation_operation_running? ? MF_GRAYED : MF_ENABLED
       end
       dispatcher.update_geometry_command()
       dispatcher.update_dual_overlay_command()

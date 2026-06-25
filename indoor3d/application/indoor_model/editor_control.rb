@@ -19,15 +19,42 @@ module ULOL
 
           def recheck_validation_focus_errors
             focus = @editor_session.validation_focus_elements
-            UI.messagebox(
-              "오류 요소 재검사 대상\n" \
-              "CellSpace: #{focus[:cell_spaces].length}\n" \
-              "State: #{focus[:states].length}\n" \
-              "Transition: #{focus[:transitions].length}"
-            )
+            if focus[:cell_spaces].empty?
+              UI.messagebox('재검사할 오류 CellSpace가 없습니다.')
+              return nil
+            end
+
+            progress = IndoorGmlConverter::ExportProgressDialog.active || IndoorGmlConverter::ExportProgressDialog.new
+            state = { session: nil, completed: false }
+            progress.on_create_gml do
+              UI.messagebox('오류 요소 재검사 report에서는 GML export를 사용할 수 없습니다.')
+            end
+            progress.on_cancel do
+              state[:session]&.terminate
+              state[:completed] = true
+              progress.fail(:val3dity)
+              progress.result(
+                status: :error,
+                title: '오류 요소 재검사 취소',
+                message: '재검사가 취소되었습니다.',
+                actions: [:close]
+              )
+            end
+            progress.on_request_close do
+              state[:session]&.terminate unless state[:completed]
+              :close
+            end
+            progress.on_ready do
+              next if state[:started]
+
+              state[:started] = true
+              start_validation_focus_recheck(progress, state, focus)
+            end
+            progress.show
             focus
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck failed: #{e.class}: #{e.message}"
+            UI.messagebox("오류 요소 재검사 실패:\n#{e.message}")
             nil
           end
 
@@ -353,6 +380,84 @@ module ULOL
           end
 
           private
+
+          def start_validation_focus_recheck(progress, state, focus)
+            report_name = validation_focus_recheck_report_name
+            output_path = File.join(IndoorGmlConverter::GmlExporter.output_root, "#{report_name}.gml")
+
+            progress.running(:temp_file)
+            progress.detail(
+              :temp_file,
+              percent: 0,
+              phase: '오류 요소 GML 생성',
+              message: validation_focus_recheck_summary(focus),
+              current: File.basename(output_path)
+            )
+            IndoorGmlConverter::GmlExporter.new(
+              self,
+              refresh_runtime_data: false,
+              cell_spaces: focus[:cell_spaces],
+              transitions: focus[:transitions]
+            ).export(output_path: output_path)
+            progress.complete(:temp_file)
+
+            runner = IndoorGmlConverter::Val3dityRunner.new(
+              output_path,
+              overlap_tol: IndoorGmlConverter::Val3dityRunner::STRICT_OVERLAP_TOL,
+              report_name: report_name
+            )
+            state[:session] = runner.start(progress: progress) do |result|
+              state[:completed] = true
+              handle_validation_focus_recheck_result(progress, result)
+            end
+          rescue StandardError => e
+            state[:completed] = true
+            progress.fail(:temp_file)
+            progress.result(
+              status: :error,
+              title: '오류 요소 재검사 실패',
+              message: e.message,
+              actions: [:close]
+            )
+          end
+
+          def handle_validation_focus_recheck_result(progress, result)
+            if result.error?
+              progress.fail(:val3dity)
+              progress.result(
+                status: :error,
+                title: '오류 요소 재검사 실패',
+                message: result.error.message,
+                actions: [:close]
+              )
+              return
+            end
+
+            progress.on_open_report do
+              progress.show_report(result.report_html_path)
+            end
+            progress.result(
+              status: result.valid? ? :success : :failed,
+              title: result.valid? ? '오류 요소 재검사 통과' : '오류 요소 재검사 실패',
+              message: result.valid? ? '선택된 오류 요소가 유효합니다.' : '선택된 오류 요소에 오류가 남아 있습니다.',
+              actions: [:openReport, :close]
+            )
+          rescue StandardError => e
+            progress.result(
+              status: :error,
+              title: '오류 요소 재검사 결과 처리 실패',
+              message: e.message,
+              actions: [:close]
+            )
+          end
+
+          def validation_focus_recheck_report_name
+            "fix_recheck_#{Time.now.strftime('%Y%m%d_%H%M%S')}"
+          end
+
+          def validation_focus_recheck_summary(focus)
+            "CellSpace #{focus[:cell_spaces].length}개, State #{focus[:states].length}개, Transition #{focus[:transitions].length}개 재검사"
+          end
 
           def apply_indoor_lock_policy
             @editor_session.apply_lock_policy()

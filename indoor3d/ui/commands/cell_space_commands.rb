@@ -5,6 +5,8 @@ module ULOL
     module IndoorCore
       module CellSpaceCommands
         def convert_selected_solid_groups_to_cell_spaces
+          return if respond_to?(:validation_operation_running?) && validation_operation_running?
+
           begin
             model = Sketchup.active_model()
             original_active_path = active_path_snapshot(model)

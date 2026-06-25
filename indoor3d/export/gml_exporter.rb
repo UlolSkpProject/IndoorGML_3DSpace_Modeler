@@ -30,9 +30,11 @@ module ULOL
             # CellSpaceType::ANCHOR => 'navi:AnchorSpace'
           }.freeze
 
-          def initialize(indoor_model, refresh_runtime_data: true)
+          def initialize(indoor_model, refresh_runtime_data: true, cell_spaces: nil, transitions: nil)
             @indoor_model = indoor_model
             @refresh_runtime_data = refresh_runtime_data
+            @requested_cell_spaces = cell_spaces
+            @requested_transitions = transitions
           end
 
           def export(output_path: self.class.default_temp_gml_path)
@@ -270,19 +272,21 @@ module ULOL
           end
 
           def exportable_cell_spaces
-            @exportable_cell_spaces ||= @indoor_model.cell_spaces.select do |cell_space|
+            source = @requested_cell_spaces || @indoor_model.cell_spaces
+            @exportable_cell_spaces ||= source.select do |cell_space|
               cell_space&.valid_sketchup_group && cell_space.duality_state&.valid?
-            end
+            end.uniq
           end
 
           def exportable_transitions
-            @indoor_model.transitions.select do |transition|
+            source = @requested_transitions || @indoor_model.transitions
+            source.select do |transition|
               transition&.valid? &&
                 transition.state1&.valid? &&
                 transition.state2&.valid? &&
                 exportable_cell_spaces.include?(transition.state1.duality_cell) &&
                 exportable_cell_spaces.include?(transition.state2.duality_cell)
-            end
+            end.uniq
           end
 
           def loop_points(loop, transform)

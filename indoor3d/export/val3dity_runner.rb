@@ -897,10 +897,11 @@ module ULOL
                     font-family: Arial, sans-serif;
                     color: #d8d6d0;
                     background: #1c1c1b;
+                    scrollbar-gutter: stable;
                   }
                   * { box-sizing: border-box; }
-                  body { margin: 0; padding: 10px; background: #1c1c1b; }
-                  main { max-width: 430px; margin: 0 auto; }
+                  body { margin: 0; padding: 10px 0; background: #1c1c1b; }
+                  main { max-width: 450px; margin: 0 auto; padding: 0 10px; }
                   .hero { padding: 10px 0 16px; border-bottom: 1px solid #373633; }
                   .hero-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
                   .hero-title { display: flex; align-items: center; min-height: 31px; }
@@ -929,8 +930,8 @@ module ULOL
                   .filter-btn { flex: 0 0 auto; padding: 8px 13px; border: 1px solid #4a4945; border-radius: 8px; background: transparent; color: #b9b6ae; cursor: pointer; font-size: 12px; font-weight: 700; }
                   .filter-btn.active { border-color: #327a4f; background: #12261a; color: #d8d6d0; }
                   .report-actions { display: flex; justify-content: flex-end; }
-                  .report-action { padding: 8px 12px; border: 1px solid #327a4f; border-radius: 7px; background: #12261a; color: #d8d6d0; cursor: pointer; font-size: 12px; font-weight: 700; }
-                  .report-action:hover { background: #173420; }
+                  .report-action { min-width: 92px; padding: 8px 12px; border: 1px solid #5a5953; border-radius: 7px; background: #343432; color: #e8e6e0; cursor: pointer; font-size: 12px; font-weight: 700; white-space: nowrap; }
+                  .report-action:hover { background: #3d3d3a; border-color: #6a6962; }
                   .recheck-list { display: grid; gap: 8px; }
                   .recheck-row { background: #242422; border: 1px solid #2f2e2b; border-radius: 8px; }
                   .recheck-row.focused { border-color: #ef4444; box-shadow: inset 0 0 0 1px rgba(239, 68, 68, .55); }
@@ -972,8 +973,8 @@ module ULOL
                   details[open] > summary .toggle-triangle { transform: rotate(90deg); }
                   code { background: #242422; border-radius: 4px; padding: 1px 4px; color: #d8d6d0; }
                   @media (min-width: 700px) {
-                    body { padding: 20px; }
-                    main { max-width: 520px; }
+                    body { padding: 20px 0; }
+                    main { max-width: 540px; padding: 0 10px; }
                   }
                 </style>
               </head>

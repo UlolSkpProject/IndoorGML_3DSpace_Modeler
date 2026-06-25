@@ -6,6 +6,10 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       module ExportCommands
+        def validation_operation_running?
+          @validation_operation_running == true
+        end
+
         def create_temp_indoorgml
           progress = IndoorGmlConverter::ExportProgressDialog.new
           state = validation_close_state
@@ -39,6 +43,8 @@ module ULOL
         end
 
         def export_gml
+          return if validation_operation_running?
+
           path = UI.savepanel('Export GML', '~', 'IndoorGML Files|*.gml;||')
           return if path.to_s.empty?
 
@@ -53,11 +59,15 @@ module ULOL
         end
 
         def check_validity
+          return if validation_operation_running?
+
           if validation_dialog_visible?
             @validation_progress_dialog.bring_to_front
             return
           end
 
+          IndoorModel.current.finish_editing if IndoorModel.current.editing?
+          @validation_operation_running = true
           progress = IndoorGmlConverter::ExportProgressDialog.new
           @validation_progress_dialog = progress
           state = validation_close_state
@@ -72,6 +82,7 @@ module ULOL
           end
           progress.show
         rescue StandardError => e
+          @validation_operation_running = false
           progress&.result(
             status: :error,
             title: 'IndoorGML temp GML creation failed',
@@ -109,6 +120,7 @@ module ULOL
         rescue StandardError => e
           state[:temp_file_running] = false
           state[:completed] = true
+          @validation_operation_running = false if step == :temp_file
           progress&.fail(step)
           progress&.result(
             status: :error,
@@ -152,11 +164,13 @@ module ULOL
 
             state[:val_running] = false
             state[:completed] = true
+            @validation_operation_running = false
             handle_validation_result(result, progress, temp_path)
           end
         rescue StandardError => e
           state[:val_running] = false
           state[:completed] = true
+          @validation_operation_running = false
           progress&.fail(:val3dity)
           progress&.result(
             status: :error,
@@ -175,11 +189,13 @@ module ULOL
               if IndoorGmlConverter::Val3dityRunner.shutting_down?
                 state[:cancelled] = true
                 state[:val_running] = false
+                @validation_operation_running = false
                 state[:val_session]&.terminate(wait_ms: 0)
                 :close
               elsif UI.messagebox("Validation is still running.\nCancel validation?", MB_YESNO) == IDYES
                 state[:cancelled] = true
                 state[:val_running] = false
+                @validation_operation_running = false
                 state[:val_session]&.terminate
                 :close
               else
@@ -197,6 +213,7 @@ module ULOL
               state[:cancelled] = true
               state[:val_running] = false
               state[:completed] = true
+              @validation_operation_running = false
               state[:val_session]&.terminate
               progress&.fail(:val3dity)
               progress&.result(
@@ -209,6 +226,7 @@ module ULOL
               state[:cancelled] = true
               state[:temp_file_running] = false
               state[:completed] = true
+              @validation_operation_running = false
               progress&.fail(:temp_file)
               progress&.result(
                 status: :error,

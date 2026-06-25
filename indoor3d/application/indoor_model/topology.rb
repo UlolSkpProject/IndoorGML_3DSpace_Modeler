@@ -147,8 +147,8 @@ module ULOL
 
           def update_transition(transition)
             updated = transition.update(
-              state_local_position(transition.state1),
-              state_local_position(transition.state2)
+              state_primal_position(transition.state1),
+              state_primal_position(transition.state2)
             )
             refresh_transition_waypoint_candidates(transition) if updated
             updated
@@ -159,8 +159,8 @@ module ULOL
             unless candidates.empty?
               transition.set_waypoint_candidates(
                 candidates,
-                point1: state_local_position(transition.state1),
-                point2: state_local_position(transition.state2)
+                point1: state_primal_position(transition.state1),
+                point2: state_primal_position(transition.state2)
               )
             end
           rescue StandardError => e
@@ -170,49 +170,61 @@ module ULOL
           def transition_waypoint_candidates(transition)
             return [] unless transition.cell1&.valid? && transition.cell2&.valid?
 
-            world_candidates = AdjacencyService::GeometryQuery.common_face_waypoint_candidates(
+            candidates = AdjacencyService::GeometryQuery.common_face_waypoint_candidates(
               transition.cell1.sketchup_group,
               transition.cell2.sketchup_group,
-              state1_point: primal_local_point_to_world(state_local_position(transition.state1)),
-              state2_point: primal_local_point_to_world(state_local_position(transition.state2))
+              state1_point: state_primal_position(transition.state1),
+              state2_point: state_primal_position(transition.state2)
             )
-            world_candidates.filter_map { |candidate| waypoint_candidate_to_primal_local(candidate) }
+            candidates.filter_map { |candidate| normalize_primal_waypoint_candidate(candidate, transition) }
           end
 
-          def primal_local_point_to_world(point)
-            return point unless point.is_a?(Geom::Point3d)
-            return point unless @primal_group&.valid?
-
-            point.transform(@primal_group.transformation)
+          def state_primal_position(state)
+            state_local_position(state)
           end
 
-          def world_point_to_primal_local(point)
-            return point unless @primal_group&.valid?
+          def normalize_primal_waypoint_candidate(candidate, transition)
+            normalized = if candidate.is_a?(Geom::Point3d)
+                           { point: candidate, normal1: nil, normal2: nil }
+                         elsif candidate.is_a?(Hash)
+                           point = candidate[:point]
+                           return nil unless point.is_a?(Geom::Point3d)
 
-            point.transform(@primal_group.transformation.inverse)
+                           {
+                             point: point,
+                             normal1: normalized_primal_vector(candidate[:normal1] || candidate[:normal]),
+                             normal2: normalized_primal_vector(candidate[:normal2])
+                           }
+                         end
+            return nil unless normalized
+            return nil unless plausible_primal_waypoint?(normalized[:point], transition)
+
+            normalized
           end
 
-          def waypoint_candidate_to_primal_local(candidate)
-            return world_point_to_primal_local(candidate) if candidate.is_a?(Geom::Point3d)
-            return nil unless candidate.is_a?(Hash)
-
-            point = candidate[:point]
-            return nil unless point.is_a?(Geom::Point3d)
-
-            {
-              point: world_point_to_primal_local(point),
-              normal1: world_vector_to_primal_local(candidate[:normal1] || candidate[:normal]),
-              normal2: world_vector_to_primal_local(candidate[:normal2])
-            }
-          end
-
-          def world_vector_to_primal_local(vector)
+          def normalized_primal_vector(vector)
             return vector unless vector.is_a?(Geom::Vector3d)
-            return vector unless @primal_group&.valid?
 
-            transformed = vector.transform(@primal_group.transformation.inverse)
-            transformed.normalize! if transformed.length > 0.001
-            transformed
+            normalized = vector.clone
+            normalized.normalize! if normalized.length > 0.001
+            normalized
+          rescue StandardError
+            nil
+          end
+
+          def plausible_primal_waypoint?(point, transition)
+            point1 = state_primal_position(transition.state1)
+            point2 = state_primal_position(transition.state2)
+            return true unless point1.is_a?(Geom::Point3d) && point2.is_a?(Geom::Point3d)
+
+            midpoint = Geom::Point3d.new(
+              (point1.x + point2.x) / 2.0,
+              (point1.y + point2.y) / 2.0,
+              (point1.z + point2.z) / 2.0
+            )
+            state_distance = point1.distance(point2)
+            max_distance = [state_distance * 10.0, 10_000.mm].max
+            midpoint.distance(point) <= max_distance
           end
 
           def rebuild_runtime_transitions_from_cell_adjacency

@@ -5,6 +5,8 @@ module ULOL
     module IndoorCore
       module DisplayCommands
         def begin_indoor_gml_editing
+          return if respond_to?(:validation_operation_running?) && validation_operation_running?
+
           begin
             indoor_model = IndoorModel.current
             if indoor_model.editing?()
@@ -28,6 +30,8 @@ module ULOL
         end
 
         def toggle_indoor_gml_editing
+          return if respond_to?(:validation_operation_running?) && validation_operation_running?
+
           begin
             indoor_model = IndoorModel.current
             if indoor_model.editing?()
@@ -92,7 +96,7 @@ module ULOL
           selected_cell_spaces = selected_indoor_entities.select { |entity| indoor_feature(entity) == 'CellSpace' }
 
           if !indoor_model.editing?() && selected_indoor_entities.any?()
-            menu.add_item('Edit IndoorGML') { begin_indoor_gml_editing() }
+            menu.add_item('Edit IndoorGML') { begin_indoor_gml_editing() } unless validation_operation_running?
           end
 
           if indoor_model.editing?() && cell_space_type_change_available?(selected_cell_spaces)

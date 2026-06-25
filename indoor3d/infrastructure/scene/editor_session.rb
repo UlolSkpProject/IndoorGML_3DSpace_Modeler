@@ -179,15 +179,16 @@ module ULOL
         def validation_focus_state?(state)
           return true unless validation_focus_active?
 
-          validation_focus_cell_space?(state&.duality_cell)
+          validation_visible_cell_space?(state&.duality_cell)
         rescue StandardError
           false
         end
 
         def set_validation_focus_highlight(cell_gml_ids, code = nil)
           ids = Array(cell_gml_ids).map(&:to_s).reject(&:empty?)
-          @validation_highlight_cell_ids = ids.each_with_object({}) { |id, memo| memo[id] = true }
+          @validation_highlight_cell_ids = ids.empty? ? nil : ids.each_with_object({}) { |id, memo| memo[id] = true }
           @validation_highlight_code = code.to_s
+          apply_validation_focus_visibility
           invalidate_view(Sketchup.active_model())
           true
         rescue StandardError => e
@@ -319,7 +320,7 @@ module ULOL
 
             persistent_id = group.persistent_id
             @validation_focus_visibility[persistent_id] = group.visible? unless @validation_focus_visibility.key?(persistent_id)
-            with_unlocked(group) { group.visible = validation_focus_cell_space?(cell_space) }
+            with_unlocked(group) { group.visible = validation_visible_cell_space?(cell_space) }
           end
           invalidate_view(Sketchup.active_model())
           true
@@ -334,6 +335,18 @@ module ULOL
           @indoor_model.cell_spaces.select { |cell_space| validation_focus_cell_space?(cell_space) }
         rescue StandardError
           []
+        end
+
+        def validation_visible_cell_space?(cell_space)
+          return true unless validation_focus_active?
+          return false unless cell_space&.valid?
+          if @validation_highlight_cell_ids.is_a?(Hash) && !@validation_highlight_cell_ids.empty?
+            return @validation_highlight_cell_ids[validation_focus_cell_gml_id(cell_space)] == true
+          end
+
+          validation_focus_cell_space?(cell_space)
+        rescue StandardError
+          false
         end
 
         def restore_validation_focus_visibility

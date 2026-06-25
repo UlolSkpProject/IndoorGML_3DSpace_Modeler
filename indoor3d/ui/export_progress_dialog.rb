@@ -21,8 +21,16 @@ module ULOL
           INITIAL_HEIGHT = 590
           MIN_DIALOG_HEIGHT = 520
           MAX_DIALOG_HEIGHT = 760
+          REPORT_SCROLLBAR_WIDTH = 18
           CONTENT_PADDING_HEIGHT = 8
           DIALOG_WINDOW_CHROME_HEIGHT = 44
+
+          def self.active
+            dialog = @active_dialog
+            dialog&.visible? ? dialog : nil
+          rescue StandardError
+            nil
+          end
 
           def initialize
             @dialog = nil
@@ -42,14 +50,19 @@ module ULOL
           end
 
           def show
+            reset_progress_state
+            self.class.instance_variable_set(:@active_dialog, self)
             dialog.set_file(File.join(__dir__, 'html', 'export_progress', 'index.html'))
             dialog.show
+            dialog.set_size(INITIAL_WIDTH, INITIAL_HEIGHT)
           end
 
           def show_report(path)
+            @dom_ready = false
+            self.class.instance_variable_set(:@active_dialog, self)
             dialog.set_file(File.expand_path(path))
             dialog.show
-            dialog.set_size(INITIAL_WIDTH, MAX_DIALOG_HEIGHT)
+            dialog.set_size(INITIAL_WIDTH + REPORT_SCROLLBAR_WIDTH, MAX_DIALOG_HEIGHT)
           end
 
           def visible?
@@ -154,6 +167,7 @@ module ULOL
           def close
             @suppress_close_callback = true
             @dialog&.close if @dialog&.visible?
+            self.class.instance_variable_set(:@active_dialog, nil) if self.class.instance_variable_get(:@active_dialog).equal?(self)
             @dialog = nil
             @dom_ready = false
           rescue StandardError => e
@@ -164,6 +178,15 @@ module ULOL
 
           def dialog
             @dialog ||= build_dialog
+          end
+
+          def reset_progress_state
+            @dialog_height = INITIAL_HEIGHT
+            @statuses = {}
+            @detail_payload = nil
+            @result_payload = nil
+            @dom_ready = false
+            @pending_scripts = []
           end
 
           def build_dialog
@@ -224,6 +247,7 @@ module ULOL
                 show
               end
             else
+              self.class.instance_variable_set(:@active_dialog, nil) if self.class.instance_variable_get(:@active_dialog).equal?(self)
               @dialog = nil
               @dom_ready = false
             end
