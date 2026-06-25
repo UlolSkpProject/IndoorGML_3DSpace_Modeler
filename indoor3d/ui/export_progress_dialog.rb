@@ -34,6 +34,7 @@ module ULOL
             @pending_scripts = []
             @create_gml_callback = nil
             @open_report_callback = nil
+            @validation_focus_callback = nil
             @cancel_callback = nil
             @request_close_callback = nil
             @ready_callback = nil
@@ -127,6 +128,10 @@ module ULOL
             @open_report_callback = block
           end
 
+          def on_validation_focus_cells(&block)
+            @validation_focus_callback = block
+          end
+
           def on_cancel(&block)
             @cancel_callback = block
           end
@@ -186,6 +191,9 @@ module ULOL
             end
             dialog.add_action_callback('openReport') do |_context|
               @open_report_callback&.call
+            end
+            dialog.add_action_callback('focusValidationCells') do |_context, cell_ids, code, state_ids, transition_ids|
+              @validation_focus_callback&.call(Array(cell_ids), code.to_s, Array(state_ids), Array(transition_ids))
             end
             dialog.add_action_callback('cancelValidation') do |_context|
               @cancel_callback&.call

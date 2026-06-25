@@ -16,14 +16,22 @@ var singleCellInfo = document.getElementById('singleCellInfo');
 var multiCellInfo = document.getElementById('multiCellInfo');
 var cellSpaceCount = document.getElementById('cellSpaceCount');
 var clearAll = document.getElementById('clearAll');
+var recheckErrors = document.getElementById('recheckErrors');
+var modeTitle = document.getElementById('modeTitle');
 var cellTypeCounts = document.getElementById('cellTypeCounts');
 var stateCount = document.getElementById('stateCount');
 var totalTransitionCount = document.getElementById('totalTransitionCount');
 var suppressTypeChange = false;
 var currentMode = null;
 var currentSelectionKey = null;
+var fixMode = false;
 
 function init(config) {
+  fixMode = Boolean(config.fixMode);
+  modeTitle.textContent = fixMode ? '수정 모드' : '편집 모드';
+  document.getElementById('finish').textContent = fixMode ? '수정 완료' : '편집 완료';
+  setVisible(clearAll, false);
+  setVisible(recheckErrors, fixMode);
   fillOptions(selectedClassification, config.classificationOptions);
   fillOptions(solidClassification, config.classificationOptions);
   setIcon('convertIcon', config.assetRoot, 'create_cellspace.svg');
@@ -72,7 +80,8 @@ function updateSelection(snapshot) {
     setVisible(emptyPanel, nextMode === 'empty');
     setVisible(solidPanel, nextMode === 'solid_groups');
     setVisible(cellPanel, nextMode === 'cell_space' || nextMode === 'cell_spaces');
-    setVisible(clearAll, nextMode === 'empty');
+    setVisible(clearAll, !fixMode && nextMode === 'empty');
+    setVisible(recheckErrors, fixMode);
     currentMode = nextMode;
   }
 
@@ -234,6 +243,9 @@ document.getElementById('finish').addEventListener('click', function () {
 });
 document.getElementById('clearAll').addEventListener('click', function () {
   sketchup.clearAllIndoorGmlElements();
+});
+recheckErrors.addEventListener('click', function () {
+  sketchup.recheckFixModeErrors();
 });
 window.addEventListener('load', function () {
   sketchup.domReady();

@@ -226,10 +226,15 @@ module ULOL
           end
           progress&.on_open_report do
             begin
+              begin_validation_report_edit_mode(result.report) unless result.valid?
               open_report_dialog(result.report_html_path, progress)
             rescue StandardError => e
               progress&.set_result_message("Opening report failed:\n#{e.message}")
             end
+          end
+          progress&.on_validation_focus_cells do |cell_ids, code, state_ids, transition_ids|
+            refs = { cells: cell_ids, states: state_ids, transitions: transition_ids }
+            IndoorModel.current.set_validation_focus_highlight(validation_focus_cell_ids_for_refs(refs), code)
           end
 
           if result.error?
@@ -294,6 +299,95 @@ module ULOL
           dialog = progress || @validation_progress_dialog || IndoorGmlConverter::ExportProgressDialog.new
           @validation_progress_dialog = dialog
           dialog.show_report(path)
+        end
+
+        def begin_validation_report_edit_mode(report)
+          cell_ids = validation_report_error_focus_cell_ids(report)
+          return false if cell_ids.empty?
+
+          IndoorModel.current.begin_validation_focus_editing(cell_ids)
+        rescue StandardError => e
+          Logger.puts "[IndoorGML] Validation report edit mode failed: #{e.class}: #{e.message}"
+          false
+        end
+
+        def validation_report_error_focus_cell_ids(report)
+          refs = validation_report_error_refs(report)
+          validation_focus_cell_ids_for_refs(refs)
+        end
+
+        def validation_report_error_refs(report)
+          errors = []
+          Array(report && report['dataset_errors']).each { |error| errors << error }
+          Array(report && report['features']).each do |feature|
+            Array(feature['errors']).each { |error| errors << error }
+            Array(feature['primitives']).each do |primitive|
+              Array(primitive['errors']).each { |error| errors << error }
+            end
+          end
+
+          refs = { cells: [], states: [], transitions: [] }
+          errors.each do |error|
+            text = validation_error_text(error)
+            refs[:cells].concat(text.scan(/cell_[A-Za-z0-9_.-]+/))
+            refs[:states].concat(text.scan(/state_[A-Za-z0-9_.-]+/))
+            refs[:transitions].concat(text.scan(/transition_[A-Za-z0-9_.-]+/))
+          end
+          refs.each_value(&:uniq!)
+          refs
+        end
+
+        def validation_focus_cell_ids_for_refs(refs)
+          model = IndoorModel.current
+          cell_ids = Array(refs[:cells]).dup
+
+          model.states.each do |state|
+            next unless state&.valid?
+            next unless Array(refs[:states]).include?(validation_state_gml_id(state))
+
+            cell = state.duality_cell
+            cell_ids << validation_cell_gml_id(cell) if cell&.valid?
+          end
+
+          model.transitions.each do |transition|
+            next unless transition&.valid?
+            next unless Array(refs[:transitions]).include?(validation_transition_gml_id(transition))
+
+            [transition.state1&.duality_cell, transition.state2&.duality_cell].each do |cell|
+              cell_ids << validation_cell_gml_id(cell) if cell&.valid?
+            end
+          end
+
+          cell_ids.compact.uniq
+        end
+
+        def validation_error_text(value)
+          case value
+          when Hash
+            value.values.map { |child| validation_error_text(child) }.join(' ')
+          when Array
+            value.map { |child| validation_error_text(child) }.join(' ')
+          else
+            value.to_s
+          end
+        end
+
+        def validation_cell_gml_id(cell_space)
+          return nil unless cell_space
+
+          "cell_#{validation_safe_id(cell_space.id)}"
+        end
+
+        def validation_state_gml_id(state)
+          "state_#{validation_safe_id(state.id)}"
+        end
+
+        def validation_transition_gml_id(transition)
+          "transition_#{validation_safe_id(transition.id)}"
+        end
+
+        def validation_safe_id(value)
+          value.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')
         end
       end
     end

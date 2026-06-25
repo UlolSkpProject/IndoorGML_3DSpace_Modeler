@@ -28,6 +28,10 @@ module ULOL
           @progress = nil
           @dual_overlay_visible = model_boolean_attribute(GRAPH_VISIBLE_ATTRIBUTE, true)
           @geometry_visible = model_boolean_attribute(GEOMETRY_VISIBLE_ATTRIBUTE, true)
+          @validation_focus_cell_ids = nil
+          @validation_highlight_cell_ids = nil
+          @validation_highlight_code = nil
+          @validation_focus_visibility = {}
         end
 
         def editing?
@@ -104,15 +108,39 @@ module ULOL
           true
         end
 
+        def begin_validation_focus_editing(cell_gml_ids)
+          ids = Array(cell_gml_ids).map(&:to_s).reject(&:empty?)
+          return false if ids.empty?
+
+          @validation_focus_cell_ids = ids.each_with_object({}) { |id, memo| memo[id] = true }
+          started = @editing ? true : begin_editing
+          unless started
+            clear_validation_focus
+            return false
+          end
+
+          apply_validation_focus_visibility
+          invalidate_overlay_transition_points
+          selection_changed
+          invalidate_view(Sketchup.active_model())
+          true
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Validation focus edit mode failed: #{e.class}: #{e.message}"
+          clear_validation_focus
+          false
+        end
+
         def finish
           return false unless @editing
 
           model = Sketchup.active_model()
           with_active_path_enforcement_suspended do
             prepare_active_path_for_finish(model)
+            restore_validation_focus_visibility
             @editing = false
             @editable_entity_ids = {}
             @editing_active_path_target = nil
+            clear_validation_focus
             @indoor_model.detach_edit_selection_observer(model)
             close_active_path(model)
             @previous_active_path = nil
@@ -133,6 +161,73 @@ module ULOL
           rescue StandardError
             false
           end
+        end
+
+        def validation_focus_active?
+          @validation_focus_cell_ids.is_a?(Hash) && !@validation_focus_cell_ids.empty?
+        end
+
+        def validation_focus_cell_space?(cell_space)
+          return true unless validation_focus_active?
+          return false unless cell_space&.valid?
+
+          @validation_focus_cell_ids[validation_focus_cell_gml_id(cell_space)] == true
+        rescue StandardError
+          false
+        end
+
+        def validation_focus_state?(state)
+          return true unless validation_focus_active?
+
+          validation_focus_cell_space?(state&.duality_cell)
+        rescue StandardError
+          false
+        end
+
+        def set_validation_focus_highlight(cell_gml_ids, code = nil)
+          ids = Array(cell_gml_ids).map(&:to_s).reject(&:empty?)
+          @validation_highlight_cell_ids = ids.each_with_object({}) { |id, memo| memo[id] = true }
+          @validation_highlight_code = code.to_s
+          invalidate_view(Sketchup.active_model())
+          true
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight failed: #{e.class}: #{e.message}"
+          false
+        end
+
+        def validation_focus_highlight_cell_spaces
+          return [] unless @validation_highlight_cell_ids.is_a?(Hash) && !@validation_highlight_cell_ids.empty?
+
+          @indoor_model.cell_spaces.select do |cell_space|
+            cell_space&.valid? && @validation_highlight_cell_ids[validation_focus_cell_gml_id(cell_space)] == true
+          end
+        rescue StandardError
+          []
+        end
+
+        def validation_focus_highlight_code
+          @validation_highlight_code
+        end
+
+        def validation_focus_elements
+          cells = validation_focus_cell_spaces
+          cell_set = cells.each_with_object({}) { |cell, memo| memo[cell.object_id] = true }
+          states = cells.map(&:duality_state).select { |state| state&.valid? }
+          transitions = @indoor_model.transitions.select do |transition|
+            next false unless transition&.valid?
+
+            cell1 = transition.state1&.duality_cell
+            cell2 = transition.state2&.duality_cell
+            cell1&.valid? && cell2&.valid? && cell_set[cell1.object_id] && cell_set[cell2.object_id]
+          end
+
+          {
+            cell_spaces: cells,
+            states: states,
+            transitions: transitions
+          }
+        rescue StandardError
+          { cell_spaces: [], states: [], transitions: [] }
         end
 
         def cell_space_geometry_editing?
@@ -212,6 +307,67 @@ module ULOL
           false
         end
 
+        def apply_validation_focus_visibility
+          return false unless validation_focus_active?
+
+          @validation_focus_visibility ||= {}
+          @indoor_model.cell_spaces.each do |cell_space|
+            next unless cell_space&.valid?
+
+            group = cell_space.sketchup_group
+            next unless group&.valid? && group.respond_to?(:visible=)
+
+            persistent_id = group.persistent_id
+            @validation_focus_visibility[persistent_id] = group.visible? unless @validation_focus_visibility.key?(persistent_id)
+            with_unlocked(group) { group.visible = validation_focus_cell_space?(cell_space) }
+          end
+          invalidate_view(Sketchup.active_model())
+          true
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Validation focus visibility failed: #{e.class}: #{e.message}"
+          false
+        end
+
+        def validation_focus_cell_spaces
+          return [] unless validation_focus_active?
+
+          @indoor_model.cell_spaces.select { |cell_space| validation_focus_cell_space?(cell_space) }
+        rescue StandardError
+          []
+        end
+
+        def restore_validation_focus_visibility
+          snapshots = @validation_focus_visibility || {}
+          return true if snapshots.empty?
+
+          @indoor_model.cell_spaces.each do |cell_space|
+            next unless cell_space&.valid?
+
+            group = cell_space.sketchup_group
+            next unless group&.valid? && group.respond_to?(:visible=)
+            next unless snapshots.key?(group.persistent_id)
+
+            with_unlocked(group) { group.visible = snapshots[group.persistent_id] }
+          end
+          @validation_focus_visibility = {}
+          invalidate_view(Sketchup.active_model())
+          true
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Validation focus visibility restore failed: #{e.class}: #{e.message}"
+          false
+        end
+
+        def clear_validation_focus
+          @validation_focus_cell_ids = nil
+          @validation_highlight_cell_ids = nil
+          @validation_highlight_code = nil
+          @validation_focus_visibility = {}
+        end
+
+        def validation_focus_cell_gml_id(cell_space)
+          "cell_#{cell_space.id.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')}"
+        end
+
         def active_path_changed(model)
           begin
             model ||= Sketchup.active_model()
@@ -258,10 +414,12 @@ module ULOL
         def close_dialog_only
           begin
             @dialog.close_without_finish()
+            restore_validation_focus_visibility
             @editing = false
             @editable_entity_ids = {}
             @editing_active_path_target = nil
             @previous_active_path = nil
+            clear_validation_focus
             @progress = nil
             set_overlay_enabled(false)
           rescue StandardError => e
