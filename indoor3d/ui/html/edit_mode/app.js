@@ -26,8 +26,8 @@ var currentSelectionKey = null;
 function init(config) {
   fillOptions(selectedClassification, config.classificationOptions);
   fillOptions(solidClassification, config.classificationOptions);
-  setIcon('convertIcon', config.assetRoot, 'create_cellspace.png');
-  setIcon('changeTypeIcon', config.assetRoot, 'change_cellspace_type.png');
+  setIcon('convertIcon', config.assetRoot, 'create_cellspace.svg');
+  setIcon('changeTypeIcon', config.assetRoot, 'change_cellspace_type.svg');
   applyOverlayColors(config.overlayColors);
   overlayMinRadius.value = config.minRadius;
   overlayMaxRadius.value = config.maxRadius;
