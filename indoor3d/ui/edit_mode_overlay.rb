@@ -77,6 +77,7 @@ module ULOL
         private
 
         def draw_dual_overlay?
+          return false unless renderable_active_context?
           return false if @indoor_model.respond_to?(:cell_space_geometry_editing?) && @indoor_model.cell_space_geometry_editing?()
 
           @indoor_model.editing?() || @indoor_model.dual_overlay_visible?()
@@ -539,6 +540,17 @@ module ULOL
           point
         rescue StandardError
           point
+        end
+
+        def renderable_active_context?
+          path = Sketchup.active_model&.active_path
+          return true if path.nil?
+          return false unless path.length == 1
+
+          primal_group = @indoor_model.primal_group
+          primal_group&.valid? && path.first == primal_group
+        rescue StandardError
+          false
         end
 
         def clamp_overlay_radius(view, center, model_radius, pixel_scale: 1.0)
