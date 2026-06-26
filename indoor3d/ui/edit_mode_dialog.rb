@@ -7,7 +7,7 @@ module ULOL
       class EditModeDialog
         include Utils::HtmlHelpers
         
-        DIALOG_WIDTH = 280
+        DIALOG_WIDTH = 560
         INITIAL_DIALOG_HEIGHT = 360
         MIN_DIALOG_HEIGHT = 260
         MAX_DIALOG_HEIGHT = 760
