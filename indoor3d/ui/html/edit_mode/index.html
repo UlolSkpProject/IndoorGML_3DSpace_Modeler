@@ -1,87 +1,171 @@
 <!doctype html>
-<html>
+<html lang="ko">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IndoorGML CellSpace Editor</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
+  <header class="dialog-header">
     <div class="eyebrow">IndoorGML</div>
     <h1 id="modeTitle">편집 모드</h1>
   </header>
 
-  <main>
+  <main class="dialog-main">
+    <!-- 선택 없음 -->
     <section id="emptyPanel" class="mode-panel">
-      <div id="modelSummary" class="model-summary">
+      <div class="model-summary">
         <div class="summary-title">현재 IndoorGML 요소</div>
         <div id="cellTypeCounts" class="type-counts"></div>
+
         <div class="summary-metrics">
           <span>State <strong id="stateCount">0</strong></span>
           <span>Transition <strong id="totalTransitionCount">0</strong></span>
         </div>
       </div>
+
       <p class="description">
         CellSpace를 선택하면 타입을 변경할 수 있습니다.<br>
         Solid Group만 선택하면 CellSpace로 변환할 수 있습니다.
       </p>
     </section>
 
+    <!-- Solid Group 선택 -->
     <section id="solidPanel" class="mode-panel hidden">
-      <div class="summary-line">Solid Group <span id="solidCount">0</span>개 선택됨</div>
+      <div class="summary-line">
+        Solid Group <span id="solidCount">0</span>개 선택됨
+      </div>
+
       <label class="field-label" for="solidClassification">CellSpace 타입</label>
       <select id="solidClassification"></select>
+
       <button id="convertSelected" class="command" type="button">
         <img id="convertIcon" alt="">
         <span>선택한 Solid Group을 CellSpace로 변환</span>
       </button>
     </section>
 
-    <section id="cellPanel" class="mode-panel hidden">
-      <div id="singleCellInfo" class="info-grid">
-        <span>ID</span><strong id="selectedId" class="copyable-cell-id">-</strong>
-        <span>이름</span><strong id="selectedName" class="copyable-cell-id">-</strong>
-        <span>연결 Transition</span><strong id="transitionCount">0</strong>
-      </div>
-      <div id="multiCellInfo" class="summary-line hidden">
-        CellSpace <span id="cellSpaceCount">0</span>개 선택됨
-      </div>
-      <label class="field-label" for="selectedClassification">CellSpace 타입</label>
-      <select id="selectedClassification"></select>
-      <button id="changeType" class="command" type="button">
-        <img id="changeTypeIcon" alt="">
-        <span>선택한 CellSpace 타입 변경</span>
-      </button>
-      <div id="storeyFields" class="storey-fields hidden">
-        <div class="field-label">층 범위</div>
-        <div class="storey-range">
-          <select id="storeyFromKind">
-            <option value="F">지상</option>
-            <option value="B">지하</option>
-          </select>
-          <select id="storeyFromLevel"></select>
-          <span>~</span>
-          <select id="storeyToKind">
-            <option value="F">지상</option>
-            <option value="B">지하</option>
-          </select>
-          <select id="storeyToLevel"></select>
+    <!-- CellSpace 선택 -->
+    <section id="cellPanel" class="mode-panel cell-panel hidden">
+      <div class="cell-editor">
+        <!-- 1행: 좌우 2열 -->
+        <div id="cellTop" class="cell-top">
+          <!-- 1행 1열: 기본 정보 -->
+          <section class="cell-column cell-overview" aria-label="CellSpace 기본 정보">
+            <div id="singleCellInfo" class="meta-list">
+              <div class="meta-row">
+                <span class="meta-label">ID</span>
+                <strong id="selectedId" class="meta-value copyable-cell-id">-</strong>
+              </div>
+
+              <div class="meta-row">
+                <span class="meta-label">이름</span>
+                <strong id="selectedName" class="meta-value">-</strong>
+              </div>
+
+              <div class="meta-row">
+                <span class="meta-label">연결 Transition</span>
+                <strong id="transitionCount" class="meta-value">0</strong>
+              </div>
+            </div>
+
+            <div id="multiCellInfo" class="summary-line hidden">
+              CellSpace <span id="cellSpaceCount">0</span>개 선택됨
+            </div>
+
+            <div id="storeyFields" class="storey-fields hidden">
+              <div class="field-label">층 범위</div>
+
+              <div class="storey-range">
+                <select id="storeyFromKind" aria-label="시작 층 구분">
+                  <option value="F">지상</option>
+                  <option value="B">지하</option>
+                </select>
+                <input
+                  id="storeyFromLevel"
+                  class="storey-number"
+                  type="number"
+                  min="1"
+                  max="99"
+                  value="1"
+                  aria-label="시작 층"
+                >
+
+                <span class="storey-separator">~</span>
+
+                <select id="storeyToKind" aria-label="종료 층 구분">
+                  <option value="F">지상</option>
+                  <option value="B">지하</option>
+                </select>
+                <input
+                  id="storeyToLevel"
+                  class="storey-number"
+                  type="number"
+                  min="1"
+                  max="99"
+                  value="1"
+                  aria-label="종료 층"
+                >
+              </div>
+            </div>
+          </section>
+
+          <!-- 1행 2열: Navigation semantics -->
+          <section
+            id="navigationSemantics"
+            class="cell-column navigation-column hidden"
+            aria-label="Navigation semantics"
+          >
+            <div class="field-group">
+              <label class="field-label" for="navigationClass">
+                Class <small>공간 분류</small>
+              </label>
+              <input id="navigationClass" type="text" spellcheck="false">
+            </div>
+
+            <div class="field-group">
+              <label class="field-label" for="navigationFunction">
+                Function <small>설계상 역할</small>
+              </label>
+              <input id="navigationFunction" type="text" spellcheck="false">
+            </div>
+
+            <div class="field-group">
+              <label class="field-label" for="navigationUsage">
+                Usage <small>사용/접근 성격</small>
+              </label>
+              <input id="navigationUsage" type="text" spellcheck="false">
+            </div>
+          </section>
         </div>
-      </div>
-      <div id="navigationSemantics" class="semantic-fields hidden">
-        <label class="field-label" for="navigationClass">Class <small>공간 분류</small></label>
-        <input id="navigationClass" type="text" spellcheck="false">
-        <label class="field-label" for="navigationFunction">Function <small>설계상 역할</small></label>
-        <input id="navigationFunction" type="text" spellcheck="false">
-        <label class="field-label" for="navigationUsage">Usage <small>사용/접근 성격</small></label>
-        <input id="navigationUsage" type="text" spellcheck="false">
+
+        <!-- 2행: 전체 너비 -->
+        <section class="type-row" aria-label="CellSpace 타입 변경">
+          <label class="field-label" for="selectedClassification">CellSpace 타입</label>
+
+          <div class="type-controls">
+            <select id="selectedClassification"></select>
+
+            <button id="changeType" class="command inline-command" type="button">
+              <img id="changeTypeIcon" alt="">
+              <span>타입 변경</span>
+            </button>
+          </div>
+        </section>
       </div>
     </section>
 
-    <button id="finish" class="primary" type="button">편집 완료</button>
+    <!-- 전체 너비의 절반, 중앙 정렬 -->
+    <button id="finish" class="primary finish-button" type="button">편집 완료</button>
+
     <button id="recheckErrors" class="command no-icon hidden" type="button">
       <span>오류 요소 재검사</span>
     </button>
-    <button id="clearAll" class="danger" type="button">모든 IndoorGML 요소 삭제</button>
+
+    <button id="clearAll" class="danger" type="button">
+      모든 IndoorGML 요소 삭제
+    </button>
   </main>
 
   <script src="app.js"></script>
