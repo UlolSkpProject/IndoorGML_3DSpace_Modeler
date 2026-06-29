@@ -277,20 +277,9 @@ module ULOL
 
           def register_cell_space(cell_space)
             @feature_registry.add_cell_space(cell_space)
-            ensure_cell_space_unlocked(cell_space.sketchup_group)
             attach_cell_space_observer(cell_space.sketchup_group)
             @scene_group_guard.track(cell_space.sketchup_group, cell_space.sketchup_group.name)
             remember_cell_space_change_snapshot(cell_space.sketchup_group)
-          end
-
-          def ensure_cell_space_unlocked(entity)
-            return unless entity&.valid?
-            return unless entity.respond_to?(:locked=)
-            return unless entity.respond_to?(:locked?) && entity.locked?
-
-            entity.locked = false
-          rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] CellSpace unlock cleanup failed: #{e.class}: #{e.message}"
           end
 
           def duplicate_cell_space_identity?(entity)
