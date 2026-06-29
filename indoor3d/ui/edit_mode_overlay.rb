@@ -40,14 +40,15 @@ module ULOL
         def initialize(indoor_model)
           @indoor_model = indoor_model
           @transition_curve_cache = {}
-          @transition_line_points = nil
+          @world_transition_line_points = nil
           @transition_draw_points = []
           super(OVERLAY_ID, OVERLAY_NAME, description: 'Shows when IndoorGML editing is active.')
         end
 
         def invalidate_transition_points
           @transition_curve_cache&.clear
-          @transition_line_points = nil
+          @world_transition_line_points = nil
+          @transition_draw_points&.clear
         end
 
         def draw(view)
@@ -230,19 +231,19 @@ module ULOL
           camera_direction = view.camera.direction.clone
           camera_direction.normalize!
           depth_distance = view.pixels_to_model(TRANSITION_DEPTH_OFFSET_PIXELS, Geom::Point3d.new(0, 0, 0))
-          base_points = transition_line_points
-          return if base_points.empty?
+          world_points = transition_line_points
+          return if world_points.empty?
 
-          points = offset_transition_line_points(base_points, camera_direction, depth_distance)
+          points = offset_transition_line_points(world_points, camera_direction, depth_distance)
           view.drawing_color = DUAL_TRANSITION_COLOR
           view.draw(GL_LINES, points)
         end
 
         def transition_line_points
-          @transition_line_points ||= build_transition_line_points
+          @world_transition_line_points ||= build_world_transition_line_points
         end
 
-        def build_transition_line_points
+        def build_world_transition_line_points
           primal_tf = @indoor_model.primal_group&.valid? ? @indoor_model.primal_group.transformation : nil
           points = []
           @indoor_model.transitions.each do |transition|
