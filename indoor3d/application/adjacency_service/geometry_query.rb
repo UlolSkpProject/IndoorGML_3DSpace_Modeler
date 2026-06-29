@@ -27,8 +27,8 @@ module ULOL
           end
 
           def self.common_face_candidates(entity1, entity2, tolerance)
-            faces1 = Utils::Geometry.world_faces(entity1)
-            faces2 = Utils::Geometry.world_faces(entity2)
+            faces1 = Utils::Geometry.entity_faces_in_parent_space(entity1)
+            faces2 = Utils::Geometry.entity_faces_in_parent_space(entity2)
             faces1.each_with_object([]) do |face1, candidates|
               faces2.each do |face2|
                 next unless Utils::Geometry.normals_opposite?(face1[:normal], face2[:normal])
