@@ -5,11 +5,11 @@ module ULOL
     module IndoorCore
       class AdjacencyService
         module GeometryQuery
-          def self.common_face_waypoint_candidates(entity1, entity2, state1_point: nil, state2_point: nil, tolerance: Utils::Geometry::DEFAULT_TOLERANCE)
+          def self.common_face_waypoint_candidates(entity1, entity2, state1_point: nil, state2_point: nil, transformation1: nil, transformation2: nil, tolerance: Utils::Geometry::DEFAULT_TOLERANCE)
             return [] unless entity1&.valid? && entity2&.valid?
             return [] unless Utils::Geometry.touching_bounds?(entity1.bounds, entity2.bounds, tolerance)
 
-            candidates = common_face_candidates(entity1, entity2, tolerance)
+            candidates = common_face_candidates(entity1, entity2, transformation1, transformation2, tolerance)
             return [] if candidates.empty?
 
             max_area = candidates.map { |candidate| candidate[:area] }.max
@@ -26,9 +26,9 @@ module ULOL
             []
           end
 
-          def self.common_face_candidates(entity1, entity2, tolerance)
-            faces1 = Utils::Geometry.entity_faces_in_parent_space(entity1)
-            faces2 = Utils::Geometry.entity_faces_in_parent_space(entity2)
+          def self.common_face_candidates(entity1, entity2, transformation1, transformation2, tolerance)
+            faces1 = Utils::Geometry.entity_faces_in_parent_space(entity1, transformation1)
+            faces2 = Utils::Geometry.entity_faces_in_parent_space(entity2, transformation2)
             faces1.each_with_object([]) do |face1, candidates|
               faces2.each do |face2|
                 next unless Utils::Geometry.normals_opposite?(face1[:normal], face2[:normal])

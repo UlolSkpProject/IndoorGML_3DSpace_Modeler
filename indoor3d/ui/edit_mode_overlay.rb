@@ -251,14 +251,11 @@ module ULOL
         end
 
         def transition_line_points_cache_key
-          primal_group = @indoor_model.primal_group
-          return nil unless primal_group&.valid?
-
-          rounded_transform_key(primal_group.transformation)
+          rounded_transform_key(primal_world_transformation)
         end
 
         def build_world_transition_line_points
-          primal_tf = @indoor_model.primal_group&.valid? ? @indoor_model.primal_group.transformation : nil
+          primal_tf = primal_world_transformation
           points = []
           @indoor_model.transitions.each do |transition|
             next unless transition&.valid?()
@@ -502,39 +499,56 @@ module ULOL
         end
 
         def transition_curve_input(transition, primal_tf)
-          point1 = overlay_state_point_with_tf(transition.state1, primal_tf)
-          point2 = overlay_state_point_with_tf(transition.state2, primal_tf)
+          point1 = overlay_state_world_point(transition.state1)
+          point2 = overlay_state_world_point(transition.state2)
           return { points: [], normal1: nil, normal2: nil } if point1.distance(point2) <= 0.001
 
-          waypoint = overlay_transition_waypoint_with_tf(transition.selected_waypoint, primal_tf)
+          waypoint_source = overlay_transition_waypoint_source(transition.selected_waypoint, point1, point2, primal_tf) ||
+                            { point: nil, source: :primal }
+          waypoint = waypoint_source[:point]
           points = waypoint ? [point1, waypoint, point2] : [point1, point2]
           {
             points: points,
-            normal1: overlay_transition_normal_with_tf(transition.selected_waypoint_normal1, primal_tf),
-            normal2: overlay_transition_normal_with_tf(transition.selected_waypoint_normal2, primal_tf)
+            normal1: overlay_transition_normal_with_source(transition.selected_waypoint_normal1, primal_tf, waypoint_source[:source]),
+            normal2: overlay_transition_normal_with_source(transition.selected_waypoint_normal2, primal_tf, waypoint_source[:source])
           }
         end
 
-        def overlay_state_point_with_tf(state, primal_tf)
-          point = state.position
-          return point.transform(primal_tf) if primal_tf
-          point
+        def overlay_state_world_point(state)
+          group = state&.duality_cell&.sketchup_group
+          return state.position unless group&.valid?
+
+          Utils::Transformation.entity_world_transformation_under_root(group, @indoor_model.primal_group).origin
         rescue StandardError
           state.position
         end
 
-        def overlay_transition_waypoint_with_tf(point, primal_tf)
+        def overlay_transition_waypoint_source(point, state1_world, state2_world, primal_tf)
           return nil unless point.is_a?(Geom::Point3d)
-          return point.transform(primal_tf) if primal_tf
-          point
+
+          raw_world = point
+          local_world = primal_tf ? point.transform(primal_tf) : point
+          raw_score = waypoint_fit_score(raw_world, state1_world, state2_world)
+          local_score = waypoint_fit_score(local_world, state1_world, state2_world)
+          if raw_score && local_score && raw_score < local_score
+            { point: raw_world, source: :world }
+          else
+            { point: local_world, source: :primal }
+          end
         rescue StandardError
-          point
+          { point: point, source: :world }
         end
 
-        def overlay_transition_normal_with_tf(vector, primal_tf)
+        def waypoint_fit_score(point, state1_world, state2_world)
+          return nil unless point && state1_world && state2_world
+
+          [state1_world.distance(point), point.distance(state2_world)].max
+        end
+
+        def overlay_transition_normal_with_source(vector, primal_tf, source)
           return nil unless vector.is_a?(Geom::Vector3d)
 
-          normal = primal_tf ? vector.transform(primal_tf) : vector.clone
+          normal = source == :world ? vector.clone : (primal_tf ? vector.transform(primal_tf) : vector.clone)
           return nil unless normal.is_a?(Geom::Vector3d)
 
           normal.normalize! if normal.length > 0.001
@@ -616,13 +630,13 @@ module ULOL
         end
 
         def overlay_state_point(state)
-          point = state.position
-          primal_group = @indoor_model.primal_group
-          return point.transform(primal_group.transformation) if primal_group&.valid?
-
-          point
+          overlay_state_world_point(state)
         rescue StandardError
           state.position
+        end
+
+        def primal_world_transformation
+          Utils::Transformation.root_transformation_in_model(@indoor_model.primal_group)
         end
 
         def draw_2d_quad(view, points, color)
