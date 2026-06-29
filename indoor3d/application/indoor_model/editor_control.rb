@@ -63,8 +63,9 @@ module ULOL
           def finish_editing
             @finishing_editing = true
             @editor_session.restore_validation_focus_visibility if @editor_session.validation_focus_active?
+            skip_primal_normalization = @editor_session.auto_primal_clean_session?
             finished = @editor_session.finish()
-            if finished
+            if finished && !skip_primal_normalization
               normalize_primal_children_for_finish()
             #   refresh_runtime_data()
             end
@@ -322,6 +323,7 @@ module ULOL
                   job[:source].erase! if job[:source]&.valid?
                   cleanup_empty_conversion_ancestors(job)
                   converted_count += 1
+                  @editor_session.mark_dirty!
                 rescue StandardError => e
                   IndoorCore::Logger.puts "[IndoorGML] Selected solid group conversion failed: #{e.class}: #{e.message}"
                   source.erase! if source&.valid? && indoor_feature(source) != 'CellSpace'
@@ -358,6 +360,7 @@ module ULOL
                 change_cell_space_type(cell_space.sketchup_group, cell_type, category_code)
               end
               model.commit_operation()
+              @editor_session.mark_dirty!
               @editor_session.refresh_visibility_filter
               @editor_session.selection_changed()
               model.active_view().invalidate() if model&.active_view
@@ -394,6 +397,7 @@ module ULOL
                 write_cell_space_attributes(cell_space)
               end
               model.commit_operation()
+              @editor_session.mark_dirty!
               remember_cell_space_change_snapshot(cell_space.sketchup_group)
               @editor_session.selection_changed()
               true
@@ -424,6 +428,7 @@ module ULOL
                 end
               end
               model.commit_operation()
+              @editor_session.mark_dirty!
               cell_spaces.each { |cell_space| remember_cell_space_change_snapshot(cell_space.sketchup_group) }
               @editor_session.refresh_visibility_filter
               @editor_session.selection_changed()
@@ -440,7 +445,9 @@ module ULOL
               cell_space = selected_cell_space
               return false unless cell_space&.valid?
 
-              @editor_session.edit_cell_space_geometry(cell_space)
+              result = @editor_session.edit_cell_space_geometry(cell_space)
+              @editor_session.mark_dirty! if result
+              result
             rescue StandardError => e
               IndoorCore::Logger.puts "[IndoorGML] Selected CellSpace geometry edit failed: #{e.class}: #{e.message}"
               false
@@ -448,7 +455,9 @@ module ULOL
           end
 
           def finish_cell_space_geometry_editing
-            @editor_session.finish_cell_space_geometry_editing()
+            result = @editor_session.finish_cell_space_geometry_editing()
+            @editor_session.mark_dirty! if result
+            result
           end
 
           def with_active_path_enforcement_suspended

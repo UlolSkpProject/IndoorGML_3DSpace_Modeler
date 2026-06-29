@@ -50,7 +50,7 @@ module ULOL
             primal_group = @indoor_model.primal_group
             return unless primal_group&.valid?
 
-            @editing ? unlock_entity(primal_group) : lock_entity(primal_group)
+            unlock_entity(primal_group)
           end
 
           private
