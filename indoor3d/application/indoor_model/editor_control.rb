@@ -244,9 +244,10 @@ module ULOL
                 classification_locked: cell_space_type_change_locked_by_tag?([cell_space]),
                 storey: cell_space.storey,
                 navigation_semantics_enabled: cell_space.navigable?,
-                navigation_class: cell_space.navigation_class,
-                navigation_function: cell_space.navigation_function,
-                navigation_usage: cell_space.navigation_usage,
+                navigation_class: resolved_navigation_semantic_value(cell_space, :class_value),
+                navigation_function: resolved_navigation_semantic_value(cell_space, :function_value),
+                navigation_usage: resolved_navigation_semantic_value(cell_space, :usage_value),
+                navigation_semantics_editable: cell_space.cell_type == CellSpaceType::GENERAL,
                 transition_count: cell_space.duality_state&.transition_ids&.length.to_i,
                 cell_geometry_editing: @editor_session.cell_space_geometry_editing?
               }
@@ -349,11 +350,11 @@ module ULOL
               cell_space = selected_cell_space
               cell_space = @editor_session.editing_cell_space if cell_space.nil?
               return false unless cell_space&.valid?
-              return false unless cell_space.navigable?
+              return false unless cell_space.cell_type == CellSpaceType::GENERAL
 
               model = Sketchup.active_model()
               operation_started = false
-              model.start_operation('Change CellSpace Navigation Semantics', true)
+              model.start_operation('Change GeneralSpace Navigation Semantics', true)
               operation_started = true
               sync do
                 cell_space.set_navigation_semantics(
@@ -369,7 +370,7 @@ module ULOL
               true
             rescue StandardError => e
               model.abort_operation() if operation_started
-              IndoorCore::Logger.puts "[IndoorGML] Selected CellSpace navigation semantics update failed: #{e.class}: #{e.message}"
+              IndoorCore::Logger.puts "[IndoorGML] GeneralSpace navigation semantics update failed: #{e.class}: #{e.message}"
               false
             end
           end
@@ -589,6 +590,12 @@ module ULOL
             end.uniq
 
             classifications.length == 1 ? classifications.first : nil
+          end
+
+          def resolved_navigation_semantic_value(cell_space, key)
+            NavigationSemanticResolver.resolve(cell_space).public_send(key)
+          rescue NavigationSemanticError
+            nil
           end
 
           def cell_space_type_change_locked_by_tag?(cell_spaces)

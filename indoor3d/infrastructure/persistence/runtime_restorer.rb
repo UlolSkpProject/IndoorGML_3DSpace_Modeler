@@ -61,8 +61,12 @@ module ULOL
             id: @serializer.attribute(entity, 'id'),
             category_code: @serializer.attribute(entity, 'category_code'),
             navigation_class: @serializer.attribute(entity, 'navigation_class'),
+            navigation_class_code_space: @serializer.attribute(entity, 'navigation_class_code_space'),
             navigation_function: @serializer.attribute(entity, 'navigation_function'),
+            navigation_function_code_space: @serializer.attribute(entity, 'navigation_function_code_space'),
             navigation_usage: @serializer.attribute(entity, 'navigation_usage'),
+            navigation_usage_code_space: @serializer.attribute(entity, 'navigation_usage_code_space'),
+            navigation_code_space: @serializer.attribute(entity, 'navigation_code_space'),
             storey: storey
           )
         rescue StandardError => e

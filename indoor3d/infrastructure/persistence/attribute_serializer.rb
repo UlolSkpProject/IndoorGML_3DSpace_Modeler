@@ -173,16 +173,29 @@ module ULOL
         end
 
         def write_navigation_attributes(group, cell_space)
-          if cell_space.navigable?
-            group.set_attribute(@dictionary_name, 'navigation_class', cell_space.navigation_class)
-            group.set_attribute(@dictionary_name, 'navigation_function', cell_space.navigation_function)
-            group.set_attribute(@dictionary_name, 'navigation_usage', cell_space.navigation_usage)
-          else
-            %w[navigation_class navigation_function navigation_usage].each do |key|
-              group.delete_attribute(@dictionary_name, key) if group.respond_to?(:delete_attribute)
-            end
+          if cell_space.cell_type == CellSpaceType::GENERAL
+            semantic = NavigationSemanticResolver.resolve(cell_space)
+            group.set_attribute(@dictionary_name, 'navigation_class', semantic.class_value)
+            group.set_attribute(@dictionary_name, 'navigation_class_code_space', semantic.class_code_space)
+            group.set_attribute(@dictionary_name, 'navigation_function', semantic.function_value)
+            group.set_attribute(@dictionary_name, 'navigation_function_code_space', semantic.function_code_space)
+            group.set_attribute(@dictionary_name, 'navigation_usage', semantic.usage_value)
+            group.set_attribute(@dictionary_name, 'navigation_usage_code_space', semantic.usage_code_space)
+            group.delete_attribute(@dictionary_name, 'navigation_code_space') if group.respond_to?(:delete_attribute)
+            return
           end
-          group.delete_attribute(@dictionary_name, 'navigation_code_space') if group.respond_to?(:delete_attribute)
+
+          %w[
+            navigation_class
+            navigation_class_code_space
+            navigation_function
+            navigation_function_code_space
+            navigation_usage
+            navigation_usage_code_space
+            navigation_code_space
+          ].each do |key|
+            group.delete_attribute(@dictionary_name, key) if group.respond_to?(:delete_attribute)
+          end
         end
       end
 

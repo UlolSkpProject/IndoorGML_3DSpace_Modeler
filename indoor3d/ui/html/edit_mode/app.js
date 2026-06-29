@@ -243,6 +243,7 @@ function selectionKey(snapshot) {
     snapshot.classificationLocked ? 'locked' : 'unlocked',
     snapshot.storey || '',
     snapshot.navigationSemanticsEnabled ? 'navi' : 'core',
+    snapshot.navigationSemanticsEditable ? 'editable' : 'readonly',
     snapshot.navigationClass || '',
     snapshot.navigationFunction || '',
     snapshot.navigationUsage || '',
@@ -341,6 +342,10 @@ function setNavigationSemantics(snapshot, enabled) {
   navigationClass.value = snapshot.navigationClass || '';
   navigationFunction.value = snapshot.navigationFunction || '';
   navigationUsage.value = snapshot.navigationUsage || '';
+  setControlLocked(
+    [navigationClass, navigationFunction, navigationUsage],
+    !snapshot.navigationSemanticsEditable
+  );
 }
 
 // ────────────────────────────────────────────────────────────────

@@ -8,7 +8,7 @@ module ULOL
 
         TAG_SUFFIX_MAP = {
           'MV_RM_01' => [CellSpaceType::TRANSITION, 'Elevator'],
-          'MV_RM_02' => [CellSpaceType::TRANSITION, 'Escalator'],
+          'MV_RM_02' => [CellSpaceType::TRANSITION, 'Stair'],
           'IP_RM_05' => [CellSpaceType::TRANSITION, 'Stair'],
           'IP_RM_23' => [CellSpaceType::GENERAL, 'Room'],
           'RM_DR' => [CellSpaceType::CONNECTION, 'Door']

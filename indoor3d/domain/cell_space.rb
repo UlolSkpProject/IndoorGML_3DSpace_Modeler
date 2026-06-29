@@ -13,8 +13,11 @@ module ULOL
         attr_accessor :category_code_space
         attr_accessor :category_standard
         attr_accessor :navigation_class
+        attr_accessor :navigation_class_code_space
         attr_accessor :navigation_function
+        attr_accessor :navigation_function_code_space
         attr_accessor :navigation_usage
+        attr_accessor :navigation_usage_code_space
         attr_accessor :navigation_code_space
         attr_accessor :storey
         attr_accessor :editable
@@ -31,7 +34,6 @@ module ULOL
           @sketchup_group_id = sketchup_group.persistent_id
           @cell_type = cell_type
           set_category(category_code)
-          apply_default_navigation_semantics
           @storey = DEFAULT_STOREY
           @editable = false
           @duality_state = nil
@@ -49,7 +51,7 @@ module ULOL
           @category_label = category[:label]
           @category_code_space = category[:code_space]
           @category_standard = category[:standard]
-          apply_default_navigation_semantics
+          clear_navigation_semantics
         end
 
         def create_duality_state(parent_entities, local_position = nil)
@@ -82,10 +84,14 @@ module ULOL
 
         def set_navigation_semantics(navigation_class:, navigation_function:, navigation_usage:)
           return false unless navigable?
+          return false unless @cell_type == CellSpaceType::GENERAL
 
-          @navigation_class = normalize_navigation_semantic(navigation_class, fallback: @navigation_class)
-          @navigation_function = normalize_navigation_semantic(navigation_function, fallback: @navigation_function)
-          @navigation_usage = normalize_navigation_semantic(navigation_usage, fallback: @navigation_usage)
+          @navigation_class = normalize_navigation_semantic(navigation_class)
+          @navigation_function = normalize_navigation_semantic(navigation_function)
+          @navigation_usage = normalize_navigation_semantic(navigation_usage)
+          @navigation_class_code_space = CellSpaceCategory::DEFAULT_CODE_SPACE unless @navigation_class.to_s.empty?
+          @navigation_function_code_space = CellSpaceCategory::DEFAULT_CODE_SPACE unless @navigation_function.to_s.empty?
+          @navigation_usage_code_space = CellSpaceCategory::DEFAULT_CODE_SPACE unless @navigation_usage.to_s.empty?
           true
         end
 
@@ -93,11 +99,11 @@ module ULOL
           @storey = normalize_storey(value)
         end
 
-        def self.restore(sketchup_group, cell_type, id: nil, name: nil, category_code: nil, category_label: nil, category_code_space: nil, category_standard: nil, navigation_class: nil, navigation_function: nil, navigation_usage: nil, navigation_code_space: nil, storey: nil, storey_id: nil)
+        def self.restore(sketchup_group, cell_type, id: nil, name: nil, category_code: nil, category_label: nil, category_code_space: nil, category_standard: nil, navigation_class: nil, navigation_class_code_space: nil, navigation_function: nil, navigation_function_code_space: nil, navigation_usage: nil, navigation_usage_code_space: nil, navigation_code_space: nil, storey: nil, storey_id: nil)
           validate_sketchup_group!(sketchup_group)
 
           cell_space = allocate
-          cell_space.send(:initialize_restored, sketchup_group, cell_type, id, name, category_code, category_label, category_code_space, category_standard, navigation_class, navigation_function, navigation_usage, navigation_code_space, storey, storey_id)
+          cell_space.send(:initialize_restored, sketchup_group, cell_type, id, name, category_code, category_label, category_code_space, category_standard, navigation_class, navigation_class_code_space, navigation_function, navigation_function_code_space, navigation_usage, navigation_usage_code_space, navigation_code_space, storey, storey_id)
           cell_space
         end
 
@@ -117,15 +123,20 @@ module ULOL
 
         private
 
-        def initialize_restored(sketchup_group, cell_type, id, name, category_code, category_label, category_code_space, category_standard, navigation_class, navigation_function, navigation_usage, navigation_code_space, storey, storey_id)
+        def initialize_restored(sketchup_group, cell_type, id, name, category_code, category_label, category_code_space, category_standard, navigation_class, navigation_class_code_space, navigation_function, navigation_function_code_space, navigation_usage, navigation_usage_code_space, navigation_code_space, storey, storey_id)
           @sketchup_group = sketchup_group
           @sketchup_group_id = sketchup_group.persistent_id
           @cell_type = cell_type
           set_category(category_code, category_label, category_code_space, category_standard)
-          @navigation_class = blank_to_nil(navigation_class) || @navigation_class
-          @navigation_function = blank_to_nil(navigation_function) || @navigation_function
-          @navigation_usage = blank_to_nil(navigation_usage) || @navigation_usage
-          @navigation_code_space = blank_to_nil(navigation_code_space) || @navigation_code_space
+          clear_navigation_semantics
+          restore_general_space_navigation_semantics(
+            navigation_class,
+            navigation_class_code_space || navigation_code_space,
+            navigation_function,
+            navigation_function_code_space || navigation_code_space,
+            navigation_usage,
+            navigation_usage_code_space || navigation_code_space
+          )
           @storey = normalize_storey(blank_to_nil(storey) || legacy_storey_value(storey_id))
           @editable = false
           @duality_state = nil
@@ -133,27 +144,34 @@ module ULOL
           @name = name.to_s
         end
 
-        def apply_default_navigation_semantics
-          return clear_navigation_semantics unless navigable?
-
-          default_code = @category_label.to_s.empty? ? @category_code.to_s : @category_label.to_s
-          default_code = CellSpaceType.label(@cell_type) if default_code.empty?
-          @navigation_class = default_code
-          @navigation_function = default_code
-          @navigation_usage = default_code
-          @navigation_code_space = @category_code_space
-        end
-
         def clear_navigation_semantics
           @navigation_class = nil
+          @navigation_class_code_space = nil
           @navigation_function = nil
+          @navigation_function_code_space = nil
           @navigation_usage = nil
+          @navigation_usage_code_space = nil
           @navigation_code_space = nil
         end
 
-        def normalize_navigation_semantic(value, fallback:)
+        def restore_general_space_navigation_semantics(navigation_class, class_code_space, navigation_function, function_code_space, navigation_usage, usage_code_space)
+          return unless @cell_type == CellSpaceType::GENERAL
+
+          @navigation_class = normalize_navigation_semantic(navigation_class)
+          @navigation_class_code_space = blank_to_nil(class_code_space) unless @navigation_class.to_s.empty?
+          @navigation_function = normalize_navigation_semantic(navigation_function)
+          @navigation_function_code_space = blank_to_nil(function_code_space) unless @navigation_function.to_s.empty?
+          @navigation_usage = normalize_navigation_semantic(navigation_usage)
+          @navigation_usage_code_space = blank_to_nil(usage_code_space) unless @navigation_usage.to_s.empty?
+        end
+
+        def normalize_navigation_semantic(value)
           normalized = value.to_s.strip
-          normalized.empty? ? fallback.to_s : normalized
+          normalized.empty? || legacy_navigation_semantic?(normalized) ? nil : normalized
+        end
+
+        def legacy_navigation_semantic?(value)
+          %w[Stair Elevator Door Escalator Room].include?(value.to_s)
         end
 
         def normalize_storey(value)
