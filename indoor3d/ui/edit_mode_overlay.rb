@@ -248,7 +248,7 @@ module ULOL
           @indoor_model.transitions.each do |transition|
             next unless transition&.valid?()
             next unless transition.state1&.valid?() && transition.state2&.valid?()
-            next unless overlay_state_visible?(transition.state1) && overlay_state_visible?(transition.state2)
+            next unless overlay_transition_visible?(transition)
         
             segments = transition_curve_segments(transition, primal_tf)
             points.concat(segments[:default])
@@ -259,10 +259,24 @@ module ULOL
         end
 
         def overlay_state_visible?(state)
+          if @indoor_model.respond_to?(:dual_overlay_state_visible?)
+            return @indoor_model.dual_overlay_state_visible?(state)
+          end
+
           return true unless @indoor_model.respond_to?(:validation_focus_active?)
           return true unless @indoor_model.validation_focus_active?
 
           @indoor_model.validation_focus_state?(state)
+        rescue StandardError
+          false
+        end
+
+        def overlay_transition_visible?(transition)
+          if @indoor_model.respond_to?(:dual_overlay_transition_visible?)
+            return @indoor_model.dual_overlay_transition_visible?(transition)
+          end
+
+          overlay_state_visible?(transition.state1) && overlay_state_visible?(transition.state2)
         rescue StandardError
           false
         end

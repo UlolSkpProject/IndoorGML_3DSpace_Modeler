@@ -134,6 +134,14 @@ module ULOL
             @editor_session.validation_focus_state?(state)
           end
 
+          def dual_overlay_state_visible?(state)
+            @editor_session.dual_overlay_state_visible?(state)
+          end
+
+          def dual_overlay_transition_visible?(transition)
+            @editor_session.dual_overlay_transition_visible?(transition)
+          end
+
           def validation_focus_highlight_cell_spaces
             @editor_session.validation_focus_highlight_cell_spaces
           end
