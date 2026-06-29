@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'json'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -99,6 +101,12 @@ module ULOL
               @indoor_model.set_selected_cell_space_storey(storey)
             end
           end
+          dialog.add_action_callback('setEditModeVisibilityFilter') do |_context, storeys_json, cell_types_json|
+            IndoorCore::Logger.puts '[IndoorGML] EditModeDialog#setEditModeVisibilityFilter'
+            UI.start_timer(0, false) do
+              @indoor_model.set_edit_mode_visibility_filter(storeys_json, cell_types_json)
+            end
+          end
           dialog.add_action_callback('convertSelectedSolidGroups') do |_context, selection_value|
             IndoorCore::Logger.puts "[IndoorGML] EditModeDialog#convertSelectedSolidGroups value=#{selection_value}"
             UI.start_timer(0, false) do
@@ -158,7 +166,7 @@ module ULOL
             "{value: #{js_string(option[:value])}, label: #{js_string(option[:label])}}"
           end.join(', ')
 
-          "init({classificationOptions: [#{options}], assetRoot: #{js_string(asset_root)}, overlayColors: #{overlay_colors_script}, fixMode: #{@indoor_model.validation_focus_active? ? 'true' : 'false'}});"
+          "init({classificationOptions: [#{options}], assetRoot: #{js_string(asset_root)}, overlayColors: #{overlay_colors_script}, fixMode: #{@indoor_model.validation_focus_active? ? 'true' : 'false'}, visibilityFilter: #{visibility_filter_script(@indoor_model.edit_mode_visibility_filter_snapshot)}});"
         end
 
         def overlay_colors_script
@@ -186,6 +194,8 @@ module ULOL
                 classification: #{snapshot[:classification].nil? ? 'null' : js_string(snapshot[:classification])},
                 classificationLocked: #{snapshot[:classification_locked] ? 'true' : 'false'},
                 storey: #{js_string(snapshot[:storey])},
+                storeyEditable: #{snapshot[:storey_editable] ? 'true' : 'false'},
+                storeyRangeAllowed: #{snapshot[:storey_range_allowed] ? 'true' : 'false'},
                 navigationSemanticsEnabled: #{snapshot[:navigation_semantics_enabled] ? 'true' : 'false'},
                 navigationClass: #{js_string(snapshot[:navigation_class])},
                 navigationFunction: #{js_string(snapshot[:navigation_function])},
@@ -196,6 +206,7 @@ module ULOL
                 stateCount: #{snapshot[:state_count].to_i},
                 totalTransitionCount: #{snapshot[:total_transition_count].to_i},
                 cellTypeCounts: #{cell_type_counts_script(snapshot[:cell_type_counts])},
+                visibilityFilter: #{visibility_filter_script(snapshot[:visibility_filter])},
                 cellGeometryEditing: #{snapshot[:cell_geometry_editing] ? 'true' : 'false'}
               });
             JS
@@ -206,6 +217,28 @@ module ULOL
           Array(counts).map do |entry|
             "{label: #{js_string(entry[:label])}, count: #{entry[:count].to_i}}"
           end.then { |items| "[#{items.join(', ')}]" }
+        end
+
+        def visibility_filter_script(filter)
+          filter ||= {}
+          <<~JS.strip
+            {
+              storeyOptions: #{option_list_script(filter[:storey_options])},
+              selectedStoreys: #{string_list_script(filter[:selected_storeys])},
+              cellTypeOptions: #{option_list_script(filter[:cell_type_options])},
+              selectedCellTypes: #{string_list_script(filter[:selected_cell_types])}
+            }
+          JS
+        end
+
+        def option_list_script(options)
+          Array(options).map do |entry|
+            "{value: #{js_string(entry[:value])}, label: #{js_string(entry[:label])}}"
+          end.then { |items| "[#{items.join(', ')}]" }
+        end
+
+        def string_list_script(values)
+          Array(values).map { |value| js_string(value) }.then { |items| "[#{items.join(', ')}]" }
         end
 
         def js_string(value)

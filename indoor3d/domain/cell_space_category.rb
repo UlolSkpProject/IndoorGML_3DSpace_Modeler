@@ -17,6 +17,9 @@ module ULOL
           ],
           CellSpaceType::CONNECTION => [
             { code: 'Door', label: 'Door', code_space: DEFAULT_CODE_SPACE, standard: true }
+          ],
+          CellSpaceType::ANCHOR => [
+            { code: 'ExteriorDoor', label: 'Exterior Door', code_space: DEFAULT_CODE_SPACE, standard: true }
           ]
         }.freeze unless const_defined?(:DEFAULTS, false)
 

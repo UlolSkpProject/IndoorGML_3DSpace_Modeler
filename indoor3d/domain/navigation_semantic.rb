@@ -51,20 +51,32 @@ module ULOL
             function_code_space: ANNEX_D_CODE_SPACE,
             usage_value: '1000',
             usage_code_space: ANNEX_D_CODE_SPACE
+          ),
+          [CellSpaceType::ANCHOR, 'ExteriorDoor'] => NavigationSemantic.new(
+            class_value: '1020',
+            class_code_space: ANNEX_D_CODE_SPACE,
+            function_value: '1010',
+            function_code_space: ANNEX_D_CODE_SPACE,
+            usage_value: '1010',
+            usage_code_space: ANNEX_D_CODE_SPACE
           )
         }.freeze
 
         def self.resolve(cell_space)
           cell_type = cell_space&.cell_type
           category_code = CellSpaceCategory.migrate_legacy_code(cell_space&.category_code)
-          semantic = NAVIGATION_SEMANTICS[[cell_type, category_code]]
-          semantic = general_space_override(cell_space, semantic) if cell_type == CellSpaceType::GENERAL && semantic
+          semantic = default_for(cell_type, category_code)
+          semantic = override_from_cell_space(cell_space, semantic) if semantic
           return semantic if semantic
 
           raise NavigationSemanticError, missing_mapping_message(cell_space, cell_type, category_code)
         end
 
-        def self.general_space_override(cell_space, default_semantic)
+        def self.default_for(cell_type, category_code)
+          NAVIGATION_SEMANTICS[[cell_type, CellSpaceCategory.migrate_legacy_code(category_code)]]
+        end
+
+        def self.override_from_cell_space(cell_space, default_semantic)
           NavigationSemantic.new(
             class_value: override_value(semantic_attr(cell_space, :navigation_class), default_semantic.class_value),
             class_code_space: override_value(semantic_attr(cell_space, :navigation_class_code_space), default_semantic.class_code_space),
@@ -74,7 +86,7 @@ module ULOL
             usage_code_space: override_value(semantic_attr(cell_space, :navigation_usage_code_space), default_semantic.usage_code_space)
           )
         end
-        private_class_method :general_space_override
+        private_class_method :override_from_cell_space
 
         def self.semantic_attr(cell_space, name)
           cell_space.respond_to?(name) ? cell_space.public_send(name) : nil

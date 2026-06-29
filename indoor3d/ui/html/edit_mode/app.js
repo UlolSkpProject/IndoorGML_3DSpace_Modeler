@@ -5,6 +5,11 @@ var emptyPanel = document.getElementById('emptyPanel');
 var solidPanel = document.getElementById('solidPanel');
 var cellPanel = document.getElementById('cellPanel');
 var cellTop = document.getElementById('cellTop');
+var filterPanel = document.getElementById('filterPanel');
+var storeyFilterAll = document.getElementById('storeyFilterAll');
+var storeyFilterOptions = document.getElementById('storeyFilterOptions');
+var typeFilterAll = document.getElementById('typeFilterAll');
+var typeFilterOptions = document.getElementById('typeFilterOptions');
 
 var modeTitle = document.getElementById('modeTitle');
 var finishButton = document.getElementById('finish');
@@ -43,6 +48,14 @@ var totalTransitionCount = document.getElementById('totalTransitionCount');
 var currentMode = null;
 var currentSelectionKey = null;
 var fixMode = false;
+var currentStoreyRangeAllowed = false;
+var suppressFilterEvents = false;
+var currentVisibilityFilter = {
+  storeyOptions: [],
+  selectedStoreys: [],
+  cellTypeOptions: [],
+  selectedCellTypes: []
+};
 
 // ────────────────────────────────────────────────────────────────
 // SketchUp bridge helpers
@@ -114,6 +127,131 @@ function applyOverlayColors(colors) {
   document.documentElement.style.setProperty('--overlay-state-soft-color', colors.stateSoft || '');
 }
 
+function normalizeArray(values) {
+  return Array.isArray(values) ? values : [];
+}
+
+function selectedSet(values) {
+  return normalizeArray(values).reduce(function (memo, value) {
+    memo[String(value)] = true;
+    return memo;
+  }, {});
+}
+
+function renderVisibilityFilter(filter) {
+  filter = filter || {};
+  currentVisibilityFilter = {
+    storeyOptions: normalizeArray(filter.storeyOptions),
+    selectedStoreys: normalizeArray(filter.selectedStoreys),
+    cellTypeOptions: normalizeArray(filter.cellTypeOptions),
+    selectedCellTypes: normalizeArray(filter.selectedCellTypes)
+  };
+
+  suppressFilterEvents = true;
+  renderFilterGroup(
+    storeyFilterOptions,
+    storeyFilterAll,
+    currentVisibilityFilter.storeyOptions,
+    currentVisibilityFilter.selectedStoreys,
+    'storey'
+  );
+  renderFilterGroup(
+    typeFilterOptions,
+    typeFilterAll,
+    currentVisibilityFilter.cellTypeOptions,
+    currentVisibilityFilter.selectedCellTypes,
+    'type'
+  );
+  suppressFilterEvents = false;
+}
+
+function renderFilterGroup(container, allCheckbox, options, selectedValues, name) {
+  var selected = selectedSet(selectedValues);
+  var allSelected = selectedValues.length === 0;
+
+  allCheckbox.checked = allSelected;
+  container.innerHTML = '';
+
+  if (!options.length) {
+    var empty = document.createElement('span');
+    empty.className = 'filter-option empty';
+    empty.textContent = '-';
+    container.appendChild(empty);
+    return;
+  }
+
+  options.forEach(function (option) {
+    var label = document.createElement('label');
+    var input = document.createElement('input');
+    var text = document.createElement('span');
+
+    label.className = 'filter-option';
+    input.type = 'checkbox';
+    input.name = name + 'Filter';
+    input.value = option.value;
+    input.checked = !allSelected && selected[String(option.value)] === true;
+    input.addEventListener('change', onFilterOptionChanged);
+    text.textContent = option.label || option.value;
+
+    label.appendChild(input);
+    label.appendChild(text);
+    container.appendChild(label);
+  });
+}
+
+function checkedFilterValues(container) {
+  return Array.prototype.map.call(
+    container.querySelectorAll('input[type="checkbox"]:checked'),
+    function (input) { return input.value; }
+  );
+}
+
+function commitVisibilityFilter() {
+  if (suppressFilterEvents) return;
+
+  var selectedStoreys = storeyFilterAll.checked ? [] : checkedFilterValues(storeyFilterOptions);
+  var selectedTypes = typeFilterAll.checked ? [] : checkedFilterValues(typeFilterOptions);
+
+  invokeSketchup('setEditModeVisibilityFilter', [
+    JSON.stringify(selectedStoreys),
+    JSON.stringify(selectedTypes)
+  ]);
+}
+
+function onFilterAllChanged(event) {
+  if (suppressFilterEvents) return;
+
+  var allCheckbox = event.currentTarget;
+  var container = allCheckbox === storeyFilterAll ? storeyFilterOptions : typeFilterOptions;
+
+  if (allCheckbox.checked) {
+    Array.prototype.forEach.call(container.querySelectorAll('input[type="checkbox"]'), function (input) {
+      input.checked = false;
+    });
+  } else if (!checkedFilterValues(container).length) {
+    allCheckbox.checked = true;
+  }
+
+  commitVisibilityFilter();
+}
+
+function onFilterOptionChanged(event) {
+  if (suppressFilterEvents) return;
+
+  var input = event.currentTarget;
+  var isStorey = input.name === 'storeyFilter';
+  var allCheckbox = isStorey ? storeyFilterAll : typeFilterAll;
+  var container = isStorey ? storeyFilterOptions : typeFilterOptions;
+
+  if (checkedFilterValues(container).length) {
+    allCheckbox.checked = false;
+  } else {
+    allCheckbox.checked = true;
+  }
+
+  commitVisibilityFilter();
+}
+
 // ────────────────────────────────────────────────────────────────
 // Storey parsing and composition
 // ────────────────────────────────────────────────────────────────
@@ -157,18 +295,26 @@ function composeStorey() {
   clampStoreyLevel(storeyToLevel);
 
   var from = storeyFromKind.value + padLevel(storeyFromLevel.value);
+  if (!currentStoreyRangeAllowed) {
+    storeyToKind.value = storeyFromKind.value;
+    storeyToLevel.value = storeyFromLevel.value;
+    return from;
+  }
+
   var to = storeyToKind.value + padLevel(storeyToLevel.value);
 
   return from === to ? from : from + '~' + to;
 }
 
-function setStorey(value) {
+function setStorey(value, rangeAllowed) {
   var parsed = parseStorey(value);
 
+  currentStoreyRangeAllowed = Boolean(rangeAllowed);
   storeyFromKind.value = parsed.from.kind;
   storeyFromLevel.value = parsed.from.level;
-  storeyToKind.value = parsed.to.kind;
-  storeyToLevel.value = parsed.to.level;
+  storeyToKind.value = currentStoreyRangeAllowed ? parsed.to.kind : parsed.from.kind;
+  storeyToLevel.value = currentStoreyRangeAllowed ? parsed.to.level : parsed.from.level;
+  setControlLocked([storeyToKind, storeyToLevel], !currentStoreyRangeAllowed);
   show(storeyFields);
 }
 
@@ -188,6 +334,7 @@ function init(config) {
   setIcon('convertIcon', config.assetRoot, 'create_cellspace.svg');
   setIcon('changeTypeIcon', config.assetRoot, 'change_cellspace_type.svg');
   applyOverlayColors(config.overlayColors);
+  renderVisibilityFilter(config.visibilityFilter);
 
   setVisible(recheckErrorsButton, fixMode);
   updateSelection(null);
@@ -208,8 +355,10 @@ function updateSelection(snapshot) {
   setVisible(emptyPanel, nextMode === 'empty');
   setVisible(solidPanel, nextMode === 'solid_groups');
   setVisible(cellPanel, nextMode === 'cell_space' || nextMode === 'cell_spaces');
+  setVisible(filterPanel, true);
   setVisible(clearAllButton, !fixMode && nextMode === 'empty');
   setVisible(recheckErrorsButton, fixMode);
+  renderVisibilityFilter((snapshot || {}).visibilityFilter || currentVisibilityFilter);
 
   if (nextMode === 'solid_groups') {
     renderSolidGroups(snapshot || {});
@@ -242,6 +391,8 @@ function selectionKey(snapshot) {
     snapshot.classification || '',
     snapshot.classificationLocked ? 'locked' : 'unlocked',
     snapshot.storey || '',
+    snapshot.storeyEditable ? 'storey-editable' : 'storey-readonly',
+    snapshot.storeyRangeAllowed ? 'storey-range' : 'storey-single',
     snapshot.navigationSemanticsEnabled ? 'navi' : 'core',
     snapshot.navigationSemanticsEditable ? 'editable' : 'readonly',
     snapshot.navigationClass || '',
@@ -252,6 +403,7 @@ function selectionKey(snapshot) {
     snapshot.solidGroupCount || 0,
     snapshot.stateCount || 0,
     snapshot.totalTransitionCount || 0,
+    visibilityFilterKey(snapshot.visibilityFilter),
     cellTypeCountKey(snapshot.cellTypeCounts)
   ].join('|');
 }
@@ -261,6 +413,23 @@ function cellTypeCountKey(counts) {
 
   return counts.map(function (entry) {
     return [entry.label || '', entry.count || 0].join(':');
+  }).join(',');
+}
+
+function visibilityFilterKey(filter) {
+  if (!filter) return '';
+
+  return [
+    optionKey(filter.storeyOptions),
+    normalizeArray(filter.selectedStoreys).join(','),
+    optionKey(filter.cellTypeOptions),
+    normalizeArray(filter.selectedCellTypes).join(',')
+  ].join('|');
+}
+
+function optionKey(options) {
+  return normalizeArray(options).map(function (entry) {
+    return [entry.value || '', entry.label || ''].join(':');
   }).join(',');
 }
 
@@ -298,7 +467,11 @@ function renderSolidGroups(snapshot) {
 function renderCellSpaces(snapshot) {
   hide(singleCellInfo);
   show(multiCellInfo);
-  hide(storeyFields);
+  if (snapshot.storeyEditable) {
+    setStorey(snapshot.storey || 'F01', Boolean(snapshot.storeyRangeAllowed));
+  } else {
+    hide(storeyFields);
+  }
   setNavigationSemantics(null, false);
 
   cellSpaceCount.textContent = snapshot.cellSpaceCount || 0;
@@ -319,7 +492,7 @@ function renderCellSpace(snapshot) {
   transitionCount.textContent = snapshot.transitionCount || 0;
   selectedClassification.value = snapshot.classification || 'GeneralSpace|Room';
 
-  setStorey(snapshot.storey || 'F01');
+  setStorey(snapshot.storey || 'F01', Boolean(snapshot.storeyRangeAllowed));
   setNavigationSemantics(snapshot, Boolean(snapshot.navigationSemanticsEnabled));
 
   setControlLocked(
@@ -393,6 +566,9 @@ storeyToLevel.addEventListener('keydown', function (event) {
 navigationClass.addEventListener('change', commitNavigationSemantics);
 navigationFunction.addEventListener('change', commitNavigationSemantics);
 navigationUsage.addEventListener('change', commitNavigationSemantics);
+
+storeyFilterAll.addEventListener('change', onFilterAllChanged);
+typeFilterAll.addEventListener('change', onFilterAllChanged);
 
 changeTypeButton.addEventListener('click', function () {
   invokeSketchup('setSelectedCellSpaceClassification', [selectedClassification.value]);

@@ -345,7 +345,7 @@ module ULOL
           def build_independent_cell_space(entity)
             cell_type = CellSpaceType.from_label(indoor_attribute(entity, 'cell_type'))
             cell_space = CellSpace.new(entity, cell_type, indoor_attribute(entity, 'category_code'))
-            if cell_space.cell_type == CellSpaceType::GENERAL
+            if cell_space.navigable?
               cell_space.set_navigation_semantics(
                 navigation_class: indoor_attribute(entity, 'navigation_class'),
                 navigation_function: indoor_attribute(entity, 'navigation_function'),
@@ -424,6 +424,7 @@ module ULOL
               end
             end
             remember_cell_space_change_snapshot(cell_space.sketchup_group)
+            @editor_session.refresh_visibility_filter if editing?
             true
           end
 
@@ -446,6 +447,7 @@ module ULOL
               end
             end
             remember_cell_space_change_snapshot(cell_space.sketchup_group)
+            @editor_session.refresh_visibility_filter if editing?
             true
           end
 
@@ -463,7 +465,7 @@ module ULOL
           end
 
           def apply_cell_space_navigation_attributes(cell_space)
-            return unless cell_space.cell_type == CellSpaceType::GENERAL
+            return unless cell_space.navigable?
 
             entity = cell_space.sketchup_group
             cell_space.set_navigation_semantics(
@@ -499,7 +501,7 @@ module ULOL
               category_code: indoor_attribute(entity, 'category_code').to_s,
               storey: indoor_attribute(entity, 'storey').to_s
             }
-            if CellSpaceType.from_label(snapshot[:cell_type]) == CellSpaceType::GENERAL
+            if CellSpaceType.navigable?(CellSpaceType.from_label(snapshot[:cell_type]))
               snapshot[:navigation_class] = indoor_attribute(entity, 'navigation_class').to_s
               snapshot[:navigation_function] = indoor_attribute(entity, 'navigation_function').to_s
               snapshot[:navigation_usage] = indoor_attribute(entity, 'navigation_usage').to_s

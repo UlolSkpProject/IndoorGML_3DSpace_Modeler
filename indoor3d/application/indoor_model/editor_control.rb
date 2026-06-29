@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'json'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -144,6 +146,22 @@ module ULOL
             @editor_session.invalidate_overlay_transition_points
           end
 
+          def edit_mode_visibility_filter_snapshot
+            {
+              storey_options: edit_mode_storey_filter_options,
+              selected_storeys: @editor_session.visible_storeys,
+              cell_type_options: edit_mode_cell_type_filter_options,
+              selected_cell_types: @editor_session.visible_cell_type_labels
+            }
+          end
+
+          def set_edit_mode_visibility_filter(storeys, cell_types)
+            @editor_session.set_visibility_filter(
+              storeys: parse_visibility_filter_values(storeys),
+              cell_types: parse_visibility_filter_values(cell_types)
+            )
+          end
+
           def run_batched(items, message:, batch_size: 20, complete: nil, failure: nil, &block)
             @editor_session.run_batched(
               items,
@@ -225,15 +243,15 @@ module ULOL
               cell_spaces = cell_spaces.select { |cell_space| cell_space&.valid? }
               if cell_spaces.empty?
                 solid_snapshot = selected_solid_groups_snapshot
-                return solid_snapshot if solid_snapshot
+                return with_edit_mode_visibility_filter(solid_snapshot) if solid_snapshot
 
-                return empty_edit_mode_snapshot
+                return with_edit_mode_visibility_filter(empty_edit_mode_snapshot)
               end
-              return selected_cell_spaces_snapshot(cell_spaces) if cell_spaces.length > 1
+              return with_edit_mode_visibility_filter(selected_cell_spaces_snapshot(cell_spaces)) if cell_spaces.length > 1
 
               cell_space = cell_spaces.first
               group = cell_space.sketchup_group
-              {
+              with_edit_mode_visibility_filter({
                 mode: 'cell_space',
                 feature: 'CellSpace',
                 id: cell_space.id,
@@ -243,14 +261,16 @@ module ULOL
                 classification: CellSpaceCategory.selection_value(cell_space.cell_type, cell_space.category_code),
                 classification_locked: cell_space_type_change_locked_by_tag?([cell_space]),
                 storey: cell_space.storey,
+                storey_editable: true,
+                storey_range_allowed: storey_range_allowed_for_cell_spaces([cell_space]),
                 navigation_semantics_enabled: cell_space.navigable?,
                 navigation_class: resolved_navigation_semantic_value(cell_space, :class_value),
                 navigation_function: resolved_navigation_semantic_value(cell_space, :function_value),
                 navigation_usage: resolved_navigation_semantic_value(cell_space, :usage_value),
-                navigation_semantics_editable: cell_space.cell_type == CellSpaceType::GENERAL,
+                navigation_semantics_editable: cell_space.navigable?,
                 transition_count: cell_space.duality_state&.transition_ids&.length.to_i,
                 cell_geometry_editing: @editor_session.cell_space_geometry_editing?
-              }
+              })
             rescue StandardError => e
               IndoorCore::Logger.puts "[IndoorGML] Edit mode selection snapshot failed: #{e.class}: #{e.message}"
               nil
@@ -330,6 +350,7 @@ module ULOL
                 change_cell_space_type(cell_space.sketchup_group, cell_type, category_code)
               end
               model.commit_operation()
+              @editor_session.refresh_visibility_filter
               @editor_session.selection_changed()
               model.active_view().invalidate() if model&.active_view
               true
@@ -350,11 +371,11 @@ module ULOL
               cell_space = selected_cell_space
               cell_space = @editor_session.editing_cell_space if cell_space.nil?
               return false unless cell_space&.valid?
-              return false unless cell_space.cell_type == CellSpaceType::GENERAL
+              return false unless cell_space.navigable?
 
               model = Sketchup.active_model()
               operation_started = false
-              model.start_operation('Change GeneralSpace Navigation Semantics', true)
+              model.start_operation('Change CellSpace Navigation Semantics', true)
               operation_started = true
               sync do
                 cell_space.set_navigation_semantics(
@@ -370,27 +391,33 @@ module ULOL
               true
             rescue StandardError => e
               model.abort_operation() if operation_started
-              IndoorCore::Logger.puts "[IndoorGML] GeneralSpace navigation semantics update failed: #{e.class}: #{e.message}"
+              IndoorCore::Logger.puts "[IndoorGML] CellSpace navigation semantics update failed: #{e.class}: #{e.message}"
               false
             end
           end
 
           def set_selected_cell_space_storey(storey)
             begin
-              cell_space = selected_cell_space
-              cell_space = @editor_session.editing_cell_space if cell_space.nil?
-              return false unless cell_space&.valid?
+              cell_spaces = selected_cell_spaces
+              cell_spaces = [@editor_session.editing_cell_space].compact if cell_spaces.empty?
+              cell_spaces = cell_spaces.select { |cell_space| cell_space&.valid? }
+              return false if cell_spaces.empty?
+              return false if cell_spaces.length > 1 && common_cell_space_type(cell_spaces).nil?
+              normalized_storey = storey_range_allowed_for_cell_spaces(cell_spaces) ? storey : first_storey_value(storey)
 
               model = Sketchup.active_model()
               operation_started = false
               model.start_operation('Change CellSpace Storey', true)
               operation_started = true
               sync do
-                cell_space.set_storey(storey)
-                write_cell_space_attributes(cell_space)
+                cell_spaces.each do |cell_space|
+                  cell_space.set_storey(normalized_storey)
+                  write_cell_space_attributes(cell_space)
+                end
               end
               model.commit_operation()
-              remember_cell_space_change_snapshot(cell_space.sketchup_group)
+              cell_spaces.each { |cell_space| remember_cell_space_change_snapshot(cell_space.sketchup_group) }
+              @editor_session.refresh_visibility_filter
               @editor_session.selection_changed()
               true
             rescue StandardError => e
@@ -504,6 +531,64 @@ module ULOL
             @editor_session.apply_lock_policy()
           end
 
+          def with_edit_mode_visibility_filter(snapshot)
+            snapshot.merge(visibility_filter: edit_mode_visibility_filter_snapshot)
+          end
+
+          def parse_visibility_filter_values(values)
+            if values.is_a?(String)
+              parsed = JSON.parse(values)
+              return Array(parsed).map(&:to_s)
+            end
+
+            Array(values).map(&:to_s)
+          rescue StandardError
+            []
+          end
+
+          def edit_mode_storey_filter_options
+            labels = @cell_spaces.each_with_object([]) do |cell_space, result|
+              next unless cell_space&.valid?
+
+              result.concat(storey_filter_labels(cell_space.storey))
+            end
+            labels.uniq.sort.map { |label| { value: label, label: label } }
+          end
+
+          def edit_mode_cell_type_filter_options
+            CellSpaceType::SELECTABLE_TYPES.map do |cell_type|
+              label = CellSpaceType.label(cell_type)
+              { value: label, label: label }
+            end
+          end
+
+          def storey_filter_labels(value)
+            parts = value.to_s.strip.upcase.split('~', 2)
+            from = parse_storey_filter_part(parts[0])
+            to = parse_storey_filter_part(parts[1] || parts[0])
+            return [CellSpace::DEFAULT_STOREY] if from.nil?
+            return [format_storey_filter_part(from)] if to.nil?
+
+            if from[:kind] == to[:kind]
+              min, max = [from[:level], to[:level]].minmax
+              return (min..max).map { |level| "#{from[:kind]}#{format('%02d', level)}" }
+            end
+
+            [format_storey_filter_part(from), format_storey_filter_part(to)].compact.uniq
+          end
+
+          def parse_storey_filter_part(value)
+            match = value.to_s.strip.upcase.match(/\A([FB])(\d{1,2})\z/)
+            return nil unless match
+
+            level = [[match[2].to_i, 1].max, 99].min
+            { kind: match[1], level: level }
+          end
+
+          def format_storey_filter_part(part)
+            "#{part[:kind]}#{format('%02d', part[:level])}"
+          end
+
           def selected_cell_space
             selected_cell_spaces.first
           end
@@ -523,7 +608,10 @@ module ULOL
               mode: 'cell_spaces',
               cell_space_count: cell_spaces.length,
               classification: common_cell_space_classification(cell_spaces),
-              classification_locked: cell_space_type_change_locked_by_tag?(cell_spaces)
+              classification_locked: cell_space_type_change_locked_by_tag?(cell_spaces),
+              storey: multi_cell_space_storey_value(cell_spaces),
+              storey_editable: !common_cell_space_type(cell_spaces).nil?,
+              storey_range_allowed: storey_range_allowed_for_cell_spaces(cell_spaces)
             }
           end
 
@@ -551,6 +639,32 @@ module ULOL
             end.uniq
 
             classifications.length == 1 ? classifications.first : nil
+          end
+
+          def common_cell_space_type(cell_spaces)
+            types = cell_spaces.map(&:cell_type).uniq
+            types.length == 1 ? types.first : nil
+          end
+
+          def multi_cell_space_storey_value(cell_spaces)
+            storeys = cell_spaces.map { |cell_space| cell_space.storey.to_s }.reject(&:empty?).uniq
+            return storeys.first if storeys.length == 1
+
+            cell_spaces.first&.storey || CellSpace::DEFAULT_STOREY
+          end
+
+          def storey_range_allowed_for_cell_spaces(cell_spaces)
+            cell_spaces = Array(cell_spaces).select { |cell_space| cell_space&.valid? }
+            return false if cell_spaces.empty?
+
+            cell_spaces.all? do |cell_space|
+              cell_space.cell_type == CellSpaceType::TRANSITION &&
+                %w[Stair Elevator].include?(cell_space.category_code.to_s)
+            end
+          end
+
+          def first_storey_value(value)
+            value.to_s.split('~', 2).first
           end
 
           def selected_solid_groups_snapshot

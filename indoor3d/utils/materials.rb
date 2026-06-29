@@ -7,14 +7,14 @@ module ULOL
 
         remove_const(:MATERIAL_DEFINITIONS) if const_defined?(:MATERIAL_DEFINITIONS, false)
         MATERIAL_DEFINITIONS = {
-          'GeneralSpace|Room' => ['Indoor3DGml_GeneralSpace', Sketchup::Color.new(255, 0, 0), 0.2],
-          'TransitionSpace|Stair' => ['Indoor3DGml_TransitionSpace_Stair', Sketchup::Color.new(0, 128, 0), 0.6],
-          'TransitionSpace|Elevator' => ['Indoor3DGml_TransitionSpace_Elevator', Sketchup::Color.new(0, 128, 0), 0.6],
-          'ConnectionSpace|Door' => ['Indoor3DGml_ConnectionSpace', Sketchup::Color.new(145, 95, 210), 0.5]
+          'GeneralSpace' => ['Indoor3DGml_GeneralSpace', Sketchup::Color.new(255, 0, 0), 0.2],
+          'TransitionSpace' => ['Indoor3DGml_TransitionSpace', Sketchup::Color.new(0, 128, 0), 0.6],
+          'ConnectionSpace' => ['Indoor3DGml_ConnectionSpace', Sketchup::Color.new(145, 95, 210), 0.5],
+          'AnchorSpace' => ['Indoor3DGml_AnchorSpace', Sketchup::Color.new(245, 175, 35), 0.5]
         }.freeze
 
-        def self.cell_space(cell_type, category_code)
-          key = "#{::ULOL::Indoor3DGmlModeler::IndoorCore::CellSpaceType.label(cell_type)}|#{category_code}"
+        def self.cell_space(cell_type, _category_code = nil)
+          key = ::ULOL::Indoor3DGmlModeler::IndoorCore::CellSpaceType.label(cell_type)
           return nil unless MATERIAL_DEFINITIONS.key?(key)
 
           fetch_solid(key)

@@ -51,7 +51,7 @@ module ULOL
           @category_label = category[:label]
           @category_code_space = category[:code_space]
           @category_standard = category[:standard]
-          clear_navigation_semantics
+          apply_default_navigation_semantics
         end
 
         def create_duality_state(parent_entities, local_position = nil)
@@ -84,7 +84,6 @@ module ULOL
 
         def set_navigation_semantics(navigation_class:, navigation_function:, navigation_usage:)
           return false unless navigable?
-          return false unless @cell_type == CellSpaceType::GENERAL
 
           @navigation_class = normalize_navigation_semantic(navigation_class)
           @navigation_function = normalize_navigation_semantic(navigation_function)
@@ -128,8 +127,7 @@ module ULOL
           @sketchup_group_id = sketchup_group.persistent_id
           @cell_type = cell_type
           set_category(category_code, category_label, category_code_space, category_standard)
-          clear_navigation_semantics
-          restore_general_space_navigation_semantics(
+          restore_navigation_semantics(
             navigation_class,
             navigation_class_code_space || navigation_code_space,
             navigation_function,
@@ -154,14 +152,35 @@ module ULOL
           @navigation_code_space = nil
         end
 
-        def restore_general_space_navigation_semantics(navigation_class, class_code_space, navigation_function, function_code_space, navigation_usage, usage_code_space)
-          return unless @cell_type == CellSpaceType::GENERAL
+        def apply_default_navigation_semantics
+          return clear_navigation_semantics unless navigable?
 
-          @navigation_class = normalize_navigation_semantic(navigation_class)
+          semantic = NavigationSemanticResolver.default_for(@cell_type, @category_code)
+          return clear_navigation_semantics unless semantic
+
+          @navigation_class = semantic.class_value
+          @navigation_class_code_space = semantic.class_code_space
+          @navigation_function = semantic.function_value
+          @navigation_function_code_space = semantic.function_code_space
+          @navigation_usage = semantic.usage_value
+          @navigation_usage_code_space = semantic.usage_code_space
+          @navigation_code_space = nil
+        end
+
+        def restore_navigation_semantics(navigation_class, class_code_space, navigation_function, function_code_space, navigation_usage, usage_code_space)
+          return unless navigable?
+
+          restored_class = normalize_navigation_semantic(navigation_class)
+          restored_function = normalize_navigation_semantic(navigation_function)
+          restored_usage = normalize_navigation_semantic(navigation_usage)
+
+          return if restored_class.to_s.empty? && restored_function.to_s.empty? && restored_usage.to_s.empty?
+
+          @navigation_class = restored_class
           @navigation_class_code_space = blank_to_nil(class_code_space) unless @navigation_class.to_s.empty?
-          @navigation_function = normalize_navigation_semantic(navigation_function)
+          @navigation_function = restored_function
           @navigation_function_code_space = blank_to_nil(function_code_space) unless @navigation_function.to_s.empty?
-          @navigation_usage = normalize_navigation_semantic(navigation_usage)
+          @navigation_usage = restored_usage
           @navigation_usage_code_space = blank_to_nil(usage_code_space) unless @navigation_usage.to_s.empty?
         end
 
