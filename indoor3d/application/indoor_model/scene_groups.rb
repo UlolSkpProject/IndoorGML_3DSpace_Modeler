@@ -146,7 +146,7 @@ module ULOL
 
             observer_key = entity_observer_key(group)
             @scene_group_guard.track(group, expected_name)
-            with_unlocked(group) { group.name = expected_name } unless group.name == expected_name
+            ensure_space_features_name(group, expected_name)
             remember_space_features_change_snapshot(group)
             return if @space_features_observed_ids[observer_key]
 
@@ -197,6 +197,17 @@ module ULOL
             rescue StandardError => e
               IndoorCore::Logger.puts "[IndoorGML] Origin point creation failed: #{e.class}: #{e.message}"
             end
+          end
+
+          def ensure_space_features_name(group, expected_name)
+            return true unless group&.valid?
+            return true if group.name == expected_name
+
+            with_unlocked(group) { group.name = expected_name }
+            true
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] SpaceFeatures name update skipped: #{e.class}: #{e.message}"
+            false
           end
 
           def origin_construction_point(group)
