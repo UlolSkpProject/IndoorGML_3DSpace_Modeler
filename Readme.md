@@ -90,7 +90,7 @@ Solid가 아닌 group은 CellSpace로 변환되지 않습니다.
 
 변환할 solid group을 선택하고 ![create_cellspace](indoor3d/assets/icons/create_cellspace.png) `Create CellSpace` 버튼을 클릭합니다.
 
-CellSpace 타입(`Room`, `Door`, `Escalator`, `Elevator`, `Stair`)을 함께 선택할 수 있습니다.
+CellSpace 타입(`Room`, `Door`, `Elevator`, `Stair`)을 함께 선택할 수 있습니다.
 변환된 CellSpace는 자동으로 `IndoorGML_PrimalSpaceFeatures` 그룹(이하 PrimalGroup) 안으로 이동됩니다.
 
 ![Create CellSpace 결과](docs/images/step2_create_cellspace.png)

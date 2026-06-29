@@ -9,7 +9,6 @@ module ULOL
         MATERIAL_DEFINITIONS = {
           'GeneralSpace|Room' => ['Indoor3DGml_GeneralSpace', Sketchup::Color.new(255, 0, 0), 0.2],
           'TransitionSpace|Stair' => ['Indoor3DGml_TransitionSpace_Stair', Sketchup::Color.new(0, 128, 0), 0.6],
-          'TransitionSpace|Escalator' => ['Indoor3DGml_TransitionSpace_Escalator', Sketchup::Color.new(0, 128, 0), 0.6],
           'TransitionSpace|Elevator' => ['Indoor3DGml_TransitionSpace_Elevator', Sketchup::Color.new(0, 128, 0), 0.6],
           'ConnectionSpace|Door' => ['Indoor3DGml_ConnectionSpace', Sketchup::Color.new(145, 95, 210), 0.5]
         }.freeze

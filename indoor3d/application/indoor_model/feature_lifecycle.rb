@@ -345,7 +345,7 @@ module ULOL
           def build_independent_cell_space(entity)
             cell_type = CellSpaceType.from_label(indoor_attribute(entity, 'cell_type'))
             cell_space = CellSpace.new(entity, cell_type, indoor_attribute(entity, 'category_code'))
-            if cell_space.navigable?
+            if cell_space.cell_type == CellSpaceType::GENERAL
               cell_space.set_navigation_semantics(
                 navigation_class: indoor_attribute(entity, 'navigation_class'),
                 navigation_function: indoor_attribute(entity, 'navigation_function'),
@@ -463,7 +463,7 @@ module ULOL
           end
 
           def apply_cell_space_navigation_attributes(cell_space)
-            return unless cell_space.navigable?
+            return unless cell_space.cell_type == CellSpaceType::GENERAL
 
             entity = cell_space.sketchup_group
             cell_space.set_navigation_semantics(
@@ -492,16 +492,19 @@ module ULOL
           end
 
           def build_cell_space_change_snapshot(entity)
-            {
+            snapshot = {
               name: entity.name.to_s,
               transformation: entity.transformation.to_a,
               cell_type: indoor_attribute(entity, 'cell_type').to_s,
               category_code: indoor_attribute(entity, 'category_code').to_s,
-              storey: indoor_attribute(entity, 'storey').to_s,
-              navigation_class: indoor_attribute(entity, 'navigation_class').to_s,
-              navigation_function: indoor_attribute(entity, 'navigation_function').to_s,
-              navigation_usage: indoor_attribute(entity, 'navigation_usage').to_s
+              storey: indoor_attribute(entity, 'storey').to_s
             }
+            if CellSpaceType.from_label(snapshot[:cell_type]) == CellSpaceType::GENERAL
+              snapshot[:navigation_class] = indoor_attribute(entity, 'navigation_class').to_s
+              snapshot[:navigation_function] = indoor_attribute(entity, 'navigation_function').to_s
+              snapshot[:navigation_usage] = indoor_attribute(entity, 'navigation_usage').to_s
+            end
+            snapshot
           end
 
           def changed_cell_space_snapshot_fields(previous_snapshot, current_snapshot)

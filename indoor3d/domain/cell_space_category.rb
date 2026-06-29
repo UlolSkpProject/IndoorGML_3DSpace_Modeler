@@ -13,7 +13,6 @@ module ULOL
           ],
           CellSpaceType::TRANSITION => [
             { code: 'Stair',     label: 'Stair',     code_space: DEFAULT_CODE_SPACE, standard: true },
-            { code: 'Escalator', label: 'Escalator', code_space: DEFAULT_CODE_SPACE, standard: true },
             { code: 'Elevator',  label: 'Elevator',  code_space: DEFAULT_CODE_SPACE, standard: true },
           ],
           CellSpaceType::CONNECTION => [
@@ -30,14 +29,17 @@ module ULOL
         end
 
         def self.find(cell_type, code)
-          list_for(cell_type).find { |category| category[:code] == code.to_s }
+          normalized_code = migrate_legacy_code(code)
+          list_for(cell_type).find { |category| category[:code] == normalized_code }
         end
 
         def self.normalize(cell_type, category_code = nil, category_label = nil, category_code_space = nil, category_standard = nil)
-          category = find(cell_type, category_code) || default_for(cell_type)
+          normalized_category_code = migrate_legacy_code(category_code)
+          normalized_category_label = legacy_escalator?(category_label) ? 'Stair' : category_label
+          category = find(cell_type, normalized_category_code) || default_for(cell_type)
           {
-            code: category_code.to_s.empty? ? category[:code] : category_code.to_s,
-            label: category_label.to_s.empty? ? category[:label] : category_label.to_s,
+            code: normalized_category_code.to_s.empty? ? category[:code] : normalized_category_code.to_s,
+            label: normalized_category_label.to_s.empty? ? category[:label] : normalized_category_label.to_s,
             code_space: category_code_space.to_s.empty? ? category[:code_space] : category_code_space.to_s,
             standard: category_standard.nil? ? category[:standard] : truthy?(category_standard)
           }
@@ -73,6 +75,14 @@ module ULOL
           cell_type = CellSpaceType.from_label(cell_type_label)
           category_code = nil unless valid_for_type?(cell_type, category_code)
           [cell_type, category_code || default_for(cell_type)[:code]]
+        end
+
+        def self.migrate_legacy_code(code)
+          legacy_escalator?(code) ? 'Stair' : code.to_s
+        end
+
+        def self.legacy_escalator?(value)
+          value.to_s.casecmp('Escalator').zero?
         end
 
         def self.truthy?(value)
