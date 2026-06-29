@@ -210,7 +210,7 @@ module ULOL
           end
 
           def lock_space_features_groups
-            unlock_indoor_entity(@primal_group)
+            editing? ? unlock_indoor_entity(@primal_group) : lock_indoor_entity(@primal_group)
           end
 
           def enforce_space_features_constraints

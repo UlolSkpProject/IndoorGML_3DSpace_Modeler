@@ -14,7 +14,6 @@ module ULOL
           def mark_cell_space_dirty(cell_space)
             return unless cell_space&.valid?
 
-            @editor_session.mark_dirty! if @editor_session&.editing?
             entity = cell_space.valid_sketchup_group
             return unless entity
 
