@@ -174,13 +174,24 @@ module ULOL
               transition.cell1.sketchup_group,
               transition.cell2.sketchup_group,
               state1_point: state_primal_position(transition.state1),
-              state2_point: state_primal_position(transition.state2)
+              state2_point: state_primal_position(transition.state2),
+              transformation1: cell_space_primal_transformation(transition.cell1),
+              transformation2: cell_space_primal_transformation(transition.cell2)
             )
             candidates.filter_map { |candidate| normalize_primal_waypoint_candidate(candidate, transition) }
           end
 
           def state_primal_position(state)
+            cell_space_primal_transformation(state&.duality_cell).origin
+          rescue StandardError
             state_local_position(state)
+          end
+
+          def cell_space_primal_transformation(cell_space)
+            group = cell_space&.sketchup_group
+            return Geom::Transformation.new unless group&.valid?
+
+            Utils::Transformation.entity_transformation_in_root(group, @primal_group)
           end
 
           def normalize_primal_waypoint_candidate(candidate, transition)
@@ -223,7 +234,7 @@ module ULOL
               (point1.z + point2.z) / 2.0
             )
             state_distance = point1.distance(point2)
-            max_distance = [state_distance * 10.0, 10_000.mm].max
+            max_distance = [state_distance * 2.0, 500.mm].max
             midpoint.distance(point) <= max_distance
           end
 

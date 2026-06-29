@@ -355,20 +355,14 @@ module ULOL
           end
 
           def state_world_position(state)
-            point = state.position
-            primal_group = @indoor_model.primal_group
-            return point unless primal_group&.valid?
+            group = state&.duality_cell&.sketchup_group
+            return state.position unless group&.valid?
 
-            point.transform(primal_group.transformation)
+            Utils::Transformation.entity_world_transformation_under_root(group, @indoor_model.primal_group).origin
           end
 
           def cell_space_world_transformation(group)
-            primal_group = @indoor_model.primal_group
-            if primal_group&.valid? && Utils::Transformation.direct_child_of_root?(group, primal_group)
-              return primal_group.transformation * group.transformation
-            end
-
-            group.transformation
+            Utils::Transformation.entity_world_transformation_under_root(group, @indoor_model.primal_group)
           end
 
           def format_point(point)

@@ -29,8 +29,8 @@ module ULOL
 
           adjacent_snapshot_face_axis(snapshot1, snapshot2, tolerance)
         end
-        def self.entity_faces_in_parent_space(entity)
-          transformation = entity.transformation
+        def self.entity_faces_in_parent_space(entity, transformation = nil)
+          transformation ||= entity.transformation
           entity.definition.entities.grep(Sketchup::Face).map do |face|
             points = face.outer_loop.vertices.map { |vertex| vertex.position.transform(transformation) }
             next if points.length < 3
