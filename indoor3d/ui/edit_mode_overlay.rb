@@ -41,6 +41,7 @@ module ULOL
           @indoor_model = indoor_model
           @transition_curve_cache = {}
           @world_transition_line_points = nil
+          @world_transition_line_points_key = nil
           @transition_draw_points = []
           super(OVERLAY_ID, OVERLAY_NAME, description: 'Shows when IndoorGML editing is active.')
         end
@@ -48,6 +49,7 @@ module ULOL
         def invalidate_transition_points
           @transition_curve_cache&.clear
           @world_transition_line_points = nil
+          @world_transition_line_points_key = nil
           @transition_draw_points&.clear
         end
 
@@ -240,7 +242,19 @@ module ULOL
         end
 
         def transition_line_points
-          @world_transition_line_points ||= build_world_transition_line_points
+          cache_key = transition_line_points_cache_key
+          if @world_transition_line_points.nil? || @world_transition_line_points_key != cache_key
+            @world_transition_line_points = build_world_transition_line_points
+            @world_transition_line_points_key = cache_key
+          end
+          @world_transition_line_points
+        end
+
+        def transition_line_points_cache_key
+          primal_group = @indoor_model.primal_group
+          return nil unless primal_group&.valid?
+
+          rounded_transform_key(primal_group.transformation)
         end
 
         def build_world_transition_line_points
@@ -323,10 +337,12 @@ module ULOL
         end
 
         def transition_curve_segments(transition, primal_tf)
-          control_points = transition_control_points(transition, primal_tf)
+          control_points = []
+          curve_input = transition_curve_input(transition, primal_tf)
+          control_points = curve_input[:points]
           return empty_transition_segment_groups if control_points.length < 2
         
-          curve_point_groups = cached_transition_curve_point_groups(transition, control_points)
+          curve_point_groups = cached_transition_curve_point_groups(transition, curve_input)
           {
             default: polyline_segments(curve_point_groups[:default]),
             first:   polyline_segments(curve_point_groups[:first]),
@@ -341,28 +357,29 @@ module ULOL
           { default: [], first: [], second: [] }
         end
 
-        def cached_transition_curve_point_groups(transition, control_points)
+        def cached_transition_curve_point_groups(transition, curve_input)
+          control_points = curve_input[:points]
           return { default: control_points, first: [], second: [] } if control_points.length < 3
 
           @transition_curve_cache ||= {}
-          key = transition_curve_cache_key(transition, control_points)
+          key = transition_curve_cache_key(transition, curve_input)
           cached = @transition_curve_cache[key]
           return cached if cached
 
           @transition_curve_cache.clear if @transition_curve_cache.length > transition_curve_cache_limit
-          groups = transition.selected_waypoint_normal1 && transition.selected_waypoint_normal2 ?
-            hermite_transition_curve_point_groups(transition, control_points) :
+          groups = curve_input[:normal1] && curve_input[:normal2] ?
+            hermite_transition_curve_point_groups(control_points, curve_input[:normal1], curve_input[:normal2]) :
             { default: control_points, first: [], second: [] }
           @transition_curve_cache[key] = groups
           groups
         end
 
-        def transition_curve_cache_key(transition, control_points)
+        def transition_curve_cache_key(transition, curve_input)
           [
             transition.id,
-            control_points.map { |point| rounded_point_key(point) },
-            rounded_vector_key(transition.selected_waypoint_normal1),
-            rounded_vector_key(transition.selected_waypoint_normal2)
+            curve_input[:points].map { |point| rounded_point_key(point) },
+            rounded_vector_key(curve_input[:normal1]),
+            rounded_vector_key(curve_input[:normal2])
           ]
         rescue StandardError
           [transition.id, Time.now.to_f]
@@ -380,6 +397,12 @@ module ULOL
           [vector.x.to_f.round(6), vector.y.to_f.round(6), vector.z.to_f.round(6)]
         end
 
+        def rounded_transform_key(transformation)
+          return nil unless transformation.respond_to?(:to_a)
+
+          transformation.to_a.map { |value| value.to_f.round(6) }
+        end
+
         def transition_curve_cache_limit
           transition_count = @indoor_model.transitions.length
           [transition_count * 2, MIN_TRANSITION_CURVE_CACHE_LIMIT].max
@@ -387,12 +410,10 @@ module ULOL
           MIN_TRANSITION_CURVE_CACHE_LIMIT
         end
 
-        def hermite_transition_curve_point_groups(transition, control_points)
+        def hermite_transition_curve_point_groups(control_points, normal1, normal2)
           return { default: control_points, first: [], second: [] } unless control_points.length == 3
 
           point1, waypoint, point2 = control_points
-          normal1 = transition.selected_waypoint_normal1
-          normal2 = transition.selected_waypoint_normal2
           unless normal1.is_a?(Geom::Vector3d) && normal1.length > 0.001 &&
                  normal2.is_a?(Geom::Vector3d) && normal2.length > 0.001
             return { default: control_points, first: [], second: [] }
@@ -480,13 +501,18 @@ module ULOL
           vector
         end
 
-        def transition_control_points(transition, primal_tf)
+        def transition_curve_input(transition, primal_tf)
           point1 = overlay_state_point_with_tf(transition.state1, primal_tf)
           point2 = overlay_state_point_with_tf(transition.state2, primal_tf)
-          return [] if point1.distance(point2) <= 0.001
-        
+          return { points: [], normal1: nil, normal2: nil } if point1.distance(point2) <= 0.001
+
           waypoint = overlay_transition_waypoint_with_tf(transition.selected_waypoint, primal_tf)
-          waypoint ? [point1, waypoint, point2] : [point1, point2]
+          points = waypoint ? [point1, waypoint, point2] : [point1, point2]
+          {
+            points: points,
+            normal1: overlay_transition_normal_with_tf(transition.selected_waypoint_normal1, primal_tf),
+            normal2: overlay_transition_normal_with_tf(transition.selected_waypoint_normal2, primal_tf)
+          }
         end
 
         def overlay_state_point_with_tf(state, primal_tf)
@@ -504,15 +530,17 @@ module ULOL
         rescue StandardError
           point
         end
-        
-        def offset_points(points, camera_direction, depth_distance)
-          points.map do |point|
-            Geom::Point3d.new(
-              point.x + (camera_direction.x * depth_distance),
-              point.y + (camera_direction.y * depth_distance),
-              point.z + (camera_direction.z * depth_distance)
-            )
-          end
+
+        def overlay_transition_normal_with_tf(vector, primal_tf)
+          return nil unless vector.is_a?(Geom::Vector3d)
+
+          normal = primal_tf ? vector.transform(primal_tf) : vector.clone
+          return nil unless normal.is_a?(Geom::Vector3d)
+
+          normal.normalize! if normal.length > 0.001
+          normal
+        rescue StandardError
+          nil
         end
 
         def offset_transition_line_points(points, camera_direction, depth_distance)
@@ -544,17 +572,6 @@ module ULOL
             point.y - (direction.y * distance),
             point.z - (direction.z * distance)
           )
-        rescue StandardError
-          point
-        end
-
-        def overlay_transition_waypoint(point)
-          return nil unless point.is_a?(Geom::Point3d)
-
-          primal_group = @indoor_model.primal_group
-          return point.transform(primal_group.transformation) if primal_group&.valid?
-
-          point
         rescue StandardError
           point
         end

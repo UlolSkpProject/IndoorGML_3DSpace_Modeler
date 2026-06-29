@@ -29,7 +29,7 @@ module ULOL
 
           adjacent_snapshot_face_axis(snapshot1, snapshot2, tolerance)
         end
-        def self.world_faces(entity)
+        def self.entity_faces_in_parent_space(entity)
           transformation = entity.transformation
           entity.definition.entities.grep(Sketchup::Face).map do |face|
             points = face.outer_loop.vertices.map { |vertex| vertex.position.transform(transformation) }
@@ -39,6 +39,11 @@ module ULOL
             normal.normalize!
             { points: points, normal: normal, triangles: face_mesh_triangles(face, transformation) }
           end.compact
+        end
+
+        # Compatibility alias; this returns parent-space faces, not model-world faces.
+        def self.world_faces(entity)
+          entity_faces_in_parent_space(entity)
         end
 
         def self.coplanar_overlap_metrics(face1, face2, tolerance)
@@ -140,8 +145,8 @@ module ULOL
         private_class_method :deep_freeze
 
         def self.adjacent_face_axis(entity1, entity2, tolerance)
-          faces1 = world_faces(entity1)
-          faces2 = world_faces(entity2)
+          faces1 = entity_faces_in_parent_space(entity1)
+          faces2 = entity_faces_in_parent_space(entity2)
           return nil if faces1.empty? || faces2.empty?
 
           faces1.each do |face1|

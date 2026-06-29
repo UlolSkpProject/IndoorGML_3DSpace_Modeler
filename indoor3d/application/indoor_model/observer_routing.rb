@@ -63,7 +63,9 @@ module ULOL
           end
 
           def handle_space_features_transform_changed(entity)
+            invalidate_overlay_transition_points
             remember_space_features_change_snapshot(entity)
+            Sketchup.active_model&.active_view&.invalidate
             true
           end
 
