@@ -38,6 +38,8 @@ module ULOL
             end
 
             changed_fields = changed_space_features_snapshot_fields(previous_snapshot, current_snapshot)
+            return nil if changed_fields.empty?
+
             change_kind =
               if changed_fields.include?(:name)
                 :name
@@ -58,24 +60,11 @@ module ULOL
             end
             remember_space_features_change_snapshot(entity)
             true
-          ensure
-            with_indoor_model_operation('IndoorGML SpaceFeatures Lock', transparent: true) do
-              apply_indoor_lock_policy if entity&.valid? && !editing?
-            end
           end
 
           def handle_space_features_transform_changed(entity)
-            with_transparent_space_features_operation('IndoorGML SpaceFeatures Transform Change') do
-              with_guard_flag(:@constraining_space_features) do
-                enforce_space_features_constraints()
-              end
-            end
             remember_space_features_change_snapshot(entity)
             true
-          ensure
-            with_indoor_model_operation('IndoorGML SpaceFeatures Lock', transparent: true) do
-              apply_indoor_lock_policy if entity&.valid? && !editing?
-            end
           end
 
           def handle_space_features_etc_changed(entity)
@@ -105,8 +94,7 @@ module ULOL
           def build_space_features_change_snapshot(entity)
             {
               name: entity.name.to_s,
-              transformation: entity.transformation.to_a,
-              locked: entity.locked? == true
+              transformation: entity.transformation.to_a
             }
           end
 
@@ -139,10 +127,6 @@ module ULOL
             case feature
             when 'CellSpace'
               relocate_indoor_entity(entity, @primal_group.entities, @primal_group, transparent: true)
-            else
-              with_indoor_model_operation('IndoorGML Lock Indoor Entity', transparent: true) do
-                lock_indoor_entity(entity)
-              end
             end
           end
 
