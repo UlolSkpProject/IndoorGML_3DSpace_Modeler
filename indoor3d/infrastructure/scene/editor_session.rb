@@ -36,10 +36,28 @@ module ULOL
           @visible_storeys = []
           @visible_cell_types = []
           @edit_mode_visibility_snapshots = {}
+          @entry_source = nil
+          @dirty = false
         end
 
         def editing?
           @editing
+        end
+
+        def entry_source
+          @entry_source
+        end
+
+        def dirty?
+          @dirty == true
+        end
+
+        def mark_dirty!
+          @dirty = true
+        end
+
+        def auto_primal_clean_session?
+          @entry_source == :primal_active_path && !dirty?
         end
 
         def dual_overlay_visible?
@@ -80,7 +98,7 @@ module ULOL
           apply_geometry_visibility()
         end
 
-        def begin_editing
+        def begin_editing(source: :manual)
           return false if @editing
           model = Sketchup.active_model()
 
@@ -90,6 +108,8 @@ module ULOL
 
           ensure_overlay_registered(model)
           @previous_active_path = active_path_snapshot(model)
+          @entry_source = source
+          @dirty = false
           reset_edit_mode_visibility_filter
           @editing = true
           @indoor_model.attach_edit_selection_observer(model)
@@ -103,6 +123,8 @@ module ULOL
             @editing = false
             @editable_entity_ids = {}
             @editing_active_path_target = nil
+            @entry_source = nil
+            @dirty = false
             @indoor_model.detach_edit_selection_observer(model)
             apply_lock_policy()
             return false
@@ -119,7 +141,8 @@ module ULOL
 
           @validation_focus_cell_ids = ids.each_with_object({}) { |id, memo| memo[id] = true }
           capture_and_apply_validation_focus_rendering_options(ids.length)
-          started = @editing ? true : begin_editing
+          @entry_source = :validation_focus if @editing
+          started = @editing ? true : begin_editing(source: :validation_focus)
           unless started
             restore_validation_focus_rendering_options
             clear_validation_focus
@@ -148,6 +171,8 @@ module ULOL
             @editing = false
             @editable_entity_ids = {}
             @editing_active_path_target = nil
+            @entry_source = nil
+            @dirty = false
             reset_edit_mode_visibility_filter
             restore_validation_focus_rendering_options
             clear_validation_focus
@@ -583,6 +608,8 @@ module ULOL
             @editable_entity_ids = {}
             @editing_active_path_target = nil
             @previous_active_path = nil
+            @entry_source = nil
+            @dirty = false
             restore_validation_focus_rendering_options
             restore_edit_mode_visibility
             reset_edit_mode_visibility_filter
@@ -606,8 +633,7 @@ module ULOL
 
             primal_group = @indoor_model.primal_group
             return false unless primal_group&.valid?
-            return false unless primal_group.respond_to?(:locked?)
-            return false if primal_group.locked?
+            return false unless primal_group_active_path?(model || Sketchup.active_model)
 
             reenter_editing_from_primal_path(model || Sketchup.active_model)
           rescue StandardError => e
@@ -870,7 +896,7 @@ module ULOL
         end
 
         def reenter_editing_from_primal_path(model)
-          return false unless begin_editing
+          return false unless begin_editing(source: :primal_active_path)
 
           @previous_active_path = nil
           true
