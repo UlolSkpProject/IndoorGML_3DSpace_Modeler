@@ -29,7 +29,7 @@ end
   REXML::XPath.each(doc, "//#{tag}", { 'navi' => 'http://www.opengis.net/indoorgml/1.0/navigation' }) do |element|
     value = element.text.to_s
     errors << "Empty #{tag}" if value.empty?
-    errors << "Element type leaked into navi:class: #{value}" if tag == 'navi:class' && %w[GeneralSpace TransitionSpace ConnectionSpace].include?(value)
+    errors << "Element type leaked into navi:class: #{value}" if tag == 'navi:class' && %w[GeneralSpace TransitionSpace ConnectionSpace AnchorSpace].include?(value)
   end
 end
 
@@ -46,7 +46,7 @@ state_storeys = {}
 REXML::XPath.each(doc, '//core:State', { 'core' => 'http://www.opengis.net/indoorgml/1.0/core' }) do |state|
   state_id = state.attributes['gml:id']
   description = REXML::XPath.first(state, 'gml:description', { 'gml' => 'http://www.opengis.net/gml/3.2' })&.text.to_s
-  state_storeys[state_id] = description[/storey="([^"]+)"/, 1]
+  state_storeys[state_id] = description[/storey="?([^":]+)"?/, 1]
 end
 
 REXML::XPath.each(doc, '//core:Transition', { 'core' => 'http://www.opengis.net/indoorgml/1.0/core' }) do |transition|
@@ -55,7 +55,7 @@ REXML::XPath.each(doc, '//core:Transition', { 'core' => 'http://www.opengis.net/
 end
 
 navi_ns = { 'navi' => 'http://www.opengis.net/indoorgml/1.0/navigation' }
-%w[GeneralSpace TransitionSpace ConnectionSpace].each do |space_type|
+%w[GeneralSpace TransitionSpace ConnectionSpace AnchorSpace].each do |space_type|
   REXML::XPath.each(doc, "//navi:#{space_type}", navi_ns) do |space|
     %w[class function usage].each do |code_name|
       code = REXML::XPath.first(space, "navi:#{code_name}", navi_ns)
@@ -64,9 +64,9 @@ navi_ns = { 'navi' => 'http://www.opengis.net/indoorgml/1.0/navigation' }
   end
 end
 
-REXML::XPath.each(doc, '//*[starts-with(local-name(), "GeneralSpace") or starts-with(local-name(), "TransitionSpace") or starts-with(local-name(), "ConnectionSpace")]') do |cell|
+REXML::XPath.each(doc, '//*[starts-with(local-name(), "GeneralSpace") or starts-with(local-name(), "TransitionSpace") or starts-with(local-name(), "ConnectionSpace") or starts-with(local-name(), "AnchorSpace")]') do |cell|
   description = REXML::XPath.first(cell, 'gml:description', { 'gml' => 'http://www.opengis.net/gml/3.2' })&.text.to_s
-  cell_storey = description[/storey="([^"]+)"/, 1]
+  cell_storey = description[/storey="?([^":]+)"?/, 1]
   errors << "CellSpace missing storey: #{cell.attributes['gml:id']}" if cell_storey.to_s.empty?
   duality = REXML::XPath.first(cell, 'core:duality', { 'core' => 'http://www.opengis.net/indoorgml/1.0/core' })
   state_id = duality&.attributes&.[]('xlink:href').to_s.delete_prefix('#')

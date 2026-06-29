@@ -13,6 +13,25 @@
   </header>
 
   <main class="dialog-main">
+    <section id="filterPanel" class="filter-panel" aria-label="View filter">
+      <div class="filter-section">
+        <div class="filter-title">Storey</div>
+        <label class="filter-option filter-all">
+          <input id="storeyFilterAll" type="checkbox" checked>
+          <span>All</span>
+        </label>
+        <div id="storeyFilterOptions" class="filter-options"></div>
+      </div>
+
+      <div class="filter-section">
+        <div class="filter-title">Type</div>
+        <label class="filter-option filter-all">
+          <input id="typeFilterAll" type="checkbox" checked>
+          <span>All</span>
+        </label>
+        <div id="typeFilterOptions" class="filter-options"></div>
+      </div>
+    </section>
     <!-- 선택 없음 -->
     <section id="emptyPanel" class="mode-panel">
       <div class="model-summary">

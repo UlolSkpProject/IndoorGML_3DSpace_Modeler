@@ -26,8 +26,8 @@ module ULOL
           CELL_SPACE_TAGS = {
             CellSpaceType::GENERAL => 'navi:GeneralSpace',
             CellSpaceType::TRANSITION => 'navi:TransitionSpace',
-            CellSpaceType::CONNECTION => 'navi:ConnectionSpace'
-            # CellSpaceType::ANCHOR => 'navi:AnchorSpace'
+            CellSpaceType::CONNECTION => 'navi:ConnectionSpace',
+            CellSpaceType::ANCHOR => 'navi:AnchorSpace'
           }.freeze
 
           def initialize(indoor_model, refresh_runtime_data: true, cell_spaces: nil, transitions: nil)
@@ -456,39 +456,16 @@ module ULOL
           end
 
           def cell_space_description(cell_space)
-            %(storey="#{storey_name_for(cell_space)}":indoor=#{indoor_description_type(cell_space)})
+            "storey=#{storey_name_for(cell_space)}"
           end
 
           def state_description(state)
-            %(storey="#{storey_name_for(state&.duality_cell)}")
+            "storey=#{storey_name_for(state&.duality_cell)}"
           end
 
           def storey_name_for(cell_space)
             storey = cell_space&.storey.to_s
             storey.empty? ? Storey::DEFAULT_NAME : storey
-          end
-
-          def indoor_description_type(cell_space)
-            category = cell_space.category_code.to_s.downcase
-            return 'room' if category.include?('room')
-            return 'door' if category.include?('door')
-            return 'stairs' if category.include?('stair')
-            return 'elevator' if category.include?('elevator')
-            return 'corridor' if category.include?('corridor')
-            return 'entrance' if category.include?('entrance') || category.include?('enterance')
-
-            case cell_space.cell_type
-            when CellSpaceType::GENERAL
-              'room'
-            when CellSpaceType::CONNECTION
-              'door'
-            when CellSpaceType::TRANSITION
-              'transition'
-            # when CellSpaceType::ANCHOR
-            #   'entrance'
-            else
-              'space'
-            end
           end
 
           def append_nil_bounded_by(parent)

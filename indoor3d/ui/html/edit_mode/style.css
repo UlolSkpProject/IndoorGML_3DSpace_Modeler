@@ -80,6 +80,67 @@ h1 {
   background: var(--panel);
 }
 
+.filter-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.filter-section {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+.filter-title {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.filter-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-height: 24px;
+}
+
+.filter-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 7px;
+  border: 1px solid var(--field-border);
+  border-radius: 7px;
+  background: var(--field-bg);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.filter-option input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+}
+
+.filter-option.empty {
+  color: var(--text-subtle);
+  font-weight: 400;
+}
+
+.filter-all {
+  justify-self: start;
+}
+
 .description {
   margin: 0;
   color: #b9b6ae;

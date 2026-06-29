@@ -66,6 +66,17 @@ module ULOL
           assert_equal ANNEX_D, semantic.usage_code_space
         end
 
+        def test_anchor_exterior_door_mapping
+          semantic = resolve(CellSpaceType::ANCHOR, 'ExteriorDoor')
+
+          assert_equal '1020', semantic.class_value
+          assert_equal '1010', semantic.function_value
+          assert_equal '1010', semantic.usage_value
+          assert_equal ANNEX_D, semantic.class_code_space
+          assert_equal ANNEX_D, semantic.function_code_space
+          assert_equal ANNEX_D, semantic.usage_code_space
+        end
+
         def test_general_room_can_override_semantic_values
           semantic = NavigationSemanticResolver.resolve(
             fake_cell(
@@ -80,6 +91,38 @@ module ULOL
           assert_equal '1020', semantic.class_value
           assert_equal '1260', semantic.function_value
           assert_equal '1260', semantic.usage_value
+        end
+
+        def test_transition_space_can_override_semantic_values
+          semantic = NavigationSemanticResolver.resolve(
+            fake_cell(
+              CellSpaceType::TRANSITION,
+              'Stair',
+              navigation_class: '1010',
+              navigation_function: '1060',
+              navigation_usage: '1060'
+            )
+          )
+
+          assert_equal '1010', semantic.class_value
+          assert_equal '1060', semantic.function_value
+          assert_equal '1060', semantic.usage_value
+        end
+
+        def test_connection_space_can_override_semantic_values
+          semantic = NavigationSemanticResolver.resolve(
+            fake_cell(
+              CellSpaceType::CONNECTION,
+              'Door',
+              navigation_class: '1000',
+              navigation_function: '1010',
+              navigation_usage: '1010'
+            )
+          )
+
+          assert_equal '1000', semantic.class_value
+          assert_equal '1010', semantic.function_value
+          assert_equal '1010', semantic.usage_value
         end
 
         def test_legacy_escalator_category_migrates_to_stair
@@ -104,6 +147,21 @@ module ULOL
           assert_code parent, 'navi:class', '1010'
           assert_code parent, 'navi:function', '1120'
           assert_code parent, 'navi:usage', '1120'
+        end
+
+        def test_exporter_writes_anchor_space_codes
+          parent = REXML::Element.new('navi:AnchorSpace')
+          exporter = IndoorGmlConverter::GmlExporter.allocate
+
+          exporter.send(
+            :append_navigable_space_codes,
+            parent,
+            fake_cell(CellSpaceType::ANCHOR, 'ExteriorDoor')
+          )
+
+          assert_code parent, 'navi:class', '1020'
+          assert_code parent, 'navi:function', '1010'
+          assert_code parent, 'navi:usage', '1010'
         end
 
         private

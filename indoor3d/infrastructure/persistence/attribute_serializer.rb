@@ -173,7 +173,7 @@ module ULOL
         end
 
         def write_navigation_attributes(group, cell_space)
-          if cell_space.cell_type == CellSpaceType::GENERAL
+          if cell_space.navigable?
             semantic = NavigationSemanticResolver.resolve(cell_space)
             group.set_attribute(@dictionary_name, 'navigation_class', semantic.class_value)
             group.set_attribute(@dictionary_name, 'navigation_class_code_space', semantic.class_code_space)

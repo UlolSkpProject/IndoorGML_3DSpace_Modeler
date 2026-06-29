@@ -33,6 +33,9 @@ module ULOL
           @validation_highlight_code = nil
           @validation_focus_visibility = {}
           @validation_focus_hide_rest_previous = nil
+          @visible_storeys = []
+          @visible_cell_types = []
+          @edit_mode_visibility_snapshots = {}
         end
 
         def editing?
@@ -87,6 +90,7 @@ module ULOL
 
           ensure_overlay_registered(model)
           @previous_active_path = active_path_snapshot(model)
+          reset_edit_mode_visibility_filter
           @editing = true
           @indoor_model.attach_edit_selection_observer(model)
           mark_editable_primal_entities()
@@ -140,9 +144,11 @@ module ULOL
           with_active_path_enforcement_suspended do
             prepare_active_path_for_finish(model)
             restore_validation_focus_visibility
+            restore_edit_mode_visibility
             @editing = false
             @editable_entity_ids = {}
             @editing_active_path_target = nil
+            reset_edit_mode_visibility_filter
             restore_validation_focus_rendering_options
             clear_validation_focus
             @indoor_model.detach_edit_selection_observer(model)
@@ -169,6 +175,29 @@ module ULOL
 
         def validation_focus_active?
           @validation_focus_cell_ids.is_a?(Hash) && !@validation_focus_cell_ids.empty?
+        end
+
+        def visible_storeys
+          @visible_storeys ||= []
+        end
+
+        def visible_cell_type_labels
+          visible_cell_types.map { |cell_type| CellSpaceType.label(cell_type) }
+        end
+
+        def set_visibility_filter(storeys:, cell_types:)
+          @visible_storeys = normalize_storey_filter(storeys)
+          @visible_cell_types = normalize_cell_type_filter(cell_types)
+          apply_edit_mode_visibility_filter
+          selection_changed
+          true
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Edit visibility filter update failed: #{e.class}: #{e.message}"
+          false
+        end
+
+        def refresh_visibility_filter
+          apply_edit_mode_visibility_filter
         end
 
         def validation_focus_cell_space?(cell_space)
@@ -324,7 +353,7 @@ module ULOL
 
             persistent_id = group.persistent_id
             @validation_focus_visibility[persistent_id] = group.visible? unless @validation_focus_visibility.key?(persistent_id)
-            with_unlocked(group) { group.visible = validation_visible_cell_space?(cell_space) }
+            with_unlocked(group) { group.visible = edit_mode_visible_cell_space?(cell_space) }
           end
           invalidate_view(Sketchup.active_model())
           true
@@ -367,6 +396,7 @@ module ULOL
             with_unlocked(group) { group.visible = snapshots[group.persistent_id] }
           end
           @validation_focus_visibility = {}
+          apply_edit_mode_visibility_filter(ignore_validation: true) if visibility_filter_active?
           invalidate_view(Sketchup.active_model())
           true
         rescue StandardError => e
@@ -379,6 +409,48 @@ module ULOL
           @validation_highlight_cell_ids = nil
           @validation_highlight_code = nil
           @validation_focus_visibility = {}
+        end
+
+        def apply_edit_mode_visibility_filter(ignore_validation: false)
+          return restore_edit_mode_visibility unless visibility_filter_active? || (!ignore_validation && validation_focus_active?)
+
+          @indoor_model.cell_spaces.each do |cell_space|
+            next unless cell_space&.valid?
+
+            group = cell_space.sketchup_group
+            next unless group&.valid? && group.respond_to?(:visible=)
+
+            remember_edit_mode_visibility(group) if visibility_filter_active?
+            with_unlocked(group) do
+              group.visible = edit_mode_visible_cell_space?(cell_space, include_validation: !ignore_validation)
+            end
+          end
+          invalidate_view(Sketchup.active_model())
+          true
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Edit visibility filter apply failed: #{e.class}: #{e.message}"
+          false
+        end
+
+        def restore_edit_mode_visibility
+          snapshots = @edit_mode_visibility_snapshots || {}
+          return true if snapshots.empty?
+
+          @indoor_model.cell_spaces.each do |cell_space|
+            next unless cell_space&.valid?
+
+            group = cell_space.sketchup_group
+            next unless group&.valid? && group.respond_to?(:visible=)
+            next unless snapshots.key?(group.persistent_id)
+
+            with_unlocked(group) { group.visible = snapshots[group.persistent_id] }
+          end
+          @edit_mode_visibility_snapshots = {}
+          invalidate_view(Sketchup.active_model())
+          true
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Edit visibility filter restore failed: #{e.class}: #{e.message}"
+          false
         end
 
         def capture_and_apply_validation_focus_rendering_options(focus_cell_count)
@@ -462,6 +534,8 @@ module ULOL
             @editing_active_path_target = nil
             @previous_active_path = nil
             restore_validation_focus_rendering_options
+            restore_edit_mode_visibility
+            reset_edit_mode_visibility_filter
             clear_validation_focus
             @progress = nil
             set_overlay_enabled(false)
@@ -493,6 +567,103 @@ module ULOL
         end
 
         private
+
+        def visible_cell_types
+          @visible_cell_types ||= []
+        end
+
+        def reset_edit_mode_visibility_filter
+          @visible_storeys = []
+          @visible_cell_types = []
+          @edit_mode_visibility_snapshots = {}
+        end
+
+        def normalize_storey_filter(values)
+          Array(values).map { |value| normalize_storey_filter_label(value) }.compact.uniq.sort
+        end
+
+        def normalize_storey_filter_label(value)
+          match = value.to_s.strip.upcase.match(/\A([FB])(\d{1,2})\z/)
+          return nil unless match
+
+          "#{match[1]}#{format('%02d', match[2].to_i)}"
+        end
+
+        def normalize_cell_type_filter(values)
+          Array(values).map do |value|
+            label = value.to_s.strip
+            next nil if label.empty?
+
+            CellSpaceType::LABELS.value?(label) ? CellSpaceType.from_label(label) : nil
+          end.compact.uniq
+        end
+
+        def visibility_filter_active?
+          visible_storeys.any? || visible_cell_types.any?
+        end
+
+        def remember_edit_mode_visibility(group)
+          @edit_mode_visibility_snapshots ||= {}
+          persistent_id = group.persistent_id
+          return if @edit_mode_visibility_snapshots.key?(persistent_id)
+
+          @edit_mode_visibility_snapshots[persistent_id] =
+            if @validation_focus_visibility&.key?(persistent_id)
+              @validation_focus_visibility[persistent_id]
+            else
+              group.visible?
+            end
+        rescue StandardError
+          nil
+        end
+
+        def edit_mode_visible_cell_space?(cell_space, include_validation: true)
+          return false if include_validation && !validation_visible_cell_space?(cell_space)
+          return false unless storey_filter_visible?(cell_space)
+          return false unless cell_type_filter_visible?(cell_space)
+
+          true
+        end
+
+        def storey_filter_visible?(cell_space)
+          return true if visible_storeys.empty?
+
+          cell_storeys = storey_filter_labels(cell_space&.storey)
+          cell_storeys.any? { |storey| visible_storeys.include?(storey) }
+        end
+
+        def cell_type_filter_visible?(cell_space)
+          return true if visible_cell_types.empty?
+
+          visible_cell_types.include?(cell_space&.cell_type)
+        end
+
+        def storey_filter_labels(value)
+          parts = value.to_s.strip.upcase.split('~', 2)
+          from = parse_storey_filter_part(parts[0])
+          to = parse_storey_filter_part(parts[1] || parts[0])
+          return [CellSpace::DEFAULT_STOREY] if from.nil?
+          return [format_storey_filter_part(from)] if to.nil?
+
+          if from[:kind] == to[:kind]
+            min, max = [from[:level], to[:level]].minmax
+            return (min..max).map { |level| "#{from[:kind]}#{format('%02d', level)}" }
+          end
+
+          [format_storey_filter_part(from), format_storey_filter_part(to)].compact.uniq
+        end
+
+        def parse_storey_filter_part(value)
+          match = value.to_s.strip.upcase.match(/\A([FB])(\d{1,2})\z/)
+          return nil unless match
+
+          level = [[match[2].to_i, 1].max, 99].min
+          { kind: match[1], level: level }
+        end
+
+        def format_storey_filter_part(part)
+          "#{part[:kind]}#{format('%02d', part[:level])}"
+        end
 
         def ensure_overlay_registered(model)
           begin
