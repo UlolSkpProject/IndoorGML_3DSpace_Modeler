@@ -144,7 +144,7 @@ module ULOL
           with_active_path_enforcement_suspended do
             prepare_active_path_for_finish(model)
             restore_validation_focus_visibility
-            restore_edit_mode_visibility
+            normalize_visibility_for_non_edit_mode
             @editing = false
             @editable_entity_ids = {}
             @editing_active_path_target = nil
@@ -157,6 +157,7 @@ module ULOL
             update_overlay_enabled()
             @dialog.close()
             apply_lock_policy()
+            apply_geometry_visibility()
             invalidate_view(model)
             true
           end
@@ -188,6 +189,7 @@ module ULOL
         def set_visibility_filter(storeys:, cell_types:)
           @visible_storeys = normalize_storey_filter(storeys)
           @visible_cell_types = normalize_cell_type_filter(cell_types)
+          invalidate_overlay_transition_points
           apply_edit_mode_visibility_filter
           selection_changed
           true
@@ -197,7 +199,26 @@ module ULOL
         end
 
         def refresh_visibility_filter
+          invalidate_overlay_transition_points
           apply_edit_mode_visibility_filter
+        end
+
+        def dual_overlay_state_visible?(state)
+          return false unless state&.valid?
+
+          edit_mode_visible_cell_space?(state.duality_cell)
+        rescue StandardError
+          false
+        end
+
+        def dual_overlay_transition_visible?(transition)
+          return false unless transition&.valid?
+          return false unless transition.state1&.valid? && transition.state2&.valid?
+
+          dual_overlay_state_visible?(transition.state1) ||
+            dual_overlay_state_visible?(transition.state2)
+        rescue StandardError
+          false
         end
 
         def validation_focus_cell_space?(cell_space)
@@ -412,7 +433,9 @@ module ULOL
         end
 
         def apply_edit_mode_visibility_filter(ignore_validation: false)
-          return restore_edit_mode_visibility unless visibility_filter_active? || (!ignore_validation && validation_focus_active?)
+          unless visibility_filter_active? || (!ignore_validation && validation_focus_active?)
+            return apply_all_edit_mode_cell_space_visibility
+          end
 
           @indoor_model.cell_spaces.each do |cell_space|
             next unless cell_space&.valid?
@@ -429,6 +452,23 @@ module ULOL
           true
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Edit visibility filter apply failed: #{e.class}: #{e.message}"
+          false
+        end
+
+        def apply_all_edit_mode_cell_space_visibility
+          @indoor_model.cell_spaces.each do |cell_space|
+            next unless cell_space&.valid?
+
+            group = cell_space.sketchup_group
+            next unless group&.valid? && group.respond_to?(:visible=)
+
+            with_unlocked(group) { group.visible = true }
+          end
+          @edit_mode_visibility_snapshots = {}
+          invalidate_view(Sketchup.active_model())
+          true
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Edit visibility filter clear failed: #{e.class}: #{e.message}"
           false
         end
 
@@ -450,6 +490,16 @@ module ULOL
           true
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Edit visibility filter restore failed: #{e.class}: #{e.message}"
+          false
+        end
+
+        def normalize_visibility_for_non_edit_mode
+          apply_all_edit_mode_cell_space_visibility
+          apply_geometry_visibility
+          invalidate_overlay_transition_points
+          true
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Edit visibility normalize failed: #{e.class}: #{e.message}"
           false
         end
 
