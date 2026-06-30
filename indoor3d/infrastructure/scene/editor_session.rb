@@ -606,8 +606,7 @@ module ULOL
 
             primal_group = @indoor_model.primal_group
             return false unless primal_group&.valid?
-            return false unless primal_group.respond_to?(:locked?)
-            return false if primal_group.locked?
+            return false unless primal_group_active_path?(model || Sketchup.active_model)
 
             reenter_editing_from_primal_path(model || Sketchup.active_model)
           rescue StandardError => e
