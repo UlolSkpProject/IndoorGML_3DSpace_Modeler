@@ -66,6 +66,22 @@ module ULOL
           Geom::Transformation.new
         end
 
+        def self.root_local_point_to_model(point, root_group)
+          return point unless point.is_a?(Geom::Point3d)
+
+          point.transform(root_transformation_in_model(root_group))
+        end
+
+        def self.root_local_vector_to_model(vector, root_group)
+          return vector unless vector.is_a?(Geom::Vector3d)
+
+          transformed = vector.transform(root_transformation_in_model(root_group))
+          transformed.normalize! if transformed.length > 0.001
+          transformed
+        rescue StandardError
+          vector
+        end
+
         def self.parent_instance_world_transformation(entity, active_path = Sketchup.active_model&.active_path)
           parent = entity&.parent
           return nil unless parent.respond_to?(:instances)

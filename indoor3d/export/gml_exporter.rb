@@ -355,19 +355,30 @@ module ULOL
           end
 
           def state_world_position(state)
+            group = state&.duality_cell&.valid_sketchup_group
+            return Utils::Transformation.entity_world_transformation_under_root(group, @indoor_model.primal_group).origin if group
+
             state.position
           end
 
           def transition_state1_world_position(transition)
-            transition.state1_point || state_world_position(transition.state1)
+            transition_point_world_position(transition.state1_point) || state_world_position(transition.state1)
           end
 
           def transition_state2_world_position(transition)
-            transition.state2_point || state_world_position(transition.state2)
+            transition_point_world_position(transition.state2_point) || state_world_position(transition.state2)
           end
 
           def cell_space_world_transformation(group)
             Utils::Transformation.entity_world_transformation_under_root(group, @indoor_model.primal_group)
+          end
+
+          def transition_point_world_position(point)
+            return nil unless point.is_a?(Geom::Point3d)
+
+            Utils::Transformation.root_local_point_to_model(point, @indoor_model.primal_group)
+          rescue StandardError
+            point
           end
 
           def format_point(point)

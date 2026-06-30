@@ -147,8 +147,8 @@ module ULOL
 
           def update_transition(transition)
             updated = transition.update(
-              state_world_position(transition.state1),
-              state_world_position(transition.state2)
+              state_root_local_position(transition.state1),
+              state_root_local_position(transition.state2)
             )
             refresh_transition_waypoint_candidates(transition) if updated
             updated
@@ -159,8 +159,8 @@ module ULOL
             unless candidates.empty?
               transition.set_waypoint_candidates(
                 candidates,
-                point1: state_world_position(transition.state1),
-                point2: state_world_position(transition.state2)
+                point1: state_root_local_position(transition.state1),
+                point2: state_root_local_position(transition.state2)
               )
             end
           rescue StandardError => e
@@ -173,31 +173,31 @@ module ULOL
             candidates = AdjacencyService::GeometryQuery.common_face_waypoint_candidates(
               transition.cell1.sketchup_group,
               transition.cell2.sketchup_group,
-              state1_point: state_world_position(transition.state1),
-              state2_point: state_world_position(transition.state2),
-              transformation1: cell_space_world_transformation(transition.cell1),
-              transformation2: cell_space_world_transformation(transition.cell2)
+              state1_point: state_root_local_position(transition.state1),
+              state2_point: state_root_local_position(transition.state2),
+              transformation1: cell_space_root_local_transformation(transition.cell1),
+              transformation2: cell_space_root_local_transformation(transition.cell2)
             )
-            candidates.filter_map { |candidate| normalize_world_waypoint_candidate(candidate, transition) }
+            candidates.filter_map { |candidate| normalize_root_local_waypoint_candidate(candidate, transition) }
           end
 
-          def state_world_position(state)
+          def state_root_local_position(state)
             group = state&.duality_cell&.sketchup_group
             return state.position unless group&.valid?
 
-            cell_space_world_transformation(state.duality_cell).origin
+            cell_space_root_local_transformation(state.duality_cell).origin
           rescue StandardError
             state_local_position(state)
           end
 
-          def cell_space_world_transformation(cell_space)
+          def cell_space_root_local_transformation(cell_space)
             group = cell_space&.sketchup_group
             return Geom::Transformation.new unless group&.valid?
 
-            Utils::Transformation.entity_world_transformation_under_root(group, @primal_group)
+            Utils::Transformation.entity_transformation_in_root(group, @primal_group)
           end
 
-          def normalize_world_waypoint_candidate(candidate, transition)
+          def normalize_root_local_waypoint_candidate(candidate, transition)
             normalized = if candidate.is_a?(Geom::Point3d)
                            { point: candidate, normal1: nil, normal2: nil }
                          elsif candidate.is_a?(Hash)
@@ -206,17 +206,17 @@ module ULOL
 
                            {
                              point: point,
-                             normal1: normalized_world_vector(candidate[:normal1] || candidate[:normal]),
-                             normal2: normalized_world_vector(candidate[:normal2])
+                             normal1: normalized_root_local_vector(candidate[:normal1] || candidate[:normal]),
+                             normal2: normalized_root_local_vector(candidate[:normal2])
                            }
                          end
             return nil unless normalized
-            return nil unless plausible_world_waypoint?(normalized[:point], transition)
+            return nil unless plausible_root_local_waypoint?(normalized[:point], transition)
 
             normalized
           end
 
-          def normalized_world_vector(vector)
+          def normalized_root_local_vector(vector)
             return vector unless vector.is_a?(Geom::Vector3d)
 
             normalized = vector.clone
@@ -226,9 +226,9 @@ module ULOL
             nil
           end
 
-          def plausible_world_waypoint?(point, transition)
-            point1 = state_world_position(transition.state1)
-            point2 = state_world_position(transition.state2)
+          def plausible_root_local_waypoint?(point, transition)
+            point1 = state_root_local_position(transition.state1)
+            point2 = state_root_local_position(transition.state2)
             return true unless point1.is_a?(Geom::Point3d) && point2.is_a?(Geom::Point3d)
 
             midpoint = Geom::Point3d.new(
