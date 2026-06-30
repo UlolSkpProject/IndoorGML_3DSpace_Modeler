@@ -30,6 +30,21 @@ module ULOL
           entity&.transformation || Geom::Transformation.new
         end
 
+        def self.entity_world_transformation(entity)
+          return entity.transformation unless entity&.valid?
+
+          model = Sketchup.active_model
+          active_path = model&.active_path
+          return model.edit_transform if active_path&.last == entity
+
+          parent_transform = parent_instance_world_transformation(entity, active_path)
+          return parent_transform * entity.transformation if parent_transform
+
+          entity.transformation
+        rescue StandardError
+          entity&.transformation || Geom::Transformation.new
+        end
+
         def self.entity_transformation_in_root(entity, root_group)
           return entity.transformation unless entity&.valid?
           return entity.transformation unless root_group&.valid?
@@ -50,6 +65,25 @@ module ULOL
         rescue StandardError
           Geom::Transformation.new
         end
+
+        def self.parent_instance_world_transformation(entity, active_path = Sketchup.active_model&.active_path)
+          parent = entity&.parent
+          return nil unless parent.respond_to?(:instances)
+
+          instances = parent.instances.select { |instance| instance&.valid? }
+          return nil if instances.empty?
+
+          parent_instance = active_path&.reverse_each&.find { |path_entity| instances.include?(path_entity) }
+          return nil if parent_instance && active_path&.include?(parent_instance)
+
+          parent_instance ||= instances.first
+          return nil unless parent_instance&.valid?
+
+          entity_world_transformation(parent_instance)
+        rescue StandardError
+          nil
+        end
+        private_class_method :parent_instance_world_transformation
 
         def self.move_entity_origin_in_root_local_to(entity, root_group, local_position)
           current_root_local_position = entity_origin_in_root_local(entity, root_group)

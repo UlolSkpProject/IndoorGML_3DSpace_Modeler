@@ -13,6 +13,8 @@ module ULOL
         attr_reader :state2_id
         attr_reader :cell1_id
         attr_reader :cell2_id
+        attr_reader :state1_point
+        attr_reader :state2_point
         attr_reader :waypoint_candidates
         attr_reader :selected_waypoint_candidate
         attr_reader :selected_waypoint
@@ -31,6 +33,8 @@ module ULOL
           @state2 = state2
           @cell1 = cell1
           @cell2 = cell2
+          @state1_point = nil
+          @state2_point = nil
           @waypoint_candidates = []
           @selected_waypoint_candidate = nil
           @selected_waypoint = nil
@@ -44,9 +48,11 @@ module ULOL
         def update(point1, point2, waypoint_candidates: nil)
           return false unless valid_states?
 
+          @state1_point = copy_point(point1)
+          @state2_point = copy_point(point2)
           candidates = Array(waypoint_candidates).compact
-          candidates = [midpoint(point1, point2)] if candidates.empty?
-          set_waypoint_candidates(candidates, point1: point1, point2: point2)
+          candidates = [midpoint(@state1_point, @state2_point)] if candidates.empty?
+          set_waypoint_candidates(candidates, point1: @state1_point, point2: @state2_point)
           capture_reference_ids
           true
         end
@@ -56,9 +62,9 @@ module ULOL
           @selected_waypoint_candidate = shortest_waypoint_candidate(point1, point2) ||
                                          @waypoint_candidates[selected_index.to_i] ||
                                          @waypoint_candidates.first
-          @selected_waypoint = @selected_waypoint_candidate&.dig(:point)
-          @selected_waypoint_normal1 = @selected_waypoint_candidate&.dig(:normal1)
-          @selected_waypoint_normal2 = @selected_waypoint_candidate&.dig(:normal2)
+          @selected_waypoint = copy_point(@selected_waypoint_candidate&.dig(:point))
+          @selected_waypoint_normal1 = copy_vector(@selected_waypoint_candidate&.dig(:normal1))
+          @selected_waypoint_normal2 = copy_vector(@selected_waypoint_candidate&.dig(:normal2))
           @selected_waypoint_normal = @selected_waypoint_normal1
         end
 
@@ -75,6 +81,8 @@ module ULOL
           @state2 = nil
           @cell1 = nil
           @cell2 = nil
+          @state1_point = nil
+          @state2_point = nil
           @waypoint_candidates = []
           @selected_waypoint_candidate = nil
           @selected_waypoint = nil
@@ -109,6 +117,8 @@ module ULOL
           @state2 = state2
           @cell1 = cell1
           @cell2 = cell2
+          @state1_point = nil
+          @state2_point = nil
           @waypoint_candidates = []
           @selected_waypoint_candidate = nil
           @selected_waypoint = nil
@@ -142,7 +152,7 @@ module ULOL
         end
 
         def normalize_waypoint_candidate(candidate)
-          return { point: candidate, normal: nil } if candidate.is_a?(Geom::Point3d)
+          return { point: copy_point(candidate), normal1: nil, normal2: nil } if candidate.is_a?(Geom::Point3d)
           return nil unless candidate.is_a?(Hash)
 
           point = candidate[:point]
@@ -150,19 +160,29 @@ module ULOL
           normal2 = candidate[:normal2]
           return nil unless point.is_a?(Geom::Point3d)
 
-          { point: point, normal1: normalized_vector(normal1), normal2: normalized_vector(normal2) }
+          { point: copy_point(point), normal1: normalized_vector(normal1), normal2: normalized_vector(normal2) }
         rescue StandardError
           nil
         end
 
         def normalized_vector(vector)
-          return nil unless vector.is_a?(Geom::Vector3d)
-
-          vector = vector.clone
-          vector.normalize! if vector.length > 0.001
-          vector
+          copied = copy_vector(vector)
+          copied&.normalize! if copied&.length.to_f > 0.001
+          copied
         rescue StandardError
           nil
+        end
+
+        def copy_point(point)
+          return nil unless point.is_a?(Geom::Point3d)
+
+          Geom::Point3d.new(point.x, point.y, point.z)
+        end
+
+        def copy_vector(vector)
+          return nil unless vector.is_a?(Geom::Vector3d)
+
+          Geom::Vector3d.new(vector.x, vector.y, vector.z)
         end
 
         def capture_reference_ids
