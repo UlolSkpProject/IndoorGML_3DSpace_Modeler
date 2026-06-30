@@ -8,63 +8,59 @@ module ULOL
           # Depends on EditorSession-owned state:
           # @editing, @editable_entity_ids, and @indoor_model.
           def lock_entity(entity)
-            begin
-              return true unless lockable?(entity)
-              return true if editable_entity?(entity)
-              return true if entity.respond_to?(:locked?) && entity.locked?
-
-              entity.locked = true
-              true
-            rescue StandardError
-              true
-            end
+            set_entity_locked(entity, true)
           end
 
           def unlock_entity(entity)
-            begin
-              return true unless lockable?(entity)
-              return true if entity.respond_to?(:locked?) && !entity.locked?
-
-              entity.locked = false
-              true
-            rescue StandardError
-              true
-            end
+            set_entity_locked(entity, false)
           end
 
           def with_unlocked(entity)
-            begin
-              entities = temporary_unlock_entities(entity)
-              lock_states = entities.to_h do |target|
-                [target, target.respond_to?(:locked?) && target.locked?]
-              end
-              entities.each { |target| unlock_entity(target) if lock_states[target] }
-              yield
-            ensure
-              entities&.reverse_each { |target| lock_entity(target) if lock_states&.[](target) }
-            end
+            return yield unless lockable_entity?(entity)
+
+            was_locked = entity.locked?
+            entity.locked = false if was_locked
+            yield
+          ensure
+            entity.locked = true if was_locked && entity&.valid?
           end
 
           def apply_lock_policy
-            @editable_entity_ids = {}
-            primal_group = @indoor_model.primal_group
-            return unless primal_group&.valid?
+            return true unless @editing == true
 
-            @editing ? unlock_entity(primal_group) : lock_entity(primal_group)
+            primal_group = @indoor_model.primal_group
+
+            unlock_entity(primal_group) if primal_group&.valid?
+
+            @indoor_model.cell_spaces.each do |cell_space|
+              group = cell_space&.sketchup_group
+              next unless group&.valid?
+
+              unlock_entity(group)
+            end
+
+            true
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Lock policy apply failed: #{e.class}: #{e.message}"
+            false
           end
 
           private
 
-          def temporary_unlock_entities(entity)
-            [entity].compact.select { |target| target&.valid?() }
+          def lockable_entity?(entity)
+            entity&.valid? && entity.respond_to?(:locked?) && entity.respond_to?(:locked=)
+          rescue StandardError
+            false
           end
 
-          def lockable?(entity)
-            begin
-              entity&.valid?() && entity.respond_to?(:locked=)
-            rescue StandardError
-              false
-            end
+          def set_entity_locked(entity, locked)
+            return false unless lockable_entity?(entity)
+
+            entity.locked = locked == true
+            true
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Entity lock update failed: #{e.class}: #{e.message}"
+            false
           end
         end
       end

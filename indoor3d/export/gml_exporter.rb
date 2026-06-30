@@ -270,8 +270,8 @@ module ULOL
               line = geometry.add_element('gml:LineString')
               line.add_attribute('gml:id', "line_#{transition_gml_id(transition)}")
               append_local_crs_attributes(line)
-              line.add_element('gml:pos').text = format_point(state_world_position(transition.state1))
-              line.add_element('gml:pos').text = format_point(state_world_position(transition.state2))
+              line.add_element('gml:pos').text = format_point(transition_state1_world_position(transition))
+              line.add_element('gml:pos').text = format_point(transition_state2_world_position(transition))
             end
           end
 
@@ -355,20 +355,30 @@ module ULOL
           end
 
           def state_world_position(state)
-            point = state.position
-            primal_group = @indoor_model.primal_group
-            return point unless primal_group&.valid?
+            group = state&.duality_cell&.valid_sketchup_group
+            return Utils::Transformation.entity_world_transformation_under_root(group, @indoor_model.primal_group).origin if group
 
-            point.transform(primal_group.transformation)
+            state.position
+          end
+
+          def transition_state1_world_position(transition)
+            transition_point_world_position(transition.state1_point) || state_world_position(transition.state1)
+          end
+
+          def transition_state2_world_position(transition)
+            transition_point_world_position(transition.state2_point) || state_world_position(transition.state2)
           end
 
           def cell_space_world_transformation(group)
-            primal_group = @indoor_model.primal_group
-            if primal_group&.valid? && Utils::Transformation.direct_child_of_root?(group, primal_group)
-              return primal_group.transformation * group.transformation
-            end
+            Utils::Transformation.entity_world_transformation_under_root(group, @indoor_model.primal_group)
+          end
 
-            group.transformation
+          def transition_point_world_position(point)
+            return nil unless point.is_a?(Geom::Point3d)
+
+            Utils::Transformation.root_local_point_to_model(point, @indoor_model.primal_group)
+          rescue StandardError
+            point
           end
 
           def format_point(point)
