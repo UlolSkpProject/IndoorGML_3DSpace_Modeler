@@ -40,6 +40,8 @@ module ULOL
             changed_fields = changed_space_features_snapshot_fields(previous_snapshot, current_snapshot)
             return nil if changed_fields.empty?
 
+            remember_space_features_scale_revert_transform(entity, previous_snapshot, current_snapshot) if changed_fields.include?(:transformation)
+
             change_kind =
               if changed_fields.include?(:name)
                 :name
@@ -63,6 +65,8 @@ module ULOL
           end
 
           def handle_space_features_transform_changed(entity)
+            return true if reject_scaled_space_features_transform(entity)
+
             invalidate_overlay_transition_points
             remember_space_features_change_snapshot(entity)
             Sketchup.active_model&.active_view&.invalidate
@@ -91,6 +95,58 @@ module ULOL
             @space_features_change_snapshots[entity_observer_key(entity)]
           rescue StandardError
             nil
+          end
+
+          def remember_space_features_scale_revert_transform(entity, previous_snapshot, current_snapshot)
+            scale_revert_transforms.delete(entity_observer_key(entity))
+            current_transform = current_snapshot&.[](:transformation)
+            return unless scaled_transform_values?(current_transform)
+
+            previous_transform = previous_snapshot&.[](:transformation)
+            return if scaled_transform_values?(previous_transform)
+            return unless previous_transform.is_a?(Array) && previous_transform.length == 16
+
+            scale_revert_transforms[entity_observer_key(entity)] = previous_transform
+          rescue StandardError
+            nil
+          end
+
+          def reject_scaled_space_features_transform(entity)
+            return false unless entity&.valid?
+            return false unless Utils::Transformation.scaled?(entity.transformation)
+
+            revert_values = scale_revert_transforms.delete(entity_observer_key(entity))
+            unless revert_values.is_a?(Array) && revert_values.length == 16
+              IndoorCore::Logger.puts "[IndoorGML] Primal scale rejected but no previous unscaled transform is available: entity_id=#{entity.entityID}"
+              return false
+            end
+
+            revert_transform = Geom::Transformation.new(revert_values)
+            with_transparent_space_features_operation('IndoorGML Reject Primal Scale') do
+              with_guard_flag(:@constraining_space_features) do
+                set_group_transformation(entity, revert_transform)
+              end
+            end
+            invalidate_overlay_transition_points
+            remember_space_features_change_snapshot(entity)
+            Sketchup.active_model&.active_view&.invalidate
+            IndoorCore::Logger.puts "[IndoorGML] Primal scale rejected and transform restored: entity_id=#{entity.entityID}"
+            true
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Primal scale restore failed: #{e.class}: #{e.message}"
+            false
+          end
+
+          def scaled_transform_values?(values)
+            return false unless values.is_a?(Array) && values.length == 16
+
+            Utils::Transformation.scaled?(Geom::Transformation.new(values))
+          rescue StandardError
+            false
+          end
+
+          def scale_revert_transforms
+            @space_features_scale_revert_transforms ||= {}
           end
 
           def build_space_features_change_snapshot(entity)
