@@ -31,7 +31,6 @@ module ULOL
         OVERLAY_RADIUS_SCALE = 1.0
         OVERLAY_MIN_RADIUS_PIXELS = 1.0
         OVERLAY_MAX_RADIUS_PIXELS = 7.0
-        TRANSITION_DEPTH_OFFSET_PIXELS = 2.0
         TRANSITION_MIN_CURVE_SEGMENTS = 3
         TRANSITION_RIGHT_ANGLE_CURVE_SEGMENTS = 6
         TRANSITION_CURVE_SEGMENTS = 9
@@ -42,7 +41,7 @@ module ULOL
           @transition_curve_cache = {}
           @world_transition_line_points = nil
           @world_transition_line_points_key = nil
-          @transition_draw_points = []
+          @render_state_triangle_points = []
           super(OVERLAY_ID, OVERLAY_NAME, description: 'Shows when IndoorGML editing is active.')
         end
 
@@ -50,7 +49,7 @@ module ULOL
           @transition_curve_cache&.clear
           @world_transition_line_points = nil
           @world_transition_line_points_key = nil
-          @transition_draw_points&.clear
+          @render_state_triangle_points&.clear
         end
 
         def draw(view)
@@ -213,16 +212,17 @@ module ULOL
         def draw_overlay_states(view)
           view.drawing_color = DUAL_STATE_COLOR
           right_axis, up_axis = camera_billboard_axes(view)
-          points = []
+          @render_state_triangle_points ||= []
+          @render_state_triangle_points.clear
           @indoor_model.states.each do |state|
             next unless state&.valid?()
             next unless overlay_state_visible?(state)
 
-            center = offset_state_point_in_front_of_transitions(view, overlay_state_point(state))
+            center = overlay_state_point(state)
             radius = overlay_state_radius(view, center, state)
-            points.concat(billboard_disk_triangle_points(center, right_axis, up_axis, radius))
+            @render_state_triangle_points.concat(billboard_disk_triangle_points(center, right_axis, up_axis, radius))
           end
-          view.draw(GL_TRIANGLES, points) unless points.empty?
+          view.draw(GL_TRIANGLES, @render_state_triangle_points) unless @render_state_triangle_points.empty?
         end
 
         def draw_overlay_transitions(view)
@@ -230,39 +230,49 @@ module ULOL
 
           view.line_width = overlay_transition_line_width if view.respond_to?(:line_width=)
         
-          camera_direction = view.camera.direction.clone
-          camera_direction.normalize!
-          depth_distance = view.pixels_to_model(TRANSITION_DEPTH_OFFSET_PIXELS, Geom::Point3d.new(0, 0, 0))
           world_points = transition_line_points
           return if world_points.empty?
 
-          points = offset_transition_line_points(world_points, camera_direction, depth_distance)
           view.drawing_color = DUAL_TRANSITION_COLOR
-          view.draw(GL_LINES, points)
+          view.draw(GL_LINES, world_points)
         end
 
         def transition_line_points
-          cache_key = transition_line_points_cache_key
+          transition_line_points_with_key.first
+        end
+
+        def transition_line_points_with_key
+          cache_key = world_transition_line_points_cache_key
           if @world_transition_line_points.nil? || @world_transition_line_points_key != cache_key
             @world_transition_line_points = build_world_transition_line_points
             @world_transition_line_points_key = cache_key
           end
-          @world_transition_line_points
+          [@world_transition_line_points, @world_transition_line_points_key]
         end
 
-        def transition_line_points_cache_key
-          rounded_transform_key(primal_world_transformation)
+        def world_transition_line_points_cache_key
+          @indoor_model.transitions.map do |transition|
+            next nil unless transition&.valid?()
+
+            [
+              transition.id,
+              rounded_point_key(transition.state1_point || transition.state1&.position),
+              rounded_point_key(transition.state2_point || transition.state2&.position),
+              rounded_point_key(transition.selected_waypoint),
+              rounded_vector_key(transition.selected_waypoint_normal1),
+              rounded_vector_key(transition.selected_waypoint_normal2)
+            ]
+          end.compact
         end
 
         def build_world_transition_line_points
-          primal_tf = primal_world_transformation
           points = []
           @indoor_model.transitions.each do |transition|
             next unless transition&.valid?()
             next unless transition.state1&.valid?() && transition.state2&.valid?()
             next unless overlay_transition_visible?(transition)
         
-            segments = transition_curve_segments(transition, primal_tf)
+            segments = transition_curve_segments(transition)
             points.concat(segments[:default])
             points.concat(segments[:first])
             points.concat(segments[:second])
@@ -333,9 +343,12 @@ module ULOL
           [(OVERLAY_MIN_RADIUS_PIXELS * 1.25).round, 2].max
         end
 
-        def transition_curve_segments(transition, primal_tf)
+        def transition_curve_segments(transition)
+          transition_curve_segments_from_input(transition, transition_curve_input(transition))
+        end
+
+        def transition_curve_segments_from_input(transition, curve_input)
           control_points = []
-          curve_input = transition_curve_input(transition, primal_tf)
           control_points = curve_input[:points]
           return empty_transition_segment_groups if control_points.length < 2
         
@@ -392,12 +405,6 @@ module ULOL
           return nil unless vector.is_a?(Geom::Vector3d)
 
           [vector.x.to_f.round(6), vector.y.to_f.round(6), vector.z.to_f.round(6)]
-        end
-
-        def rounded_transform_key(transformation)
-          return nil unless transformation.respond_to?(:to_a)
-
-          transformation.to_a.map { |value| value.to_f.round(6) }
         end
 
         def transition_curve_cache_limit
@@ -498,76 +505,34 @@ module ULOL
           vector
         end
 
-        def transition_curve_input(transition, primal_tf)
-          point1 = overlay_state_world_point(transition.state1)
-          point2 = overlay_state_world_point(transition.state2)
+        def transition_curve_input(transition)
+          point1 = transition.state1_point || overlay_state_world_point(transition.state1)
+          point2 = transition.state2_point || overlay_state_world_point(transition.state2)
           return { points: [], normal1: nil, normal2: nil } if point1.distance(point2) <= 0.001
 
-          waypoint_source = overlay_transition_waypoint_source(transition.selected_waypoint, point1, point2, primal_tf) ||
-                            { point: nil, source: :primal }
-          waypoint = waypoint_source[:point]
+          waypoint = transition.selected_waypoint
           points = waypoint ? [point1, waypoint, point2] : [point1, point2]
           {
             points: points,
-            normal1: overlay_transition_normal_with_source(transition.selected_waypoint_normal1, primal_tf, waypoint_source[:source]),
-            normal2: overlay_transition_normal_with_source(transition.selected_waypoint_normal2, primal_tf, waypoint_source[:source])
+            normal1: normalized_transition_normal(transition.selected_waypoint_normal1),
+            normal2: normalized_transition_normal(transition.selected_waypoint_normal2)
           }
         end
 
         def overlay_state_world_point(state)
-          group = state&.duality_cell&.sketchup_group
-          return state.position unless group&.valid?
-
-          Utils::Transformation.entity_world_transformation_under_root(group, @indoor_model.primal_group).origin
-        rescue StandardError
           state.position
-        end
-
-        def overlay_transition_waypoint_source(point, state1_world, state2_world, primal_tf)
-          return nil unless point.is_a?(Geom::Point3d)
-
-          raw_world = point
-          local_world = primal_tf ? point.transform(primal_tf) : point
-          raw_score = waypoint_fit_score(raw_world, state1_world, state2_world)
-          local_score = waypoint_fit_score(local_world, state1_world, state2_world)
-          if raw_score && local_score && raw_score < local_score
-            { point: raw_world, source: :world }
-          else
-            { point: local_world, source: :primal }
-          end
         rescue StandardError
-          { point: point, source: :world }
+          ORIGIN
         end
 
-        def waypoint_fit_score(point, state1_world, state2_world)
-          return nil unless point && state1_world && state2_world
-
-          [state1_world.distance(point), point.distance(state2_world)].max
-        end
-
-        def overlay_transition_normal_with_source(vector, primal_tf, source)
+        def normalized_transition_normal(vector)
           return nil unless vector.is_a?(Geom::Vector3d)
 
-          normal = source == :world ? vector.clone : (primal_tf ? vector.transform(primal_tf) : vector.clone)
-          return nil unless normal.is_a?(Geom::Vector3d)
-
+          normal = vector.clone
           normal.normalize! if normal.length > 0.001
           normal
         rescue StandardError
           nil
-        end
-
-        def offset_transition_line_points(points, camera_direction, depth_distance)
-          @transition_draw_points ||= []
-          @transition_draw_points.clear
-          points.each do |point|
-            @transition_draw_points << Geom::Point3d.new(
-              point.x + (camera_direction.x * depth_distance),
-              point.y + (camera_direction.y * depth_distance),
-              point.z + (camera_direction.z * depth_distance)
-            )
-          end
-          @transition_draw_points
         end
 
         def polyline_segments(points)
@@ -577,23 +542,9 @@ module ULOL
           end
         end
 
-        def offset_state_point_in_front_of_transitions(view, point)
-          direction = view.camera.direction.clone
-          direction.normalize!
-          distance = view.pixels_to_model(TRANSITION_DEPTH_OFFSET_PIXELS, point)
-          Geom::Point3d.new(
-            point.x - (direction.x * distance),
-            point.y - (direction.y * distance),
-            point.z - (direction.z * distance)
-          )
-        rescue StandardError
-          point
-        end
-
         def renderable_active_context?
           path = Sketchup.active_model&.active_path
           return true if path.nil?
-          return false unless path.length == 1
 
           primal_group = @indoor_model.primal_group
           primal_group&.valid? && path.first == primal_group
@@ -633,10 +584,6 @@ module ULOL
           overlay_state_world_point(state)
         rescue StandardError
           state.position
-        end
-
-        def primal_world_transformation
-          Utils::Transformation.root_transformation_in_model(@indoor_model.primal_group)
         end
 
         def draw_2d_quad(view, points, color)

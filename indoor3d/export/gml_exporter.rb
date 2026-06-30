@@ -270,8 +270,8 @@ module ULOL
               line = geometry.add_element('gml:LineString')
               line.add_attribute('gml:id', "line_#{transition_gml_id(transition)}")
               append_local_crs_attributes(line)
-              line.add_element('gml:pos').text = format_point(state_world_position(transition.state1))
-              line.add_element('gml:pos').text = format_point(state_world_position(transition.state2))
+              line.add_element('gml:pos').text = format_point(transition_state1_world_position(transition))
+              line.add_element('gml:pos').text = format_point(transition_state2_world_position(transition))
             end
           end
 
@@ -355,10 +355,15 @@ module ULOL
           end
 
           def state_world_position(state)
-            group = state&.duality_cell&.sketchup_group
-            return state.position unless group&.valid?
+            state.position
+          end
 
-            Utils::Transformation.entity_world_transformation_under_root(group, @indoor_model.primal_group).origin
+          def transition_state1_world_position(transition)
+            transition.state1_point || state_world_position(transition.state1)
+          end
+
+          def transition_state2_world_position(transition)
+            transition.state2_point || state_world_position(transition.state2)
           end
 
           def cell_space_world_transformation(group)

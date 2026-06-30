@@ -14,19 +14,19 @@ module ULOL
 
         @@display_radius = STATE_NODE_RADIUS
 
-        def initialize(cell_space, _parent_entities, local_position)
+        def initialize(cell_space, _parent_entities, position)
           unless cell_space.is_a?(CellSpace)
             raise ArgumentError, 'IndoorCore::CellSpace expected'
           end
 
-          unless local_position.nil? || local_position.is_a?(Geom::Point3d)
-            raise ArgumentError, 'Geom::Point3d local_position expected'
+          unless position.nil? || position.is_a?(Geom::Point3d)
+            raise ArgumentError, 'Geom::Point3d position expected'
           end
 
           super()
 
           @duality_cell = cell_space
-          @fallback_position = local_position
+          @fallback_position = position
           @radius = self.class.display_radius
           @transitions = []
           @editable = false
@@ -34,19 +34,19 @@ module ULOL
 
         def position
           group = @duality_cell&.valid_sketchup_group
-          return group.transformation.origin if group
+          return Utils::Transformation.entity_world_transformation(group).origin if group
 
           @fallback_position || ORIGIN
         rescue StandardError
           @fallback_position || ORIGIN
         end
 
-        def update_position(local_position)
-          unless local_position.is_a?(Geom::Point3d)
-            raise ArgumentError, 'Geom::Point3d local_position expected'
+        def update_position(position)
+          unless position.is_a?(Geom::Point3d)
+            raise ArgumentError, 'Geom::Point3d position expected'
           end
 
-          @fallback_position = local_position
+          @fallback_position = position
         end
 
         def add_transition(transition)
@@ -69,13 +69,13 @@ module ULOL
           @transitions.clear
         end
 
-        def self.restore(cell_space, local_position, id: nil, name: nil)
+        def self.restore(cell_space, position, id: nil, name: nil)
           unless cell_space.is_a?(CellSpace)
             raise ArgumentError, 'IndoorCore::CellSpace expected'
           end
 
           state = allocate
-          state.send(:initialize_restored, cell_space, local_position, id, name)
+          state.send(:initialize_restored, cell_space, position, id, name)
           state
         end
 
@@ -98,9 +98,9 @@ module ULOL
 
         private
 
-        def initialize_restored(cell_space, local_position, id, name)
+        def initialize_restored(cell_space, position, id, name)
           @duality_cell = cell_space
-          @fallback_position = local_position
+          @fallback_position = position
           @radius = self.class.display_radius
           @transitions = []
           @editable = false
