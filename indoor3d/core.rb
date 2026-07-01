@@ -31,6 +31,8 @@ module ULOL
     require_relative 'infrastructure/observers/app_observer'
     require_relative 'infrastructure/persistence/attribute_serializer'
     require_relative 'infrastructure/persistence/runtime_restorer'
+    require_relative 'application/storey_filter_parser'
+    require_relative 'application/storey_filter_options_builder'
     require_relative 'infrastructure/scene/scene_group_guard'
     require_relative 'infrastructure/scene/editor_session'
     require_relative 'application/feature_registry'

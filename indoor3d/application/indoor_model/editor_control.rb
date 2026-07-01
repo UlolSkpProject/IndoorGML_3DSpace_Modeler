@@ -555,12 +555,7 @@ module ULOL
           end
 
           def edit_mode_storey_filter_options
-            labels = @cell_spaces.each_with_object([]) do |cell_space, result|
-              next unless cell_space&.valid?
-
-              result.concat(storey_filter_labels(cell_space.storey))
-            end
-            labels.uniq.sort.map { |label| { value: label, label: label } }
+            StoreyFilterOptionsBuilder.build(@cell_spaces)
           end
 
           def edit_mode_cell_type_filter_options
@@ -568,33 +563,6 @@ module ULOL
               label = CellSpaceType.label(cell_type)
               { value: label, label: label }
             end
-          end
-
-          def storey_filter_labels(value)
-            parts = value.to_s.strip.upcase.split('~', 2)
-            from = parse_storey_filter_part(parts[0])
-            to = parse_storey_filter_part(parts[1] || parts[0])
-            return [CellSpace::DEFAULT_STOREY] if from.nil?
-            return [format_storey_filter_part(from)] if to.nil?
-
-            if from[:kind] == to[:kind]
-              min, max = [from[:level], to[:level]].minmax
-              return (min..max).map { |level| "#{from[:kind]}#{format('%02d', level)}" }
-            end
-
-            [format_storey_filter_part(from), format_storey_filter_part(to)].compact.uniq
-          end
-
-          def parse_storey_filter_part(value)
-            match = value.to_s.strip.upcase.match(/\A([FB])(\d{1,2})\z/)
-            return nil unless match
-
-            level = [[match[2].to_i, 1].max, 99].min
-            { kind: match[1], level: level }
-          end
-
-          def format_storey_filter_part(part)
-            "#{part[:kind]}#{format('%02d', part[:level])}"
           end
 
           def selected_cell_space

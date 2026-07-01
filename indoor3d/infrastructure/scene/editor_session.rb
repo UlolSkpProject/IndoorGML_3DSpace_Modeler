@@ -628,14 +628,7 @@ module ULOL
         end
 
         def normalize_storey_filter(values)
-          Array(values).map { |value| normalize_storey_filter_label(value) }.compact.uniq.sort
-        end
-
-        def normalize_storey_filter_label(value)
-          match = value.to_s.strip.upcase.match(/\A([FB])(\d{1,2})\z/)
-          return nil unless match
-
-          "#{match[1]}#{format('%02d', match[2].to_i)}"
+          StoreyFilterParser.normalize_labels(values)
         end
 
         def normalize_cell_type_filter(values)
@@ -677,7 +670,7 @@ module ULOL
         def storey_filter_visible?(cell_space)
           return true if visible_storeys.empty?
 
-          cell_storeys = storey_filter_labels(cell_space&.storey)
+          cell_storeys = StoreyFilterParser.labels_for(cell_space&.storey)
           cell_storeys.any? { |storey| visible_storeys.include?(storey) }
         end
 
@@ -685,33 +678,6 @@ module ULOL
           return true if visible_cell_types.empty?
 
           visible_cell_types.include?(cell_space&.cell_type)
-        end
-
-        def storey_filter_labels(value)
-          parts = value.to_s.strip.upcase.split('~', 2)
-          from = parse_storey_filter_part(parts[0])
-          to = parse_storey_filter_part(parts[1] || parts[0])
-          return [CellSpace::DEFAULT_STOREY] if from.nil?
-          return [format_storey_filter_part(from)] if to.nil?
-
-          if from[:kind] == to[:kind]
-            min, max = [from[:level], to[:level]].minmax
-            return (min..max).map { |level| "#{from[:kind]}#{format('%02d', level)}" }
-          end
-
-          [format_storey_filter_part(from), format_storey_filter_part(to)].compact.uniq
-        end
-
-        def parse_storey_filter_part(value)
-          match = value.to_s.strip.upcase.match(/\A([FB])(\d{1,2})\z/)
-          return nil unless match
-
-          level = [[match[2].to_i, 1].max, 99].min
-          { kind: match[1], level: level }
-        end
-
-        def format_storey_filter_part(part)
-          "#{part[:kind]}#{format('%02d', part[:level])}"
         end
 
         def ensure_overlay_registered(model)
