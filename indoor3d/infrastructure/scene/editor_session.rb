@@ -33,6 +33,7 @@ module ULOL
           @validation_highlight_code = nil
           @validation_focus_visibility = {}
           @validation_focus_hide_rest_previous = nil
+          @cell_space_render_visibility = {}
           @visible_storeys = []
           @visible_cell_types = []
           @edit_mode_visibility_snapshots = {}
@@ -352,8 +353,10 @@ module ULOL
           return false unless primal_group&.valid?
           return false unless primal_group.respond_to?(:visible=)
 
-          with_unlocked(primal_group) do
-            primal_group.visible = geometry_visible?
+          with_visibility_update_operation do
+            with_unlocked(primal_group) do
+              primal_group.visible = geometry_visible?
+            end
           end
           invalidate_view(Sketchup.active_model())
           true
@@ -365,16 +368,26 @@ module ULOL
         def apply_validation_focus_visibility
           return false unless validation_focus_active?
 
-          @validation_focus_visibility ||= {}
-          @indoor_model.cell_spaces.each do |cell_space|
-            next unless cell_space&.valid?
+          with_visibility_update_operation do
+            @validation_focus_visibility ||= {}
+            @indoor_model.cell_spaces.each do |cell_space|
+              next unless cell_space&.valid?
 
-            group = cell_space.sketchup_group
-            next unless group&.valid? && group.respond_to?(:visible=)
+              group = cell_space.sketchup_group
+              next unless cell_space_visibility_target?(group)
 
-            persistent_id = group.persistent_id
-            @validation_focus_visibility[persistent_id] = group.visible? unless @validation_focus_visibility.key?(persistent_id)
-            with_unlocked(group) { group.visible = edit_mode_visible_cell_space?(cell_space) }
+              persistent_id = group.persistent_id
+              unless @validation_focus_visibility.key?(persistent_id)
+                @validation_focus_visibility[persistent_id] = capture_cell_space_visibility(group)
+              end
+              with_unlocked(group) do
+                set_cell_space_render_visible(
+                  group,
+                  edit_mode_visible_cell_space?(cell_space),
+                  @validation_focus_visibility[persistent_id]
+                )
+              end
+            end
           end
           invalidate_view(Sketchup.active_model())
           true
@@ -407,14 +420,16 @@ module ULOL
           snapshots = @validation_focus_visibility || {}
           return true if snapshots.empty?
 
-          @indoor_model.cell_spaces.each do |cell_space|
-            next unless cell_space&.valid?
+          with_visibility_update_operation do
+            @indoor_model.cell_spaces.each do |cell_space|
+              next unless cell_space&.valid?
 
-            group = cell_space.sketchup_group
-            next unless group&.valid? && group.respond_to?(:visible=)
-            next unless snapshots.key?(group.persistent_id)
+              group = cell_space.sketchup_group
+              next unless cell_space_visibility_target?(group)
+              next unless snapshots.key?(group.persistent_id)
 
-            with_unlocked(group) { group.visible = snapshots[group.persistent_id] }
+              with_unlocked(group) { restore_cell_space_visibility(group, snapshots[group.persistent_id]) }
+            end
           end
           @validation_focus_visibility = {}
           apply_edit_mode_visibility_filter(ignore_validation: true) if visibility_filter_active?
@@ -437,15 +452,21 @@ module ULOL
             return apply_all_edit_mode_cell_space_visibility
           end
 
-          @indoor_model.cell_spaces.each do |cell_space|
-            next unless cell_space&.valid?
+          with_visibility_update_operation do
+            @indoor_model.cell_spaces.each do |cell_space|
+              next unless cell_space&.valid?
 
-            group = cell_space.sketchup_group
-            next unless group&.valid? && group.respond_to?(:visible=)
+              group = cell_space.sketchup_group
+              next unless cell_space_visibility_target?(group)
 
-            remember_edit_mode_visibility(group) if visibility_filter_active?
-            with_unlocked(group) do
-              group.visible = edit_mode_visible_cell_space?(cell_space, include_validation: !ignore_validation)
+              remember_edit_mode_visibility(group) if visibility_filter_active?
+              with_unlocked(group) do
+                set_cell_space_render_visible(
+                  group,
+                  edit_mode_visible_cell_space?(cell_space, include_validation: !ignore_validation),
+                  @edit_mode_visibility_snapshots[group.persistent_id]
+                )
+              end
             end
           end
           invalidate_view(Sketchup.active_model())
@@ -456,13 +477,18 @@ module ULOL
         end
 
         def apply_all_edit_mode_cell_space_visibility
-          @indoor_model.cell_spaces.each do |cell_space|
-            next unless cell_space&.valid?
+          with_visibility_update_operation do
+            @indoor_model.cell_spaces.each do |cell_space|
+              next unless cell_space&.valid?
 
-            group = cell_space.sketchup_group
-            next unless group&.valid? && group.respond_to?(:visible=)
+              group = cell_space.sketchup_group
+              next unless cell_space_visibility_target?(group)
 
-            with_unlocked(group) { group.visible = true }
+              snapshot = @edit_mode_visibility_snapshots[group.persistent_id]
+              with_unlocked(group) do
+                snapshot ? restore_cell_space_visibility(group, snapshot) : set_cell_space_render_visible(group, true)
+              end
+            end
           end
           @edit_mode_visibility_snapshots = {}
           invalidate_view(Sketchup.active_model())
@@ -476,14 +502,16 @@ module ULOL
           snapshots = @edit_mode_visibility_snapshots || {}
           return true if snapshots.empty?
 
-          @indoor_model.cell_spaces.each do |cell_space|
-            next unless cell_space&.valid?
+          with_visibility_update_operation do
+            @indoor_model.cell_spaces.each do |cell_space|
+              next unless cell_space&.valid?
 
-            group = cell_space.sketchup_group
-            next unless group&.valid? && group.respond_to?(:visible=)
-            next unless snapshots.key?(group.persistent_id)
+              group = cell_space.sketchup_group
+              next unless cell_space_visibility_target?(group)
+              next unless snapshots.key?(group.persistent_id)
 
-            with_unlocked(group) { group.visible = snapshots[group.persistent_id] }
+              with_unlocked(group) { restore_cell_space_visibility(group, snapshots[group.persistent_id]) }
+            end
           end
           @edit_mode_visibility_snapshots = {}
           invalidate_view(Sketchup.active_model())
@@ -621,10 +649,88 @@ module ULOL
           @visible_cell_types ||= []
         end
 
+        def with_visibility_update_operation
+          model = Sketchup.active_model
+          return with_visibility_observer_suppression { yield } unless model
+
+          if model.respond_to?(:active_operation_name) && model.active_operation_name.to_s.length.positive?
+            return with_visibility_observer_suppression { yield }
+          end
+
+          operation_started = false
+          begin
+            result = nil
+            with_visibility_observer_suppression do
+              operation_started = model.start_operation('IndoorGML Edit Visibility', true)
+              result = yield
+              model.commit_operation if operation_started
+              operation_started = false
+            end
+            result
+          rescue StandardError
+            model.abort_operation if operation_started
+            raise
+          end
+        end
+
+        def with_visibility_observer_suppression
+          if @indoor_model.respond_to?(:with_runtime_observer_suppression)
+            @indoor_model.with_runtime_observer_suppression { yield }
+          else
+            yield
+          end
+        end
+
+        def cell_space_visibility_target?(group)
+          group&.valid? && group.respond_to?(:visible=) && group.respond_to?(:entities)
+        rescue StandardError
+          false
+        end
+
+        def capture_cell_space_visibility(group)
+          {
+            visible: group.respond_to?(:visible?) ? group.visible? : true,
+            children: visibility_child_entities(group).map { |entity| [entity, entity.hidden?] }
+          }
+        end
+
+        def restore_cell_space_visibility(group, snapshot)
+          return set_cell_space_render_visible(group, snapshot == true) unless snapshot.is_a?(Hash)
+
+          Array(snapshot[:children]).each do |entity, hidden|
+            next unless entity&.valid? && entity.respond_to?(:hidden=)
+
+            entity.hidden = hidden == true
+          end
+          @cell_space_render_visibility[group.persistent_id] = true if group&.valid?
+          true
+        end
+
+        def set_cell_space_render_visible(group, visible, snapshot = nil)
+          return restore_cell_space_visibility(group, snapshot) if visible && snapshot
+
+          persistent_id = group.persistent_id
+          target_visible = visible == true
+          return true if @cell_space_render_visibility[persistent_id] == target_visible
+
+          visibility_child_entities(group).each { |entity| entity.hidden = visible != true }
+          @cell_space_render_visibility[persistent_id] = target_visible
+          true
+        end
+
+        def visibility_child_entities(group)
+          group.entities.to_a.select do |entity|
+            entity&.valid? && entity.respond_to?(:hidden?) && entity.respond_to?(:hidden=)
+          end
+        rescue StandardError
+          []
+        end
+
         def reset_edit_mode_visibility_filter
           @visible_storeys = []
           @visible_cell_types = []
           @edit_mode_visibility_snapshots = {}
+          @cell_space_render_visibility = {}
         end
 
         def normalize_storey_filter(values)
@@ -653,7 +759,7 @@ module ULOL
             if @validation_focus_visibility&.key?(persistent_id)
               @validation_focus_visibility[persistent_id]
             else
-              group.visible?
+              capture_cell_space_visibility(group)
             end
         rescue StandardError
           nil

@@ -58,6 +58,10 @@ module ULOL
             with_guard_flag(:@constraining_space_features) { yield }
           end
 
+          def with_runtime_observer_suppression
+            sync { yield }
+          end
+
           private
 
           def diagnostic_count(features)
