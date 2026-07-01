@@ -8,6 +8,7 @@ require 'rexml/document'
 require_relative 'val3dity_process_adapter'
 require_relative 'val3dity_report_schema'
 require_relative 'val3dity_report_renderer'
+require_relative 'val3dity_overlap_recheck_policy'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -390,10 +391,8 @@ module ULOL
           def recheck_overlap_errors!(raw_report, progress: nil, progress_step: nil)
             @overlap_recheck_pair_analysis = {}
             @overlap_recheck_701_decisions = {}
-            raw_report.delete(OVERLAP_RECHECK_REPORT_KEY)
-            results = []
             tracker = {
-              total: count_recheckable_overlap_errors(raw_report),
+              total: overlap_recheck_policy.count_recheckable_errors(raw_report),
               processed: 0,
               progress: progress,
               progress_step: progress_step
@@ -404,60 +403,24 @@ module ULOL
               phase: 'Collect 701/704 errors'
             )
 
-            remove_rechecked_errors!(
-              Array(raw_report['dataset_errors']),
-              results,
-              raw_report['input_file'],
-              tracker: tracker
-            )
-
-            Array(raw_report['features']).each do |feature|
-              remove_rechecked_errors!(Array(feature['errors']), results, feature['id'], tracker: tracker)
-              Array(feature['primitives']).each do |primitive|
-                remove_rechecked_errors!(
-                  Array(primitive['errors']),
-                  results,
-                  feature['id'],
-                  primitive['id'],
-                  tracker: tracker
+            overlap_recheck_policy.apply!(
+              raw_report,
+              on_result: lambda { |result|
+                tracker[:processed] = tracker[:processed].to_i + 1
+                emit_overlap_recheck_progress(tracker, result)
+              },
+              before_refresh: lambda { |_results|
+                emit_overlap_recheck_progress(
+                  tracker,
+                  message: 'Applying extension validation policy',
+                  phase: 'Apply extension policy'
                 )
-              end
-            end
-            emit_overlap_recheck_progress(
-              tracker,
-              message: 'Applying extension validation policy',
-              phase: 'Apply extension policy'
-            )
-
-            raw_report[OVERLAP_RECHECK_REPORT_KEY] = results unless results.empty?
-            refresh_rechecked_validity!(raw_report)
+              }
+            ) { |code, cell_id1, cell_id2| recheck_cell_pair(code, cell_id1, cell_id2) }
           end
 
           def preserve_strict_validation!(raw_report)
-            raw_report[STRICT_VALIDITY_KEY] = raw_report['validity'] == true
-            raw_report[STRICT_ERRORS_REPORT_KEY] = error_item_rows(raw_report).map do |row|
-              {
-                'scope' => row[:scope],
-                'item' => row[:item],
-                'code' => row[:code],
-                'description' => row[:description]
-              }
-            end
-          end
-
-          def count_recheckable_overlap_errors(raw_report)
-            count = Array(raw_report['dataset_errors']).count { |error| recheckable_overlap_error?(error) }
-            Array(raw_report['features']).each do |feature|
-              count += Array(feature['errors']).count { |error| recheckable_overlap_error?(error) }
-              Array(feature['primitives']).each do |primitive|
-                count += Array(primitive['errors']).count { |error| recheckable_overlap_error?(error) }
-              end
-            end
-            count
-          end
-
-          def recheckable_overlap_error?(error)
-            [701, 704].include?(error_code_number(error && error['code']))
+            overlap_recheck_policy.preserve_strict_validation!(raw_report)
           end
 
           def emit_overlap_recheck_progress(tracker, result = nil, message: nil, phase: nil)
@@ -485,71 +448,6 @@ module ULOL
             )
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] overlap recheck progress failed: #{e.class}: #{e.message}"
-          end
-
-          def remove_rechecked_errors!(errors, results, *context, tracker: nil)
-            errors.delete_if do |error|
-              result = overlap_error_recheck_result(error, *context)
-              next false unless result
-
-              results << result
-              if tracker
-                tracker[:processed] = tracker[:processed].to_i + 1
-                emit_overlap_recheck_progress(tracker, result)
-              end
-              result['tolerated'] == true
-            end
-          end
-
-          def refresh_rechecked_validity!(raw_report)
-            Array(raw_report['features']).each do |feature|
-              Array(feature['primitives']).each do |primitive|
-                primitive['validity'] = Array(primitive['errors']).empty?
-              end
-
-              feature['validity'] = Array(feature['errors']).empty? &&
-                                    Array(feature['primitives']).all? { |primitive| primitive['validity'] == true }
-            end
-
-            raw_report['validity'] = error_item_rows(raw_report).empty?
-            raw_report[EXTENSION_VALIDITY_KEY] = raw_report['validity'] == true
-            raw_report[VALIDATION_STATUS_KEY] = if raw_report[STRICT_VALIDITY_KEY] == true
-                                                  'exact_valid'
-                                                elsif raw_report[EXTENSION_VALIDITY_KEY] == true
-                                                  'extension_policy_valid'
-                                                else
-                                                  'invalid'
-                                                end
-            refresh_overview_counts!(raw_report, 'features_overview', Array(raw_report['features']))
-            refresh_overview_counts!(
-              raw_report,
-              'primitives_overview',
-              Array(raw_report['features']).flat_map { |feature| Array(feature['primitives']) }
-            )
-            raw_report['all_errors'] = error_item_rows(raw_report).map { |row| row[:code] }.uniq
-          end
-
-          def refresh_overview_counts!(raw_report, key, items)
-            overview = Array(raw_report[key])
-            return if overview.empty?
-
-            overview.each do |row|
-              type = row['type']
-              matching = items.select { |item| type.to_s.empty? || item['type'] == type }
-              row['total'] = matching.length
-              row['valid'] = matching.count { |item| item['validity'] == true }
-            end
-          end
-
-          def overlap_error_recheck_result(error, *context)
-            code = error_code_number(error['code'])
-            return nil unless [701, 704].include?(code)
-
-            text = ([error] + context).map { |value| value.is_a?(Hash) ? value.to_json : value.to_s }.join(' ')
-            cell_ids = text.scan(/cell_[A-Za-z0-9_.-]+/).uniq
-            return overlap_recheck_result(code, [], false, 'cell pair not found in val3dity error') if cell_ids.length < 2
-
-            recheck_cell_pair(code, cell_ids[0], cell_ids[1])
           end
 
           def recheck_cell_pair(code, cell_id1, cell_id2)
@@ -1053,19 +951,24 @@ module ULOL
           end
 
           def overlap_recheck_result(code, cell_ids, tolerated, reason, status: nil, distance: nil, overlap_area: nil, normal_thickness: nil, actual_overlap_volume: nil, intersection_component_count: nil)
-            {
-              'code' => code,
-              'cells' => cell_ids,
-              'tolerated' => tolerated,
-              'status' => status || (tolerated ? 'suppressed' : 'kept'),
-              'reason' => reason,
-              'tolerance_mm' => OVERLAP_RECHECK_TOLERANCE_MM,
-              'distance_mm' => distance.nil? ? nil : distance.to_f * 25.4,
-              'normal_thickness_mm' => normal_thickness.nil? ? nil : normal_thickness.to_f * 25.4,
-              'overlap_area_mm2' => overlap_area.nil? ? nil : overlap_area.to_f * 25.4 * 25.4,
-              'actual_overlap_volume_mm3' => actual_overlap_volume.nil? ? nil : actual_overlap_volume.to_f * 25.4 * 25.4 * 25.4,
-              'intersection_component_count' => intersection_component_count
-            }
+            overlap_recheck_policy.recheck_result(
+              code,
+              cell_ids,
+              tolerated,
+              reason,
+              status: status,
+              distance: distance,
+              overlap_area: overlap_area,
+              normal_thickness: normal_thickness,
+              actual_overlap_volume: actual_overlap_volume,
+              intersection_component_count: intersection_component_count
+            )
+          end
+
+          def overlap_recheck_policy
+            @overlap_recheck_policy ||= Val3dityOverlapRecheckPolicy.new(
+              tolerance_mm: OVERLAP_RECHECK_TOLERANCE_MM
+            )
           end
 
           def error_code_number(code)
