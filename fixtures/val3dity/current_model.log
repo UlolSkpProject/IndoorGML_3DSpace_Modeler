@@ -1,0 +1,3220 @@
+---
+val3dity Copyright (c) 2011-2020, 3D geoinformation research group, TU Delft  
+This program comes with ABSOLUTELY NO WARRANTY.
+This is free software, and you are welcome to redistribute it
+under certain conditions; for details run val3dity with the '--license' option.
+---
+Reading file: fixtures\golden\current_model.gml
+Translating all coordinates by (-20360.8, --20616.9)
+XLinks found, resolving them...done.
+IndoorGML input file
+Primitive(s) validated: All
+(CityGML/CityJSON/IndoorGML have all their 3D primitives validated)
+Parameters used for validation:
+   snap_tol                 0.001
+   planarity_d2p_tol         0.01
+   planarity_n_tol             20
+   overlap_tol               none
+
+Validation of 1 feature(s):
+--- Validation of IndoorModel ---
+
+######### Validating Feature #########
+id:   IF_001
+type: IndoorModel
+--
+======== Validating Primitive ========
+Solid
+id: solid_cell_sg0blstw
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_47dzbk2u
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_2hzilo1l
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_bjjgtv98
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_lbgbtv4p
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_mligh55r
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_4q3hmu08
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_6na46o09
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_nl22zzq5
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_jk0cmghx
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_8olckhnp
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_fix4x76g
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_qmv8kc2d
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_jnx6t9lr
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_wsc44pt2
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_qhtyh37r
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_1sugkfi4
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_x3xyl6j3
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_aul7kc6l
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_6f9bvwd0
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_c121uwp5
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_y7q3tjuz
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_zerfzhmv
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_ht3lmq6
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_buhg307u
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_6noj2c6p
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_q51iydm1
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_xndnshut
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_exc7ganu
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_dvbgxauo
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_tuxd07wq
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_zzlbb2b1
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_w4qx92n2
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_pk5b9dqo
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_dgep7u63
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_ltxg98ps
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_79zrrnxe
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_rx6298ar
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_t1rb97vz
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_eemcs0gu
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_1kxsyanv
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_wnlkrg8b
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_qos3eeq1
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_6jm49h25
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_8ppgk6ei
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_jdm96jr
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_agplgfvc
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_6o2z9ozb
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_op8r0iru
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_e44expfy
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_ns4x2hsl
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_txkw7gds
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_n3e37vva
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_du0dbi74
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_p05skmne
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_i3tbo075
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_l7hh7lsf
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_pcxzxtds
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_ymxlqex
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_ktkr4jm7
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_gxtxvrzh
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_q0eotiix
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_9woxis4w
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_8heih4u
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_w58npmz4
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_mu723c4u
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_sbdqmsnj
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_jea65x94
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_go1q2ib3
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_6tgu1dyc
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_zndlr8nt
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_gp0up3gx
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_3oo9n1md
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_il4ioe4x
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_8npjuixo
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_je7f6lg4
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_z66fm0d3
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_rfk0pr5c
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_66v2nxca
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_j2tl11sr
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_is81ads3
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_mijj8ck3
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_uaupav5s
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+	ERROR 203: NON_PLANAR_POLYGON_DISTANCE_PLANE (face polygon_127_cell_uaupav5s)
+	[distance to fitted plane: 0.0102755 (tolerance=0.01)]
+======== INVALID ========
+======== Validating Primitive ========
+Solid
+id: solid_cell_l6gafpi0
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_qa9glvpo
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_zusv5b1p
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_kr8boyb2
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+	ERROR 203: NON_PLANAR_POLYGON_DISTANCE_PLANE (face polygon_12_cell_kr8boyb2)
+	[distance to fitted plane: 0.0359722 (tolerance=0.01)]
+======== INVALID ========
+======== Validating Primitive ========
+Solid
+id: solid_cell_6jiw7060
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_xfgn7f4u
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_oja96lyx
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_ak1qx6n9
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_g790kn70
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_6fmu8g3a
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_w5m4alja
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_7bmjllfm
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_xel6qc9s
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_kg02tz8
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_hdihqtt2
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_4u5gtltj
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_ipcdfij0
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_c5bnpwhh
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_ffj3z5fa
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_q9qadi7n
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_5nsowbk8
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_4wdzfpfl
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_htumo0qq
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_2g76sm2d
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_jgkxcosb
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_gkzmaguf
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_ds6gncw6
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_9whbxq19
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_b1ukswk1
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_f7poobru
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_8h3wz4zr
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_pk28dbde
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_vv0m4bea
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_qbvlqdnf
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_ilbjk014
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_hv4wkzkc
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_uw6hnwq2
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_fdrmpf32
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_ndiwus0k
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_jz4ex1qx
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_8f81998o
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_kbzg5xwg
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_y3k1p5wx
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_oe0zbqxd
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_dnddzqz0
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_60hfhlj
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_h7to8kib
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_8go7rd5l
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_4iw2318o
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_zi0rsnol
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_3fyato3p
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_p23mjhhj
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_h4sqvnws
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_bqjqnabb
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_d1usb9m
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_9pdpg9ox
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_sy50k4yh
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_lzc03oux
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_blnj5qiq
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_4nqrb755
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_bcy2myrh
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_8rhaysre
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_5ncaoe5f
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_l4wphb48
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_vyg6z5p1
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_ilxl18l5
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_ejujlcpo
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_str4w8ns
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_z26j1bs1
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_cktxt356
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_4f3v2x3
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_af447etu
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_fpedu09w
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_dc23c0d4
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_w6iuadm4
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_9gyplmgl
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_qy0nhj1o
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_216wvcmf
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_a9hvnqry
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_akugo1gi
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_hv6t35l
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_2vawmr1o
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_9kcb97zm
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_7geybtlt
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_wem3lnuq
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_rkpvkz47
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_3sbu620y
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_q11x85qs
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_45kbwbss
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_ys3zqmvp
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_p9redacl
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_tkn2v8u2
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_idmiceil
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_sbuyru7e
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_eglpsdpu
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_vlwy8j71
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_d4zv2a1u
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_ae9bugkw
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_9ce6jg3c
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_a0krd17z
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_t1016tdi
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_nod7rulb
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_8ojwfmys
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_jyzvn47i
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_5q8c472s
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_cgimxa0j
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_uvy5eyap
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_j784qo6h
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_jdvo60dl
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_rvfpb7tu
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_b7qyarra
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_wn016ahq
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_zxdn85dx
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_xuu16uyc
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_5drgh12t
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_31a637pq
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_iumknujr
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_j0ty2i9r
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_7lzy5ef9
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_1ezzhgff
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_tnrl9s2t
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_x5tw2mzi
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_chrae68j
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_eqtkng69
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_843j43pl
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_3x18vq3r
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_j38o8tzx
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_xmv0cgqb
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_ht1frwaz
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_i6id28gu
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_jlkglw36
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_lh8prka8
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_e0hoopjn
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_xa004x59
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_hvkk9f48
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_qxuosr3s
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+======== Validating Primitive ========
+Solid
+id: solid_cell_vwlf8e63
+--
+--- Shell validation (#0) ---
+-----2D validation of each surface
+-----Triangulation of each surface
+-----Planarity of surfaces (with normals deviation)
+-----Combinatorial consistency
+-----Geometrical consistency
+-----Global orientation of normals
+========= VALID =========
+--- Overlapping tests between Cells ---
+--- Constructing Nef Polyhedra ---
+--- Constructing AABB tree ---
+--- Testing intersections between Nefs ---
+--//-/||/---/|/-/-||||-|//|-Total AABB tests: 714
+Error: Cells have overlapping interior
+	ERROR 701: CELLS_OVERLAP (id: cell_dgep7u63 and cell_ktkr4jm7)
+	ERROR 701: CELLS_OVERLAP (id: cell_l6gafpi0 and cell_qmv8kc2d)
+	ERROR 701: CELLS_OVERLAP (id: cell_l6gafpi0 and cell_y7q3tjuz)
+	ERROR 701: CELLS_OVERLAP (id: cell_l6gafpi0 and cell_tuxd07wq)
+	ERROR 701: CELLS_OVERLAP (id: cell_uw6hnwq2 and cell_exc7ganu)
+	ERROR 701: CELLS_OVERLAP (id: cell_uw6hnwq2 and cell_fix4x76g)
+	ERROR 701: CELLS_OVERLAP (id: cell_uw6hnwq2 and cell_6f9bvwd0)
+	ERROR 701: CELLS_OVERLAP (id: cell_zzlbb2b1 and cell_6jiw7060)
+	ERROR 701: CELLS_OVERLAP (id: cell_l6gafpi0 and cell_pk28dbde)
+	ERROR 701: CELLS_OVERLAP (id: cell_l6gafpi0 and cell_vv0m4bea)
+	ERROR 701: CELLS_OVERLAP (id: cell_l6gafpi0 and cell_dvbgxauo)
+	ERROR 701: CELLS_OVERLAP (id: cell_w4qx92n2 and cell_l6gafpi0)
+	ERROR 701: CELLS_OVERLAP (id: cell_dgep7u63 and cell_uw6hnwq2)
+	ERROR 701: CELLS_OVERLAP (id: cell_dvbgxauo and cell_ak1qx6n9)
+	ERROR 701: CELLS_OVERLAP (id: cell_w4qx92n2 and cell_go1q2ib3)
+	ERROR 701: CELLS_OVERLAP (id: cell_jnx6t9lr and cell_uw6hnwq2)
+	ERROR 701: CELLS_OVERLAP (id: cell_jz4ex1qx and cell_6f9bvwd0)
+	ERROR 701: CELLS_OVERLAP (id: cell_jnx6t9lr and cell_bqjqnabb)
+	ERROR 701: CELLS_OVERLAP (id: cell_jea65x94 and cell_w6iuadm4)
+	ERROR 701: CELLS_OVERLAP (id: cell_il4ioe4x and cell_9gyplmgl)
+	ERROR 701: CELLS_OVERLAP (id: cell_qos3eeq1 and cell_6jiw7060)
+	ERROR 701: CELLS_OVERLAP (id: cell_8heih4u and cell_ejujlcpo)
+	ERROR 701: CELLS_OVERLAP (id: cell_l7hh7lsf and cell_str4w8ns)
+	ERROR 701: CELLS_OVERLAP (id: cell_9woxis4w and cell_pk28dbde)
+	ERROR 701: CELLS_OVERLAP (id: cell_9woxis4w and cell_vv0m4bea)
+	ERROR 701: CELLS_OVERLAP (id: cell_op8r0iru and cell_d4zv2a1u)
+	ERROR 701: CELLS_OVERLAP (id: cell_txkw7gds and cell_p9redacl)
+	ERROR 701: CELLS_OVERLAP (id: cell_vlwy8j71 and cell_w6iuadm4)
+	ERROR 701: CELLS_OVERLAP (id: cell_vlwy8j71 and cell_8rhaysre)
+	ERROR 701: CELLS_OVERLAP (id: cell_vlwy8j71 and cell_fpedu09w)
+	ERROR 701: CELLS_OVERLAP (id: cell_il4ioe4x and cell_3sbu620y)
+	ERROR 701: CELLS_OVERLAP (id: cell_qos3eeq1 and cell_sy50k4yh)
+	ERROR 701: CELLS_OVERLAP (id: cell_zndlr8nt and cell_fpedu09w)
+	ERROR 701: CELLS_OVERLAP (id: cell_vlwy8j71 and cell_a9hvnqry)
+	ERROR 701: CELLS_OVERLAP (id: cell_vlwy8j71 and cell_9ce6jg3c)
+	ERROR 701: CELLS_OVERLAP (id: cell_vlwy8j71 and cell_ejujlcpo)
+	ERROR 701: CELLS_OVERLAP (id: cell_vlwy8j71 and cell_str4w8ns)
+	ERROR 701: CELLS_OVERLAP (id: cell_i3tbo075 and cell_9ce6jg3c)
+	ERROR 701: CELLS_OVERLAP (id: cell_e44expfy and cell_tkn2v8u2)
+	ERROR 701: CELLS_OVERLAP (id: cell_l7hh7lsf and cell_ae9bugkw)
+	ERROR 701: CELLS_OVERLAP (id: cell_8ppgk6ei and cell_ae9bugkw)
+	ERROR 701: CELLS_OVERLAP (id: cell_vlwy8j71 and cell_xndnshut)
+	ERROR 701: CELLS_OVERLAP (id: cell_vlwy8j71 and cell_45kbwbss)
+	ERROR 701: CELLS_OVERLAP (id: cell_79zrrnxe and cell_45kbwbss)
+	ERROR 701: CELLS_OVERLAP (id: cell_vlwy8j71 and cell_c121uwp5)
+	ERROR 701: CELLS_OVERLAP (id: cell_vlwy8j71 and cell_d4zv2a1u)
+	ERROR 701: CELLS_OVERLAP (id: cell_vlwy8j71 and cell_p9redacl)
+	ERROR 701: CELLS_OVERLAP (id: cell_vlwy8j71 and cell_sbuyru7e)
+	ERROR 701: CELLS_OVERLAP (id: cell_vlwy8j71 and cell_7geybtlt)
+	ERROR 701: CELLS_OVERLAP (id: cell_wnlkrg8b and cell_q11x85qs)
+	ERROR 701: CELLS_OVERLAP (id: cell_ymxlqex and cell_ys3zqmvp)
+	ERROR 701: CELLS_OVERLAP (id: cell_idmiceil and cell_hv6t35l)
+	ERROR 701: CELLS_OVERLAP (id: cell_9woxis4w and cell_xel6qc9s)
+	ERROR 701: CELLS_OVERLAP (id: cell_9woxis4w and cell_w5m4alja)
+	ERROR 701: CELLS_OVERLAP (id: cell_vlwy8j71 and cell_eglpsdpu)
+	ERROR 701: CELLS_OVERLAP (id: cell_vlwy8j71 and cell_akugo1gi)
+	ERROR 701: CELLS_OVERLAP (id: cell_vlwy8j71 and cell_hv6t35l)
+	ERROR 701: CELLS_OVERLAP (id: cell_vlwy8j71 and cell_idmiceil)
+	ERROR 701: CELLS_OVERLAP (id: cell_9woxis4w and cell_idmiceil)
+	ERROR 701: CELLS_OVERLAP (id: cell_79zrrnxe and cell_akugo1gi)
+	ERROR 701: CELLS_OVERLAP (id: cell_jyzvn47i and cell_xel6qc9s)
+	ERROR 701: CELLS_OVERLAP (id: cell_jyzvn47i and cell_w5m4alja)
+	ERROR 701: CELLS_OVERLAP (id: cell_a0krd17z and cell_vlwy8j71)
+	ERROR 701: CELLS_OVERLAP (id: cell_4nqrb755 and cell_rfk0pr5c)
+	ERROR 701: CELLS_OVERLAP (id: cell_a0krd17z and cell_eglpsdpu)
+	ERROR 701: CELLS_OVERLAP (id: cell_e0hoopjn and cell_h4sqvnws)
+	ERROR 701: CELLS_OVERLAP (id: cell_31a637pq and cell_y3k1p5wx)
+	ERROR 701: CELLS_OVERLAP (id: cell_jyzvn47i and cell_8f81998o)
+	ERROR 701: CELLS_OVERLAP (id: cell_jyzvn47i and cell_4nqrb755)
+	ERROR 701: CELLS_OVERLAP (id: cell_jyzvn47i and cell_rfk0pr5c)
+	ERROR 701: CELLS_OVERLAP (id: cell_jyzvn47i and cell_dnddzqz0)
+	ERROR 701: CELLS_OVERLAP (id: cell_jyzvn47i and cell_d1usb9m)
+	ERROR 701: CELLS_OVERLAP (id: cell_jyzvn47i and cell_9pdpg9ox)
+	ERROR 701: CELLS_OVERLAP (id: cell_xuu16uyc and cell_pcxzxtds)
+	ERROR 701: CELLS_OVERLAP (id: cell_8npjuixo and cell_jyzvn47i)
+	ERROR 701: CELLS_OVERLAP (id: cell_4iw2318o and cell_jyzvn47i)
+	ERROR 701: CELLS_OVERLAP (id: cell_zi0rsnol and cell_jyzvn47i)
+	ERROR 701: CELLS_OVERLAP (id: cell_3fyato3p and cell_jyzvn47i)
+	ERROR 701: CELLS_OVERLAP (id: cell_zi0rsnol and cell_xmv0cgqb)
+	ERROR 701: CELLS_OVERLAP (id: cell_vyg6z5p1 and cell_3x18vq3r)
+	ERROR 701: CELLS_OVERLAP (id: cell_3fyato3p and cell_nod7rulb)
+	ERROR 701: CELLS_OVERLAP (id: cell_ltxg98ps and cell_jlkglw36)
+	ERROR 701: CELLS_OVERLAP (id: cell_ltxg98ps and cell_x5tw2mzi)
+	ERROR 701: CELLS_OVERLAP (id: cell_3oo9n1md and cell_jyzvn47i)
+	ERROR 701: CELLS_OVERLAP (id: cell_oe0zbqxd and cell_jyzvn47i)
+	ERROR 701: CELLS_OVERLAP (id: cell_af447etu and cell_eqtkng69)
+	ERROR 701: CELLS_OVERLAP (id: cell_af447etu and cell_5drgh12t)
+	ERROR 701: CELLS_OVERLAP (id: cell_6tgu1dyc and cell_7lzy5ef9)
+	ERROR 701: CELLS_OVERLAP (id: cell_6tgu1dyc and cell_lh8prka8)
+	ERROR 701: CELLS_OVERLAP (id: cell_60hfhlj and cell_iumknujr)
+	ERROR 701: CELLS_OVERLAP (id: cell_z66fm0d3 and cell_jyzvn47i)
+	ERROR 701: CELLS_OVERLAP (id: cell_tnrl9s2t and cell_3oo9n1md)
+	ERROR 701: CELLS_OVERLAP (id: cell_8npjuixo and cell_4iw2318o)
+	ERROR 701: CELLS_OVERLAP (id: cell_z66fm0d3 and cell_843j43pl)
+	ERROR 701: CELLS_OVERLAP (id: cell_cgimxa0j and cell_jyzvn47i)
+	ERROR 701: CELLS_OVERLAP (id: cell_mijj8ck3 and cell_jk0cmghx)
+	ERROR 701: CELLS_OVERLAP (id: cell_mijj8ck3 and cell_wem3lnuq)
+	ERROR 701: CELLS_OVERLAP (id: cell_ilbjk014 and cell_mligh55r)
+	ERROR 701: CELLS_OVERLAP (id: cell_qbvlqdnf and cell_1sugkfi4)
+	ERROR 701: CELLS_OVERLAP (id: cell_xfgn7f4u and cell_jk0cmghx)
+	ERROR 701: CELLS_OVERLAP (id: cell_kg02tz8 and cell_216wvcmf)
+	ERROR 701: CELLS_OVERLAP (id: cell_g790kn70 and cell_wem3lnuq)
+	ERROR 701: CELLS_OVERLAP (id: cell_qa9glvpo and cell_2vawmr1o)
+	ERROR 701: CELLS_OVERLAP (id: cell_6fmu8g3a and cell_2vawmr1o)
+	ERROR 701: CELLS_OVERLAP (id: cell_6fmu8g3a and cell_t1016tdi)
+	ERROR 701: CELLS_OVERLAP (id: cell_6fmu8g3a and cell_216wvcmf)
+	ERROR 701: CELLS_OVERLAP (id: cell_mijj8ck3 and cell_cgimxa0j)
+	ERROR 701: CELLS_OVERLAP (id: cell_mijj8ck3 and cell_uvy5eyap)
+	ERROR 701: CELLS_OVERLAP (id: cell_mijj8ck3 and cell_zerfzhmv)
+	ERROR 701: CELLS_OVERLAP (id: cell_mijj8ck3 and cell_2hzilo1l)
+	ERROR 701: CELLS_OVERLAP (id: cell_mijj8ck3 and cell_rkpvkz47)
+	ERROR 701: CELLS_OVERLAP (id: cell_mijj8ck3 and cell_buhg307u)
+	ERROR 701: CELLS_OVERLAP (id: cell_zusv5b1p and cell_buhg307u)
+	ERROR 701: CELLS_OVERLAP (id: cell_ndiwus0k and cell_rx6298ar)
+	ERROR 701: CELLS_OVERLAP (id: cell_j2tl11sr and cell_rx6298ar)
+	ERROR 701: CELLS_OVERLAP (id: cell_4q3hmu08 and cell_mijj8ck3)
+	ERROR 701: CELLS_OVERLAP (id: cell_x3xyl6j3 and cell_mijj8ck3)
+	ERROR 701: CELLS_OVERLAP (id: cell_wsc44pt2 and cell_mijj8ck3)
+	ERROR 701: CELLS_OVERLAP (id: cell_qxuosr3s and cell_mijj8ck3)
+	ERROR 701: CELLS_OVERLAP (id: cell_bjjgtv98 and cell_mijj8ck3)
+	ERROR 701: CELLS_OVERLAP (id: cell_bjjgtv98 and cell_q9qadi7n)
+	ERROR 701: CELLS_OVERLAP (id: cell_z26j1bs1 and cell_mijj8ck3)
+	ERROR 701: CELLS_OVERLAP (id: cell_5nsowbk8 and cell_z26j1bs1)
+	ERROR 701: CELLS_OVERLAP (id: cell_sg0blstw and cell_5nsowbk8)
+	ERROR 701: CELLS_OVERLAP (id: cell_6noj2c6p and cell_9whbxq19)
+	ERROR 701: CELLS_OVERLAP (id: cell_c5bnpwhh and cell_oja96lyx)
+	ERROR 701: CELLS_OVERLAP (id: cell_c5bnpwhh and cell_66v2nxca)
+	ERROR 701: CELLS_OVERLAP (id: cell_h7to8kib and cell_2g76sm2d)
+	ERROR 701: CELLS_OVERLAP (id: cell_hv4wkzkc and cell_h7to8kib)
+	ERROR 701: CELLS_OVERLAP (id: cell_hv4wkzkc and cell_2g76sm2d)
+	ERROR 701: CELLS_OVERLAP (id: cell_5ncaoe5f and cell_c5bnpwhh)
+	ERROR 701: CELLS_OVERLAP (id: cell_8go7rd5l and cell_c5bnpwhh)
+	ERROR 701: CELLS_OVERLAP (id: cell_bcy2myrh and cell_c5bnpwhh)
+	ERROR 701: CELLS_OVERLAP (id: cell_bcy2myrh and cell_8go7rd5l)
+	ERROR 701: CELLS_OVERLAP (id: cell_jgkxcosb and cell_fdrmpf32)
+	ERROR 701: CELLS_OVERLAP (id: cell_p23mjhhj and cell_2g76sm2d)
+	ERROR 701: CELLS_OVERLAP (id: cell_47dzbk2u and cell_4f3v2x3)
+======== Validating Dual Vertex (Point-in-Solid tests) ========
+Cell (navi:GeneralSpace) id=cell_1ezzhgff --> ok
+Cell (navi:TransitionSpace) id=cell_1kxsyanv --> ok
+Cell (navi:ConnectionSpace) id=cell_1sugkfi4 --> ok
+Cell (navi:ConnectionSpace) id=cell_216wvcmf --> ok
+Cell (navi:GeneralSpace) id=cell_2g76sm2d --> ok
+Cell (navi:ConnectionSpace) id=cell_2hzilo1l --> ok
+Cell (navi:ConnectionSpace) id=cell_2vawmr1o --> ok
+Cell (navi:GeneralSpace) id=cell_31a637pq --> ok
+Cell (navi:ConnectionSpace) id=cell_3fyato3p --> ok
+Cell (navi:ConnectionSpace) id=cell_3oo9n1md --> ok
+Cell (navi:ConnectionSpace) id=cell_3sbu620y --> ok
+Cell (navi:GeneralSpace) id=cell_3x18vq3r --> ok
+Cell (navi:ConnectionSpace) id=cell_45kbwbss --> ok
+Cell (navi:TransitionSpace) id=cell_47dzbk2u --> ok
+Cell (navi:AnchorSpace) id=cell_4f3v2x3 --> ok
+Cell (navi:ConnectionSpace) id=cell_4iw2318o --> ok
+Cell (navi:ConnectionSpace) id=cell_4nqrb755 --> ok
+Cell (navi:ConnectionSpace) id=cell_4q3hmu08 --> ok
+Cell (navi:TransitionSpace) id=cell_4u5gtltj --> ok
+Cell (navi:GeneralSpace) id=cell_4wdzfpfl --> ok
+Cell (navi:GeneralSpace) id=cell_5drgh12t --> ok
+Cell (navi:ConnectionSpace) id=cell_5ncaoe5f --> ok
+Cell (navi:GeneralSpace) id=cell_5nsowbk8 --> ok
+Cell (navi:GeneralSpace) id=cell_5q8c472s --> ok
+Cell (navi:ConnectionSpace) id=cell_60hfhlj --> ok
+Cell (navi:TransitionSpace) id=cell_66v2nxca --> ok
+Cell (navi:ConnectionSpace) id=cell_6f9bvwd0 --> ok
+Cell (navi:GeneralSpace) id=cell_6fmu8g3a --> ok
+Cell (navi:TransitionSpace) id=cell_6jiw7060 --> ok
+Cell (navi:TransitionSpace) id=cell_6jm49h25 --> ok
+Cell (navi:ConnectionSpace) id=cell_6na46o09 --> ok
+Cell (navi:ConnectionSpace) id=cell_6noj2c6p --> ok
+Cell (navi:GeneralSpace) id=cell_6o2z9ozb --> ok
+Cell (navi:ConnectionSpace) id=cell_6tgu1dyc --> ok
+Cell (navi:GeneralSpace) id=cell_79zrrnxe --> ok
+Cell (navi:GeneralSpace) id=cell_7bmjllfm --> ok
+Cell (navi:ConnectionSpace) id=cell_7geybtlt --> ok
+Cell (navi:GeneralSpace) id=cell_7lzy5ef9 --> ok
+Cell (navi:GeneralSpace) id=cell_843j43pl --> ok
+Cell (navi:ConnectionSpace) id=cell_8f81998o --> ok
+Cell (navi:ConnectionSpace) id=cell_8go7rd5l --> ok
+Cell (navi:TransitionSpace) id=cell_8h3wz4zr --> ok
+Cell (navi:GeneralSpace) id=cell_8heih4u --> ok
+Cell (navi:ConnectionSpace) id=cell_8npjuixo --> ok
+Cell (navi:GeneralSpace) id=cell_8ojwfmys --> ok
+Cell (navi:ConnectionSpace) id=cell_8olckhnp --> ok
+Cell (navi:GeneralSpace) id=cell_8ppgk6ei --> ok
+Cell (navi:ConnectionSpace) id=cell_8rhaysre --> ok
+Cell (navi:ConnectionSpace) id=cell_9ce6jg3c --> ok
+Cell (navi:ConnectionSpace) id=cell_9gyplmgl --> ok
+Cell (navi:ConnectionSpace) id=cell_9kcb97zm --> ok
+Cell (navi:ConnectionSpace) id=cell_9pdpg9ox --> ok
+Cell (navi:TransitionSpace) id=cell_9whbxq19 --> ok
+Cell (navi:GeneralSpace) id=cell_9woxis4w --> ok
+Cell (navi:ConnectionSpace) id=cell_a0krd17z --> ok
+Cell (navi:ConnectionSpace) id=cell_a9hvnqry --> ok
+Cell (navi:ConnectionSpace) id=cell_ae9bugkw --> ok
+Cell (navi:ConnectionSpace) id=cell_af447etu --> ok
+Cell (navi:GeneralSpace) id=cell_agplgfvc --> ok
+Cell (navi:GeneralSpace) id=cell_ak1qx6n9 --> ok
+Cell (navi:ConnectionSpace) id=cell_akugo1gi --> ok
+Cell (navi:ConnectionSpace) id=cell_aul7kc6l --> ok
+Cell (navi:TransitionSpace) id=cell_b1ukswk1 --> ok
+Cell (navi:TransitionSpace) id=cell_b7qyarra --> ok
+Cell (navi:ConnectionSpace) id=cell_bcy2myrh --> ok
+Cell (navi:ConnectionSpace) id=cell_bjjgtv98 --> ok
+Cell (navi:ConnectionSpace) id=cell_blnj5qiq --> ok
+Cell (navi:GeneralSpace) id=cell_bqjqnabb --> ok
+Cell (navi:ConnectionSpace) id=cell_buhg307u --> ok
+Cell (navi:ConnectionSpace) id=cell_c121uwp5 --> ok
+Cell (navi:GeneralSpace) id=cell_c5bnpwhh --> ok
+Cell (navi:TransitionSpace) id=cell_cgimxa0j --> ok
+Cell (navi:GeneralSpace) id=cell_chrae68j --> ok
+Cell (navi:GeneralSpace) id=cell_cktxt356 --> ok
+Cell (navi:ConnectionSpace) id=cell_d1usb9m --> ok
+Cell (navi:ConnectionSpace) id=cell_d4zv2a1u --> ok
+Cell (navi:GeneralSpace) id=cell_dc23c0d4 --> ok
+Cell (navi:ConnectionSpace) id=cell_dgep7u63 --> ok
+Cell (navi:ConnectionSpace) id=cell_dnddzqz0 --> ok
+Cell (navi:TransitionSpace) id=cell_ds6gncw6 --> ok
+Cell (navi:ConnectionSpace) id=cell_du0dbi74 --> ok
+Cell (navi:ConnectionSpace) id=cell_dvbgxauo --> ok
+Cell (navi:GeneralSpace) id=cell_e0hoopjn --> ok
+Cell (navi:GeneralSpace) id=cell_e44expfy --> ok
+Cell (navi:TransitionSpace) id=cell_eemcs0gu --> ok
+Cell (navi:ConnectionSpace) id=cell_eglpsdpu --> ok
+Cell (navi:ConnectionSpace) id=cell_ejujlcpo --> ok
+Cell (navi:GeneralSpace) id=cell_eqtkng69 --> ok
+Cell (navi:ConnectionSpace) id=cell_exc7ganu --> ok
+Cell (navi:GeneralSpace) id=cell_f7poobru --> ok
+Cell (navi:AnchorSpace) id=cell_fdrmpf32 --> ok
+Cell (navi:TransitionSpace) id=cell_ffj3z5fa --> ok
+Cell (navi:ConnectionSpace) id=cell_fix4x76g --> ok
+Cell (navi:ConnectionSpace) id=cell_fpedu09w --> ok
+Cell (navi:GeneralSpace) id=cell_g790kn70 --> ok
+Cell (navi:TransitionSpace) id=cell_gkzmaguf --> ok
+Cell (navi:TransitionSpace) id=cell_go1q2ib3 --> ok
+Cell (navi:GeneralSpace) id=cell_gp0up3gx --> ok
+Cell (navi:ConnectionSpace) id=cell_gxtxvrzh --> ok
+Cell (navi:ConnectionSpace) id=cell_h4sqvnws --> ok
+Cell (navi:ConnectionSpace) id=cell_h7to8kib --> ok
+Cell (navi:TransitionSpace) id=cell_hdihqtt2 --> ok
+Cell (navi:GeneralSpace) id=cell_ht1frwaz --> ok
+Cell (navi:ConnectionSpace) id=cell_ht3lmq6 --> ok
+Cell (navi:TransitionSpace) id=cell_htumo0qq --> ok
+Cell (navi:ConnectionSpace) id=cell_hv4wkzkc --> ok
+Cell (navi:ConnectionSpace) id=cell_hv6t35l --> ok
+Cell (navi:TransitionSpace) id=cell_hvkk9f48 --> ok
+Cell (navi:GeneralSpace) id=cell_i3tbo075 --> ok
+Cell (navi:GeneralSpace) id=cell_i6id28gu --> ok
+Cell (navi:ConnectionSpace) id=cell_idmiceil --> ok
+Cell (navi:GeneralSpace) id=cell_il4ioe4x --> ok
+Cell (navi:TransitionSpace) id=cell_ilbjk014 --> ok
+Cell (navi:GeneralSpace) id=cell_ilxl18l5 --> ok
+Cell (navi:TransitionSpace) id=cell_ipcdfij0 --> ok
+Cell (navi:GeneralSpace) id=cell_is81ads3 --> ok
+Cell (navi:GeneralSpace) id=cell_iumknujr --> ok
+Cell (navi:GeneralSpace) id=cell_j0ty2i9r --> ok
+Cell (navi:GeneralSpace) id=cell_j2tl11sr --> ok
+Cell (navi:GeneralSpace) id=cell_j38o8tzx --> ok
+Cell (navi:TransitionSpace) id=cell_j784qo6h --> ok
+Cell (navi:GeneralSpace) id=cell_jdm96jr --> ok
+Cell (navi:TransitionSpace) id=cell_jdvo60dl --> ok
+Cell (navi:ConnectionSpace) id=cell_je7f6lg4 --> ok
+Cell (navi:GeneralSpace) id=cell_jea65x94 --> ok
+Cell (navi:GeneralSpace) id=cell_jgkxcosb --> ok
+Cell (navi:ConnectionSpace) id=cell_jk0cmghx --> ok
+Cell (navi:GeneralSpace) id=cell_jlkglw36 --> ok
+Cell (navi:ConnectionSpace) id=cell_jnx6t9lr --> ok
+Cell (navi:GeneralSpace) id=cell_jyzvn47i --> ok
+Cell (navi:GeneralSpace) id=cell_jz4ex1qx --> ok
+Cell (navi:ConnectionSpace) id=cell_kbzg5xwg --> ok
+Cell (navi:GeneralSpace) id=cell_kg02tz8 --> ok
+Cell (navi:GeneralSpace) id=cell_kr8boyb2 --> ok
+Cell (navi:TransitionSpace) id=cell_ktkr4jm7 --> ok
+Cell (navi:ConnectionSpace) id=cell_l4wphb48 --> ok
+Cell (navi:GeneralSpace) id=cell_l6gafpi0 --> ok
+Cell (navi:GeneralSpace) id=cell_l7hh7lsf --> ok
+Cell (navi:ConnectionSpace) id=cell_lbgbtv4p --> ok
+Cell (navi:GeneralSpace) id=cell_lh8prka8 --> ok
+Cell (navi:ConnectionSpace) id=cell_ltxg98ps --> ok
+Cell (navi:GeneralSpace) id=cell_lzc03oux --> ok
+Cell (navi:GeneralSpace) id=cell_mijj8ck3 --> ok
+Cell (navi:ConnectionSpace) id=cell_mligh55r --> ok
+Cell (navi:GeneralSpace) id=cell_mu723c4u --> ok
+Cell (navi:ConnectionSpace) id=cell_n3e37vva --> ok
+Cell (navi:GeneralSpace) id=cell_ndiwus0k --> ok
+Cell (navi:ConnectionSpace) id=cell_nl22zzq5 --> ok
+Cell (navi:GeneralSpace) id=cell_nod7rulb --> ok
+Cell (navi:TransitionSpace) id=cell_ns4x2hsl --> ok
+Cell (navi:ConnectionSpace) id=cell_oe0zbqxd --> ok
+Cell (navi:TransitionSpace) id=cell_oja96lyx --> ok
+Cell (navi:GeneralSpace) id=cell_op8r0iru --> ok
+Cell (navi:ConnectionSpace) id=cell_p05skmne --> ok
+Cell (navi:ConnectionSpace) id=cell_p23mjhhj --> ok
+Cell (navi:ConnectionSpace) id=cell_p9redacl --> ok
+Cell (navi:ConnectionSpace) id=cell_pcxzxtds --> ok
+Cell (navi:TransitionSpace) id=cell_pk28dbde --> ok
+Cell (navi:ConnectionSpace) id=cell_pk5b9dqo --> ok
+Cell (navi:ConnectionSpace) id=cell_q0eotiix --> ok
+Cell (navi:ConnectionSpace) id=cell_q11x85qs --> ok
+Cell (navi:ConnectionSpace) id=cell_q51iydm1 --> ok
+Cell (navi:TransitionSpace) id=cell_q9qadi7n --> ok
+Cell (navi:GeneralSpace) id=cell_qa9glvpo --> ok
+Cell (navi:TransitionSpace) id=cell_qbvlqdnf --> ok
+Cell (navi:ConnectionSpace) id=cell_qhtyh37r --> ok
+Cell (navi:ConnectionSpace) id=cell_qmv8kc2d --> ok
+Cell (navi:TransitionSpace) id=cell_qos3eeq1 --> ok
+Cell (navi:TransitionSpace) id=cell_qxuosr3s --> ok
+Cell (navi:GeneralSpace) id=cell_qy0nhj1o --> ok
+Cell (navi:ConnectionSpace) id=cell_rfk0pr5c --> ok
+Cell (navi:ConnectionSpace) id=cell_rkpvkz47 --> ok
+Cell (navi:TransitionSpace) id=cell_rvfpb7tu --> ok
+Cell (navi:ConnectionSpace) id=cell_rx6298ar --> ok
+Cell (navi:TransitionSpace) id=cell_sbdqmsnj --> ok
+Cell (navi:ConnectionSpace) id=cell_sbuyru7e --> ok
+Cell (navi:TransitionSpace) id=cell_sg0blstw --> ok
+Cell (navi:ConnectionSpace) id=cell_str4w8ns --> ok
+Cell (navi:ConnectionSpace) id=cell_sy50k4yh --> ok
+Cell (navi:ConnectionSpace) id=cell_t1016tdi --> ok
+Cell (navi:GeneralSpace) id=cell_t1rb97vz --> ok
+Cell (navi:ConnectionSpace) id=cell_tkn2v8u2 --> ok
+Cell (navi:GeneralSpace) id=cell_tnrl9s2t --> ok
+Cell (navi:ConnectionSpace) id=cell_tuxd07wq --> ok
+Cell (navi:GeneralSpace) id=cell_txkw7gds --> ok
+Cell (navi:TransitionSpace) id=cell_uaupav5s --> ok
+Cell (navi:TransitionSpace) id=cell_uvy5eyap --> ok
+Cell (navi:GeneralSpace) id=cell_uw6hnwq2 --> ok
+Cell (navi:GeneralSpace) id=cell_vlwy8j71 --> ok
+Cell (navi:TransitionSpace) id=cell_vv0m4bea --> ok
+Cell (navi:TransitionSpace) id=cell_vwlf8e63 --> ok
+Cell (navi:ConnectionSpace) id=cell_vyg6z5p1 --> ok
+Cell (navi:ConnectionSpace) id=cell_w4qx92n2 --> ok
+Cell (navi:TransitionSpace) id=cell_w58npmz4 --> ok
+Cell (navi:TransitionSpace) id=cell_w5m4alja --> ok
+Cell (navi:ConnectionSpace) id=cell_w6iuadm4 --> ok
+Cell (navi:ConnectionSpace) id=cell_wem3lnuq --> ok
+Cell (navi:TransitionSpace) id=cell_wn016ahq --> ok
+Cell (navi:GeneralSpace) id=cell_wnlkrg8b --> ok
+Cell (navi:ConnectionSpace) id=cell_wsc44pt2 --> ok
+Cell (navi:ConnectionSpace) id=cell_x3xyl6j3 --> ok
+Cell (navi:GeneralSpace) id=cell_x5tw2mzi --> ok
+Cell (navi:GeneralSpace) id=cell_xa004x59 --> ok
+Cell (navi:TransitionSpace) id=cell_xel6qc9s --> ok
+Cell (navi:GeneralSpace) id=cell_xfgn7f4u --> ok
+Cell (navi:GeneralSpace) id=cell_xmv0cgqb --> ok
+Cell (navi:ConnectionSpace) id=cell_xndnshut --> ok
+Cell (navi:GeneralSpace) id=cell_xuu16uyc --> ok
+Cell (navi:ConnectionSpace) id=cell_y3k1p5wx --> ok
+Cell (navi:ConnectionSpace) id=cell_y7q3tjuz --> ok
+Cell (navi:GeneralSpace) id=cell_ymxlqex --> ok
+Cell (navi:ConnectionSpace) id=cell_ys3zqmvp --> ok
+Cell (navi:TransitionSpace) id=cell_z26j1bs1 --> ok
+Cell (navi:ConnectionSpace) id=cell_z66fm0d3 --> ok
+Cell (navi:ConnectionSpace) id=cell_zerfzhmv --> ok
+Cell (navi:ConnectionSpace) id=cell_zi0rsnol --> ok
+Cell (navi:GeneralSpace) id=cell_zndlr8nt --> ok
+Cell (navi:GeneralSpace) id=cell_zusv5b1p --> ok
+Cell (navi:TransitionSpace) id=cell_zxdn85dx --> ok
+Cell (navi:ConnectionSpace) id=cell_zzlbb2b1 --> ok
+======== Validating Primal-Dual links ========
+======== Validating Primal-Dual links ========
+Cells id=cell_1sugkfi4 id=cell_mijj8ck3	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_1sugkfi4 & id=cell_mijj8ck3)
+ NOT valid
+Cells id=cell_1sugkfi4 id=cell_qbvlqdnf --> ok
+Cells id=cell_2g76sm2d id=cell_hv4wkzkc --> ok
+Cells id=cell_2g76sm2d id=cell_h7to8kib --> ok
+Cells id=cell_2g76sm2d id=cell_p23mjhhj --> ok
+Cells id=cell_2hzilo1l id=cell_zerfzhmv	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_2hzilo1l & id=cell_zerfzhmv)
+ NOT valid
+Cells id=cell_2hzilo1l id=cell_mijj8ck3 --> ok
+Cells id=cell_2hzilo1l id=cell_kr8boyb2 are not valid, skipped adjacency test
+Cells id=cell_3fyato3p id=cell_nod7rulb --> ok
+Cells id=cell_3fyato3p id=cell_jyzvn47i --> ok
+Cells id=cell_3oo9n1md id=cell_jyzvn47i --> ok
+Cells id=cell_3oo9n1md id=cell_tnrl9s2t --> ok
+Cells id=cell_45kbwbss id=cell_vlwy8j71 --> ok
+Cells id=cell_47dzbk2u id=cell_4f3v2x3 --> ok
+Cells id=cell_4iw2318o id=cell_jyzvn47i --> ok
+Cells id=cell_4nqrb755 id=cell_jyzvn47i --> ok
+Cells id=cell_4q3hmu08 id=cell_mijj8ck3 --> ok
+Cells id=cell_4q3hmu08 id=cell_b1ukswk1	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_4q3hmu08 & id=cell_b1ukswk1)
+ NOT valid
+Cells id=cell_4wdzfpfl id=cell_hv4wkzkc	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_4wdzfpfl & id=cell_hv4wkzkc)
+ NOT valid
+Cells id=cell_4wdzfpfl id=cell_h7to8kib	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_4wdzfpfl & id=cell_h7to8kib)
+ NOT valid
+Cells id=cell_4wdzfpfl id=cell_p23mjhhj	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_4wdzfpfl & id=cell_p23mjhhj)
+ NOT valid
+Cells id=cell_5nsowbk8 id=cell_z26j1bs1 --> ok
+Cells id=cell_5nsowbk8 id=cell_hvkk9f48	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_5nsowbk8 & id=cell_hvkk9f48)
+ NOT valid
+Cells id=cell_5nsowbk8 id=cell_qxuosr3s	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_5nsowbk8 & id=cell_qxuosr3s)
+ NOT valid
+Cells id=cell_60hfhlj id=cell_iumknujr --> ok
+Cells id=cell_60hfhlj id=cell_843j43pl	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_60hfhlj & id=cell_843j43pl)
+ NOT valid
+Cells id=cell_66v2nxca id=cell_c5bnpwhh --> ok
+Cells id=cell_6f9bvwd0 id=cell_uw6hnwq2 --> ok
+Cells id=cell_6f9bvwd0 id=cell_jz4ex1qx --> ok
+Cells id=cell_6fmu8g3a id=cell_t1016tdi --> ok
+Cells id=cell_6na46o09 id=cell_mijj8ck3	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_6na46o09 & id=cell_mijj8ck3)
+ NOT valid
+Cells id=cell_6na46o09 id=cell_9whbxq19	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_6na46o09 & id=cell_9whbxq19)
+ NOT valid
+Cells id=cell_6noj2c6p id=cell_mijj8ck3	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_6noj2c6p & id=cell_mijj8ck3)
+ NOT valid
+Cells id=cell_6noj2c6p id=cell_9whbxq19 --> ok
+Cells id=cell_6o2z9ozb id=cell_blnj5qiq	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_6o2z9ozb & id=cell_blnj5qiq)
+ NOT valid
+Cells id=cell_6tgu1dyc id=cell_7lzy5ef9 --> ok
+Cells id=cell_6tgu1dyc id=cell_lh8prka8 --> ok
+Cells id=cell_79zrrnxe id=cell_akugo1gi --> ok
+Cells id=cell_7bmjllfm id=cell_rkpvkz47	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_7bmjllfm & id=cell_rkpvkz47)
+ NOT valid
+Cells id=cell_7geybtlt id=cell_sbuyru7e	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_7geybtlt & id=cell_sbuyru7e)
+ NOT valid
+Cells id=cell_7geybtlt id=cell_vlwy8j71 --> ok
+Cells id=cell_8f81998o id=cell_jyzvn47i --> ok
+Cells id=cell_8f81998o id=cell_jlkglw36	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_8f81998o & id=cell_jlkglw36)
+ NOT valid
+Cells id=cell_8go7rd5l id=cell_bcy2myrh --> ok
+Cells id=cell_8heih4u id=cell_ejujlcpo --> ok
+Cells id=cell_8heih4u id=cell_tkn2v8u2	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_8heih4u & id=cell_tkn2v8u2)
+ NOT valid
+Cells id=cell_8npjuixo id=cell_jyzvn47i --> ok
+Cells id=cell_8olckhnp id=cell_l6gafpi0	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_8olckhnp & id=cell_l6gafpi0)
+ NOT valid
+Cells id=cell_8olckhnp id=cell_uw6hnwq2	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_8olckhnp & id=cell_uw6hnwq2)
+ NOT valid
+Cells id=cell_8ppgk6ei id=cell_ae9bugkw --> ok
+Cells id=cell_8rhaysre id=cell_vlwy8j71 --> ok
+Cells id=cell_9gyplmgl id=cell_vlwy8j71	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_9gyplmgl & id=cell_vlwy8j71)
+ NOT valid
+Cells id=cell_9pdpg9ox id=cell_jyzvn47i --> ok
+Cells id=cell_9pdpg9ox id=cell_ht1frwaz	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_9pdpg9ox & id=cell_ht1frwaz)
+ NOT valid
+Cells id=cell_9woxis4w id=cell_w5m4alja --> ok
+Cells id=cell_9woxis4w id=cell_xel6qc9s --> ok
+Cells id=cell_9woxis4w id=cell_pk28dbde --> ok
+Cells id=cell_9woxis4w id=cell_vv0m4bea --> ok
+Cells id=cell_9woxis4w id=cell_hv6t35l	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_9woxis4w & id=cell_hv6t35l)
+ NOT valid
+Cells id=cell_9woxis4w id=cell_idmiceil --> ok
+Cells id=cell_9woxis4w id=cell_sbuyru7e	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_9woxis4w & id=cell_sbuyru7e)
+ NOT valid
+Cells id=cell_a9hvnqry id=cell_vlwy8j71 --> ok
+Cells id=cell_af447etu id=cell_eqtkng69 --> ok
+Cells id=cell_akugo1gi id=cell_vlwy8j71 --> ok
+Cells id=cell_aul7kc6l id=cell_vlwy8j71	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_aul7kc6l & id=cell_vlwy8j71)
+ NOT valid
+Cells id=cell_bjjgtv98 id=cell_mijj8ck3 --> ok
+Cells id=cell_bjjgtv98 id=cell_q9qadi7n --> ok
+Cells id=cell_blnj5qiq id=cell_vlwy8j71	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_blnj5qiq & id=cell_vlwy8j71)
+ NOT valid
+Cells id=cell_buhg307u id=cell_mijj8ck3 --> ok
+Cells id=cell_buhg307u id=cell_zusv5b1p --> ok
+Cells id=cell_c121uwp5 id=cell_vlwy8j71 --> ok
+Cells id=cell_d1usb9m id=cell_jyzvn47i --> ok
+Cells id=cell_dgep7u63 id=cell_ktkr4jm7 --> ok
+Cells id=cell_dgep7u63 id=cell_uw6hnwq2 --> ok
+Cells id=cell_dnddzqz0 id=cell_jyzvn47i --> ok
+Cells id=cell_dnddzqz0 id=cell_lh8prka8	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_dnddzqz0 & id=cell_lh8prka8)
+ NOT valid
+Cells id=cell_du0dbi74 id=cell_jyzvn47i	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_du0dbi74 & id=cell_jyzvn47i)
+ NOT valid
+Cells id=cell_dvbgxauo id=cell_l6gafpi0 --> ok
+Cells id=cell_e44expfy id=cell_tkn2v8u2 --> ok
+Cells id=cell_eglpsdpu id=cell_vlwy8j71 --> ok
+Cells id=cell_ejujlcpo id=cell_vlwy8j71 --> ok
+Cells id=cell_exc7ganu id=cell_uw6hnwq2 --> ok
+Cells id=cell_fix4x76g id=cell_uw6hnwq2 --> ok
+Cells id=cell_fpedu09w id=cell_vlwy8j71 --> ok
+Cells id=cell_g790kn70 id=cell_wem3lnuq --> ok
+Cells id=cell_gxtxvrzh id=cell_jyzvn47i	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_gxtxvrzh & id=cell_jyzvn47i)
+ NOT valid
+Cells id=cell_gxtxvrzh id=cell_xuu16uyc	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_gxtxvrzh & id=cell_xuu16uyc)
+ NOT valid
+Cells id=cell_h4sqvnws id=cell_jyzvn47i	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_h4sqvnws & id=cell_jyzvn47i)
+ NOT valid
+Cells id=cell_ht3lmq6 id=cell_mijj8ck3	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_ht3lmq6 & id=cell_mijj8ck3)
+ NOT valid
+Cells id=cell_hv6t35l id=cell_idmiceil --> ok
+Cells id=cell_hv6t35l id=cell_vlwy8j71 --> ok
+Cells id=cell_idmiceil id=cell_vlwy8j71 --> ok
+Cells id=cell_je7f6lg4 id=cell_jyzvn47i	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_je7f6lg4 & id=cell_jyzvn47i)
+ NOT valid
+Cells id=cell_jea65x94 id=cell_w6iuadm4 --> ok
+Cells id=cell_jgkxcosb id=cell_vwlf8e63	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_jgkxcosb & id=cell_vwlf8e63)
+ NOT valid
+Cells id=cell_jk0cmghx id=cell_mijj8ck3 --> ok
+Cells id=cell_jk0cmghx id=cell_xfgn7f4u --> ok
+Cells id=cell_jnx6t9lr id=cell_uw6hnwq2 --> ok
+Cells id=cell_jyzvn47i id=cell_uvy5eyap	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_jyzvn47i & id=cell_uvy5eyap)
+ NOT valid
+Cells id=cell_kr8boyb2 id=cell_t1016tdi are not valid, skipped adjacency test
+Cells id=cell_l6gafpi0 id=cell_pk28dbde --> ok
+Cells id=cell_l6gafpi0 id=cell_vv0m4bea --> ok
+Cells id=cell_l7hh7lsf id=cell_str4w8ns --> ok
+Cells id=cell_lbgbtv4p id=cell_mijj8ck3	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_lbgbtv4p & id=cell_mijj8ck3)
+ NOT valid
+Cells id=cell_ltxg98ps id=cell_x5tw2mzi --> ok
+Cells id=cell_mijj8ck3 id=cell_ndiwus0k	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_mijj8ck3 & id=cell_ndiwus0k)
+ NOT valid
+Cells id=cell_mijj8ck3 id=cell_z26j1bs1 --> ok
+Cells id=cell_mijj8ck3 id=cell_wem3lnuq --> ok
+Cells id=cell_mijj8ck3 id=cell_rkpvkz47 --> ok
+Cells id=cell_mijj8ck3 id=cell_uvy5eyap --> ok
+Cells id=cell_mijj8ck3 id=cell_qxuosr3s --> ok
+Cells id=cell_n3e37vva id=cell_xa004x59	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_n3e37vva & id=cell_xa004x59)
+ NOT valid
+Cells id=cell_p9redacl id=cell_vlwy8j71 --> ok
+Cells id=cell_pcxzxtds id=cell_xuu16uyc --> ok
+Cells id=cell_pk5b9dqo id=cell_w58npmz4	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_pk5b9dqo & id=cell_w58npmz4)
+ NOT valid
+Cells id=cell_q11x85qs id=cell_vlwy8j71	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_q11x85qs & id=cell_vlwy8j71)
+ NOT valid
+Cells id=cell_q51iydm1 id=cell_qbvlqdnf	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_q51iydm1 & id=cell_qbvlqdnf)
+ NOT valid
+Cells id=cell_qos3eeq1 id=cell_uaupav5s are not valid, skipped adjacency test
+Cells id=cell_qos3eeq1 id=cell_sy50k4yh --> ok
+Cells id=cell_sbuyru7e id=cell_vlwy8j71 --> ok
+Cells id=cell_str4w8ns id=cell_vlwy8j71 --> ok
+Cells id=cell_tuxd07wq id=cell_uw6hnwq2	ERROR 704: PRIMAL_DUAL_ADJACENCIES_INCONSISTENT (id: Cells id=cell_tuxd07wq & id=cell_uw6hnwq2)
+ NOT valid
+Cells id=cell_ymxlqex id=cell_ys3zqmvp --> ok
+
+
++++++++++++++++++++ SUMMARY +++++++++++++++++++
+Input file type:
+  IndoorGML
++++++
+Total # of Features:          1
+  # valid:                    0 (0.0%)
+  # invalid:                  1 (100.0%)
+Types:
+  IndoorModel
++++++
+Total # of primitives:      220
+  # valid:                  218 (99.1%)
+  # invalid:                  2 (0.9%)
+Types:
+  Solid
++++++
+Errors present:
+  203 -- NON_PLANAR_POLYGON_DISTANCE_PLANE
+          2 primitive(s)
+  701 -- CELLS_OVERLAP
+          1 feature(s)
+  704 -- PRIMAL_DUAL_ADJACENCIES_INCONSISTENT
+          1 feature(s)
++++++++++++++++++++++++++++++++++++++++++++++++
+
+Validation report saved to "C:/ProgramData\SketchUp\SketchUp 2026\SketchUp\Devs\IndoorGML_3DSpace_Modeler\indoor3d\tmp\pr01_val3dity_report.json"
+Browse its content:
+==>http://geovalidation.bk.tudelft.nl/val3dity/browser/
+
