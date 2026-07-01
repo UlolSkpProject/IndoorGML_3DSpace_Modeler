@@ -244,7 +244,6 @@ module ULOL
           end
           progress&.on_open_report do
             begin
-              begin_validation_report_edit_mode(result.report) unless result.valid?
               open_report_dialog(result.report_html_path, progress)
             rescue StandardError => e
               progress&.set_result_message("Opening report failed:\n#{e.message}")
@@ -252,7 +251,14 @@ module ULOL
           end
           progress&.on_validation_focus_cells do |cell_ids, code, state_ids, transition_ids|
             refs = { cells: cell_ids, states: state_ids, transitions: transition_ids }
-            IndoorModel.current.set_validation_focus_highlight(validation_focus_cell_ids_for_refs(refs), code)
+            focus_cell_ids = validation_focus_cell_ids_for_refs(refs)
+            indoor_model = IndoorModel.current
+            if focus_cell_ids.empty?
+              indoor_model.set_validation_focus_highlight([], code) if indoor_model.validation_focus_active?
+            else
+              indoor_model.begin_validation_focus_editing(focus_cell_ids) unless indoor_model.validation_focus_active?
+              indoor_model.set_validation_focus_highlight(focus_cell_ids, code)
+            end
           end
           progress&.on_fix_validation_errors do
             begin_validation_report_edit_mode(result.report) unless result.valid?
