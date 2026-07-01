@@ -107,10 +107,8 @@ module ULOL
           @runtime_restorer = RuntimeRestorer.new(
             registry: @feature_registry,
             serializer: @attribute_serializer,
-            callbacks: {
-              cell_space_registrar: method(:register_cell_space),
-              state_registrar: method(:register_state)
-            }
+            cell_space_registrar: method(:register_cell_space),
+            state_registrar: method(:register_state)
           )
           @scene_group_guard = SceneGroupGuard.new(
             with_unlocked: method(:with_unlocked),
