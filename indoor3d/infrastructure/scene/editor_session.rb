@@ -6,12 +6,10 @@ module ULOL
 
       class EditorSession
         require_relative 'editor_session/lock_controller'
-        require_relative 'editor_session/lock_policy'
         require_relative 'editor_session/batch_progress'
         require_relative 'editor_session/visibility_controller'
         require_relative 'editor_session/overlay_controller'
         require_relative 'editor_session/validation_focus_controller'
-        include LockPolicy
         include BatchProgress
 
         GRAPH_VISIBLE_ATTRIBUTE = 'graph_visible'
@@ -169,6 +167,22 @@ module ULOL
           rescue StandardError
             false
           end
+        end
+
+        def lock_entity(entity)
+          lock_controller.lock_entity(entity)
+        end
+
+        def unlock_entity(entity)
+          lock_controller.unlock_entity(entity)
+        end
+
+        def with_unlocked(entity)
+          lock_controller.with_unlocked(entity) { yield }
+        end
+
+        def apply_lock_policy
+          lock_controller.apply(editing: @editing)
         end
 
         def validation_focus_active?
@@ -673,10 +687,6 @@ module ULOL
 
         def set_cell_space_render_visible(group, visible, snapshot = nil)
           visibility_controller.set_cell_space_render_visible(group, visible, snapshot)
-        end
-
-        def visibility_child_entities(group)
-          visibility_controller.visibility_child_entities(group)
         end
 
         def reset_edit_mode_visibility_filter

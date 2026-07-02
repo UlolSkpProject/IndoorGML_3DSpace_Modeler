@@ -65,7 +65,7 @@ module ULOL
             end
 
             exportable_cell_spaces.each do |cell_space|
-              NavigationSemanticResolver.resolve(cell_space) if cell_space_tag(cell_space).start_with?('navi:')
+              NavigationSemanticResolver.resolve(cell_space) if GmlWriter.cell_space_tag(cell_space).start_with?('navi:')
             end
           end
 
@@ -286,9 +286,6 @@ module ULOL
             format('%.17g', numeric)
           end
 
-          def cell_space_tag(cell_space)
-            GmlWriter.cell_space_tag(cell_space)
-          end
         end
 
       end
