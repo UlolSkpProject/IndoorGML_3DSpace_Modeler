@@ -5,6 +5,7 @@ module ULOL
     module IndoorCore
 
       class EditorSession
+        require_relative 'editor_session/lock_controller'
         require_relative 'editor_session/lock_policy'
         require_relative 'editor_session/batch_progress'
         require_relative 'editor_session/visibility_controller'
@@ -34,6 +35,7 @@ module ULOL
           @validation_highlight_code = nil
           @validation_focus_visibility = {}
           @validation_focus_hide_rest_previous = nil
+          @lock_controller = LockController.new(indoor_model: @indoor_model)
           @visibility_controller = VisibilityController.new
         end
 
@@ -647,6 +649,10 @@ module ULOL
 
         def visible_cell_types
           visibility_controller.visible_cell_types
+        end
+
+        def lock_controller
+          @lock_controller ||= LockController.new(indoor_model: @indoor_model)
         end
 
         def visibility_controller
