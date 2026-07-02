@@ -10,6 +10,7 @@ module ULOL
         require_relative 'editor_session/batch_progress'
         require_relative 'editor_session/visibility_controller'
         require_relative 'editor_session/overlay_controller'
+        require_relative 'editor_session/validation_focus_controller'
         include LockPolicy
         include BatchProgress
 
@@ -28,11 +29,7 @@ module ULOL
           @progress = nil
           @dual_overlay_visible = model_boolean_attribute(GRAPH_VISIBLE_ATTRIBUTE, true)
           @geometry_visible = model_boolean_attribute(GEOMETRY_VISIBLE_ATTRIBUTE, true)
-          @validation_focus_cell_ids = nil
-          @validation_highlight_cell_ids = nil
-          @validation_highlight_code = nil
-          @validation_focus_visibility = {}
-          @validation_focus_hide_rest_previous = nil
+          @validation_focus_controller = ValidationFocusController.new
           @lock_controller = LockController.new(indoor_model: @indoor_model)
           @visibility_controller = VisibilityController.new
           @overlay_controller = OverlayController.new(indoor_model: @indoor_model)
@@ -117,7 +114,7 @@ module ULOL
           ids = Array(cell_gml_ids).map(&:to_s).reject(&:empty?)
           return false if ids.empty?
 
-          @validation_focus_cell_ids = ids.each_with_object({}) { |id, memo| memo[id] = true }
+          validation_focus_controller.begin(ids)
           capture_and_apply_validation_focus_rendering_options(ids.length)
           started = @editing ? true : begin_editing
           unless started
@@ -175,7 +172,7 @@ module ULOL
         end
 
         def validation_focus_active?
-          @validation_focus_cell_ids.is_a?(Hash) && !@validation_focus_cell_ids.empty?
+          validation_focus_controller.active?
         end
 
         def visible_storeys
@@ -227,7 +224,7 @@ module ULOL
           return true unless validation_focus_active?
           return false unless cell_space&.valid?
 
-          @validation_focus_cell_ids[validation_focus_cell_gml_id(cell_space)] == true
+          validation_focus_controller.focus_cell_space?(cell_space)
         rescue StandardError
           false
         end
@@ -241,9 +238,7 @@ module ULOL
         end
 
         def set_validation_focus_highlight(cell_gml_ids, code = nil)
-          ids = Array(cell_gml_ids).map(&:to_s).reject(&:empty?)
-          @validation_highlight_cell_ids = ids.empty? ? nil : ids.each_with_object({}) { |id, memo| memo[id] = true }
-          @validation_highlight_code = code.to_s
+          validation_focus_controller.set_highlight(cell_gml_ids, code)
           apply_validation_focus_visibility
           invalidate_view(Sketchup.active_model())
           true
@@ -253,36 +248,20 @@ module ULOL
         end
 
         def validation_focus_highlight_cell_spaces
-          return [] unless @validation_highlight_cell_ids.is_a?(Hash) && !@validation_highlight_cell_ids.empty?
-
-          @indoor_model.cell_spaces.select do |cell_space|
-            cell_space&.valid? && @validation_highlight_cell_ids[validation_focus_cell_gml_id(cell_space)] == true
-          end
+          validation_focus_controller.highlight_cell_spaces(@indoor_model.cell_spaces)
         rescue StandardError
           []
         end
 
         def validation_focus_highlight_code
-          @validation_highlight_code
+          validation_focus_controller.highlight_code
         end
 
         def validation_focus_elements
-          cells = validation_focus_cell_spaces
-          cell_set = cells.each_with_object({}) { |cell, memo| memo[cell.object_id] = true }
-          states = cells.map(&:duality_state).select { |state| state&.valid? }
-          transitions = @indoor_model.transitions.select do |transition|
-            next false unless transition&.valid?
-
-            cell1 = transition.state1&.duality_cell
-            cell2 = transition.state2&.duality_cell
-            cell1&.valid? && cell2&.valid? && cell_set[cell1.object_id] && cell_set[cell2.object_id]
-          end
-
-          {
-            cell_spaces: cells,
-            states: states,
-            transitions: transitions
-          }
+          validation_focus_controller.elements(
+            cell_spaces: @indoor_model.cell_spaces,
+            transitions: @indoor_model.transitions
+          )
         rescue StandardError
           { cell_spaces: [], states: [], transitions: [] }
         end
@@ -370,7 +349,6 @@ module ULOL
           return false unless validation_focus_active?
 
           with_visibility_update_operation do
-            @validation_focus_visibility ||= {}
             @indoor_model.cell_spaces.each do |cell_space|
               next unless cell_space&.valid?
 
@@ -378,14 +356,17 @@ module ULOL
               next unless cell_space_visibility_target?(group)
 
               persistent_id = group.persistent_id
-              unless @validation_focus_visibility.key?(persistent_id)
-                @validation_focus_visibility[persistent_id] = capture_cell_space_visibility(group)
+              unless validation_focus_controller.visibility_snapshot?(persistent_id)
+                validation_focus_controller.remember_visibility_snapshot(
+                  persistent_id,
+                  capture_cell_space_visibility(group)
+                )
               end
               with_unlocked(group) do
                 set_cell_space_render_visible(
                   group,
                   edit_mode_visible_cell_space?(cell_space),
-                  @validation_focus_visibility[persistent_id]
+                  validation_focus_controller.visibility_snapshot(persistent_id)
                 )
               end
             end
@@ -400,7 +381,7 @@ module ULOL
         def validation_focus_cell_spaces
           return [] unless validation_focus_active?
 
-          @indoor_model.cell_spaces.select { |cell_space| validation_focus_cell_space?(cell_space) }
+          validation_focus_controller.focus_cell_spaces(@indoor_model.cell_spaces)
         rescue StandardError
           []
         end
@@ -408,17 +389,13 @@ module ULOL
         def validation_visible_cell_space?(cell_space)
           return true unless validation_focus_active?
           return false unless cell_space&.valid?
-          if @validation_highlight_cell_ids.is_a?(Hash) && !@validation_highlight_cell_ids.empty?
-            return @validation_highlight_cell_ids[validation_focus_cell_gml_id(cell_space)] == true
-          end
-
-          validation_focus_cell_space?(cell_space)
+          validation_focus_controller.visible_cell_space?(cell_space)
         rescue StandardError
           false
         end
 
         def restore_validation_focus_visibility
-          snapshots = @validation_focus_visibility || {}
+          snapshots = validation_focus_controller.visibility_snapshots
           return true if snapshots.empty?
 
           with_visibility_update_operation do
@@ -432,7 +409,7 @@ module ULOL
               with_unlocked(group) { restore_cell_space_visibility(group, snapshots[group.persistent_id]) }
             end
           end
-          @validation_focus_visibility = {}
+          validation_focus_controller.clear_visibility_snapshots
           apply_edit_mode_visibility_filter(ignore_validation: true) if visibility_filter_active?
           invalidate_view(Sketchup.active_model())
           true
@@ -442,10 +419,7 @@ module ULOL
         end
 
         def clear_validation_focus
-          @validation_focus_cell_ids = nil
-          @validation_highlight_cell_ids = nil
-          @validation_highlight_code = nil
-          @validation_focus_visibility = {}
+          validation_focus_controller.clear
         end
 
         def apply_edit_mode_visibility_filter(ignore_validation: false)
@@ -535,30 +509,19 @@ module ULOL
         def capture_and_apply_validation_focus_rendering_options(focus_cell_count)
           return unless focus_cell_count.to_i >= 2
 
-          options = Sketchup.active_model&.rendering_options
-          return unless options
-
-          @validation_focus_hide_rest_previous = options['HideRestOfModel'] if @validation_focus_hide_rest_previous.nil?
-          options['HideRestOfModel'] = false
-          Sketchup.active_model&.active_view&.invalidate
+          validation_focus_controller.capture_and_apply_rendering_options(Sketchup.active_model, focus_cell_count)
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Validation focus rendering option update failed: #{e.class}: #{e.message}"
         end
 
         def restore_validation_focus_rendering_options
-          return if @validation_focus_hide_rest_previous.nil?
-
-          options = Sketchup.active_model&.rendering_options
-          options['HideRestOfModel'] = @validation_focus_hide_rest_previous unless options.nil?
-          @validation_focus_hide_rest_previous = nil
-          Sketchup.active_model&.active_view&.invalidate
+          validation_focus_controller.restore_rendering_options(Sketchup.active_model)
         rescue StandardError => e
-          @validation_focus_hide_rest_previous = nil
           IndoorCore::Logger.puts "[IndoorGML] Validation focus rendering option restore failed: #{e.class}: #{e.message}"
         end
 
         def validation_focus_cell_gml_id(cell_space)
-          "cell_#{cell_space.id.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')}"
+          validation_focus_controller.cell_gml_id(cell_space)
         end
 
         def active_path_changed(model)
@@ -660,6 +623,10 @@ module ULOL
           @overlay_controller ||= OverlayController.new(indoor_model: @indoor_model)
         end
 
+        def validation_focus_controller
+          @validation_focus_controller ||= ValidationFocusController.new
+        end
+
         def with_visibility_update_operation
           model = Sketchup.active_model
           return with_visibility_observer_suppression { yield } unless model
@@ -735,7 +702,7 @@ module ULOL
 
         def remember_edit_mode_visibility(group)
           persistent_id = group.persistent_id
-          snapshot = @validation_focus_visibility[persistent_id] if @validation_focus_visibility&.key?(persistent_id)
+          snapshot = validation_focus_controller.visibility_snapshot(persistent_id) if validation_focus_controller.visibility_snapshot?(persistent_id)
           visibility_controller.remember_edit_mode_visibility(group, snapshot: snapshot)
         rescue StandardError
           nil
