@@ -1,0 +1,10 @@
+reading input file
+checking gml ids
+checking geometries
+checking cell intersections
+constructing Nef polyhedra
+constructing AABB tree
+testing cell intersections
+ERROR 701: overlap detected between cell_a and cell_b
+ERROR 704: shared face overlap candidate
+val3dity finished
