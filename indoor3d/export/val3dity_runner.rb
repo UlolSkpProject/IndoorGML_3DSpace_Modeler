@@ -9,6 +9,7 @@ require_relative 'val3dity_process_adapter'
 require_relative 'val3dity_report_schema'
 require_relative 'val3dity_report_renderer'
 require_relative 'val3dity_overlap_recheck_policy'
+require_relative 'val3dity_run_orchestration'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -131,99 +132,32 @@ module ULOL
               total_states: totals[:states],
               total_transitions: totals[:transitions]
             )
-            self.class.register_session(session)
 
-            completed = false
-
-            UI.start_timer(0.1, true) do
-              next false if completed
-
-              drain_val3dity_progress(session, progress, progress_step)
-              true
-            end
-
-            UI.start_timer(0.2, true) do
-              next false if completed
-              next true unless session.finished?
-
-              result = nil
-              exit_code = nil
-              build_report_later = false
-              begin
-                if session.terminated?
-                  result = Val3dityResult.new(
-                    valid: false,
-                    report: nil,
-                    report_json_path: @report_json_path,
-                    report_html_path: @report_html_path,
-                    error: RuntimeError.new('val3dity validation was canceled.')
-                  )
-                else
-                  session.join_reader
-                  drain_val3dity_progress(session, progress, progress_step)
-
-                  progress&.complete(progress_step)
-                  exit_code = session.exit_code
-                  build_report_later = true
-                end
-              rescue StandardError => e
-                result = Val3dityResult.new(
-                  valid: false,
-                  report: nil,
-                  report_json_path: @report_json_path,
-                  report_html_path: @report_html_path,
-                  error: e
+            Val3dityRunOrchestration.new(
+              session: session,
+              progress: progress,
+              progress_step: progress_step,
+              callback: callback,
+              register_session: ->(active_session) { self.class.register_session(active_session) },
+              unregister_session: ->(active_session) { self.class.unregister_session(active_session) },
+              drain_progress: ->(active_session, active_progress, active_step) { drain_val3dity_progress(active_session, active_progress, active_step) },
+              build_result: lambda { |exit_code|
+                build_result_after_process(
+                  exit_code,
+                  progress,
+                  recheck_step: recheck_step,
+                  report_step: report_step,
+                  report_view_step: report_view_step
                 )
-              ensure
-                session.close
-                self.class.unregister_session(session)
-                completed = true
-              end
-
-              if build_report_later
-                UI.start_timer(0.05, false) do
-                  begin
-                    result = build_result_after_process(
-                      exit_code,
-                      progress,
-                      recheck_step: recheck_step,
-                      report_step: report_step,
-                      report_view_step: report_view_step
-                    )
-                  rescue StandardError => e
-                    result = Val3dityResult.new(
-                      valid: false,
-                      report: nil,
-                      report_json_path: @report_json_path,
-                      report_html_path: @report_html_path,
-                      error: e
-                    )
-                  end
-
-                  callback.call(result)
-                  false
-                end
-              else
-                callback.call(result) if result
-              end
-              false
-            end
-
-            session
+              },
+              error_result: ->(error) { error_result(error) }
+            ).start
           rescue StandardError => e
             self.class.unregister_session(session) if session
             session&.close
             raise unless callback
 
-            callback.call(
-              Val3dityResult.new(
-                valid: false,
-                report: nil,
-                report_json_path: @report_json_path,
-                report_html_path: @report_html_path,
-                error: e
-              )
-            )
+            callback.call(error_result(e))
           end
 
           private
@@ -298,6 +232,16 @@ module ULOL
             end
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] val3dity progress drain failed: #{e.class}: #{e.message}"
+          end
+
+          def error_result(error)
+            Val3dityResult.new(
+              valid: false,
+              report: nil,
+              report_json_path: @report_json_path,
+              report_html_path: @report_html_path,
+              error: error
+            )
           end
 
           def build_result_after_process(exit_code, progress = nil, recheck_step: :extension_recheck, report_step: :report, report_view_step: nil)
