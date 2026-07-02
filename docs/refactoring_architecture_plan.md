@@ -32,7 +32,7 @@ Rules:
 Run the narrowest meaningful checks for each PR:
 
 - `ruby -c` on changed Ruby files.
-- Existing script checks when relevant, such as `scripts/test_navigation_semantics.rb`.
+- Ruby syntax checks and SketchUp HTTP smoke checks. Local scripts/fixtures are not tracked in Git.
 - `rg` checks for stage-specific forbidden patterns.
 - SketchUp HTTP smoke checks when SketchUp runtime behavior is touched:
   - `GET /ping`

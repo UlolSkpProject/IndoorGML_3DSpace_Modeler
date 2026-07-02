@@ -1,22 +1,15 @@
 # Golden GML Baseline
 
-This baseline records the current exporter output before staged architecture refactors.
+The repository no longer tracks local Golden GML, SKP, val3dity stdout, or helper script artifacts.
 
 ## Source Model
 
-- Model: current SketchUp model open during PR 01 baseline capture.
-- SKP files are not committed because `*.skp` is ignored.
-- The committed GML is a canonicalized export from that open model.
+- Model: current SketchUp model selected by the developer during local validation.
+- SKP, exported GML, and val3dity stdout logs are local artifacts and are ignored.
 
 ## Files
 
-- Golden GML: `fixtures/golden/current_model.gml`
-- Canonicalizer: `scripts/canonicalize_gml.rb`
-- Val3dity stdout fixtures:
-  - `fixtures/val3dity/current_model.log`
-  - `fixtures/val3dity/success.log`
-  - `fixtures/val3dity/overlap.log`
-  - `fixtures/val3dity/failure.log`
+- No baseline fixture files are tracked in Git.
 
 ## Current Validation Baseline
 
@@ -28,20 +21,14 @@ The current model baseline is not fully valid under strict val3dity.
 - extension-visible error codes: `203`, `701`
 - raw CLI fixture also contains `704` in the strict summary
 
-This is a model-state baseline, not a requirement that every refactor PR makes the model valid.
+This was a model-state baseline, not a requirement that every refactor PR makes the model valid.
 
 ## Refresh Procedure
 
 1. Open the intended baseline model in SketchUp.
 2. Refresh IndoorGML runtime data.
 3. Export GML with the extension exporter.
-4. Run:
-
-   ```sh
-   ruby scripts/canonicalize_gml.rb path/to/export.gml fixtures/golden/current_model.gml
-   ```
-
-5. Compare the resulting diff. Expected refactor-only PRs should not change this file unless the PR explicitly updates the exporter baseline.
+4. Compare export output locally when needed. Expected refactor-only PRs should not change exporter output unless the PR explicitly updates exporter behavior.
 
 ## Manual Smoke Checklist
 
