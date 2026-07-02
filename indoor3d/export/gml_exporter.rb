@@ -4,6 +4,8 @@ require 'fileutils'
 require 'rexml/document'
 require 'rexml/formatters/pretty'
 
+require_relative 'export_snapshot'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -64,7 +66,7 @@ module ULOL
           private
 
           def reset_export_cache
-            @exportable_cell_spaces = nil
+            @export_snapshot = nil
             @export_coordinate_unit = nil
             @export_timings = []
             @export_total_elapsed = nil
@@ -253,21 +255,19 @@ module ULOL
           end
 
           def exportable_cell_spaces
-            source = @requested_cell_spaces || @indoor_model.cell_spaces
-            @exportable_cell_spaces ||= source.select do |cell_space|
-              cell_space&.valid_sketchup_group && cell_space.duality_state&.valid?
-            end.uniq
+            export_snapshot.cell_spaces
           end
 
           def exportable_transitions
-            source = @requested_transitions || @indoor_model.transitions
-            source.select do |transition|
-              transition&.valid? &&
-                transition.state1&.valid? &&
-                transition.state2&.valid? &&
-                exportable_cell_spaces.include?(transition.state1.duality_cell) &&
-                exportable_cell_spaces.include?(transition.state2.duality_cell)
-            end.uniq
+            export_snapshot.transitions
+          end
+
+          def export_snapshot
+            @export_snapshot ||= ExportSnapshot.build(
+              indoor_model: @indoor_model,
+              cell_spaces: @requested_cell_spaces,
+              transitions: @requested_transitions
+            )
           end
 
           def loop_points(loop, transform)
