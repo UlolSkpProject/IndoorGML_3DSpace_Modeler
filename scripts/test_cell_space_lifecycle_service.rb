@@ -78,6 +78,71 @@ module ULOL
           refute_includes calls, :ensure_space_features_groups
         end
 
+        def test_change_type_runs_existing_update_sequence
+          calls = []
+          cell_space = fake_mutable_cell_space(calls: calls)
+          service = CellSpaceLifecycleService.new(lifecycle_callbacks(calls))
+
+          result = service.change_type(cell_space, cell_type: :transition, category_code: 'Door')
+
+          assert_same cell_space, result
+          assert_equal :transition, cell_space.cell_type
+          assert_equal 'Door', cell_space.category_code
+          assert_equal [
+            :set_category,
+            :name_cell_space_entity,
+            :apply_cell_space_material,
+            :write_cell_space_attributes,
+            :synchronize_adjacency_and_transitions_for_cell_space,
+            :apply_indoor_lock_policy
+          ], calls
+        end
+
+        def test_change_type_keeps_existing_error_messages
+          service = CellSpaceLifecycleService.new(lifecycle_callbacks([]))
+
+          assert_equal(
+            'Selected entity is not a registered CellSpace',
+            assert_raises(ArgumentError) { service.change_type(nil, cell_type: :general, category_code: nil) }.message
+          )
+          assert_equal(
+            'CellSpace is no longer valid',
+            assert_raises(ArgumentError) { service.change_type(fake_mutable_cell_space(valid: false), cell_type: :general, category_code: nil) }.message
+          )
+        end
+
+        def test_erase_runs_existing_delete_sequence
+          calls = []
+          state = fake_state(calls)
+          cell_space = fake_erasable_cell_space(state: state, calls: calls)
+          service = CellSpaceLifecycleService.new(lifecycle_callbacks(calls))
+
+          service.erase(cell_space, erase_sketchup_group: true)
+
+          assert_equal true, state.erased
+          assert_equal true, cell_space.erased
+          assert_equal [
+            :erase_transitions_for_state,
+            :state_erase,
+            :unregister_state,
+            :cell_space_erase,
+            :unregister_cell_space,
+            :erase_adjacency_for_cell_space
+          ], calls
+        end
+
+        def test_erase_can_keep_sketchup_group
+          calls = []
+          cell_space = fake_erasable_cell_space(state: fake_state(calls), calls: calls)
+          service = CellSpaceLifecycleService.new(lifecycle_callbacks(calls))
+
+          service.erase(cell_space, erase_sketchup_group: false)
+
+          assert_equal false, cell_space.erased
+          refute_includes calls, :cell_space_erase
+          assert_includes calls, :unregister_cell_space
+        end
+
         private
 
         def lifecycle_callbacks(calls, source_group: Object.new, placed_group: Object.new, state: Object.new)
@@ -105,9 +170,14 @@ module ULOL
             register_cell_space: proc { |_cell_space| calls << :register_cell_space },
             register_state: proc { |_state| calls << :register_state },
             write_attributes: proc { |_cell_space| calls << :write_attributes },
+            write_cell_space_attributes: proc { |_cell_space| calls << :write_cell_space_attributes },
             track_cell_space_entity: proc { |_group| calls << :track_cell_space_entity },
             synchronize_adjacency_and_transitions_for_cell_space: proc { |_cell_space| calls << :synchronize_adjacency_and_transitions_for_cell_space },
-            apply_indoor_lock_policy: proc { calls << :apply_indoor_lock_policy }
+            apply_indoor_lock_policy: proc { calls << :apply_indoor_lock_policy },
+            erase_transitions_for_state: proc { |_state| calls << :erase_transitions_for_state },
+            unregister_state: proc { |_state| calls << :unregister_state },
+            unregister_cell_space: proc { |_cell_space| calls << :unregister_cell_space },
+            erase_adjacency_for_cell_space: proc { |_cell_space| calls << :erase_adjacency_for_cell_space }
           }
         end
 
@@ -132,6 +202,70 @@ module ULOL
               @state = state
             end
           end
+        end
+
+        def fake_mutable_cell_space(valid: true, calls: [])
+          Class.new do
+            attr_accessor :cell_type
+            attr_reader :category_code
+
+            define_method(:initialize) do |valid_flag, call_log|
+              @valid = valid_flag
+              @calls = call_log
+            end
+
+            def valid?
+              @valid == true
+            end
+
+            def set_category(category_code)
+              @calls << :set_category
+              @category_code = category_code
+            end
+          end.new(valid, calls).tap do |cell_space|
+            cell_space.define_singleton_method(:calls) { calls }
+          end
+        end
+
+        def fake_state(calls)
+          Class.new do
+            attr_reader :erased
+
+            def initialize(calls)
+              @calls = calls
+              @erased = false
+            end
+
+            def valid?
+              true
+            end
+
+            def erase!
+              @calls << :state_erase
+              @erased = true
+            end
+          end.new(calls)
+        end
+
+        def fake_erasable_cell_space(state:, calls:)
+          Class.new do
+            attr_reader :duality_state, :erased
+
+            def initialize(state, calls)
+              @duality_state = state
+              @calls = calls
+              @erased = false
+            end
+
+            def valid?
+              true
+            end
+
+            def erase!
+              @calls << :cell_space_erase
+              @erased = true
+            end
+          end.new(state, calls)
         end
       end
     end

@@ -48,13 +48,11 @@ module ULOL
               cell_type, category_code = tag_cell_space_type_change_target(cell_space, cell_type, category_code)
 
               sync do
-                cell_space.cell_type = cell_type
-                cell_space.set_category(category_code)
-                name_cell_space_entity(cell_space)
-                apply_cell_space_material(cell_space)
-                write_cell_space_attributes(cell_space)
-                synchronize_adjacency_and_transitions_for_cell_space(cell_space)
-                apply_indoor_lock_policy()
+                cell_space_lifecycle_service.change_type(
+                  cell_space,
+                  cell_type: cell_type,
+                  category_code: category_code
+                )
               end
 
               cell_space
@@ -125,13 +123,10 @@ module ULOL
             return if cell_space.nil?
 
             erase_guard do
-              state = cell_space.duality_state
-              erase_transitions_for_state(state)
-              state.erase! if state&.valid?
-              unregister_state(state)
-              cell_space.erase! if erase_sketchup_group && cell_space.valid?
-              unregister_cell_space(cell_space)
-              erase_adjacency_for_cell_space(cell_space)
+              cell_space_lifecycle_service.erase(
+                cell_space,
+                erase_sketchup_group: erase_sketchup_group
+              )
             end
           end
 
@@ -152,9 +147,14 @@ module ULOL
               register_cell_space: method(:register_cell_space),
               register_state: method(:register_state),
               write_attributes: method(:write_attributes),
+              write_cell_space_attributes: method(:write_cell_space_attributes),
               track_cell_space_entity: method(:track_cell_space_entity),
               synchronize_adjacency_and_transitions_for_cell_space: method(:synchronize_adjacency_and_transitions_for_cell_space),
-              apply_indoor_lock_policy: method(:apply_indoor_lock_policy)
+              apply_indoor_lock_policy: method(:apply_indoor_lock_policy),
+              erase_transitions_for_state: method(:erase_transitions_for_state),
+              unregister_state: method(:unregister_state),
+              unregister_cell_space: method(:unregister_cell_space),
+              erase_adjacency_for_cell_space: method(:erase_adjacency_for_cell_space)
             )
           end
 
