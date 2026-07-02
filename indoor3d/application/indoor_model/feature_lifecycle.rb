@@ -109,27 +109,37 @@ module ULOL
 
           def cell_space_lifecycle_service
             @cell_space_lifecycle_service ||= CellSpaceLifecycleService.new(
-              converted_group?: method(:converted_group?),
-              resolve_cell_space_type_and_category: IndoorCore.method(:resolve_cell_space_type_and_category),
-              prepare_cell_space_source_group!: Utils::Geometry.method(:prepare_cell_space_source_group!),
-              ensure_space_features_groups: method(:ensure_space_features_groups),
-              place_cell_group: method(:place_cell_group),
-              default_storey_name: method(:default_storey_name),
-              fixed_state_height_offset: method(:fixed_state_height_offset),
-              recenter_cell_space_geometry: method(:recenter_cell_space_geometry),
-              name_cell_space_entity: method(:name_cell_space_entity),
-              apply_cell_space_material: method(:apply_cell_space_material),
-              register_cell_space: method(:register_cell_space),
-              register_state: method(:register_state),
-              write_attributes: method(:write_attributes),
-              write_cell_space_attributes: method(:write_cell_space_attributes),
-              track_cell_space_entity: method(:track_cell_space_entity),
-              synchronize_adjacency_and_transitions_for_cell_space: method(:synchronize_adjacency_and_transitions_for_cell_space),
-              apply_indoor_lock_policy: method(:apply_indoor_lock_policy),
-              erase_transitions_for_state: method(:erase_transitions_for_state),
-              unregister_state: method(:unregister_state),
-              unregister_cell_space: method(:unregister_cell_space),
-              erase_adjacency_for_cell_space: method(:erase_adjacency_for_cell_space)
+              source_preparer: CellSpaceLifecycleSourcePreparer.new(
+                converted_group: method(:converted_group?),
+                type_resolver: IndoorCore.method(:resolve_cell_space_type_and_category),
+                geometry_preparer: Utils::Geometry.method(:prepare_cell_space_source_group!)
+              ),
+              scene_policy: CellSpaceLifecycleScenePolicy.new(
+                ensure_space_features_groups: method(:ensure_space_features_groups),
+                place_cell_group: method(:place_cell_group),
+                default_storey_name: method(:default_storey_name),
+                fixed_state_height_offset: method(:fixed_state_height_offset),
+                recenter_cell_space_geometry: method(:recenter_cell_space_geometry),
+                name_cell_space_entity: method(:name_cell_space_entity),
+                apply_cell_space_material: method(:apply_cell_space_material),
+                track_cell_space_entity: method(:track_cell_space_entity),
+                apply_indoor_lock_policy: method(:apply_indoor_lock_policy)
+              ),
+              repository: CellSpaceLifecycleRepository.new(
+                register_cell_space: method(:register_cell_space),
+                register_state: method(:register_state),
+                unregister_cell_space: method(:unregister_cell_space),
+                unregister_state: method(:unregister_state)
+              ),
+              persistence: CellSpaceLifecyclePersistence.new(
+                write_attributes: method(:write_attributes),
+                write_cell_space_attributes: method(:write_cell_space_attributes)
+              ),
+              topology: CellSpaceLifecycleTopologyGateway.new(
+                synchronize_adjacency_and_transitions_for_cell_space: method(:synchronize_adjacency_and_transitions_for_cell_space),
+                erase_transitions_for_state: method(:erase_transitions_for_state),
+                erase_adjacency_for_cell_space: method(:erase_adjacency_for_cell_space)
+              )
             )
           end
 
