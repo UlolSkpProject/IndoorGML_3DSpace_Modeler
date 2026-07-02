@@ -3,14 +3,14 @@
 require 'fileutils'
 require 'json'
 require 'rbconfig'
-require 'rexml/document'
 
 require_relative 'val3dity_process_adapter'
 require_relative 'val3dity_report_schema'
 require_relative 'val3dity_report_renderer'
 require_relative 'val3dity_overlap_recheck_policy'
+require_relative 'val3dity_exported_solid_snapshot_reader'
+require_relative 'val3dity_overlap_geometry_rechecker'
 require_relative 'val3dity_run_orchestration'
-require_relative '../utils/geometry/polygon2d_public_api'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -415,58 +415,16 @@ module ULOL
           end
 
           def overlap_recheck_pair_analysis(cell_id1, cell_id2)
-            key = overlap_recheck_pair_key(cell_id1, cell_id2)
-            @overlap_recheck_pair_analysis ||= {}
-            @overlap_recheck_pair_analysis[key] ||= begin
-              snapshot = export_geometry_snapshot
-              cell1 = snapshot[cell_id1]
-              cell2 = snapshot[cell_id2]
-              if !(cell1 && cell2)
-                {
-                  status: :inconclusive,
-                  cells: [cell_id1, cell_id2],
-                  reason: 'GML_RECONSTRUCTION_FAILED'
-                }
-              elsif cell1[:unsupported] || cell2[:unsupported]
-                {
-                  status: :inconclusive,
-                  cells: [cell_id1, cell_id2],
-                  reason: 'GML_RECONSTRUCTION_FAILED'
-                }
-              else
-                adjacency_candidates = shared_face_candidates(cell1[:faces], cell2[:faces], mode: :adjacency)
-                overlap_candidates = shared_face_candidates(cell1[:faces], cell2[:faces], mode: :overlap)
-                intersection = exported_solid_intersection(cell1, cell2)
-                {
-                  status: :ok,
-                  cells: [cell_id1, cell_id2],
-                  cell1: cell1,
-                  cell2: cell2,
-                  adjacency_candidates: adjacency_candidates,
-                  overlap_candidates: overlap_candidates,
-                  intersection: intersection
-                }
-              end
-            rescue StandardError => e
-              {
-                status: :inconclusive,
-                cells: [cell_id1, cell_id2],
-                reason: "GML_RECONSTRUCTION_FAILED: #{e.class}: #{e.message}"
-              }
-            end
-          end
-
-          def overlap_recheck_pair_key(cell_id1, cell_id2)
-            [cell_id1, cell_id2].sort.join('|')
+            overlap_geometry_rechecker.pair_analysis(cell_id1, cell_id2)
           end
 
           def overlap_recheck_704_decision(analysis)
-            candidate = best_overlap_recheck_candidate(analysis[:adjacency_candidates], 704)
+            candidate = overlap_geometry_rechecker.best_candidate(analysis[:adjacency_candidates], 704)
             unless candidate
               return {
                 tolerated: false,
                 status: 'kept',
-                reason: overlap_recheck_missing_pair_reason(704),
+                reason: overlap_geometry_rechecker.missing_pair_reason(704),
                 candidate: nil,
                 actual_overlap_volume: analysis.dig(:intersection, :volume),
                 intersection_component_count: analysis.dig(:intersection, :component_count)
@@ -496,7 +454,7 @@ module ULOL
             {
               tolerated: true,
               status: 'suppressed',
-              reason: overlap_recheck_tolerated_reason(704, candidate),
+              reason: overlap_geometry_rechecker.tolerated_reason(704, candidate),
               candidate: candidate,
               actual_overlap_volume: overlap_decision[:actual_overlap_volume],
               intersection_component_count: overlap_decision[:intersection_component_count]
@@ -504,7 +462,7 @@ module ULOL
           end
 
           def cached_701_decision(analysis)
-            key = overlap_recheck_pair_key(*analysis[:cells])
+            key = analysis[:cells].sort.join('|')
             @overlap_recheck_701_decisions ||= {}
             @overlap_recheck_701_decisions[key] ||= overlap_recheck_701_decision(analysis)
           end
@@ -528,7 +486,7 @@ module ULOL
                 tolerated: true,
                 status: 'suppressed',
                 reason: 'NO_VALID_INTERSECTION_GROUP_RETURNED',
-                candidate: best_overlap_recheck_candidate(analysis[:adjacency_candidates], 701),
+                candidate: overlap_geometry_rechecker.best_candidate(analysis[:adjacency_candidates], 701),
                 actual_overlap_volume: 0.0,
                 intersection_component_count: 0,
                 sketchup_intersection_reproduced: false
@@ -539,221 +497,11 @@ module ULOL
               tolerated: false,
               status: 'kept',
               reason: 'REPRODUCED_AS_VALID_SKETCHUP_INTERSECTION',
-              candidate: best_overlap_recheck_candidate(analysis[:adjacency_candidates], 701),
+              candidate: overlap_geometry_rechecker.best_candidate(analysis[:adjacency_candidates], 701),
               actual_overlap_volume: intersection[:volume],
               intersection_component_count: intersection[:component_count],
               sketchup_intersection_reproduced: true
             }
-          end
-
-          def shared_face_candidates(faces1, faces2, mode:)
-            candidates = []
-            faces1.each_with_index do |face1, index1|
-              faces2.each_with_index do |face2, index2|
-                next if !face1[:interiors].to_a.empty? || !face2[:interiors].to_a.empty?
-                next unless Utils::Geometry.normals_opposite?(face1[:normal], face2[:normal])
-
-                distance = face_pair_signed_distance(face1, face2)
-                next unless distance.abs <= OVERLAP_RECHECK_TOLERANCE
-                next if mode == :overlap && !distance.negative?
-
-                overlap = coplanar_overlap_polygons(face1, face2, OVERLAP_RECHECK_TOLERANCE)
-                next unless overlap[:area] > Utils::Geometry.area_tolerance(OVERLAP_RECHECK_TOLERANCE)
-
-                candidates << {
-                  face1_index: index1,
-                  face2_index: index2,
-                  face1: face1,
-                  face2: face2,
-                  distance: distance,
-                  penetration_depth: [-distance, 0.0].max,
-                  overlap_area: overlap[:area],
-                  overlap_polygons: overlap[:polygons],
-                  axis: Utils::Geometry.dominant_axis(face1[:normal]),
-                  normal: face1[:normal],
-                  plane1: plane_constant(face1[:normal], face1[:points].first),
-                  plane2: plane_constant(face1[:normal], face2[:points].first)
-                }
-              end
-            end
-            candidates
-          end
-
-          def overlap_recheck_tolerated_reason(code, candidate)
-            direction = code == 701 ? 'SketchUp Boolean non-reproduction' : 'near-coplanar shared-face adjacency'
-            "#{overlap_recheck_face_pair_label(code)} face pair has signed #{direction} distance within #{OVERLAP_RECHECK_TOLERANCE_MM} mm"
-          end
-
-          def best_overlap_recheck_candidate(candidates, code)
-            Array(candidates).max_by do |candidate|
-              signed_score = code == 701 && candidate[:distance].to_f.negative? ? 1 : 0
-              [signed_score, candidate[:overlap_area].to_f, -candidate[:distance].to_f.abs]
-            end
-          end
-
-          def coplanar_overlap_polygons(face1, face2, tolerance)
-            return { area: 0.0, polygons: [] } if face1[:triangles].empty? || face2[:triangles].empty?
-
-            axis = Utils::Geometry.dominant_axis(face1[:normal])
-            polygons = []
-            total_area = 0.0
-            face1[:triangles].each do |triangle1|
-              polygon1 = Utils::Geometry.project_points_for_axis(triangle1, axis)
-              face2[:triangles].each do |triangle2|
-                polygon2 = Utils::Geometry.project_points_for_axis(triangle2, axis)
-                overlap = Utils::Geometry.intersect_polygons_2d(polygon1, polygon2)
-                next if overlap.length < 3
-
-                area = Utils::Geometry.polygon_area_2d_value(overlap).abs
-                next if area <= Utils::Geometry.area_tolerance(tolerance)
-
-                polygons << overlap
-                total_area += area
-              end
-            end
-            { area: total_area, polygons: polygons }
-          end
-
-          def exported_solid_intersection(cell1, cell2)
-            model = Sketchup.active_model
-            return { status: :inconclusive, reason: 'BOOLEAN_OPERATION_FAILED' } unless model
-
-            started = false
-            group1 = nil
-            group2 = nil
-            result = nil
-
-            model.start_operation('IndoorGML overlap recheck', true)
-            started = true
-
-            group1 = build_temp_solid_group(cell1)
-            group2 = build_temp_solid_group(cell2)
-            return { status: :inconclusive, reason: 'GML_RECONSTRUCTION_FAILED' } unless group1 && group2
-            return { status: :inconclusive, reason: 'INPUT_NOT_MANIFOLD' } unless valid_manifold_group?(group1) && valid_manifold_group?(group2)
-            return { status: :inconclusive, reason: 'BOOLEAN_OPERATION_FAILED' } unless group1.respond_to?(:intersect)
-
-            result = group1.intersect(group2)
-            return { status: :not_reproduced, reason: 'NO_VALID_INTERSECTION_GROUP_RETURNED', volume: 0.0, component_count: 0 } if result.nil?
-
-            faces = result.definition.entities.grep(Sketchup::Face).select(&:valid?)
-            edges = result.definition.entities.grep(Sketchup::Edge).select(&:valid?)
-            return { status: :not_reproduced, reason: 'NO_VALID_INTERSECTION_GROUP_RETURNED', volume: 0.0, component_count: 0 } if faces.empty? && edges.empty?
-            return { status: :inconclusive, reason: 'INVALID_INTERSECTION_RESULT' } unless valid_manifold_group?(result)
-
-            volume = solid_group_volume(result)
-            return { status: :inconclusive, reason: 'INVALID_INTERSECTION_RESULT' } if volume.nil? || volume <= 0.0
-
-            {
-              status: :reproduced,
-              reason: 'REPRODUCED_AS_VALID_SKETCHUP_INTERSECTION',
-              volume: volume,
-              component_count: face_components(faces).length
-            }
-          rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] Exported solid intersection failed: #{e.class}: #{e.message}"
-            { status: :inconclusive, reason: "BOOLEAN_OPERATION_FAILED: #{e.class}: #{e.message}" }
-          ensure
-            model.abort_operation if started
-            [result, group1, group2].compact.each do |entity|
-              entity.erase! if entity.respond_to?(:valid?) && entity.valid?
-            rescue StandardError
-              nil
-            end
-          end
-
-          def build_temp_solid_group(cell)
-            group = Sketchup.active_model.entities.add_group
-            cell[:faces].each do |face|
-              created = group.entities.add_face(face[:points])
-              unless created&.valid?
-                group.erase! if group.valid?
-                return nil
-              end
-              face[:interiors].to_a.each do |ring|
-                inner = group.entities.add_face(ring)
-                inner.erase! if inner&.valid?
-              end
-            end
-            group
-          end
-
-          def valid_manifold_group?(group)
-            return false unless group&.valid?
-            return false unless group.respond_to?(:manifold?) && group.manifold?
-
-            volume = solid_group_volume(group)
-            !volume.nil? && volume > 0.0
-          rescue StandardError
-            false
-          end
-
-          def solid_group_volume(group)
-            return nil unless group.respond_to?(:volume)
-
-            volume = group.volume
-            return nil if volume.nil?
-
-            volume.to_f.abs
-          rescue StandardError
-            nil
-          end
-
-          def face_components(faces)
-            remaining = faces.each_with_object({}) { |face, memo| memo[face] = true }
-            components = []
-            until remaining.empty?
-              seed = remaining.keys.first
-              stack = [seed]
-              component = []
-              remaining.delete(seed)
-              until stack.empty?
-                face = stack.pop
-                component << face
-                face.edges.flat_map(&:faces).uniq.each do |neighbor|
-                  next unless remaining[neighbor]
-
-                  remaining.delete(neighbor)
-                  stack << neighbor
-                end
-              end
-              components << component
-            end
-            components
-          end
-
-          def overlap_recheck_missing_pair_reason(code)
-            "#{overlap_recheck_face_pair_label(code)} face pair not found"
-          end
-
-          def overlap_recheck_face_pair_label(_code)
-            'opposite-normal'
-          end
-
-          def face_pair_signed_distance(face1, face2)
-            centroid1 = face_centroid(face1)
-            centroid2 = face_centroid(face2)
-            return Float::INFINITY unless centroid1 && centroid2
-
-            vector = centroid1.vector_to(centroid2)
-            Utils::Geometry.dot_product(vector, face1[:normal]).to_f
-          end
-
-          def plane_constant(normal, point)
-            Utils::Geometry.dot_product(
-              Geom::Vector3d.new(point.x.to_f, point.y.to_f, point.z.to_f),
-              normal
-            ).to_f
-          end
-
-          def face_centroid(face)
-            points = Array(face[:points])
-            return nil if points.empty?
-
-            Geom::Point3d.new(
-              points.sum(&:x) / points.length.to_f,
-              points.sum(&:y) / points.length.to_f,
-              points.sum(&:z) / points.length.to_f
-            )
           end
 
           def overlap_recheck_result(code, cell_ids, tolerated, reason, status: nil, distance: nil, overlap_area: nil, normal_thickness: nil, actual_overlap_volume: nil, intersection_component_count: nil)
@@ -777,198 +525,15 @@ module ULOL
             )
           end
 
-          def export_geometry_snapshot
-            @export_geometry_snapshot ||= begin
-              content = File.read(@gml_path, encoding: 'UTF-8')
-              document = REXML::Document.new(content)
-              snapshot = {}
-              each_xml_element(document.root) do |element|
-                next unless cell_space_element?(element)
-
-                cell_id = xml_attribute(element, 'id')
-                next if cell_id.to_s.empty?
-
-                solid = first_descendant(element, 'Solid')
-                next unless solid
-
-                snapshot[cell_id] = parse_gml_solid_snapshot(solid, cell_id)
-              end
-              snapshot
-            end
-          end
-
-          def cell_space_element?(element)
-            %w[CellSpace GeneralSpace TransitionSpace ConnectionSpace AnchorSpace].include?(xml_local_name(element))
-          end
-
-          def parse_gml_solid_snapshot(solid, cell_id)
-            faces = []
-            unsupported = false
-            each_xml_element(solid) do |element|
-              next unless xml_local_name(element) == 'Polygon'
-
-              face = parse_gml_polygon_face(element)
-              if face[:unsupported]
-                unsupported = true
-              elsif face[:face]
-                faces << face[:face]
-              end
-            end
-            { id: cell_id, faces: faces, unsupported: unsupported || faces.empty? }
-          end
-
-          def parse_gml_polygon_face(polygon)
-            exterior = first_child(polygon, 'exterior')
-            ring = first_descendant(exterior, 'LinearRing')
-            return { unsupported: true } unless ring
-
-            points = parse_gml_ring_points(ring, polygon)
-            points = remove_closing_duplicate(points)
-            return { unsupported: true } if points.length < 3
-            interiors = children_by_name(polygon, 'interior').filter_map do |interior|
-              interior_ring = first_descendant(interior, 'LinearRing')
-              next unless interior_ring
-
-              interior_points = remove_closing_duplicate(parse_gml_ring_points(interior_ring, polygon))
-              interior_points.length >= 3 ? interior_points : nil
-            end
-
-            normal = polygon_normal(points)
-            return { unsupported: true } unless normal
-
-            {
-              face: {
-                points: points,
-                interiors: interiors,
-                normal: normal,
-                triangles: triangulate_points(points)
-              },
-              unsupported: false
-            }
-          end
-
-          def parse_gml_ring_points(ring, unit_context)
-            positions = []
-            each_xml_element(ring) do |element|
-              next unless xml_local_name(element) == 'pos'
-
-              values = element.text.to_s.split.map(&:to_f)
-              next unless values.length >= 3
-
-              positions << gml_point_to_inches(values[0], values[1], values[2], unit_context)
-            end
-            positions
-          end
-
-          def gml_point_to_inches(x, y, z, element)
-            factor = gml_export_unit_factor(element)
-            Geom::Point3d.new(x.to_f / factor, y.to_f / factor, z.to_f / factor)
-          end
-
-          def gml_export_unit_factor(element)
-            unit = nil
-            current = element
-            while current
-              labels = xml_attribute(current, 'uomLabels')
-              unit = labels.to_s.split.first unless labels.to_s.empty?
-              break if unit
-
-              srs = xml_attribute(current, 'srsName')
-              unit = srs.to_s[/local-([A-Za-z]+)/, 1] unless srs.to_s.empty?
-              break if unit
-
-              current = current.respond_to?(:parent) ? current.parent : nil
-            end
-            case unit
-            when 'ft' then 1.0 / 12.0
-            when 'mm' then 25.4
-            when 'cm' then 2.54
-            when 'm' then 0.0254
-            else 1.0
-            end
-          end
-
-          def polygon_normal(points)
-            x = 0.0
-            y = 0.0
-            z = 0.0
-            points.each_with_index do |point, index|
-              next_point = points[(index + 1) % points.length]
-              x += (point.y - next_point.y) * (point.z + next_point.z)
-              y += (point.z - next_point.z) * (point.x + next_point.x)
-              z += (point.x - next_point.x) * (point.y + next_point.y)
-            end
-            normal = Geom::Vector3d.new(x, y, z)
-            return nil if normal.length <= OVERLAP_RECHECK_NUMERIC_EPSILON
-
-            normal.normalize!
-            normal
-          end
-
-          def triangulate_points(points)
-            (1...(points.length - 1)).map { |index| [points.first, points[index], points[index + 1]] }
-          end
-
-          def remove_closing_duplicate(points)
-            return points if points.length < 2
-
-            first = points.first
-            last = points.last
-            first.distance(last) <= OVERLAP_RECHECK_NUMERIC_EPSILON ? points[0...-1] : points
-          end
-
-          def each_xml_element(element, &block)
-            return unless element
-
-            yield element
-            element.elements.each { |child| each_xml_element(child, &block) }
-          end
-
-          def first_descendant(element, local_name)
-            return nil unless element
-
-            element.elements.each do |child|
-              return child if xml_local_name(child) == local_name
-
-              found = first_descendant(child, local_name)
-              return found if found
-            end
-            nil
-          end
-
-          def first_child(element, local_name)
-            return nil unless element
-
-            element.elements.each do |child|
-              return child if xml_local_name(child) == local_name
-            end
-            nil
-          end
-
-          def children_by_name(element, local_name)
-            return [] unless element
-
-            children = []
-            element.elements.each do |child|
-              children << child if xml_local_name(child) == local_name
-            end
-            children
-          end
-
-          def xml_local_name(element)
-            element&.name.to_s.split(':').last
-          end
-
-          def xml_attribute(element, local_name)
-            return nil unless element&.respond_to?(:attributes)
-
-            element.attributes.each_attribute do |attribute|
-              name = attribute.name.to_s
-              expanded_name = attribute.respond_to?(:expanded_name) ? attribute.expanded_name.to_s : name
-              return attribute.value if name == local_name || name.split(':').last == local_name ||
-                                        expanded_name == local_name || expanded_name.split(':').last == local_name
-            end
-            nil
+          def overlap_geometry_rechecker
+            @overlap_geometry_rechecker ||= Val3dityOverlapGeometryRechecker.new(
+              snapshot_reader: Val3dityExportedSolidSnapshotReader.new(
+                @gml_path,
+                numeric_epsilon: OVERLAP_RECHECK_NUMERIC_EPSILON
+              ),
+              tolerance: OVERLAP_RECHECK_TOLERANCE,
+              logger: IndoorCore::Logger
+            )
           end
 
           def decode_report_content(content)
