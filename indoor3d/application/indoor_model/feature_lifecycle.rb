@@ -226,16 +226,14 @@ module ULOL
           end
 
           def convert_primal_child_to_cell_space(child, target, parent_transformation)
-            copy = @primal_group.entities.add_instance(
-              child.definition,
-              parent_transformation * child.transformation
+            copy = EntityCopyHelper.copy_instance(
+              source: child,
+              target_entities: @primal_group.entities,
+              transformation: parent_transformation * child.transformation,
+              convert_to_group: :source_group,
+              make_unique: :source_group,
+              copy_attributes: [:name, :material, :layer, :visible]
             )
-            copy = copy.to_group if child.is_a?(Sketchup::Group) && copy.respond_to?(:to_group)
-            copy.make_unique if child.is_a?(Sketchup::Group) && copy.respond_to?(:make_unique)
-            copy.name = child.name if copy.respond_to?(:name=) && child.respond_to?(:name)
-            copy.material = child.material if copy.respond_to?(:material=) && child.respond_to?(:material)
-            copy.layer = child.layer if copy.respond_to?(:layer=) && child.respond_to?(:layer)
-            copy.visible = child.visible? if copy.respond_to?(:visible=) && child.respond_to?(:visible?)
             convert_single_group_to_cell_space(copy, target[0], target[1])
             child.erase! if child.valid?
             true

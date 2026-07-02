@@ -691,14 +691,14 @@ module ULOL
 
           def copy_conversion_job_to_model_root(job)
             source = job[:source]
-            copy = (@model || Sketchup.active_model).entities.add_instance(source.definition, job[:transformation])
-            copy = copy.to_group if source.is_a?(Sketchup::Group) && copy.respond_to?(:to_group)
-            copy.make_unique if source.is_a?(Sketchup::Group) && copy.respond_to?(:make_unique)
-            copy.name = source.name if copy.respond_to?(:name=) && source.respond_to?(:name)
-            copy.material = source.material if copy.respond_to?(:material=) && source.respond_to?(:material)
-            copy.layer = source.layer if copy.respond_to?(:layer=) && source.respond_to?(:layer)
-            copy.visible = source.visible? if copy.respond_to?(:visible=) && source.respond_to?(:visible?)
-            copy
+            EntityCopyHelper.copy_instance(
+              source: source,
+              target_entities: (@model || Sketchup.active_model).entities,
+              transformation: job[:transformation],
+              convert_to_group: :source_group,
+              make_unique: :source_group,
+              copy_attributes: [:name, :material, :layer, :visible]
+            )
           end
 
           def cleanup_empty_conversion_ancestors(job)

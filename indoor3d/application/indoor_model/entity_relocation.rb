@@ -45,13 +45,15 @@ module ULOL
             end
 
             transformation = relocation_transformation(entity, target_root_group)
-            copy = target_entities.add_instance(entity.definition, transformation)
-            copy = copy.to_group if entity.is_a?(Sketchup::Group) && copy.respond_to?(:to_group)
-            copy.make_unique if entity.is_a?(Sketchup::Group) && copy.respond_to?(:make_unique)
-            copy.name = entity.name if copy.respond_to?(:name=) && entity.respond_to?(:name)
-            copy.material = entity.material if copy.respond_to?(:material=) && entity.respond_to?(:material)
-            copy_indoor_attributes(entity, copy)
-            copy
+            EntityCopyHelper.copy_instance(
+              source: entity,
+              target_entities: target_entities,
+              transformation: transformation,
+              convert_to_group: :source_group,
+              make_unique: :source_group,
+              copy_attributes: [:name, :material],
+              attribute_copier: method(:copy_indoor_attributes)
+            )
           end
 
           def relocation_transformation(entity, target_root_group)
