@@ -76,7 +76,7 @@ module ULOL
           end
 
           def clone_group_under_primal_space(sketchup_group)
-            local_transformation = @primal_group.transformation.inverse * Utils::Transformation.entity_transformation_in_active_context(sketchup_group)
+            local_transformation = @primal_group.transformation.inverse * Utils::Transformation.entity_transformation_for_current_context(sketchup_group)
             cell_space_entity = @primal_group.entities.add_instance(sketchup_group.definition, local_transformation)
             raise ArgumentError, 'Could not create CellSpace entity' unless cell_space_entity&.valid?
 

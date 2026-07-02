@@ -317,9 +317,10 @@ module ULOL
               ) do |job, _index|
                 begin
                   target_cell_type, target_category_code = job[:target] || [cell_type, category_code]
-                  source = copy_conversion_job_to_model_root(job)
+                  source_is_primal_child = inside_primal_group?(job[:source])
+                  source = source_is_primal_child ? job[:source] : copy_conversion_job_to_model_root(job)
                   convert_single_group_to_cell_space(source, target_cell_type, target_category_code)
-                  job[:source].erase! if job[:source]&.valid?
+                  job[:source].erase! if !source_is_primal_child && job[:source]&.valid?
                   cleanup_empty_conversion_ancestors(job)
                   converted_count += 1
                 rescue StandardError => e
