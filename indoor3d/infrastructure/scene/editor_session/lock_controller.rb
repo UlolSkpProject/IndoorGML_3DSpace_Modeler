@@ -4,9 +4,11 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class EditorSession
-        module LockPolicy
-          # Depends on EditorSession-owned state:
-          # @editing, @editable_entity_ids, and @indoor_model.
+        class LockController
+          def initialize(indoor_model:)
+            @indoor_model = indoor_model
+          end
+
           def lock_entity(entity)
             set_entity_locked(entity, true)
           end
@@ -25,11 +27,10 @@ module ULOL
             entity.locked = true if was_locked && entity&.valid?
           end
 
-          def apply_lock_policy
-            return true unless @editing == true
+          def apply(editing:)
+            return true unless editing == true
 
             primal_group = @indoor_model.primal_group
-
             unlock_entity(primal_group) if primal_group&.valid?
 
             @indoor_model.cell_spaces.each do |cell_space|

@@ -32,7 +32,67 @@ module ULOL
             @refreshing_runtime = false
           end
 
+          def diagnostic_snapshot
+            {
+              cell_spaces: diagnostic_count(@cell_spaces),
+              states: diagnostic_count(@states),
+              transitions: diagnostic_count(@transitions),
+              storeys: Array(@storeys).compact.length,
+              editing: @editor_session&.editing? == true,
+              cell_space_geometry_editing: @editor_session&.cell_space_geometry_editing? == true,
+              active_path: current_active_path_kind,
+              dirty_topology_count: @dirty_cell_space_pids&.length.to_i,
+              topology_sync_scheduled: @cell_space_sync_scheduled == true,
+              guards: {
+                syncing: @syncing == true,
+                erasing: @erasing == true,
+                restoring: @refreshing_runtime == true,
+                relocating: @relocating_entity == true,
+                constraining: @constraining_space_features == true,
+                finishing_editing: @finishing_editing == true
+              }
+            }
+          end
+
+          def with_space_feature_constraint
+            with_guard_flag(:@constraining_space_features) { yield }
+          end
+
+          def with_runtime_observer_suppression
+            sync { yield }
+          end
+
           private
+
+          def diagnostic_count(features)
+            Array(features).count do |feature|
+              feature.respond_to?(:valid?) ? feature.valid? : !feature.nil?
+            rescue StandardError
+              false
+            end
+          end
+
+          def current_active_path_kind
+            model = @model || (defined?(Sketchup) ? Sketchup.active_model : nil)
+            return :unavailable unless model&.respond_to?(:active_path)
+
+            path = model.active_path
+            return :root if path.nil? || path.empty?
+
+            valid_path = Array(path).select { |entity| entity&.valid? }
+            return :root if valid_path.empty?
+            return :primal if @primal_group&.valid? && valid_path == [@primal_group]
+
+            if @primal_group&.valid? && valid_path.first == @primal_group
+              return :cell_space_geometry if valid_path.length > 1
+
+              return :primal
+            end
+
+            :other
+          rescue StandardError
+            :unknown
+          end
 
           def with_indoor_model_operation(name, transparent: false)
             return yield if @indoor_operation_depth.to_i.positive?

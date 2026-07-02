@@ -10,6 +10,7 @@ module ULOL
         ATTRIBUTE_DICTIONARY_NAME = 'IndoorGml'
         INDOOR_GML_VERSION = '1.0'
 
+        require_relative 'cell_space_lifecycle_service'
         require_relative 'indoor_model/runtime_support.rb'
         require_relative 'indoor_model/scene_groups.rb'
         require_relative 'indoor_model/feature_lifecycle.rb'
@@ -107,10 +108,8 @@ module ULOL
           @runtime_restorer = RuntimeRestorer.new(
             registry: @feature_registry,
             serializer: @attribute_serializer,
-            callbacks: {
-              cell_space_registrar: method(:register_cell_space),
-              state_registrar: method(:register_state)
-            }
+            cell_space_registrar: method(:register_cell_space),
+            state_registrar: method(:register_state)
           )
           @scene_group_guard = SceneGroupGuard.new(
             with_unlocked: method(:with_unlocked),

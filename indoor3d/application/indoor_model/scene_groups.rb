@@ -76,13 +76,14 @@ module ULOL
           end
 
           def clone_group_under_primal_space(sketchup_group)
-            local_transformation = @primal_group.transformation.inverse * Utils::Transformation.entity_transformation_in_active_context(sketchup_group)
-            cell_space_entity = @primal_group.entities.add_instance(sketchup_group.definition, local_transformation)
-            raise ArgumentError, 'Could not create CellSpace entity' unless cell_space_entity&.valid?
-
-            cell_space_entity = cell_space_entity.to_group if cell_space_entity.respond_to?(:to_group)
-            cell_space_entity.make_unique if cell_space_entity.respond_to?(:make_unique)
-
+            local_transformation = @primal_group.transformation.inverse * Utils::Transformation.entity_transformation_for_current_context(sketchup_group)
+            cell_space_entity = EntityCopyHelper.copy_instance(
+              source: sketchup_group,
+              target_entities: @primal_group.entities,
+              transformation: local_transformation,
+              convert_to_group: true,
+              make_unique: true
+            )
             sketchup_group.erase! if sketchup_group.valid?
             cell_space_entity
           end

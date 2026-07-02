@@ -7,62 +7,11 @@ module ULOL
         module FeatureLifecycle
           def convert_single_group_to_cell_space(sketchup_group, cell_type = CellSpaceType::GENERAL, category_code = nil)
             with_indoor_model_operation('IndoorGML Convert Group to CellSpace') do
-              raise ArgumentError, 'Group is already converted to CellSpace' if converted_group?(sketchup_group)
-              cell_type, category_code = IndoorCore.resolve_cell_space_type_and_category(
+              cell_space_lifecycle_service.create_from_group(
                 sketchup_group,
-                cell_type,
-                category_code
+                cell_type: cell_type,
+                category_code: category_code
               )
-              validation = Utils::Geometry.prepare_cell_space_source_group!(sketchup_group)
-              unless validation[:valid]
-                raise ArgumentError, validation[:reason] || 'Invalid CellSpace source geometry'
-              end
-
-              ensure_space_features_groups
-              cell_group = place_cell_group(sketchup_group)
-              cell_space = CellSpace.new(cell_group, cell_type, category_code)
-              cell_space.set_storey(default_storey_name)
-              recenter_cell_space_geometry(
-                cell_group,
-                fixed_z_offset_from_bottom: fixed_state_height_offset(cell_space)
-              )
-              name_cell_space_entity(cell_space)
-              apply_cell_space_material(cell_space)
-              state = cell_space.create_duality_state(nil)
-
-              register_cell_space(cell_space)
-              register_state(state)
-              write_attributes(cell_space)
-              track_cell_space_entity(cell_space.sketchup_group)
-              synchronize_adjacency_and_transitions_for_cell_space(cell_space)
-              apply_indoor_lock_policy()
-
-              cell_space
-            end
-          end
-
-          def auto_create_tagged_cell_spaces_in_primal
-            with_indoor_model_operation('IndoorGML Auto Create Tagged CellSpaces') do
-              ensure_space_features_groups
-              next 0 unless @primal_group&.valid?
-
-              converted_count = 0
-              begin
-                @relocating_entity = true
-                @primal_group.entities.to_a.each do |entity|
-                  next unless entity&.valid?
-                  next if indoor_feature(entity) == 'CellSpace'
-
-                  if auto_convert_tagged_primal_entity(entity)
-                    converted_count += 1
-                  elsif convertible_cell_space_container?(entity)
-                    converted_count += 1 if auto_convert_direct_tagged_children(entity)
-                  end
-                end
-              ensure
-                @relocating_entity = false
-              end
-              converted_count
             end
           end
 
@@ -74,13 +23,11 @@ module ULOL
               cell_type, category_code = tag_cell_space_type_change_target(cell_space, cell_type, category_code)
 
               sync do
-                cell_space.cell_type = cell_type
-                cell_space.set_category(category_code)
-                name_cell_space_entity(cell_space)
-                apply_cell_space_material(cell_space)
-                write_cell_space_attributes(cell_space)
-                synchronize_adjacency_and_transitions_for_cell_space(cell_space)
-                apply_indoor_lock_policy()
+                cell_space_lifecycle_service.change_type(
+                  cell_space,
+                  cell_type: cell_type,
+                  category_code: category_code
+                )
               end
 
               cell_space
@@ -151,17 +98,40 @@ module ULOL
             return if cell_space.nil?
 
             erase_guard do
-              state = cell_space.duality_state
-              erase_transitions_for_state(state)
-              state.erase! if state&.valid?
-              unregister_state(state)
-              cell_space.erase! if erase_sketchup_group && cell_space.valid?
-              unregister_cell_space(cell_space)
-              erase_adjacency_for_cell_space(cell_space)
+              cell_space_lifecycle_service.erase(
+                cell_space,
+                erase_sketchup_group: erase_sketchup_group
+              )
             end
           end
 
           private
+
+          def cell_space_lifecycle_service
+            @cell_space_lifecycle_service ||= CellSpaceLifecycleService.new(
+              converted_group?: method(:converted_group?),
+              resolve_cell_space_type_and_category: IndoorCore.method(:resolve_cell_space_type_and_category),
+              prepare_cell_space_source_group!: Utils::Geometry.method(:prepare_cell_space_source_group!),
+              ensure_space_features_groups: method(:ensure_space_features_groups),
+              place_cell_group: method(:place_cell_group),
+              default_storey_name: method(:default_storey_name),
+              fixed_state_height_offset: method(:fixed_state_height_offset),
+              recenter_cell_space_geometry: method(:recenter_cell_space_geometry),
+              name_cell_space_entity: method(:name_cell_space_entity),
+              apply_cell_space_material: method(:apply_cell_space_material),
+              register_cell_space: method(:register_cell_space),
+              register_state: method(:register_state),
+              write_attributes: method(:write_attributes),
+              write_cell_space_attributes: method(:write_cell_space_attributes),
+              track_cell_space_entity: method(:track_cell_space_entity),
+              synchronize_adjacency_and_transitions_for_cell_space: method(:synchronize_adjacency_and_transitions_for_cell_space),
+              apply_indoor_lock_policy: method(:apply_indoor_lock_policy),
+              erase_transitions_for_state: method(:erase_transitions_for_state),
+              unregister_state: method(:unregister_state),
+              unregister_cell_space: method(:unregister_cell_space),
+              erase_adjacency_for_cell_space: method(:erase_adjacency_for_cell_space)
+            )
+          end
 
           def tag_cell_space_type_change_target(cell_space, cell_type, category_code)
             target = IndoorCore.tag_cell_space_type_and_category(cell_space.sketchup_group)
@@ -226,16 +196,14 @@ module ULOL
           end
 
           def convert_primal_child_to_cell_space(child, target, parent_transformation)
-            copy = @primal_group.entities.add_instance(
-              child.definition,
-              parent_transformation * child.transformation
+            copy = EntityCopyHelper.copy_instance(
+              source: child,
+              target_entities: @primal_group.entities,
+              transformation: parent_transformation * child.transformation,
+              convert_to_group: :source_group,
+              make_unique: :source_group,
+              copy_attributes: [:name, :material, :layer, :visible]
             )
-            copy = copy.to_group if child.is_a?(Sketchup::Group) && copy.respond_to?(:to_group)
-            copy.make_unique if child.is_a?(Sketchup::Group) && copy.respond_to?(:make_unique)
-            copy.name = child.name if copy.respond_to?(:name=) && child.respond_to?(:name)
-            copy.material = child.material if copy.respond_to?(:material=) && child.respond_to?(:material)
-            copy.layer = child.layer if copy.respond_to?(:layer=) && child.respond_to?(:layer)
-            copy.visible = child.visible? if copy.respond_to?(:visible=) && child.respond_to?(:visible?)
             convert_single_group_to_cell_space(copy, target[0], target[1])
             child.erase! if child.valid?
             true

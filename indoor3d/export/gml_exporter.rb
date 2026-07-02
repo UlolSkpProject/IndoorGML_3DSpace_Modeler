@@ -1,8 +1,9 @@
 # frozen_string_literal: true
 
 require 'fileutils'
-require 'rexml/document'
-require 'rexml/formatters/pretty'
+
+require_relative 'export_snapshot'
+require_relative 'gml_writer'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -10,11 +11,6 @@ module ULOL
       module IndoorGmlConverter
 
         class GmlExporter
-          ROOT_ID                    = 'IF_001'
-          CORE_NAMESPACE             = 'http://www.opengis.net/indoorgml/1.0/core'
-          NAVIGATION_NAMESPACE       = 'http://www.opengis.net/indoorgml/1.0/navigation'
-          CORE_SCHEMA_LOCATION       = 'http://schemas.opengis.net/indoorgml/1.0/indoorgmlcore.xsd'
-          NAVIGATION_SCHEMA_LOCATION = 'http://schemas.opengis.net/indoorgml/1.0/indoorgmlnavi.xsd'
           # SketchUp stores geometric coordinates internally in inches.
           EXPORT_COORDINATE_UNITS = {
             0 => { unit: 'in', factor: 1.0, srs_name: 'urn:ulol:def:crs:local-in' },
@@ -23,13 +19,6 @@ module ULOL
             3 => { unit: 'cm', factor: 2.54, srs_name: 'urn:ulol:def:crs:local-cm' },
             4 => { unit: 'm', factor: 0.0254, srs_name: 'urn:ulol:def:crs:local-m' }
           }.freeze
-          CELL_SPACE_TAGS = {
-            CellSpaceType::GENERAL => 'navi:GeneralSpace',
-            CellSpaceType::TRANSITION => 'navi:TransitionSpace',
-            CellSpaceType::CONNECTION => 'navi:ConnectionSpace',
-            CellSpaceType::ANCHOR => 'navi:AnchorSpace'
-          }.freeze
-
           def initialize(indoor_model, refresh_runtime_data: true, cell_spaces: nil, transitions: nil)
             @indoor_model = indoor_model
             @refresh_runtime_data = refresh_runtime_data
@@ -64,7 +53,7 @@ module ULOL
           private
 
           def reset_export_cache
-            @exportable_cell_spaces = nil
+            @export_snapshot = nil
             @export_coordinate_unit = nil
             @export_timings = []
             @export_total_elapsed = nil
@@ -76,7 +65,7 @@ module ULOL
             end
 
             exportable_cell_spaces.each do |cell_space|
-              NavigationSemanticResolver.resolve(cell_space) if cell_space_tag(cell_space).start_with?('navi:')
+              NavigationSemanticResolver.resolve(cell_space) if GmlWriter.cell_space_tag(cell_space).start_with?('navi:')
             end
           end
 
@@ -95,12 +84,13 @@ module ULOL
             model = Sketchup.active_model
             return yield unless model
 
-            previous_active_path = active_path_snapshot(model)
+            active_path = ActivePathController.new(model)
+            previous_active_path = active_path.snapshot
             with_active_path_enforcement_suspended do
-              close_active_path(model)
+              active_path.close_to_root
               yield
             ensure
-              restore_active_path(model, previous_active_path)
+              active_path.restore(previous_active_path, close_when_nil: true)
             end
           end
 
@@ -112,102 +102,16 @@ module ULOL
             end
           end
 
-          def active_path_snapshot(model)
-            path = model.active_path
-            path ? path.dup : nil
-          rescue StandardError
-            nil
-          end
-
-          def close_active_path(model)
-            model.close_active while model.active_path
-          end
-
-          def restore_active_path(model, active_path)
-            return close_active_path(model) if active_path.nil?
-
-            valid_path = active_path.select { |entity| entity&.valid? }
-            if model.respond_to?(:active_path=) && !valid_path.empty?
-              model.active_path = valid_path
-            else
-              close_active_path(model)
-            end
-          rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] Export active path restore failed: #{e.class}: #{e.message}"
-          end
-
           def document
-            doc = REXML::Document.new
-            doc << REXML::XMLDecl.new('1.0', "UTF-8")
-            root = doc.add_element('core:IndoorFeatures')
-            root.add_namespace(CORE_NAMESPACE)
-            root.add_namespace('core', CORE_NAMESPACE)
-            root.add_namespace('navi', NAVIGATION_NAMESPACE)
-            root.add_namespace('gml', 'http://www.opengis.net/gml/3.2')
-            root.add_namespace('xsi', 'http://www.w3.org/2001/XMLSchema-instance')
-            root.add_namespace('xlink', 'http://www.w3.org/1999/xlink')
-            root.add_attribute(
-              'xsi:schemaLocation',
-              "#{CORE_NAMESPACE} #{CORE_SCHEMA_LOCATION} #{NAVIGATION_NAMESPACE} #{NAVIGATION_SCHEMA_LOCATION}"
-            )
-            root.add_attribute('gml:id', ROOT_ID)
-            append_nil_bounded_by(root)
-            measure_export_step('append primalSpaceFeatures') { append_primal_space_features(root) }
-            measure_export_step('append multiLayeredGraph') { append_multi_layered_graph(root) }
-            measure_export_step('format XML') { pretty_xml(doc) }
-          end
-
-          def append_primal_space_features(root)
-            primal_space_features = root.add_element('core:primalSpaceFeatures')
-            primal = primal_space_features.add_element('core:PrimalSpaceFeatures')
-            primal.add_attribute('gml:id', 'PS1')
-            exportable_cell_spaces.each do |cell_space|
-              append_cell_space(primal, cell_space)
-            end
-          end
-
-          def append_multi_layered_graph(root)
-            graph_property = root.add_element('core:multiLayeredGraph')
-            graph = graph_property.add_element('core:MultiLayeredGraph')
-            graph.add_attribute('gml:id', 'MG1')
-            space_layers = graph.add_element('core:spaceLayers')
-            space_layers.add_attribute('gml:id', 'SL1')
-            member = space_layers.add_element('core:spaceLayerMember')
-            space_layer = member.add_element('core:SpaceLayer')
-            space_layer.add_attribute('gml:id', 'IS1')
-            append_states(space_layer)
-            append_transitions(space_layer)
-          end
-
-          def pretty_xml(doc)
-            output = +''
-            formatter = REXML::Formatters::Pretty.new(2)
-            formatter.compact = true
-            formatter.write(doc, output)
-            output
-          end
-
-          def append_cell_space(parent, cell_space)
-            cell_id = cell_gml_id(cell_space)
-            member = parent.add_element('core:cellSpaceMember')
-            tag = cell_space_tag(cell_space)
-            cell = member.add_element(tag)
-            cell.add_attribute('gml:id', cell_id)
-            cell.add_element('gml:description').text = cell_space_description(cell_space)
-            cell.add_element('gml:name').text = cell_space_export_name(cell_space)
-            append_nil_bounded_by(cell)
-            geometry = cell.add_element('core:cellSpaceGeometry')
-            geometry_3d = geometry.add_element('core:Geometry3D')
-            solid = geometry_3d.add_element('gml:Solid')
-            solid.add_attribute('gml:id', "solid_#{cell_id}")
-            append_local_crs_attributes(solid)
-            exterior = solid.add_element('gml:exterior')
-            shell = exterior.add_element('gml:Shell')
-            shell.add_attribute('gml:id', "shell_#{cell_id}")
-            append_cell_surfaces(shell, cell_space, cell_id)
-            duality = cell.add_element('core:duality')
-            duality.add_attribute('xlink:href', internal_href(state_gml_id(cell_space.duality_state)))
-            append_navigable_space_codes(cell, cell_space) if tag.start_with?('navi:')
+            GmlWriter.new(
+              snapshot: export_snapshot,
+              coordinate_unit: export_coordinate_unit,
+              geometry_appender: method(:append_cell_surfaces),
+              state_position: method(:state_world_position),
+              transition_state1_position: method(:transition_state1_world_position),
+              transition_state2_position: method(:transition_state2_world_position),
+              measure_step: method(:measure_export_step)
+            ).to_xml
           end
 
           def append_cell_surfaces(shell, cell_space, cell_id)
@@ -230,67 +134,20 @@ module ULOL
             end
           end
 
-          def append_states(space_layer)
-            nodes = space_layer.add_element('core:nodes')
-            nodes.add_attribute('gml:id', 'N1')
-            exportable_cell_spaces.each_with_index do |cell_space, index|
-              state = cell_space.duality_state
-              member = nodes.add_element('core:stateMember')
-              state_element = member.add_element('core:State')
-              state_element.add_attribute('gml:id', state_gml_id(state))
-              state_element.add_element('gml:description').text = state_description(state)
-              state_element.add_element('gml:name').text = state_export_name(state)
-              duality = state_element.add_element('core:duality')
-              duality.add_attribute('xlink:href', internal_href(cell_gml_id(cell_space)))
-              state_connected_transition_ids(state).each do |transition_id|
-                connects = state_element.add_element('core:connects')
-                connects.add_attribute('xlink:href', internal_href(transition_id))
-              end
-              geometry = state_element.add_element('core:geometry')
-              point = geometry.add_element('gml:Point')
-              point.add_attribute('gml:id', "P#{index}")
-              append_local_crs_attributes(point)
-              point.add_element('gml:pos').text = format_point(state_world_position(state))
-            end
-          end
-
-          def append_transitions(space_layer)
-            edges = space_layer.add_element('core:edges')
-            edges.add_attribute('gml:id', 'E1')
-            exportable_transitions.each do |transition|
-              member = edges.add_element('core:transitionMember')
-              transition_element = member.add_element('core:Transition')
-              transition_element.add_attribute('gml:id', transition_gml_id(transition))
-              transition_element.add_element('core:weight').text = '1'
-              connects1 = transition_element.add_element('core:connects')
-              connects1.add_attribute('xlink:href', internal_href(state_gml_id(transition.state1)))
-              connects2 = transition_element.add_element('core:connects')
-              connects2.add_attribute('xlink:href', internal_href(state_gml_id(transition.state2)))
-              geometry = transition_element.add_element('core:geometry')
-              line = geometry.add_element('gml:LineString')
-              line.add_attribute('gml:id', "line_#{transition_gml_id(transition)}")
-              append_local_crs_attributes(line)
-              line.add_element('gml:pos').text = format_point(transition_state1_world_position(transition))
-              line.add_element('gml:pos').text = format_point(transition_state2_world_position(transition))
-            end
-          end
-
           def exportable_cell_spaces
-            source = @requested_cell_spaces || @indoor_model.cell_spaces
-            @exportable_cell_spaces ||= source.select do |cell_space|
-              cell_space&.valid_sketchup_group && cell_space.duality_state&.valid?
-            end.uniq
+            export_snapshot.cell_spaces
           end
 
           def exportable_transitions
-            source = @requested_transitions || @indoor_model.transitions
-            source.select do |transition|
-              transition&.valid? &&
-                transition.state1&.valid? &&
-                transition.state2&.valid? &&
-                exportable_cell_spaces.include?(transition.state1.duality_cell) &&
-                exportable_cell_spaces.include?(transition.state2.duality_cell)
-            end.uniq
+            export_snapshot.transitions
+          end
+
+          def export_snapshot
+            @export_snapshot ||= ExportSnapshot.build(
+              indoor_model: @indoor_model,
+              cell_spaces: @requested_cell_spaces,
+              transitions: @requested_transitions
+            )
           end
 
           def loop_points(loop, transform)
@@ -381,10 +238,6 @@ module ULOL
             point
           end
 
-          def format_point(point)
-            format_export_point(point)
-          end
-
           def format_export_point(point)
             [
               format_number(export_coordinate_value(point.x)),
@@ -433,78 +286,6 @@ module ULOL
             format('%.17g', numeric)
           end
 
-          def cell_gml_id(cell_space)
-            "cell_#{safe_id(cell_space.id)}"
-          end
-
-          def state_gml_id(state)
-            "state_#{safe_id(state.id)}"
-          end
-
-          def transition_gml_id(transition)
-            "transition_#{safe_id(transition.id)}"
-          end
-
-          def internal_href(gml_id)
-            "##{gml_id}"
-          end
-
-          def safe_id(value)
-            value.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')
-          end
-
-          def cell_space_tag(cell_space)
-            CELL_SPACE_TAGS[cell_space.cell_type] || 'core:CellSpace'
-          end
-
-          def cell_space_export_name(cell_space)
-            "Cell-#{safe_id(cell_space.id)}"
-          end
-
-          def state_export_name(state)
-            "State-#{safe_id(state.id)}"
-          end
-
-          def cell_space_description(cell_space)
-            "storey=#{storey_name_for(cell_space)}"
-          end
-
-          def state_description(state)
-            "storey=#{storey_name_for(state&.duality_cell)}"
-          end
-
-          def storey_name_for(cell_space)
-            storey = cell_space&.storey.to_s
-            storey.empty? ? Storey::DEFAULT_NAME : storey
-          end
-
-          def append_nil_bounded_by(parent)
-            bounded_by = parent.add_element('gml:boundedBy')
-            bounded_by.add_attribute('xsi:nil', 'true')
-          end
-
-          def append_navigable_space_codes(cell, cell_space)
-            semantic = NavigationSemanticResolver.resolve(cell_space)
-            append_code(cell, 'navi:class', semantic.class_value, semantic.class_code_space)
-            append_code(cell, 'navi:function', semantic.function_value, semantic.function_code_space)
-            append_code(cell, 'navi:usage', semantic.usage_value, semantic.usage_code_space)
-          end
-
-          def append_code(parent, tag, value, code_space)
-            return if value.to_s.empty?
-
-            element = parent.add_element(tag)
-            element.add_attribute('codeSpace', code_space) unless code_space.to_s.empty?
-            element.text = value.to_s
-          end
-
-          def state_connected_transition_ids(state)
-            exportable_transitions.filter_map do |transition|
-              next unless transition.state1 == state || transition.state2 == state
-
-              transition_gml_id(transition)
-            end
-          end
         end
 
       end

@@ -10,38 +10,6 @@ module ULOL
           @validation_operation_running == true
         end
 
-        def create_temp_indoorgml
-          progress = IndoorGmlConverter::ExportProgressDialog.new
-          state = validation_close_state
-          configure_validation_close_handler(progress, state)
-          configure_validation_cancel_handler(progress, state)
-          state[:after_temp_export] = proc do |temp_path|
-            progress.on_create_gml do
-              create_gml_from_temp(temp_path, progress)
-            end
-            progress.result(
-              status: :success,
-              title: 'IndoorGML temp GML created',
-              message: "Temporary GML created:\n#{temp_path}",
-              actions: [:createGml, :close]
-            )
-          end
-          progress.on_ready do
-            next if state[:started]
-
-            state[:started] = true
-            start_temp_file_creation(progress, state)
-          end
-          progress.show
-        rescue StandardError => e
-          progress&.result(
-            status: :error,
-            title: 'IndoorGML temp GML creation failed',
-            message: e.message,
-            actions: [:close]
-          )
-        end
-
         def export_gml
           return if validation_operation_running?
 
@@ -244,7 +212,6 @@ module ULOL
           end
           progress&.on_open_report do
             begin
-              begin_validation_report_edit_mode(result.report) unless result.valid?
               open_report_dialog(result.report_html_path, progress)
             rescue StandardError => e
               progress&.set_result_message("Opening report failed:\n#{e.message}")
@@ -252,7 +219,14 @@ module ULOL
           end
           progress&.on_validation_focus_cells do |cell_ids, code, state_ids, transition_ids|
             refs = { cells: cell_ids, states: state_ids, transitions: transition_ids }
-            IndoorModel.current.set_validation_focus_highlight(validation_focus_cell_ids_for_refs(refs), code)
+            focus_cell_ids = validation_focus_cell_ids_for_refs(refs)
+            indoor_model = IndoorModel.current
+            if focus_cell_ids.empty?
+              indoor_model.set_validation_focus_highlight([], code) if indoor_model.validation_focus_active?
+            else
+              indoor_model.begin_validation_focus_editing(focus_cell_ids) unless indoor_model.validation_focus_active?
+              indoor_model.set_validation_focus_highlight(focus_cell_ids, code)
+            end
           end
           progress&.on_fix_validation_errors do
             begin_validation_report_edit_mode(result.report) unless result.valid?

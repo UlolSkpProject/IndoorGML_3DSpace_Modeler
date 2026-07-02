@@ -246,39 +246,10 @@ module ULOL
 
           def selected_edit_mode_snapshot
             begin
-              cell_spaces = selected_cell_spaces
-              cell_spaces = [@editor_session.editing_cell_space].compact if cell_spaces.empty?
-              cell_spaces = cell_spaces.select { |cell_space| cell_space&.valid? }
-              if cell_spaces.empty?
-                solid_snapshot = selected_solid_groups_snapshot
-                return with_edit_mode_visibility_filter(solid_snapshot) if solid_snapshot
-
-                return with_edit_mode_visibility_filter(empty_edit_mode_snapshot)
-              end
-              return with_edit_mode_visibility_filter(selected_cell_spaces_snapshot(cell_spaces)) if cell_spaces.length > 1
-
-              cell_space = cell_spaces.first
-              group = cell_space.sketchup_group
-              with_edit_mode_visibility_filter({
-                mode: 'cell_space',
-                feature: 'CellSpace',
-                id: cell_space.id,
-                name: group&.name.to_s,
-                cell_type: CellSpaceType.label(cell_space.cell_type),
-                category_code: cell_space.category_code,
-                classification: CellSpaceCategory.selection_value(cell_space.cell_type, cell_space.category_code),
-                classification_locked: cell_space_type_change_locked_by_tag?([cell_space]),
-                storey: cell_space.storey,
-                storey_editable: true,
-                storey_range_allowed: storey_range_allowed_for_cell_spaces([cell_space]),
-                navigation_semantics_enabled: cell_space.navigable?,
-                navigation_class: resolved_navigation_semantic_value(cell_space, :class_value),
-                navigation_function: resolved_navigation_semantic_value(cell_space, :function_value),
-                navigation_usage: resolved_navigation_semantic_value(cell_space, :usage_value),
-                navigation_semantics_editable: cell_space.navigable?,
-                transition_count: cell_space.duality_state&.transition_ids&.length.to_i,
-                cell_geometry_editing: @editor_session.cell_space_geometry_editing?
-              })
+              edit_mode_selection_projection.snapshot(
+                selected_cell_spaces: selected_cell_spaces,
+                solid_jobs: selected_cell_space_conversion_jobs
+              )
             rescue StandardError => e
               IndoorCore::Logger.puts "[IndoorGML] Edit mode selection snapshot failed: #{e.class}: #{e.message}"
               nil
@@ -317,9 +288,10 @@ module ULOL
               ) do |job, _index|
                 begin
                   target_cell_type, target_category_code = job[:target] || [cell_type, category_code]
-                  source = copy_conversion_job_to_model_root(job)
+                  source_is_primal_child = inside_primal_group?(job[:source])
+                  source = source_is_primal_child ? job[:source] : copy_conversion_job_to_model_root(job)
                   convert_single_group_to_cell_space(source, target_cell_type, target_category_code)
-                  job[:source].erase! if job[:source]&.valid?
+                  job[:source].erase! if !source_is_primal_child && job[:source]&.valid?
                   cleanup_empty_conversion_ancestors(job)
                   converted_count += 1
                 rescue StandardError => e
@@ -539,8 +511,14 @@ module ULOL
             @editor_session.apply_lock_policy()
           end
 
-          def with_edit_mode_visibility_filter(snapshot)
-            snapshot.merge(visibility_filter: edit_mode_visibility_filter_snapshot)
+          def edit_mode_selection_projection
+            EditModeSelectionProjection.new(
+              cell_spaces: @cell_spaces,
+              states: @states,
+              transitions: @transitions,
+              editor_session: @editor_session,
+              visibility_filter: edit_mode_visibility_filter_snapshot
+            )
           end
 
           def parse_visibility_filter_values(values)
@@ -555,12 +533,7 @@ module ULOL
           end
 
           def edit_mode_storey_filter_options
-            labels = @cell_spaces.each_with_object([]) do |cell_space, result|
-              next unless cell_space&.valid?
-
-              result.concat(storey_filter_labels(cell_space.storey))
-            end
-            labels.uniq.sort.map { |label| { value: label, label: label } }
+            StoreyFilterOptionsBuilder.build(@cell_spaces)
           end
 
           def edit_mode_cell_type_filter_options
@@ -568,33 +541,6 @@ module ULOL
               label = CellSpaceType.label(cell_type)
               { value: label, label: label }
             end
-          end
-
-          def storey_filter_labels(value)
-            parts = value.to_s.strip.upcase.split('~', 2)
-            from = parse_storey_filter_part(parts[0])
-            to = parse_storey_filter_part(parts[1] || parts[0])
-            return [CellSpace::DEFAULT_STOREY] if from.nil?
-            return [format_storey_filter_part(from)] if to.nil?
-
-            if from[:kind] == to[:kind]
-              min, max = [from[:level], to[:level]].minmax
-              return (min..max).map { |level| "#{from[:kind]}#{format('%02d', level)}" }
-            end
-
-            [format_storey_filter_part(from), format_storey_filter_part(to)].compact.uniq
-          end
-
-          def parse_storey_filter_part(value)
-            match = value.to_s.strip.upcase.match(/\A([FB])(\d{1,2})\z/)
-            return nil unless match
-
-            level = [[match[2].to_i, 1].max, 99].min
-            { kind: match[1], level: level }
-          end
-
-          def format_storey_filter_part(part)
-            "#{part[:kind]}#{format('%02d', part[:level])}"
           end
 
           def selected_cell_space
@@ -609,44 +555,6 @@ module ULOL
               cell_space = find_cell_space_for_entity(entity)
               result << cell_space if cell_space&.valid?
             end
-          end
-
-          def selected_cell_spaces_snapshot(cell_spaces)
-            {
-              mode: 'cell_spaces',
-              cell_space_count: cell_spaces.length,
-              classification: common_cell_space_classification(cell_spaces),
-              classification_locked: cell_space_type_change_locked_by_tag?(cell_spaces),
-              storey: multi_cell_space_storey_value(cell_spaces),
-              storey_editable: !common_cell_space_type(cell_spaces).nil?,
-              storey_range_allowed: storey_range_allowed_for_cell_spaces(cell_spaces)
-            }
-          end
-
-          def empty_edit_mode_snapshot
-            {
-              mode: 'empty',
-              cell_type_counts: cell_type_counts_snapshot,
-              state_count: @states.count { |state| state&.valid? },
-              total_transition_count: @transitions.count { |transition| transition&.valid? }
-            }
-          end
-
-          def cell_type_counts_snapshot
-            CellSpaceType::LABELS.map do |type, label|
-              {
-                label: label,
-                count: @cell_spaces.count { |cell_space| cell_space&.valid? && cell_space.cell_type == type }
-              }
-            end
-          end
-
-          def common_cell_space_classification(cell_spaces)
-            classifications = cell_spaces.map do |cell_space|
-              CellSpaceCategory.selection_value(cell_space.cell_type, cell_space.category_code)
-            end.uniq
-
-            classifications.length == 1 ? classifications.first : nil
           end
 
           def common_cell_space_type(cell_spaces)
@@ -675,45 +583,6 @@ module ULOL
             value.to_s.split('~', 2).first
           end
 
-          def selected_solid_groups_snapshot
-            jobs = selected_cell_space_conversion_jobs
-            return nil if jobs.empty?
-
-            {
-              mode: 'solid_groups',
-              solid_group_count: jobs.length,
-              classification: solid_groups_classification(jobs),
-              classification_locked: solid_groups_classification_locked_by_tag?(jobs)
-            }
-          end
-
-          def solid_groups_classification(groups)
-            tag_classification = common_tag_classification(groups)
-            return tag_classification unless tag_classification.nil?
-
-            CellSpaceCategory.selection_value(
-              CellSpaceType::GENERAL,
-              CellSpaceCategory.default_for(CellSpaceType::GENERAL)[:code]
-            )
-          end
-
-          def solid_groups_classification_locked_by_tag?(groups)
-            !common_tag_classification(groups).nil?
-          end
-
-          def common_tag_classification(groups_or_jobs)
-            targets = groups_or_jobs.map do |item|
-              item.is_a?(Hash) ? item[:target] : IndoorCore.tag_cell_space_type_and_category(item)
-            end
-            return nil if targets.empty? || targets.any?(&:nil?)
-
-            classifications = targets.map do |target|
-              CellSpaceCategory.selection_value(target[0], target[1])
-            end.uniq
-
-            classifications.length == 1 ? classifications.first : nil
-          end
-
           def resolved_navigation_semantic_value(cell_space, key)
             NavigationSemanticResolver.resolve(cell_space).public_send(key)
           rescue NavigationSemanticError
@@ -727,24 +596,6 @@ module ULOL
               target = IndoorCore.tag_cell_space_type_and_category(cell_space.sketchup_group)
               target && cell_space.cell_type == target[0] && cell_space.category_code == target[1]
             end
-          end
-
-          def selected_solid_groups
-            selection = Sketchup.active_model&.selection
-            return [] unless selection
-            entities = selection.to_a
-            return [] if entities.empty?
-
-            groups = entities.select { |entity| entity.is_a?(Sketchup::Group) || entity.is_a?(Sketchup::ComponentInstance) }
-            return [] unless groups.length == entities.length
-
-            solid_groups = groups.select do |group|
-              group&.valid? &&
-                group.respond_to?(:manifold?) &&
-                group.manifold? &&
-                find_cell_space_for_entity(group).nil?
-            end
-            solid_groups.length == groups.length ? solid_groups : []
           end
 
           def selected_cell_space_conversion_jobs
@@ -822,14 +673,14 @@ module ULOL
 
           def copy_conversion_job_to_model_root(job)
             source = job[:source]
-            copy = (@model || Sketchup.active_model).entities.add_instance(source.definition, job[:transformation])
-            copy = copy.to_group if source.is_a?(Sketchup::Group) && copy.respond_to?(:to_group)
-            copy.make_unique if source.is_a?(Sketchup::Group) && copy.respond_to?(:make_unique)
-            copy.name = source.name if copy.respond_to?(:name=) && source.respond_to?(:name)
-            copy.material = source.material if copy.respond_to?(:material=) && source.respond_to?(:material)
-            copy.layer = source.layer if copy.respond_to?(:layer=) && source.respond_to?(:layer)
-            copy.visible = source.visible? if copy.respond_to?(:visible=) && source.respond_to?(:visible?)
-            copy
+            EntityCopyHelper.copy_instance(
+              source: source,
+              target_entities: (@model || Sketchup.active_model).entities,
+              transformation: job[:transformation],
+              convert_to_group: :source_group,
+              make_unique: :source_group,
+              copy_attributes: [:name, :material, :layer, :visible]
+            )
           end
 
           def cleanup_empty_conversion_ancestors(job)

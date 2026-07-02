@@ -188,12 +188,6 @@ module ULOL
             end
           end
 
-          def root_entity_removed(entity_id)
-            return if @erasing || @relocating_entity
-
-            IndoorCore::Logger.puts "[IndoorGML] Root entity removed: entity_id=#{entity_id}"
-          end
-
           def primal_entity_added(entity)
             return if @relocating_entity
             unless indoor_gml_entity?(entity)

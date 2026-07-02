@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../../utils/geometry/polygon2d_public_api'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -152,7 +154,7 @@ module ULOL
           def self.point_in_face?(point, face, axis, tolerance)
             polygon = Utils::Geometry.project_points_for_axis(face[:points], axis)
             point_2d = Utils::Geometry.project_points_for_axis([point], axis).first
-            Utils::Geometry.send(:point_in_polygon?, point_2d, polygon, tolerance)
+            Utils::Geometry.point_in_polygon_2d?(point_2d, polygon, tolerance)
           end
           private_class_method :point_in_face?
 

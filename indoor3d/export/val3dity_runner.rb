@@ -1,10 +1,16 @@
 # frozen_string_literal: true
 
 require 'fileutils'
-require 'fiddle'
 require 'json'
 require 'rbconfig'
 require 'rexml/document'
+
+require_relative 'val3dity_process_adapter'
+require_relative 'val3dity_report_schema'
+require_relative 'val3dity_report_renderer'
+require_relative 'val3dity_overlap_recheck_policy'
+require_relative 'val3dity_run_orchestration'
+require_relative '../utils/geometry/polygon2d_public_api'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -14,25 +20,11 @@ module ULOL
         class Val3dityRunner
           VENDOR_ROOT = File.expand_path('../assets/vendor/val3dity-windows-x64-v2.2.0', __dir__)
           WINDOWS_ONLY_MESSAGE = 'Val3dity validity check is currently supported only on Windows because the bundled runtime is val3dity-windows-x64-v2.2.0.'
-          CREATE_NO_WINDOW       = 0x08000000
-          STARTF_USESTDHANDLES   = 0x00000100
-          HANDLE_FLAG_INHERIT    = 0x00000001
-          WAIT_OBJECT_0          = 0
-          WAIT_TIMEOUT           = 258
-          STILL_ACTIVE           = 259
-          STDOUT_READ_BUFFER_SIZE = 4096
-          TERMINATE_EXIT_CODE    = 1
           TERMINATE_WAIT_MS      = 200
           DEFAULT_OVERLAP_TOL    = 0.5
           STRICT_OVERLAP_TOL     = -1
           OVERLAP_RECHECK_TOLERANCE = Utils::Geometry::DEFAULT_TOLERANCE
           OVERLAP_RECHECK_TOLERANCE_MM = OVERLAP_RECHECK_TOLERANCE * 25.4
-          OVERLAP_RECHECK_VOLUME_TOLERANCE = OVERLAP_RECHECK_TOLERANCE**3
-          OVERLAP_RECHECK_REPORT_KEY = 'indoorgml_modeler_overlap_recheck'
-          STRICT_VALIDITY_KEY = 'strict_val3dity_validity'
-          EXTENSION_VALIDITY_KEY = 'extension_policy_validity'
-          VALIDATION_STATUS_KEY = 'indoorgml_modeler_validation_status'
-          STRICT_ERRORS_REPORT_KEY = 'indoorgml_modeler_strict_errors'
           OVERLAP_RECHECK_NUMERIC_EPSILON = OVERLAP_RECHECK_TOLERANCE * 0.01
 
           attr_reader :report_json_path, :report_html_path
@@ -78,507 +70,8 @@ module ULOL
               @valid == true
             end
 
-            def failed?
-              @valid == false && @error.nil?
-            end
-
             def error?
               !@error.nil?
-            end
-          end
-
-          class Val3dityProcessSession
-            attr_reader :exit_code
-
-            def initialize(args:, current_dir:)
-              @args = args
-              @current_dir = current_dir
-              @process_handle = 0
-              @thread_handle = 0
-              @process_id = nil
-              @stdout_read = 0
-              @stdout_write = 0
-              @reader_thread = nil
-              @progress_queue = Queue.new
-              @finished = false
-              @output_finished = false
-              @exit_code = nil
-              @terminated = false
-              @closed = false
-            end
-
-            def start(total_states:, total_transitions:)
-              @stdout_read, @stdout_write = create_stdout_pipe
-
-              startup_info = build_startup_info(@stdout_write)
-              process_info = [0, 0, 0, 0].pack('Q<Q<L<L<')
-
-              command = wide_string(@args.map { |arg| command_quote(arg) }.join(' '))
-              current_dir = wide_string(@current_dir)
-
-              created = create_process_w.call(
-                0, command, 0, 0,
-                1,
-                CREATE_NO_WINDOW,
-                0, current_dir,
-                startup_info, process_info
-              )
-              raise "CreateProcessW failed: #{Fiddle.last_error}" if created == 0
-
-              @process_handle, @thread_handle, @process_id = process_info.unpack('Q<Q<L<')
-
-              close_handle.call(@stdout_write)
-              @stdout_write = 0
-
-              start_reader_thread(total_states: total_states, total_transitions: total_transitions)
-            end
-
-            def finished?
-              return true if @finished
-
-              result = wait_for_single_object.call(@process_handle, 0)
-              if result == WAIT_TIMEOUT
-                return mark_finished_from_output if @output_finished
-
-                return false
-              end
-
-              if result == WAIT_OBJECT_0
-                @exit_code = get_process_exit_code
-                @finished = true
-                return true
-              end
-
-              return mark_finished_from_output if @output_finished
-
-              IndoorCore::Logger.puts "[IndoorGML] WaitForSingleObject returned #{result}; waiting for val3dity stdout EOF"
-              false
-            end
-
-            def pop_progress
-              @progress_queue.pop(true)
-            rescue ThreadError
-              nil
-            end
-
-            def join_reader
-              @reader_thread&.join(1.0)
-            end
-
-            def terminated?
-              @terminated == true
-            end
-
-            def close
-              return if @closed
-
-              close_handle.call(@stdout_write) if @stdout_write.to_i.positive?
-              close_handle.call(@stdout_read) if @stdout_read.to_i.positive?
-              close_handle.call(@thread_handle) if @thread_handle.to_i.positive?
-              close_handle.call(@process_handle) if @process_handle.to_i.positive?
-
-              @stdout_write = @stdout_read = @thread_handle = @process_handle = 0
-              @closed = true
-            end
-
-            def terminate(wait_ms: TERMINATE_WAIT_MS)
-              return if @closed
-              return close if @process_handle.to_i <= 0
-
-              unless finished?
-                ok = terminate_process.call(@process_handle, TERMINATE_EXIT_CODE)
-                IndoorCore::Logger.puts "[IndoorGML] TerminateProcess failed: #{Fiddle.last_error}" if ok == 0
-                wait_result = wait_ms.to_i.positive? ? wait_for_single_object.call(@process_handle, wait_ms.to_i) : WAIT_TIMEOUT
-                kill_process_tree if wait_ms.to_i.positive? && wait_result == WAIT_TIMEOUT
-              end
-
-              @terminated = true
-              @finished = true
-              @exit_code = TERMINATE_EXIT_CODE
-              join_reader if wait_ms.to_i.positive?
-            rescue StandardError => e
-              @progress_queue << {
-                percent: nil,
-                phase: 'val3dity process',
-                message: "terminate failed: #{e.class}: #{e.message}",
-                current: nil
-              }
-            ensure
-              close
-            end
-
-            private
-
-            def create_stdout_pipe
-              sa = [24, 0, 1].pack('L<x4Q<L<')
-              read_ptr = [0].pack('Q<')
-              write_ptr = [0].pack('Q<')
-
-              ok = create_pipe.call(read_ptr, write_ptr, sa, 0)
-              raise "CreatePipe failed: #{Fiddle.last_error}" if ok == 0
-
-              read_handle = read_ptr.unpack1('Q<')
-              write_handle = write_ptr.unpack1('Q<')
-
-              ok = set_handle_information.call(read_handle, HANDLE_FLAG_INHERIT, 0)
-              raise "SetHandleInformation failed: #{Fiddle.last_error}" if ok == 0
-
-              [read_handle, write_handle]
-            end
-
-            def build_startup_info(stdout_write)
-              [
-                104,
-                0,
-                0,
-                0,
-                0, 0, 0, 0,
-                0, 0,
-                0,
-                STARTF_USESTDHANDLES,
-                0,
-                0,
-                0,
-                0,
-                stdout_write,
-                stdout_write
-              ].pack('L<x4Q<Q<Q<L<L<L<L<L<L<L<L<S<Sx4Q<Q<Q<Q<')
-            end
-
-            def start_reader_thread(total_states:, total_transitions:)
-              parser = Val3dityOutputProgress.new(
-                @progress_queue,
-                total_states: total_states,
-                total_transitions: total_transitions
-              )
-
-              @reader_thread = Thread.new do
-                begin
-                  read_process_output { |chunk| parser.feed(chunk) }
-                  parser.finish
-                rescue StandardError => e
-                  @progress_queue << {
-                    percent: nil,
-                    phase: 'val3dity output',
-                    message: "stdout read failed: #{e.class}: #{e.message}",
-                    current: nil
-                  }
-                ensure
-                  @output_finished = true
-                end
-              end
-            end
-
-            def mark_finished_from_output
-              @exit_code ||= begin
-                code = get_process_exit_code
-                code == STILL_ACTIVE ? 0 : code
-              rescue StandardError
-                0
-              end
-              @finished = true
-              true
-            end
-
-            def read_process_output
-              buffer = "\0" * STDOUT_READ_BUFFER_SIZE
-              bytes_read_ptr = [0].pack('L<')
-
-              loop do
-                bytes_read_ptr[0, 4] = [0].pack('L<')
-
-                ok = read_file.call(@stdout_read, buffer, STDOUT_READ_BUFFER_SIZE, bytes_read_ptr, 0)
-                bytes_read = bytes_read_ptr.unpack1('L<')
-                break if ok == 0 || bytes_read == 0
-
-                chunk = buffer.byteslice(0, bytes_read)
-                yield chunk if chunk && !chunk.empty?
-              end
-            end
-
-            def get_process_exit_code
-              ptr = [0].pack('L<')
-              ok = get_exit_code_process.call(@process_handle, ptr)
-              raise "GetExitCodeProcess failed: #{Fiddle.last_error}" if ok == 0
-
-              ptr.unpack1('L<')
-            end
-
-            def kernel32
-              @kernel32 ||= Fiddle.dlopen('kernel32')
-            end
-
-            def create_pipe
-              @create_pipe ||= Fiddle::Function.new(
-                kernel32['CreatePipe'],
-                [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_LONG],
-                Fiddle::TYPE_INT
-              )
-            end
-
-            def set_handle_information
-              @set_handle_information ||= Fiddle::Function.new(
-                kernel32['SetHandleInformation'],
-                [Fiddle::TYPE_VOIDP, Fiddle::TYPE_LONG, Fiddle::TYPE_LONG],
-                Fiddle::TYPE_INT
-              )
-            end
-
-            def create_process_w
-              @create_process_w ||= Fiddle::Function.new(
-                kernel32['CreateProcessW'],
-                [
-                  Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP,
-                  Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP,
-                  Fiddle::TYPE_INT, Fiddle::TYPE_LONG,
-                  Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP,
-                  Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP
-                ],
-                Fiddle::TYPE_INT
-              )
-            end
-
-            def read_file
-              @read_file ||= Fiddle::Function.new(
-                kernel32['ReadFile'],
-                [
-                  Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_LONG,
-                  Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP
-                ],
-                Fiddle::TYPE_INT
-              )
-            end
-
-            def wait_for_single_object
-              @wait_for_single_object ||= Fiddle::Function.new(
-                kernel32['WaitForSingleObject'],
-                [Fiddle::TYPE_VOIDP, Fiddle::TYPE_LONG],
-                Fiddle::TYPE_LONG
-              )
-            end
-
-            def get_exit_code_process
-              @get_exit_code_process ||= Fiddle::Function.new(
-                kernel32['GetExitCodeProcess'],
-                [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
-                Fiddle::TYPE_INT
-              )
-            end
-
-            def close_handle
-              @close_handle ||= Fiddle::Function.new(
-                kernel32['CloseHandle'],
-                [Fiddle::TYPE_VOIDP],
-                Fiddle::TYPE_INT
-              )
-            end
-
-            def terminate_process
-              @terminate_process ||= Fiddle::Function.new(
-                kernel32['TerminateProcess'],
-                [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-                Fiddle::TYPE_INT
-              )
-            end
-
-            def kill_process_tree
-              return unless @process_id.to_i.positive?
-
-              system('taskkill', '/PID', @process_id.to_s, '/T', '/F')
-            rescue StandardError => e
-              IndoorCore::Logger.puts "[IndoorGML] taskkill fallback failed: #{e.class}: #{e.message}"
-            end
-
-            def command_quote(value)
-              %("#{value.to_s.gsub('"', '\"')}")
-            end
-
-            def wide_string(value)
-              "#{value}\x00".encode('UTF-16LE')
-            end
-          end
-
-          class Val3dityOutputProgress
-            PHASE_WEIGHTS = {
-              xsd:          [0.00, 0.02],
-              primitive:    [0.02, 0.07],
-              xlinks:       [0.07, 0.10],
-              overlap:      [0.10, 0.44],
-              dual_vertex:  [0.44, 0.49],
-              primal_dual:  [0.49, 1.00]
-            }.freeze
-
-            def initialize(queue, total_states:, total_transitions:)
-              @queue = queue
-              @total_states = total_states
-              @total_transitions = total_transitions
-              @buffer = +''
-              @phase = :xsd
-              @primitive_done = 0
-              @dual_done = 0
-              @link_done = 0
-              @xlinks_emitted = false
-              @last_ratio = 0.0
-              @last_emit_at = Time.at(0)
-            end
-
-            def feed(chunk)
-              text = decode_chunk(chunk)
-              @buffer << text
-
-              while (index = @buffer.index("\n"))
-                line = @buffer.slice!(0..index).strip
-                parse_line(line) unless line.empty?
-              end
-            end
-
-            def finish
-              parse_line(@buffer.strip) unless @buffer.strip.empty?
-              @phase = :finished
-              emit(force: true, ratio_override: 1.0, message: 'val3dity finished')
-            end
-
-            private
-
-            def parse_line(line)
-              case line
-              when /XSD|schema/i
-                @phase = :xsd
-                emit(force: true, message: 'Validating IndoorGML schema')
-              when /======== Validating Primitive ========/
-                @phase = :primitive
-                emit(force: true, message: 'Validating CellSpace solids')
-              when /^id:\s+solid_(cell_[^\s]+)/
-                emit(current: Regexp.last_match(1), message: "Geometry #{Regexp.last_match(1)}")
-              when /^========= VALID =========/
-                if @phase == :primitive
-                  @primitive_done += 1
-                  emit(message: "Geometry validated #{@primitive_done}")
-                end
-              when /XLink/i
-                @phase = :xlinks
-                @xlinks_emitted = true
-                emit(force: true, message: 'Checking XLink references')
-              when /^--- Overlapping tests between Cells ---/
-                emit_xlinks_checkpoint
-                @phase = :overlap
-                emit(force: true, ratio_override: phase_start(:overlap), message: 'Checking CellSpace overlaps')
-              when /^--- Constructing Nef Polyhedra ---/
-                emit(force: true, ratio_override: phase_ratio(:overlap, 0.30), message: 'Constructing Nef polyhedra')
-              when /^--- Constructing AABB tree ---/
-                emit(force: true, ratio_override: phase_ratio(:overlap, 0.60), message: 'Constructing AABB tree')
-              when /^--- Testing intersections between Nefs ---/
-                emit(force: true, ratio_override: phase_ratio(:overlap, 0.90), message: 'Testing cell intersections')
-              when /^======== Validating Dual Vertex/
-                @phase = :dual_vertex
-                emit(force: true, ratio_override: phase_start(:dual_vertex), message: 'Checking State points inside CellSpaces')
-              when /^Cell \(.*\) id=(cell_[^\s]+)\s+--> ok/
-                @dual_done += 1
-                emit(current: Regexp.last_match(1), message: "Dual vertex #{@dual_done}")
-              when /^======== Validating Primal-Dual links/
-                @phase = :primal_dual
-                emit(force: true, ratio_override: phase_start(:primal_dual), message: 'Checking primal/dual adjacencies')
-              when /^Cells id=(cell_[^\s]+) id=(cell_[^\s]+)/
-                @link_done += 1
-                emit(
-                  current: "#{Regexp.last_match(1)} -> #{Regexp.last_match(2)}",
-                  message: "Primal-dual link #{@link_done}"
-                )
-              when /ERROR\s+(\d+):\s+([A-Z0-9_]+)/
-                emit(
-                  force: true,
-                  message: "ERROR #{Regexp.last_match(1)}: #{Regexp.last_match(2)}"
-                )
-              end
-            end
-
-            def emit(force: false, ratio_override: nil, current: nil, message: nil)
-              return unless force || Time.now - @last_emit_at >= 0.10
-
-              ratio = ratio_override || current_ratio
-              ratio = bounded_ratio(ratio, @last_ratio, 1.0)
-              @last_ratio = ratio
-              @last_emit_at = Time.now
-
-              @queue << {
-                percent: (ratio * 100.0).round,
-                phase: phase_label,
-                message: message,
-                current: current
-              }
-            end
-
-            def current_ratio
-              case @phase
-              when :xsd
-                phase_ratio(:xsd, 0.50)
-              when :primitive
-                start, finish = PHASE_WEIGHTS[:primitive]
-                bounded_ratio(start + @primitive_done * 0.01, start, finish)
-              when :xlinks
-                phase_ratio(:xlinks, 0.50)
-              when :overlap
-                phase_ratio(:overlap, 0.50)
-              when :dual_vertex
-                start, finish = PHASE_WEIGHTS[:dual_vertex]
-                if @total_states > 0
-                  bounded_ratio(start + (@dual_done.to_f / @total_states) * (finish - start), start, finish)
-                else
-                  bounded_ratio(start + @dual_done * 0.001, start, finish)
-                end
-              when :primal_dual
-                start, finish = PHASE_WEIGHTS[:primal_dual]
-                if @total_transitions > 0
-                  bounded_ratio(start + (@link_done.to_f / @total_transitions) * (finish - start), start, finish)
-                else
-                  bounded_ratio(start + @link_done * 0.002, start, finish)
-                end
-              else
-                0.0
-              end
-            end
-
-            def bounded_ratio(value, min, max)
-              [[value, min].max, max].min
-            end
-
-            def phase_start(phase)
-              PHASE_WEIGHTS.fetch(phase).first
-            end
-
-            def phase_ratio(phase, local_ratio)
-              start, finish = PHASE_WEIGHTS.fetch(phase)
-              bounded_ratio(start + (finish - start) * local_ratio, start, finish)
-            end
-
-            def phase_label
-              case @phase
-              when :xsd then '1. XSD Validation'
-              when :primitive then '2. Geometry Primal Cells'
-              when :xlinks then '3. XLinks Errors'
-              when :overlap then '4. Overlap Primal Cells'
-              when :dual_vertex then '5. Dual Vertex Inside Cells'
-              when :primal_dual then "6. Adjacency in Primal / Dual (#{@link_done} / #{@total_transitions})"
-              when :finished then 'Finished'
-              else 'Starting val3dity'
-              end
-            end
-
-            def emit_xlinks_checkpoint
-              return if @xlinks_emitted
-
-              @phase = :xlinks
-              @xlinks_emitted = true
-              emit(force: true, ratio_override: phase_ratio(:xlinks, 0.95), message: 'Checking XLink references')
-            end
-
-            def decode_chunk(chunk)
-              text = chunk.dup.force_encoding('UTF-8')
-              return text if text.valid_encoding?
-
-              chunk.force_encoding('CP949').encode('UTF-8', invalid: :replace, undef: :replace)
-            rescue EncodingError
-              chunk.force_encoding('UTF-8').encode('UTF-8', invalid: :replace, undef: :replace)
             end
           end
 
@@ -630,99 +123,32 @@ module ULOL
               total_states: totals[:states],
               total_transitions: totals[:transitions]
             )
-            self.class.register_session(session)
 
-            completed = false
-
-            UI.start_timer(0.1, true) do
-              next false if completed
-
-              drain_val3dity_progress(session, progress, progress_step)
-              true
-            end
-
-            UI.start_timer(0.2, true) do
-              next false if completed
-              next true unless session.finished?
-
-              result = nil
-              exit_code = nil
-              build_report_later = false
-              begin
-                if session.terminated?
-                  result = Val3dityResult.new(
-                    valid: false,
-                    report: nil,
-                    report_json_path: @report_json_path,
-                    report_html_path: @report_html_path,
-                    error: RuntimeError.new('val3dity validation was canceled.')
-                  )
-                else
-                  session.join_reader
-                  drain_val3dity_progress(session, progress, progress_step)
-
-                  progress&.complete(progress_step)
-                  exit_code = session.exit_code
-                  build_report_later = true
-                end
-              rescue StandardError => e
-                result = Val3dityResult.new(
-                  valid: false,
-                  report: nil,
-                  report_json_path: @report_json_path,
-                  report_html_path: @report_html_path,
-                  error: e
+            Val3dityRunOrchestration.new(
+              session: session,
+              progress: progress,
+              progress_step: progress_step,
+              callback: callback,
+              register_session: ->(active_session) { self.class.register_session(active_session) },
+              unregister_session: ->(active_session) { self.class.unregister_session(active_session) },
+              drain_progress: ->(active_session, active_progress, active_step) { drain_val3dity_progress(active_session, active_progress, active_step) },
+              build_result: lambda { |exit_code|
+                build_result_after_process(
+                  exit_code,
+                  progress,
+                  recheck_step: recheck_step,
+                  report_step: report_step,
+                  report_view_step: report_view_step
                 )
-              ensure
-                session.close
-                self.class.unregister_session(session)
-                completed = true
-              end
-
-              if build_report_later
-                UI.start_timer(0.05, false) do
-                  begin
-                    result = build_result_after_process(
-                      exit_code,
-                      progress,
-                      recheck_step: recheck_step,
-                      report_step: report_step,
-                      report_view_step: report_view_step
-                    )
-                  rescue StandardError => e
-                    result = Val3dityResult.new(
-                      valid: false,
-                      report: nil,
-                      report_json_path: @report_json_path,
-                      report_html_path: @report_html_path,
-                      error: e
-                    )
-                  end
-
-                  callback.call(result)
-                  false
-                end
-              else
-                callback.call(result) if result
-              end
-              false
-            end
-
-            session
+              },
+              error_result: ->(error) { error_result(error) }
+            ).start
           rescue StandardError => e
             self.class.unregister_session(session) if session
             session&.close
             raise unless callback
 
-            callback.call(
-              Val3dityResult.new(
-                valid: false,
-                report: nil,
-                report_json_path: @report_json_path,
-                report_html_path: @report_html_path,
-                error: e
-              )
-            )
+            callback.call(error_result(e))
           end
 
           private
@@ -797,6 +223,16 @@ module ULOL
             end
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] val3dity progress drain failed: #{e.class}: #{e.message}"
+          end
+
+          def error_result(error)
+            Val3dityResult.new(
+              valid: false,
+              report: nil,
+              report_json_path: @report_json_path,
+              report_html_path: @report_html_path,
+              error: error
+            )
           end
 
           def build_result_after_process(exit_code, progress = nil, recheck_step: :extension_recheck, report_step: :report, report_view_step: nil)
@@ -884,525 +320,14 @@ module ULOL
           def prepare_html_report(raw_report)
             FileUtils.rm_rf(@report_dir)
             FileUtils.mkdir_p(@report_dir)
-            File.write(@report_html_path, fallback_report_html(raw_report), encoding: 'UTF-8')
-          end
-
-          def fallback_report_html(raw_report)
-            <<~HTML
-              <!doctype html>
-              <html>
-              <head>
-                <meta charset="utf-8">
-                <title>val3dity report</title>
-                <style>
-                  :root {
-                    color-scheme: dark;
-                    font-family: Arial, sans-serif;
-                    color: #d8d6d0;
-                    background: #1c1c1b;
-                    scrollbar-gutter: stable;
-                  }
-                  * { box-sizing: border-box; }
-                  html { user-select: none; -webkit-user-select: none; }
-                  body { margin: 0; padding: 10px 0; background: #1c1c1b; }
-                  main { max-width: 450px; margin: 0 auto; padding: 0 10px; }
-                  .hero { padding: 10px 0 16px; border-bottom: 1px solid #373633; }
-                  .hero-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-                  .hero-title { display: flex; align-items: center; gap: 7px; min-height: 31px; }
-                  .top-meta { margin-bottom: 12px; color: #85827b; font-size: 11px; line-height: 1.55; }
-                  .eyebrow { margin-bottom: 6px; color: #85827b; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-                  h1 { margin: 0; color: #e8e6e0; font-size: 22px; line-height: 1.15; }
-                  .result-message { margin: 8px 0 0; color: #b9b6ae; font-size: 12px; line-height: 1.5; }
-                  .result-badge { display: inline-flex; align-items: center; padding: 5px 13px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
-                  .result-badge.valid { color: #3ebc71; background: #12261a; border: 1px solid #327a4f; }
-                  .result-badge.invalid { color: #f97066; background: #351918; border: 1px solid #7a2e2a; }
-                  .fix-action { display: inline-flex; align-items: center; padding: 5px 13px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; color: #8ab4f8; background: #17243b; border: 1px solid #315d9b; cursor: pointer; }
-                  .fix-action:hover { background: #1d2d4a; border-color: #4278c7; }
-                  .result-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
-                  .result-metric { min-height: 64px; padding: 11px 14px; background: #242422; border-radius: 8px; }
-                  .metric-value { display: block; color: #3ebc71; font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-                  .metric-value.info { color: #8ab4f8; }
-                  .metric-label { display: block; margin-top: 5px; color: #85827b; font-size: 11px; }
-                  .section { padding-top: 18px; margin-top: 0; }
-                  .section + .section { border-top: 1px solid #373633; margin-top: 18px; }
-                  .section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
-                  h2 { margin: 0; color: #a8a49d; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
-                  .section-count { color: #85827b; font-size: 12px; white-space: nowrap; }
-                  .params-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-                  .param { min-width: 0; padding: 10px 12px; background: #242422; border-radius: 8px; }
-                  .param-label { color: #85827b; font-family: Consolas, Monaco, monospace; font-size: 10px; letter-spacing: .03em; }
-                  .param-value { margin-top: 3px; color: #e8e6e0; font-family: Consolas, Monaco, monospace; font-size: 13px; overflow-wrap: anywhere; }
-                  .filter-row { display: flex; gap: 7px; margin-bottom: 10px; overflow-x: auto; padding-bottom: 2px; }
-                  .filter-btn { flex: 0 0 auto; padding: 8px 13px; border: 1px solid #4a4945; border-radius: 8px; background: transparent; color: #b9b6ae; cursor: pointer; font-size: 12px; font-weight: 700; }
-                  .filter-btn.active { border-color: #327a4f; background: #12261a; color: #d8d6d0; }
-                  .report-actions { display: flex; justify-content: flex-end; }
-                  .report-action { min-width: 92px; padding: 8px 12px; border: 1px solid #5a5953; border-radius: 7px; background: #343432; color: #e8e6e0; cursor: pointer; font-size: 12px; font-weight: 700; white-space: nowrap; }
-                  .report-action:hover { background: #3d3d3a; border-color: #6a6962; }
-                  .recheck-list { display: grid; gap: 8px; }
-                  .recheck-row { background: #242422; border: 1px solid #2f2e2b; border-radius: 8px; }
-                  .recheck-row.focused { border-color: #ef4444; box-shadow: inset 0 0 0 1px rgba(239, 68, 68, .55); }
-                  .recheck-row.c100.focused { border-color: #f87171; box-shadow: inset 0 0 0 1px rgba(248, 113, 113, .6); }
-                  .recheck-row.c200.focused { border-color: #74d66f; box-shadow: inset 0 0 0 1px rgba(116, 214, 111, .6); }
-                  .recheck-row.c300.focused { border-color: #f6b45b; box-shadow: inset 0 0 0 1px rgba(246, 180, 91, .6); }
-                  .recheck-row.c400.focused { border-color: #22d3ee; box-shadow: inset 0 0 0 1px rgba(34, 211, 238, .6); }
-                  .recheck-row.c500.focused { border-color: #bbf7b8; box-shadow: inset 0 0 0 1px rgba(187, 247, 184, .6); }
-                  .recheck-row.c600.focused { border-color: #d6a36d; box-shadow: inset 0 0 0 1px rgba(214, 163, 109, .6); }
-                  .recheck-row.c700.focused { border-color: #f472b6; box-shadow: inset 0 0 0 1px rgba(244, 114, 182, .6); }
-                  .recheck-row.c900.focused { border-color: #fef08a; box-shadow: inset 0 0 0 1px rgba(254, 240, 138, .6); }
-                  .recheck-row summary { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 8px 9px; cursor: pointer; list-style: none; }
-                  .recheck-row summary::-webkit-details-marker { display: none; }
-                  .recheck-row[open] summary { border-bottom: 1px solid #33322f; }
-                  .recheck-summary-main { display: flex; align-items: center; gap: 7px; min-width: 0; }
-                  .recheck-summary-main .cell-name { font-size: 10px; }
-                  .summary-distance { color: #e8e6e0; font-family: Consolas, Monaco, monospace; font-size: 11px; text-align: right; white-space: nowrap; }
-                  .summary-distance sup { font-size: 8px; line-height: 0; }
-                  .recheck-detail { display: grid; gap: 6px; padding: 8px 9px 9px; }
-                  .code-badge { display: inline-flex; align-items: center; padding: 3px 7px; border-radius: 5px; background: #1d355d; color: #8ab4f8; font-family: Consolas, Monaco, monospace; font-size: 11px; font-weight: 700; }
-                  .code-badge.c704 { background: #443815; color: #e5c567; }
-                  .code-badge.c100 { background: #451a1a; color: #fca5a5; }
-                  .code-badge.c200 { background: #16351a; color: #86efac; }
-                  .code-badge.c300 { background: #44270d; color: #fdba74; }
-                  .code-badge.c400 { background: #083344; color: #67e8f9; }
-                  .code-badge.c500 { background: #1b3a1b; color: #bbf7d0; }
-                  .code-badge.c600 { background: #3b2716; color: #d6a36d; }
-                  .code-badge.c700 { background: #4a1735; color: #f9a8d4; }
-                  .code-badge.c900 { background: #3f3b12; color: #fef08a; }
-                  .status-badge { color: #3ebc71; font-size: 11px; font-weight: 700; text-transform: uppercase; }
-                  .status-badge.kept, .status-badge.inconclusive { color: #f9b84e; }
-                  .cell-pair { display: grid; gap: 3px; min-width: 0; color: #d8d6d0; font-family: Consolas, Monaco, monospace; font-size: 11px; line-height: 1.35; }
-                  .cell-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; user-select: text; -webkit-user-select: text; }
-                  .reason { color: #a8a49d; font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
-                  .empty { color: #85827b; margin: 0; font-size: 12px; }
-                  details.section > summary.section-head { cursor: pointer; list-style: none; }
-                  details.section > summary.section-head::-webkit-details-marker { display: none; }
-                  .toggle-triangle { display: inline-block; width: 0; height: 0; margin-right: 8px; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 7px solid #85827b; transition: transform .12s ease-out; }
-                  details[open] > summary .toggle-triangle { transform: rotate(90deg); }
-                  code { background: #242422; border-radius: 4px; padding: 1px 4px; color: #d8d6d0; }
-                  @media (min-width: 700px) {
-                    body { padding: 20px 0; }
-                    main { max-width: 540px; padding: 0 10px; }
-                  }
-                </style>
-              </head>
-              <body>
-                <main>
-                  #{report_top_meta_section(raw_report)}
-                  #{report_result_hero_section(raw_report)}
-                  #{report_summary_section(raw_report)}
-                  #{report_issue_sections(raw_report)}
-                  #{report_filter_script}
-                </main>
-              </body>
-              </html>
-            HTML
-          end
-
-          def report_result_hero_section(raw_report)
-            final_errors = final_error_count(raw_report)
-            validity = final_errors.zero?
-            suppressed = overlap_recheck_suppressed_count(raw_report)
-            kept = overlap_recheck_kept_count(raw_report)
-            inconclusive = overlap_recheck_inconclusive_count(raw_report)
-            primitive_value = "#{valid_count(raw_report['primitives_overview'])} / #{total_count(raw_report['primitives_overview'])}"
-            badge_class = validity ? 'result-badge valid' : 'result-badge invalid'
-            fix_button = validity ? '' : '<button class="fix-action" type="button" onclick="if (window.sketchup && sketchup.fixValidationErrors) { sketchup.fixValidationErrors(); }">FIX</button>'
-            message = result_hero_message(raw_report, final_errors, suppressed, kept, inconclusive)
-            <<~HTML
-              <section class="hero">
-                <div class="hero-top">
-                  <div>
-                    <div class="eyebrow">IndoorGML · val3dity #{html_escape(raw_report['val3dity_version'] || 'unknown')}</div>
-                    <div class="hero-title">
-                      <span class="#{badge_class}">#{validity ? 'VALID' : 'INVALID'}</span>
-                      #{fix_button}
-                    </div>
-                    <p class="result-message">#{html_escape(message)}</p>
-                  </div>
-                  <div class="report-actions">
-                    <button class="report-action" type="button" onclick="if (window.sketchup && sketchup.createGml) { sketchup.createGml(); }">Export GML</button>
-                  </div>
-                </div>
-                <div class="result-metrics">
-                  <div class="result-metric">
-                    <span class="metric-value">#{final_errors}</span>
-                    <span class="metric-label">최종 오류</span>
-                  </div>
-                  <div class="result-metric">
-                    <span class="metric-value">#{suppressed}</span>
-                    <span class="metric-label">억제됨</span>
-                  </div>
-                  <div class="result-metric">
-                    <span class="metric-value">#{kept}</span>
-                    <span class="metric-label">유지됨</span>
-                  </div>
-                  <div class="result-metric">
-                    <span class="metric-value info">#{html_escape(primitive_value)}</span>
-                    <span class="metric-label">유효 Primitive</span>
-                  </div>
-                </div>
-              </section>
-            HTML
-          end
-
-          def report_top_meta_section(raw_report)
-            <<~HTML
-              <div class="top-meta">
-                <div>#{html_escape(report_checked_at(raw_report['time']))}</div>
-                <div>strict: #{html_escape(raw_report[STRICT_VALIDITY_KEY] == true ? 'valid' : 'invalid')} · extension policy: #{html_escape(raw_report[EXTENSION_VALIDITY_KEY] == true ? 'valid' : 'invalid')} · features #{valid_count(raw_report['features_overview'])}/#{total_count(raw_report['features_overview'])}</div>
-              </div>
-            HTML
-          end
-
-          def report_metadata_line(raw_report)
-            parts = [
-              "val3dity #{raw_report['val3dity_version'] || 'unknown'}",
-              raw_report['input_file_type'] || 'IndoorGML',
-              report_checked_at(raw_report['time'])
-            ].reject { |part| part.to_s.strip.empty? || part == '-' }
-            <<~HTML
-              <p class="report-meta-line">#{html_escape(parts.join(' · '))}</p>
-            HTML
-          end
-
-          def report_error_kinds_section(raw_report)
-            rows = error_kind_rows(raw_report)
-            body = if rows.empty?
-                     '<p class="empty">No errors.</p>'
-                   else
-                     <<~HTML
-                       <table>
-                         <thead><tr><th>Code</th><th>Error</th><th>Count</th></tr></thead>
-                         <tbody>
-                           #{rows.map { |row| "<tr><td><code>#{html_escape(row[:code])}</code></td><td>#{html_escape(row[:description])}</td><td>#{row[:count]}</td></tr>" }.join}
-                         </tbody>
-                       </table>
-                     HTML
-                   end
-            <<~HTML
-              <section class="card">
-                <h2>Error 종류</h2>
-                #{body}
-              </section>
-            HTML
-          end
-
-          def report_issue_sections(raw_report)
-            [
-              report_error_items_section(
-                error_item_rows(raw_report),
-                title: 'ERROR',
-                raw_report: raw_report
-              ),
-              report_overlap_recheck_section(
-                overlap_recheck_suppressed_rows(raw_report),
-                title: 'Suppressed',
-                collapsed: true
-              )
-            ].join
-          end
-
-          def report_error_items_section(rows, title:, raw_report: nil)
-            return '' if rows.empty?
-
-            <<~HTML
-              <section class="section">
-                <div class="section-head">
-                  <h2>#{html_escape(title)}</h2>
-                  <span class="section-count">#{rows.length}건</span>
-                </div>
-                #{report_filter_row(rows)}
-                <div class="recheck-list">
-                  #{error_item_rows_html(rows, raw_report)}
-                </div>
-              </section>
-            HTML
-          end
-
-          def report_summary_section(raw_report)
-            <<~HTML
-              <section class="section">
-                <div class="section-head">
-                  <h2>파라미터</h2>
-                </div>
-                <div class="params-grid">
-                  #{parameter_html('snap_tol', raw_report.dig('parameters', 'snap_tol') || '-')}
-                  #{parameter_html('overlap_tol', raw_report.dig('parameters', 'overlap_tol') || '-')}
-                  #{parameter_html('planarity_d2p', raw_report.dig('parameters', 'planarity_d2p_tol') || '-')}
-                  #{parameter_html('planarity_n', raw_report.dig('parameters', 'planarity_n_tol') || '-')}
-                </div>
-              </section>
-            HTML
-          end
-
-          def parameter_html(label, value)
-            <<~HTML
-              <div class="param">
-                <div class="param-label">#{html_escape(label)}</div>
-                <div class="param-value">#{html_escape(value)}</div>
-              </div>
-            HTML
-          end
-
-          def metric_html(label, value, class_name = nil)
-            value_class = ['value', class_name].compact.join(' ')
-            <<~HTML
-              <div class="metric">
-                <div class="label">#{html_escape(label)}</div>
-                <div class="#{value_class}">#{html_escape(value)}</div>
-              </div>
-            HTML
-          end
-
-          def result_hero_message(raw_report, final_errors, suppressed, kept, inconclusive)
-            total_rechecks = suppressed + kept + inconclusive
-            return 'strict val3dity 오류가 없습니다.' if raw_report[VALIDATION_STATUS_KEY] == 'exact_valid'
-            if %w[extension_policy_valid tolerance_valid].include?(raw_report[VALIDATION_STATUS_KEY])
-              return "strict val3dity 오류는 있었지만 최종 오류가 없습니다. Overlap 재검사 후보 #{suppressed}건이 extension policy로 억제되었습니다."
-            end
-            return "실제 수정이 필요한 오류가 #{final_errors}건 남아 있습니다." if total_rechecks.zero?
-
-            "실제 수정이 필요한 오류가 #{final_errors}건 남아 있습니다. Overlap 재검사 후보 #{total_rechecks}건 중 #{suppressed}건은 억제, #{kept}건은 유지, #{inconclusive}건은 불명확입니다."
-          end
-
-          def validation_status_label(raw_report)
-            case raw_report[VALIDATION_STATUS_KEY]
-            when 'exact_valid'
-              'Exact Valid'
-            when 'extension_policy_valid', 'tolerance_valid'
-              'Extension Policy Valid'
-            else
-              'Invalid'
-            end
-          end
-
-          def final_error_count(raw_report)
-            error_item_rows(raw_report).length
-          end
-
-          def overlap_recheck_suppressed_count(raw_report)
-            overlap_recheck_rows(raw_report).count { |row| row['tolerated'] == true }
-          end
-
-          def overlap_recheck_kept_count(raw_report)
-            overlap_recheck_rows(raw_report).count { |row| row['status'] == 'kept' || (row['status'].nil? && row['tolerated'] != true) }
-          end
-
-          def overlap_recheck_inconclusive_count(raw_report)
-            overlap_recheck_rows(raw_report).count { |row| row['status'] == 'inconclusive' }
-          end
-
-          def overlap_recheck_rows(raw_report)
-            Array(raw_report[OVERLAP_RECHECK_REPORT_KEY])
-          end
-
-          def overlap_recheck_suppressed_rows(raw_report)
-            overlap_recheck_rows(raw_report).select { |row| row['tolerated'] == true }
-          end
-
-          def report_checked_at(value)
-            text = value.to_s.strip
-            return '-' if text.empty?
-
-            text.gsub('대한민국 표준시', 'KST')
-          end
-
-          def report_overlap_recheck_section(rows, title:, collapsed: false)
-            return '' if rows.empty?
-
-            body = <<~HTML
-              #{report_filter_row(rows)}
-              <div class="recheck-list">
-                #{rows.map { |row| overlap_recheck_row_html(row) }.join}
-              </div>
-            HTML
-            return <<~HTML if collapsed
-              <details class="section">
-                <summary class="section-head">
-                  <h2><span class="toggle-triangle" aria-hidden="true"></span>#{html_escape(title)}</h2>
-                  <span class="section-count">#{rows.length}건</span>
-                </summary>
-                #{body}
-              </details>
-            HTML
-
-            <<~HTML
-              <section class="section">
-                <div class="section-head">
-                  <h2>#{html_escape(title)}</h2>
-                  <span class="section-count">#{rows.length}건</span>
-                </div>
-                #{body}
-              </section>
-            HTML
-          end
-
-          def overlap_recheck_row_html(row)
-            cells = Array(row['cells'])
-            code = row['code'].to_s
-            distance = format_report_distance_mm(row['distance_mm'])
-            <<~HTML
-              <details class="recheck-row #{error_code_color_class(code)}" data-code="#{html_escape(code)}">
-                <summary>
-                  <span class="code-badge #{error_code_color_class(code)}">#{html_escape(code)}</span>
-                  <span class="recheck-summary-main">
-                    <span class="cell-name" title="#{html_escape(cells.join(' / '))}">#{html_escape(compact_cell_pair(cells))}</span>
-                  </span>
-                  <span class="summary-distance">#{distance}</span>
-                </summary>
-                <div class="recheck-detail">
-                  <div class="cell-pair">
-                    <span class="cell-name" title="#{html_escape(cells[0] || '-')}">#{html_escape(cells[0] || '-')}</span>
-                    <span class="cell-name" title="#{html_escape(cells[1] || '-')}">#{html_escape(cells[1] || '-')}</span>
-                  </div>
-                  <div class="reason">#{html_escape(compact_overlap_reason(row['reason']))}</div>
-                </div>
-              </details>
-            HTML
-          end
-
-          def report_filter_row(rows)
-            counts = Hash.new(0)
-            rows.each { |row| counts[report_row_code(row)] += 1 }
-            buttons = counts.keys.sort_by { |code| [error_code_number(code), code.to_s] }.map do |code|
-              <<~HTML
-                <button class="filter-btn" type="button" data-filter="#{html_escape(code)}">#{html_escape(code)} (#{counts[code]})</button>
-              HTML
-            end.join
-
-            <<~HTML
-              <div class="filter-row" aria-label="Error code filters">
-                <button class="filter-btn active" type="button" data-filter="all">전체 #{rows.length}</button>
-                #{buttons}
-              </div>
-            HTML
-          end
-
-          def report_row_code(row)
-            (row.respond_to?(:[]) && (row['code'] || row[:code])).to_s
-          end
-
-          def error_code_color_class(code)
-            number = error_code_number(code)
-            return 'c100' if (100..199).include?(number)
-            return 'c200' if (200..299).include?(number)
-            return 'c300' if (300..399).include?(number)
-            return 'c400' if (400..499).include?(number)
-            return 'c500' if (500..599).include?(number)
-            return 'c600' if (600..699).include?(number)
-            return 'c700' if (700..799).include?(number)
-            return 'c900' if (900..999).include?(number)
-
-            ''
-          end
-
-          def report_filter_script
-            <<~HTML
-              <script>
-                document.querySelectorAll('.validation-error-row').forEach(function(row) {
-                  row.addEventListener('click', function(event) {
-                    event.stopPropagation();
-                    var cells = (row.getAttribute('data-cells') || '').split(',').filter(Boolean);
-                    var states = (row.getAttribute('data-states') || '').split(',').filter(Boolean);
-                    var transitions = (row.getAttribute('data-transitions') || '').split(',').filter(Boolean);
-                    var code = row.getAttribute('data-code') || '';
-                    document.querySelectorAll('.validation-error-row.focused').forEach(function(item) {
-                      item.classList.remove('focused');
-                    });
-                    row.classList.add('focused');
-                    if ((cells.length > 0 || states.length > 0 || transitions.length > 0) && typeof sketchup !== 'undefined' && sketchup.focusValidationCells) {
-                      sketchup.focusValidationCells(cells, code, states, transitions);
-                    }
-                  });
-                });
-                document.addEventListener('click', function(event) {
-                  if (event.target.closest('.validation-error-row') || event.target.closest('.filter-btn')) return;
-                  document.querySelectorAll('.validation-error-row.focused').forEach(function(item) {
-                    item.classList.remove('focused');
-                  });
-                  if (typeof sketchup !== 'undefined' && sketchup.focusValidationCells) {
-                    sketchup.focusValidationCells([], '', [], []);
-                  }
-                });
-                document.querySelectorAll('.section .filter-btn').forEach(function(button) {
-                  button.addEventListener('click', function() {
-                    var section = button.closest('.section');
-                    if (!section) return;
-                    var filter = button.getAttribute('data-filter');
-                    section.querySelectorAll('.filter-btn').forEach(function(item) {
-                      item.classList.remove('active');
-                    });
-                    button.classList.add('active');
-                    section.querySelectorAll('.recheck-row').forEach(function(row) {
-                      row.style.display = filter === 'all' || row.getAttribute('data-code') === filter ? '' : 'none';
-                    });
-                  });
-                });
-                document.addEventListener('dragstart', function(event) {
-                  if (!event.target.closest('.cell-name')) {
-                    event.preventDefault();
-                  }
-                });
-                document.addEventListener('keydown', function(event) {
-                  if ((event.ctrlKey || event.metaKey) && String(event.key).toLowerCase() === 'a') {
-                    event.preventDefault();
-                    event.stopPropagation();
-                  }
-                }, true);
-                document.addEventListener('selectionchange', function() {
-                  var selection = window.getSelection && window.getSelection();
-                  if (!selection || selection.rangeCount === 0) return;
-
-                  var anchor = selection.anchorNode && selection.anchorNode.nodeType === Node.ELEMENT_NODE ?
-                    selection.anchorNode :
-                    selection.anchorNode && selection.anchorNode.parentElement;
-                  var focus = selection.focusNode && selection.focusNode.nodeType === Node.ELEMENT_NODE ?
-                    selection.focusNode :
-                    selection.focusNode && selection.focusNode.parentElement;
-                  if ((anchor && anchor.closest('.cell-name')) && (focus && focus.closest('.cell-name'))) return;
-
-                  selection.removeAllRanges();
-                });
-              </script>
-            HTML
-          end
-
-          def format_report_distance_mm(value)
-            return '-' if value.nil?
-
-            format_report_scientific(value, 'mm')
-          end
-
-          def format_report_scientific(value, unit_html)
-            text = format('%.3e', value.to_f)
-            mantissa, exponent = text.split('e')
-            exponent_value = exponent.to_i
-            "#{html_escape(mantissa)} × 10<sup>#{html_escape(exponent_value)}</sup> #{unit_html}"
-          end
-
-          def compact_cell_pair(cells)
-            first = cells[0].to_s
-            second = cells[1].to_s
-            return '-' if first.empty? && second.empty?
-
-            "#{first} / #{second}"
-          end
-
-          def compact_overlap_reason(reason)
-            text = reason.to_s
-            return 'SketchUp Boolean에서 유효한 intersection group 미반환' if text.include?('NO_VALID_INTERSECTION_GROUP_RETURNED')
-            return 'SketchUp Boolean에서 유효한 intersection 재현' if text.include?('REPRODUCED_AS_VALID_SKETCHUP_INTERSECTION')
-            return '공유면 인접 거리 허용 오차 이내' if text.include?('near-coplanar shared-face')
-
-            text
+            File.write(@report_html_path, Val3dityReportRenderer.new.render(raw_report), encoding: 'UTF-8')
           end
 
           def recheck_overlap_errors!(raw_report, progress: nil, progress_step: nil)
             @overlap_recheck_pair_analysis = {}
             @overlap_recheck_701_decisions = {}
-            raw_report.delete(OVERLAP_RECHECK_REPORT_KEY)
-            results = []
             tracker = {
-              total: count_recheckable_overlap_errors(raw_report),
+              total: overlap_recheck_policy.count_recheckable_errors(raw_report),
               processed: 0,
               progress: progress,
               progress_step: progress_step
@@ -1413,60 +338,24 @@ module ULOL
               phase: 'Collect 701/704 errors'
             )
 
-            remove_rechecked_errors!(
-              Array(raw_report['dataset_errors']),
-              results,
-              raw_report['input_file'],
-              tracker: tracker
-            )
-
-            Array(raw_report['features']).each do |feature|
-              remove_rechecked_errors!(Array(feature['errors']), results, feature['id'], tracker: tracker)
-              Array(feature['primitives']).each do |primitive|
-                remove_rechecked_errors!(
-                  Array(primitive['errors']),
-                  results,
-                  feature['id'],
-                  primitive['id'],
-                  tracker: tracker
+            overlap_recheck_policy.apply!(
+              raw_report,
+              on_result: lambda { |result|
+                tracker[:processed] = tracker[:processed].to_i + 1
+                emit_overlap_recheck_progress(tracker, result)
+              },
+              before_refresh: lambda { |_results|
+                emit_overlap_recheck_progress(
+                  tracker,
+                  message: 'Applying extension validation policy',
+                  phase: 'Apply extension policy'
                 )
-              end
-            end
-            emit_overlap_recheck_progress(
-              tracker,
-              message: 'Applying extension validation policy',
-              phase: 'Apply extension policy'
-            )
-
-            raw_report[OVERLAP_RECHECK_REPORT_KEY] = results unless results.empty?
-            refresh_rechecked_validity!(raw_report)
+              }
+            ) { |code, cell_id1, cell_id2| recheck_cell_pair(code, cell_id1, cell_id2) }
           end
 
           def preserve_strict_validation!(raw_report)
-            raw_report[STRICT_VALIDITY_KEY] = raw_report['validity'] == true
-            raw_report[STRICT_ERRORS_REPORT_KEY] = error_item_rows(raw_report).map do |row|
-              {
-                'scope' => row[:scope],
-                'item' => row[:item],
-                'code' => row[:code],
-                'description' => row[:description]
-              }
-            end
-          end
-
-          def count_recheckable_overlap_errors(raw_report)
-            count = Array(raw_report['dataset_errors']).count { |error| recheckable_overlap_error?(error) }
-            Array(raw_report['features']).each do |feature|
-              count += Array(feature['errors']).count { |error| recheckable_overlap_error?(error) }
-              Array(feature['primitives']).each do |primitive|
-                count += Array(primitive['errors']).count { |error| recheckable_overlap_error?(error) }
-              end
-            end
-            count
-          end
-
-          def recheckable_overlap_error?(error)
-            [701, 704].include?(error_code_number(error && error['code']))
+            overlap_recheck_policy.preserve_strict_validation!(raw_report)
           end
 
           def emit_overlap_recheck_progress(tracker, result = nil, message: nil, phase: nil)
@@ -1494,71 +383,6 @@ module ULOL
             )
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] overlap recheck progress failed: #{e.class}: #{e.message}"
-          end
-
-          def remove_rechecked_errors!(errors, results, *context, tracker: nil)
-            errors.delete_if do |error|
-              result = overlap_error_recheck_result(error, *context)
-              next false unless result
-
-              results << result
-              if tracker
-                tracker[:processed] = tracker[:processed].to_i + 1
-                emit_overlap_recheck_progress(tracker, result)
-              end
-              result['tolerated'] == true
-            end
-          end
-
-          def refresh_rechecked_validity!(raw_report)
-            Array(raw_report['features']).each do |feature|
-              Array(feature['primitives']).each do |primitive|
-                primitive['validity'] = Array(primitive['errors']).empty?
-              end
-
-              feature['validity'] = Array(feature['errors']).empty? &&
-                                    Array(feature['primitives']).all? { |primitive| primitive['validity'] == true }
-            end
-
-            raw_report['validity'] = error_item_rows(raw_report).empty?
-            raw_report[EXTENSION_VALIDITY_KEY] = raw_report['validity'] == true
-            raw_report[VALIDATION_STATUS_KEY] = if raw_report[STRICT_VALIDITY_KEY] == true
-                                                  'exact_valid'
-                                                elsif raw_report[EXTENSION_VALIDITY_KEY] == true
-                                                  'extension_policy_valid'
-                                                else
-                                                  'invalid'
-                                                end
-            refresh_overview_counts!(raw_report, 'features_overview', Array(raw_report['features']))
-            refresh_overview_counts!(
-              raw_report,
-              'primitives_overview',
-              Array(raw_report['features']).flat_map { |feature| Array(feature['primitives']) }
-            )
-            raw_report['all_errors'] = error_item_rows(raw_report).map { |row| row[:code] }.uniq
-          end
-
-          def refresh_overview_counts!(raw_report, key, items)
-            overview = Array(raw_report[key])
-            return if overview.empty?
-
-            overview.each do |row|
-              type = row['type']
-              matching = items.select { |item| type.to_s.empty? || item['type'] == type }
-              row['total'] = matching.length
-              row['valid'] = matching.count { |item| item['validity'] == true }
-            end
-          end
-
-          def overlap_error_recheck_result(error, *context)
-            code = error_code_number(error['code'])
-            return nil unless [701, 704].include?(code)
-
-            text = ([error] + context).map { |value| value.is_a?(Hash) ? value.to_json : value.to_s }.join(' ')
-            cell_ids = text.scan(/cell_[A-Za-z0-9_.-]+/).uniq
-            return overlap_recheck_result(code, [], false, 'cell pair not found in val3dity error') if cell_ids.length < 2
-
-            recheck_cell_pair(code, cell_ids[0], cell_ids[1])
           end
 
           def recheck_cell_pair(code, cell_id1, cell_id2)
@@ -1767,46 +591,6 @@ module ULOL
             end
           end
 
-          def match_intersection_components_to_slabs(components, candidates)
-            components.map do |component|
-              candidates.filter_map { |candidate| component_slab_match(component, candidate) }
-                        .max_by { |match| [match[:candidate][:overlap_area].to_f, -match[:normal_thickness].to_f] }
-            end
-          end
-
-          def component_slab_match(component, candidate)
-            samples = component[:samples]
-            return nil if samples.empty?
-
-            normal = candidate[:normal]
-            normal_values = samples.map { |point| plane_constant(normal, point) }
-            thickness = normal_values.max - normal_values.min
-            return nil if thickness > OVERLAP_RECHECK_TOLERANCE + OVERLAP_RECHECK_NUMERIC_EPSILON
-
-            min_plane, max_plane = [candidate[:plane1], candidate[:plane2]].minmax
-            return nil unless normal_values.all? do |value|
-              value >= min_plane - OVERLAP_RECHECK_NUMERIC_EPSILON &&
-                value <= max_plane + OVERLAP_RECHECK_NUMERIC_EPSILON
-            end
-
-            return nil unless samples.all? do |point|
-              point_inside_candidate_projection?(point, candidate)
-            end
-
-            volume_limit = (candidate[:overlap_area].to_f + Utils::Geometry.area_tolerance(OVERLAP_RECHECK_TOLERANCE)) *
-                           (candidate[:penetration_depth].to_f + OVERLAP_RECHECK_NUMERIC_EPSILON)
-            return nil if component[:volume].to_f > volume_limit
-
-            { candidate: candidate, normal_thickness: thickness }
-          end
-
-          def point_inside_candidate_projection?(point, candidate)
-            projected = project_point_for_axis(point, candidate[:axis])
-            candidate[:overlap_polygons].any? do |polygon|
-              Utils::Geometry.send(:point_in_polygon?, projected, polygon, OVERLAP_RECHECK_TOLERANCE)
-            end
-          end
-
           def coplanar_overlap_polygons(face1, face2, tolerance)
             return { area: 0.0, polygons: [] } if face1[:triangles].empty? || face2[:triangles].empty?
 
@@ -1817,10 +601,10 @@ module ULOL
               polygon1 = Utils::Geometry.project_points_for_axis(triangle1, axis)
               face2[:triangles].each do |triangle2|
                 polygon2 = Utils::Geometry.project_points_for_axis(triangle2, axis)
-                overlap = Utils::Geometry.send(:clip_polygon, polygon1, polygon2)
+                overlap = Utils::Geometry.intersect_polygons_2d(polygon1, polygon2)
                 next if overlap.length < 3
 
-                area = Utils::Geometry.send(:polygon_area_2d, overlap).abs
+                area = Utils::Geometry.polygon_area_2d_value(overlap).abs
                 next if area <= Utils::Geometry.area_tolerance(tolerance)
 
                 polygons << overlap
@@ -1914,17 +698,6 @@ module ULOL
             nil
           end
 
-          def intersection_components(faces)
-            face_components(faces).map do |component_faces|
-              samples = intersection_component_samples(component_faces)
-              {
-                faces: component_faces,
-                samples: samples,
-                volume: component_signed_volume(component_faces).abs
-              }
-            end
-          end
-
           def face_components(faces)
             remaining = faces.each_with_object({}) { |face, memo| memo[face] = true }
             components = []
@@ -1946,73 +719,6 @@ module ULOL
               components << component
             end
             components
-          end
-
-          def intersection_component_samples(faces)
-            points = []
-            faces.each do |face|
-              face.vertices.each { |vertex| points << vertex.position }
-              face.edges.each do |edge|
-                vertices = edge.vertices
-                next unless vertices.length == 2
-
-                points << Geom::Point3d.new(
-                  (vertices[0].position.x + vertices[1].position.x) / 2.0,
-                  (vertices[0].position.y + vertices[1].position.y) / 2.0,
-                  (vertices[0].position.z + vertices[1].position.z) / 2.0
-                )
-              end
-              face_mesh_triangles_from_face(face).each do |triangle|
-                points << Geom::Point3d.new(
-                  triangle.map(&:x).sum / 3.0,
-                  triangle.map(&:y).sum / 3.0,
-                  triangle.map(&:z).sum / 3.0
-                )
-              end
-            end
-            unique_points(points)
-          end
-
-          def face_mesh_triangles_from_face(face)
-            mesh = face.mesh
-            points = (1..mesh.count_points).map { |index| mesh.point_at(index) }
-            (1..mesh.count_polygons).flat_map do |index|
-              polygon = mesh.polygon_at(index).map { |point_index| points[point_index.abs - 1] }.compact
-              next [] if polygon.length < 3
-
-              polygon.length == 3 ? [polygon] : triangulate_points(polygon)
-            end
-          end
-
-          def unique_points(points)
-            seen = {}
-            points.each_with_object([]) do |point, unique|
-              key = [point.x, point.y, point.z].map { |value| (value / OVERLAP_RECHECK_NUMERIC_EPSILON).round }.join(',')
-              next if seen[key]
-
-              seen[key] = true
-              unique << point
-            end
-          end
-
-          def component_signed_volume(faces)
-            faces.sum do |face|
-              points = face.outer_loop.vertices.map(&:position)
-              next 0.0 if points.length < 3
-
-              origin = points.first
-              (1...(points.length - 1)).sum do |index|
-                signed_tetrahedron_volume(origin, points[index], points[index + 1])
-              end
-            end
-          end
-
-          def signed_tetrahedron_volume(point1, point2, point3)
-            (
-              (point1.x * ((point2.y * point3.z) - (point2.z * point3.y))) -
-              (point1.y * ((point2.x * point3.z) - (point2.z * point3.x))) +
-              (point1.z * ((point2.x * point3.y) - (point2.y * point3.x)))
-            ) / 6.0
           end
 
           def overlap_recheck_missing_pair_reason(code)
@@ -2039,17 +745,6 @@ module ULOL
             ).to_f
           end
 
-          def project_point_for_axis(point, axis)
-            case axis
-            when :x
-              [point.y.to_f, point.z.to_f]
-            when :y
-              [point.x.to_f, point.z.to_f]
-            else
-              [point.x.to_f, point.y.to_f]
-            end
-          end
-
           def face_centroid(face)
             points = Array(face[:points])
             return nil if points.empty?
@@ -2062,23 +757,24 @@ module ULOL
           end
 
           def overlap_recheck_result(code, cell_ids, tolerated, reason, status: nil, distance: nil, overlap_area: nil, normal_thickness: nil, actual_overlap_volume: nil, intersection_component_count: nil)
-            {
-              'code' => code,
-              'cells' => cell_ids,
-              'tolerated' => tolerated,
-              'status' => status || (tolerated ? 'suppressed' : 'kept'),
-              'reason' => reason,
-              'tolerance_mm' => OVERLAP_RECHECK_TOLERANCE_MM,
-              'distance_mm' => distance.nil? ? nil : distance.to_f * 25.4,
-              'normal_thickness_mm' => normal_thickness.nil? ? nil : normal_thickness.to_f * 25.4,
-              'overlap_area_mm2' => overlap_area.nil? ? nil : overlap_area.to_f * 25.4 * 25.4,
-              'actual_overlap_volume_mm3' => actual_overlap_volume.nil? ? nil : actual_overlap_volume.to_f * 25.4 * 25.4 * 25.4,
-              'intersection_component_count' => intersection_component_count
-            }
+            overlap_recheck_policy.recheck_result(
+              code,
+              cell_ids,
+              tolerated,
+              reason,
+              status: status,
+              distance: distance,
+              overlap_area: overlap_area,
+              normal_thickness: normal_thickness,
+              actual_overlap_volume: actual_overlap_volume,
+              intersection_component_count: intersection_component_count
+            )
           end
 
-          def error_code_number(code)
-            code.to_s[/\d+/].to_i
+          def overlap_recheck_policy
+            @overlap_recheck_policy ||= Val3dityOverlapRecheckPolicy.new(
+              tolerance_mm: OVERLAP_RECHECK_TOLERANCE_MM
+            )
           end
 
           def export_geometry_snapshot
@@ -2273,134 +969,6 @@ module ULOL
                                         expanded_name == local_name || expanded_name.split(':').last == local_name
             end
             nil
-          end
-
-          def error_kind_rows(raw_report)
-            counts = Hash.new { |hash, key| hash[key] = { code: key, description: 'UNKNOWN', count: 0 } }
-            error_item_rows(raw_report).each do |row|
-              item = counts[row[:code]]
-              item[:description] = row[:description]
-              item[:count] += 1
-            end
-            counts.values.sort_by { |row| row[:code].to_s }
-          end
-
-          def error_item_rows(raw_report)
-            rows = []
-            Array(raw_report['dataset_errors']).each do |error|
-              rows << error_row('Dataset', raw_report['input_file'], error)
-            end
-            Array(raw_report['features']).each do |feature|
-              Array(feature['errors']).each do |error|
-                rows << error_row('Feature', error['id'].to_s.empty? ? feature['id'] : error['id'], error)
-              end
-              Array(feature['primitives']).each do |primitive|
-                Array(primitive['errors']).each do |error|
-                  rows << error_row('Primitive', primitive['id'], error)
-                end
-              end
-            end
-            rows
-          end
-
-          def error_row(scope, item, error)
-            {
-              scope: scope,
-              item: item,
-              code: error['code'],
-              description: error['description'] || error['type'] || 'UNKNOWN',
-              raw: error
-            }
-          end
-
-          def error_item_rows_html(rows, raw_report = nil)
-            sorted = rows.sort_by { |row| [row[:code].to_s, row[:description].to_s, error_item_label(row).to_s] }
-            sorted.map { |row| error_item_card_html(row, raw_report) }.join
-          end
-
-          def error_item_card_html(row, raw_report = nil)
-            code = row[:code].to_s
-            recheck_row = matching_error_recheck_row(row, raw_report)
-            distance = recheck_row ? format_report_recheck_measure(recheck_row) : ''
-            refs = report_error_row_refs(row)
-            <<~HTML
-              <details class="recheck-row validation-error-row #{error_code_color_class(code)}" data-code="#{html_escape(code)}" data-cells="#{html_escape(refs[:cells].join(','))}" data-states="#{html_escape(refs[:states].join(','))}" data-transitions="#{html_escape(refs[:transitions].join(','))}">
-                <summary>
-                  <span class="code-badge #{error_code_color_class(code)}">#{html_escape(code)}</span>
-                  <span class="recheck-summary-main">
-                    <span class="cell-name" title="#{html_escape(error_item_label(row))}">#{html_escape(error_item_label(row))}</span>
-                  </span>
-                  <span class="summary-distance">#{distance}</span>
-                </summary>
-                <div class="recheck-detail">
-                  <div class="reason">#{html_escape(row[:description])}</div>
-                  #{recheck_row ? "<div class=\"reason\">#{html_escape(compact_overlap_reason(recheck_row['reason']))}</div>" : ''}
-                </div>
-              </details>
-            HTML
-          end
-
-          def matching_error_recheck_row(row, raw_report)
-            code = error_code_number(row[:code])
-            return nil unless [701, 704].include?(code)
-            return nil unless raw_report
-
-            cells = report_error_row_refs(row)[:cells]
-            return nil if cells.length < 2
-
-            overlap_recheck_rows(raw_report).find do |recheck_row|
-              next false unless error_code_number(recheck_row['code']) == code
-              next false if recheck_row['tolerated'] == true
-
-              Array(recheck_row['cells']).map(&:to_s).sort == cells.sort
-            end
-          end
-
-          def format_report_recheck_measure(row)
-            return format_report_distance_mm(row['distance_mm']) unless row['distance_mm'].nil?
-            return format_report_scientific(row['actual_overlap_volume_mm3'], 'mm<sup>3</sup>') unless row['actual_overlap_volume_mm3'].nil?
-
-            ''
-          end
-
-          def report_error_row_refs(row)
-            text = [row[:item], row[:description], row[:raw]].map do |value|
-              value.is_a?(Hash) ? value.to_json : value.to_s
-            end.join(' ')
-            {
-              cells: text.scan(/cell_[A-Za-z0-9_.-]+/).uniq,
-              states: text.scan(/state_[A-Za-z0-9_.-]+/).uniq,
-              transitions: text.scan(/transition_[A-Za-z0-9_.-]+/).uniq
-            }
-          end
-
-          def error_item_label(row)
-            item = row[:item].to_s
-            cells = item.scan(/cell_[A-Za-z0-9_.-]+/)
-            return cells.uniq.join(' and ') if cells.length >= 2
-
-            row[:scope].to_s == 'Dataset' ? item : "#{row[:scope]} #{item}"
-          end
-
-          def html_escape(value)
-            value.to_s
-                 .gsub('&', '&amp;')
-                 .gsub('<', '&lt;')
-                 .gsub('>', '&gt;')
-                 .gsub('"', '&quot;')
-                 .gsub("'", '&#39;')
-          end
-
-          def total_count(overview)
-            Array(overview).sum { |item| item['total'].to_i }
-          end
-
-          def valid_count(overview)
-            Array(overview).sum { |item| item['valid'].to_i }
-          end
-
-          def invalid_count(overview)
-            total_count(overview) - valid_count(overview)
           end
 
           def decode_report_content(content)

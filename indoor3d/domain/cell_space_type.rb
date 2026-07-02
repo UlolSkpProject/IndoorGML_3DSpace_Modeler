@@ -45,9 +45,6 @@ module ULOL
           NAVIGABLE_TYPES.include?(value)
         end
 
-        def self.selectable_labels
-          SELECTABLE_TYPES.map { |type| label(type) }
-        end
       end
 
     end
