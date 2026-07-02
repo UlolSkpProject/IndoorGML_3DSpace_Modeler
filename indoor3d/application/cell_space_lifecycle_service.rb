@@ -46,6 +46,32 @@ module ULOL
           cell_space
         end
 
+        def change_type(cell_space, cell_type:, category_code:)
+          raise ArgumentError, 'Selected entity is not a registered CellSpace' if cell_space.nil?
+          raise ArgumentError, 'CellSpace is no longer valid' unless cell_space.valid?
+
+          cell_space.cell_type = cell_type
+          cell_space.set_category(category_code)
+          call(:name_cell_space_entity, cell_space)
+          call(:apply_cell_space_material, cell_space)
+          call(:write_cell_space_attributes, cell_space)
+          call(:synchronize_adjacency_and_transitions_for_cell_space, cell_space)
+          call(:apply_indoor_lock_policy)
+          cell_space
+        end
+
+        def erase(cell_space, erase_sketchup_group: true)
+          return if cell_space.nil?
+
+          state = cell_space.duality_state
+          call(:erase_transitions_for_state, state)
+          state.erase! if state&.valid?
+          call(:unregister_state, state)
+          cell_space.erase! if erase_sketchup_group && cell_space.valid?
+          call(:unregister_cell_space, cell_space)
+          call(:erase_adjacency_for_cell_space, cell_space)
+        end
+
         private
 
         def call(name, *args, **kwargs)
