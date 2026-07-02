@@ -9,6 +9,7 @@ module ULOL
         require_relative 'editor_session/lock_policy'
         require_relative 'editor_session/batch_progress'
         require_relative 'editor_session/visibility_controller'
+        require_relative 'editor_session/overlay_controller'
         include LockPolicy
         include BatchProgress
 
@@ -19,9 +20,6 @@ module ULOL
           @indoor_model = indoor_model
           @editing = false
           @editable_entity_ids = {}
-          @overlay = nil
-          @overlay_registered = false
-          @overlay_model = nil
           @dialog = EditModeDialog.new(@indoor_model)
           @previous_active_path = nil
           @editing_active_path_target = nil
@@ -37,6 +35,7 @@ module ULOL
           @validation_focus_hide_rest_previous = nil
           @lock_controller = LockController.new(indoor_model: @indoor_model)
           @visibility_controller = VisibilityController.new
+          @overlay_controller = OverlayController.new(indoor_model: @indoor_model)
         end
 
         def editing?
@@ -625,9 +624,7 @@ module ULOL
         end
 
         def invalidate_overlay_transition_points
-          @overlay&.invalidate_transition_points
-        rescue StandardError => e
-          IndoorCore::Logger.puts "[IndoorGML] Overlay transition cache invalidation failed: #{e.class}: #{e.message}"
+          overlay_controller.invalidate_transition_points
         end
 
         def recover_unlocked_primal_after_transaction(model)
@@ -657,6 +654,10 @@ module ULOL
 
         def visibility_controller
           @visibility_controller ||= VisibilityController.new
+        end
+
+        def overlay_controller
+          @overlay_controller ||= OverlayController.new(indoor_model: @indoor_model)
         end
 
         def with_visibility_update_operation
@@ -762,51 +763,23 @@ module ULOL
         end
 
         def ensure_overlay_registered(model)
-          begin
-            if @overlay_registered && @overlay_model == model
-              set_overlay_enabled(true)
-              return
-            end
-            return unless model.respond_to?(:overlays)
-
-            @overlay ||= EditModeOverlay.new(@indoor_model)
-            remove_stale_overlay_instances(model)
-            model.overlays().add(@overlay)
-            @overlay_registered = true
-            @overlay_model = model
-            set_overlay_enabled(true)
-          rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] Edit mode overlay registration failed: #{e.class}: #{e.message}"
-          end
-        end
-
-        def remove_stale_overlay_instances(model)
-          stale_overlays = []
-          model.overlays().each do |overlay|
-            next unless overlay.overlay_id == EditModeOverlay::OVERLAY_ID
-            next if overlay.equal?(@overlay)
-
-            stale_overlays << overlay
-          end
-          stale_overlays.each { |overlay| model.overlays().remove(overlay) }
+          overlay_controller.ensure_registered(model)
         end
 
         def set_overlay_enabled(enabled)
-          begin
-            return unless @overlay&.valid?()
-
-            @overlay.enabled = enabled
-          rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] Edit mode overlay enable failed: #{e.class}: #{e.message}"
-          end
+          overlay_controller.set_enabled(enabled)
         end
 
         def update_overlay_enabled
-          set_overlay_enabled(@editing || @dual_overlay_visible == true || progress_active?)
+          overlay_controller.update_enabled(
+            editing: @editing,
+            dual_overlay_visible: @dual_overlay_visible,
+            progress_active: progress_active?
+          )
         end
 
         def invalidate_view(model)
-          model.active_view().invalidate() if model&.active_view()
+          overlay_controller.invalidate_view(model)
         end
 
         def model_boolean_attribute(key, default)
