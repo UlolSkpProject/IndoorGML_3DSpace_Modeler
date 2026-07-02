@@ -34,6 +34,7 @@ module ULOL
     require_relative 'application/storey_filter_parser'
     require_relative 'application/storey_filter_options_builder'
     require_relative 'infrastructure/scene/scene_group_guard'
+    require_relative 'infrastructure/scene/active_path_controller'
     require_relative 'infrastructure/scene/editor_session'
     require_relative 'application/feature_registry'
     require_relative 'application/adjacency_service'

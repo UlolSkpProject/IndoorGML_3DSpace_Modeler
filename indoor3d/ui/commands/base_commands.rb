@@ -90,27 +90,15 @@ module ULOL
         end
 
         def active_path_snapshot(model)
-          path = model.active_path()
-          path ? path.dup : nil
+          ActivePathController.new(model).snapshot
         end
 
         def activate_root_context(model)
-          model.close_active() while model.active_path()
+          ActivePathController.new(model).close_to_root
         end
 
         def restore_active_path(model, active_path)
-          begin
-            return unless active_path
-
-            valid_path = active_path.select { |entity| entity&.valid?() }
-            return if valid_path.empty?()
-
-            if model.respond_to?(:active_path=)
-              model.active_path = valid_path
-            end
-          rescue StandardError => e
-            Logger.puts "[IndoorGML] Edit context restore failed: #{e.class}: #{e.message}"
-          end
+          ActivePathController.new(model, logger: Logger).restore(active_path, close_when_nil: false)
         end
 
         def move_groups_to_root_context(model, groups)
