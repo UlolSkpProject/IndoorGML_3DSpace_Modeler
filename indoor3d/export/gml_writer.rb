@@ -20,13 +20,9 @@ module ULOL
             CellSpaceType::ANCHOR => 'navi:AnchorSpace'
           }.freeze
 
-          def initialize(snapshot:, coordinate_unit:, geometry_appender:, state_position:, transition_state1_position:, transition_state2_position:, measure_step: nil)
+          def initialize(snapshot:, coordinate_unit:, measure_step: nil)
             @snapshot = snapshot
             @coordinate_unit = coordinate_unit
-            @geometry_appender = geometry_appender
-            @state_position = state_position
-            @transition_state1_position = transition_state1_position
-            @transition_state2_position = transition_state2_position
             @measure_step = measure_step
           end
 
@@ -110,7 +106,7 @@ module ULOL
             exterior = solid.add_element('gml:exterior')
             shell = exterior.add_element('gml:Shell')
             shell.add_attribute('gml:id', "shell_#{cell_id}")
-            @geometry_appender.call(shell, cell_space, cell_id)
+            append_cell_surfaces(shell, cell_space, cell_id)
             duality = cell.add_element('core:duality')
             duality.add_attribute('xlink:href', internal_href(state_gml_id(cell_space.duality_state)))
             append_navigable_space_codes(cell, cell_space) if tag.start_with?('navi:')
@@ -136,7 +132,7 @@ module ULOL
               point = geometry.add_element('gml:Point')
               point.add_attribute('gml:id', "P#{index}")
               append_local_crs_attributes(point)
-              point.add_element('gml:pos').text = format_point(@state_position.call(state))
+              point.add_element('gml:pos').text = format_point(state.position)
             end
           end
 
@@ -156,8 +152,28 @@ module ULOL
               line = geometry.add_element('gml:LineString')
               line.add_attribute('gml:id', "line_#{transition_gml_id(transition)}")
               append_local_crs_attributes(line)
-              line.add_element('gml:pos').text = format_point(@transition_state1_position.call(transition))
-              line.add_element('gml:pos').text = format_point(@transition_state2_position.call(transition))
+              line.add_element('gml:pos').text = format_point(transition.state1_position)
+              line.add_element('gml:pos').text = format_point(transition.state2_position)
+            end
+          end
+
+          def append_cell_surfaces(shell, cell_space, cell_id)
+            Array(cell_space.surfaces).each_with_index do |surface, index|
+              surface_member = shell.add_element('gml:surfaceMember')
+              polygon = surface_member.add_element('gml:Polygon')
+              polygon.add_attribute('gml:id', "polygon_#{surface.id_hint || index}_#{cell_id}")
+              append_local_crs_attributes(polygon)
+              append_ring(polygon.add_element('gml:exterior'), surface.exterior)
+              Array(surface.interiors).each do |ring|
+                append_ring(polygon.add_element('gml:interior'), ring)
+              end
+            end
+          end
+
+          def append_ring(parent, points)
+            linear_ring = parent.add_element('gml:LinearRing')
+            Array(points).each do |point|
+              linear_ring.add_element('gml:pos').text = format_point(point)
             end
           end
 
