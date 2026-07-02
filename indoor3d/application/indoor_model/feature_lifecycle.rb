@@ -7,37 +7,11 @@ module ULOL
         module FeatureLifecycle
           def convert_single_group_to_cell_space(sketchup_group, cell_type = CellSpaceType::GENERAL, category_code = nil)
             with_indoor_model_operation('IndoorGML Convert Group to CellSpace') do
-              raise ArgumentError, 'Group is already converted to CellSpace' if converted_group?(sketchup_group)
-              cell_type, category_code = IndoorCore.resolve_cell_space_type_and_category(
+              cell_space_lifecycle_service.create_from_group(
                 sketchup_group,
-                cell_type,
-                category_code
+                cell_type: cell_type,
+                category_code: category_code
               )
-              validation = Utils::Geometry.prepare_cell_space_source_group!(sketchup_group)
-              unless validation[:valid]
-                raise ArgumentError, validation[:reason] || 'Invalid CellSpace source geometry'
-              end
-
-              ensure_space_features_groups
-              cell_group = place_cell_group(sketchup_group)
-              cell_space = CellSpace.new(cell_group, cell_type, category_code)
-              cell_space.set_storey(default_storey_name)
-              recenter_cell_space_geometry(
-                cell_group,
-                fixed_z_offset_from_bottom: fixed_state_height_offset(cell_space)
-              )
-              name_cell_space_entity(cell_space)
-              apply_cell_space_material(cell_space)
-              state = cell_space.create_duality_state(nil)
-
-              register_cell_space(cell_space)
-              register_state(state)
-              write_attributes(cell_space)
-              track_cell_space_entity(cell_space.sketchup_group)
-              synchronize_adjacency_and_transitions_for_cell_space(cell_space)
-              apply_indoor_lock_policy()
-
-              cell_space
             end
           end
 
@@ -162,6 +136,27 @@ module ULOL
           end
 
           private
+
+          def cell_space_lifecycle_service
+            @cell_space_lifecycle_service ||= CellSpaceLifecycleService.new(
+              converted_group?: method(:converted_group?),
+              resolve_cell_space_type_and_category: IndoorCore.method(:resolve_cell_space_type_and_category),
+              prepare_cell_space_source_group!: Utils::Geometry.method(:prepare_cell_space_source_group!),
+              ensure_space_features_groups: method(:ensure_space_features_groups),
+              place_cell_group: method(:place_cell_group),
+              default_storey_name: method(:default_storey_name),
+              fixed_state_height_offset: method(:fixed_state_height_offset),
+              recenter_cell_space_geometry: method(:recenter_cell_space_geometry),
+              name_cell_space_entity: method(:name_cell_space_entity),
+              apply_cell_space_material: method(:apply_cell_space_material),
+              register_cell_space: method(:register_cell_space),
+              register_state: method(:register_state),
+              write_attributes: method(:write_attributes),
+              track_cell_space_entity: method(:track_cell_space_entity),
+              synchronize_adjacency_and_transitions_for_cell_space: method(:synchronize_adjacency_and_transitions_for_cell_space),
+              apply_indoor_lock_policy: method(:apply_indoor_lock_policy)
+            )
+          end
 
           def tag_cell_space_type_change_target(cell_space, cell_type, category_code)
             target = IndoorCore.tag_cell_space_type_and_category(cell_space.sketchup_group)

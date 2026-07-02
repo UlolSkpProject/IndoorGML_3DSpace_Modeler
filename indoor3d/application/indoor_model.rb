@@ -10,6 +10,7 @@ module ULOL
         ATTRIBUTE_DICTIONARY_NAME = 'IndoorGml'
         INDOOR_GML_VERSION = '1.0'
 
+        require_relative 'cell_space_lifecycle_service'
         require_relative 'indoor_model/runtime_support.rb'
         require_relative 'indoor_model/scene_groups.rb'
         require_relative 'indoor_model/feature_lifecycle.rb'
