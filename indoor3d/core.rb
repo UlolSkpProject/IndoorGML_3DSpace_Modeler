@@ -44,6 +44,7 @@ module ULOL
     require_relative 'application/indoor_model/observer_routing'
     require_relative 'application/indoor_model/entity_relocation'
     require_relative 'application/indoor_model/primal_normalization'
+    require_relative 'application/indoor_model/edit_mode_selection_projection'
     require_relative 'application/indoor_model/editor_control'
     require_relative 'application/indoor_model'
     require_relative 'export/gml_exporter'
