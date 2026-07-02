@@ -36,19 +36,14 @@ module ULOL
     module IndoorCore
       module IndoorGmlConverter
         class GmlWriterTest < Minitest::Test
-          def test_writer_builds_core_xml_with_geometry_callback_and_graph
+          def test_writer_builds_core_xml_with_snapshot_geometry_and_graph
             state = fake_state('S 1')
-            cell = fake_cell_space('Cell A', :unknown, 'B02', state)
+            cell = fake_cell_space('Cell A', :unknown, 'B02', state, surfaces: [fake_surface])
             state.duality_cell = cell
             snapshot = ExportSnapshot.new(cell_spaces: [cell], transitions: [])
-            geometry_calls = []
             writer = GmlWriter.new(
               snapshot: snapshot,
-              coordinate_unit: { unit: 'm', factor: 0.0254, srs_name: 'urn:test:m' },
-              geometry_appender: proc { |shell, cell_space, cell_id| geometry_calls << [shell.name, cell_space, cell_id] },
-              state_position: proc { |_state| fake_point(1.0, 2.0, 3.0) },
-              transition_state1_position: proc { |_transition| fake_point(0.0, 0.0, 0.0) },
-              transition_state2_position: proc { |_transition| fake_point(0.0, 0.0, 0.0) }
+              coordinate_unit: { unit: 'm', factor: 0.0254, srs_name: 'urn:test:m' }
             )
 
             xml = writer.to_xml
@@ -56,9 +51,9 @@ module ULOL
 
             assert_equal 'IndoorFeatures', doc.root.name
             assert_equal 'IF_001', doc.root.attributes['gml:id']
-            assert_equal [['Shell', cell, 'cell_Cell_A']], geometry_calls
             assert_xpath(doc, '//core:CellSpace[@gml:id="cell_Cell_A"]')
             assert_xpath(doc, '//core:State[@gml:id="state_S_1"]')
+            assert_xpath(doc, '//gml:Polygon[@gml:id="polygon_0_cell_Cell_A"]')
             assert_xpath(doc, '//gml:Point[@srsName="urn:test:m"]')
             assert_includes xml, '0.025399999999999999 0.050799999999999998 0.07619999999999999'
           end
@@ -70,15 +65,11 @@ module ULOL
             cell2 = fake_cell_space('B', CellSpaceType::GENERAL, nil, state2)
             state1.duality_cell = cell1
             state2.duality_cell = cell2
-            transition = fake_transition('T 1', state1, state2)
+            transition = fake_transition('T 1', state1, state2, fake_point(1, 0, 0), fake_point(2, 0, 0))
             snapshot = ExportSnapshot.new(cell_spaces: [cell1, cell2], transitions: [transition])
             writer = GmlWriter.new(
               snapshot: snapshot,
-              coordinate_unit: { unit: 'in', factor: 1.0, srs_name: 'urn:test:in' },
-              geometry_appender: proc { |_shell, _cell_space, _cell_id| nil },
-              state_position: proc { |_state| fake_point(0, 0, 0) },
-              transition_state1_position: proc { |_transition| fake_point(1, 0, 0) },
-              transition_state2_position: proc { |_transition| fake_point(2, 0, 0) }
+              coordinate_unit: { unit: 'in', factor: 1.0, srs_name: 'urn:test:in' }
             )
 
             xml = writer.to_xml
@@ -104,29 +95,43 @@ module ULOL
             }
           end
 
-          def fake_cell_space(id, cell_type, storey, state)
-            Struct.new(
-              :id,
-              :cell_type,
-              :storey,
-              :duality_state,
-              :category_code,
-              :category_label,
-              :navigation_class,
-              :navigation_class_code_space,
-              :navigation_function,
-              :navigation_function_code_space,
-              :navigation_usage,
-              :navigation_usage_code_space
-            ).new(id, cell_type, storey, state, 'Room', 'Room', nil, nil, nil, nil, nil, nil)
+          def fake_cell_space(id, cell_type, storey, state, surfaces: [])
+            ExportSnapshot::CellSpaceSnapshot.new(
+              id: id,
+              cell_type: cell_type,
+              storey: storey,
+              duality_state: state,
+              surfaces: surfaces,
+              category_code: 'Room',
+              category_label: 'Room'
+            )
           end
 
           def fake_state(id)
-            Struct.new(:id, :duality_cell, keyword_init: true).new(id: id, duality_cell: nil)
+            ExportSnapshot::StateSnapshot.new(id: id, duality_cell: nil, position: fake_point(1.0, 2.0, 3.0))
           end
 
-          def fake_transition(id, state1, state2)
-            Struct.new(:id, :state1, :state2).new(id, state1, state2)
+          def fake_transition(id, state1, state2, state1_position, state2_position)
+            ExportSnapshot::TransitionSnapshot.new(
+              id: id,
+              state1: state1,
+              state2: state2,
+              state1_position: state1_position,
+              state2_position: state2_position
+            )
+          end
+
+          def fake_surface
+            ExportSnapshot::SurfaceSnapshot.new(
+              id_hint: 0,
+              exterior: [
+                fake_point(0, 0, 0),
+                fake_point(1, 0, 0),
+                fake_point(0, 1, 0),
+                fake_point(0, 0, 0)
+              ],
+              interiors: []
+            )
           end
 
           def fake_point(x, y, z)

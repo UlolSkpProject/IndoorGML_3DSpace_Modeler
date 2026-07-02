@@ -23,10 +23,12 @@ module ULOL
 
             snapshot = ExportSnapshot.build(indoor_model: indoor_model)
 
-            assert_equal [cell_a, cell_b], snapshot.cell_spaces
-            assert_equal [transition_inside], snapshot.transitions
+            assert_equal %w[cell_1 cell_2], snapshot.cell_spaces.map(&:id)
+            assert_equal ['transition_1'], snapshot.transitions.map(&:id)
             assert snapshot.cell_spaces.frozen?
             assert snapshot.transitions.frozen?
+            refute_same cell_a, snapshot.cell_spaces.first
+            refute_same transition_inside, snapshot.transitions.first
           end
 
           def test_build_uses_requested_sources_when_provided
@@ -41,8 +43,8 @@ module ULOL
               transitions: [requested_transition]
             )
 
-            assert_equal [requested_cell], snapshot.cell_spaces
-            assert_equal [requested_transition], snapshot.transitions
+            assert_equal [requested_cell.id], snapshot.cell_spaces.map(&:id)
+            assert_equal [requested_transition.id], snapshot.transitions.map(&:id)
           end
 
           private
@@ -52,16 +54,27 @@ module ULOL
           end
 
           def fake_cell_space(valid_group:, state_valid:)
-            cell_class = Struct.new(:valid_sketchup_group, :duality_state)
-            state_class = Struct.new(:duality_cell, :valid?)
-            cell = cell_class.new(valid_group ? Object.new : nil, nil)
-            cell.duality_state = state_class.new(cell, state_valid)
+            @cell_index = @cell_index.to_i + 1
+            cell_class = Struct.new(:id, :cell_type, :storey, :valid_sketchup_group, :duality_state, :category_code, :category_label)
+            state_class = Struct.new(:id, :duality_cell, :valid?, :position)
+            cell = cell_class.new(nil, nil, nil, valid_group ? Object.new : nil, nil, nil, nil)
+            cell.id = "cell_#{@cell_index}"
+            cell.cell_type = :general
+            cell.storey = 'F01'
+            cell.category_code = 'Room'
+            cell.category_label = 'Room'
+            cell.duality_state = state_class.new("state_#{@cell_index}", cell, state_valid, point(@cell_index, 0, 0))
             cell
           end
 
           def fake_transition(state1, state2, valid: true)
-            Struct.new(:state1, :state2, :valid?) do
-            end.new(state1, state2, valid)
+            @transition_index = @transition_index.to_i + 1
+            Struct.new(:id, :state1, :state2, :valid?, :state1_point, :state2_point) do
+            end.new("transition_#{@transition_index}", state1, state2, valid, nil, nil)
+          end
+
+          def point(x, y, z)
+            Struct.new(:x, :y, :z).new(x, y, z)
           end
         end
       end
