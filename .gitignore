@@ -1,5 +1,5 @@
 indoor3d/tmp/
 *.skp
 *.skb
-scripts/
-fixtures/
+/scripts/
+/fixtures/
