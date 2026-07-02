@@ -95,12 +95,13 @@ module ULOL
             model = Sketchup.active_model
             return yield unless model
 
-            previous_active_path = active_path_snapshot(model)
+            active_path = ActivePathController.new(model)
+            previous_active_path = active_path.snapshot
             with_active_path_enforcement_suspended do
-              close_active_path(model)
+              active_path.close_to_root
               yield
             ensure
-              restore_active_path(model, previous_active_path)
+              active_path.restore(previous_active_path, close_when_nil: true)
             end
           end
 
@@ -110,30 +111,6 @@ module ULOL
             else
               yield
             end
-          end
-
-          def active_path_snapshot(model)
-            path = model.active_path
-            path ? path.dup : nil
-          rescue StandardError
-            nil
-          end
-
-          def close_active_path(model)
-            model.close_active while model.active_path
-          end
-
-          def restore_active_path(model, active_path)
-            return close_active_path(model) if active_path.nil?
-
-            valid_path = active_path.select { |entity| entity&.valid? }
-            if model.respond_to?(:active_path=) && !valid_path.empty?
-              model.active_path = valid_path
-            else
-              close_active_path(model)
-            end
-          rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] Export active path restore failed: #{e.class}: #{e.message}"
           end
 
           def document
