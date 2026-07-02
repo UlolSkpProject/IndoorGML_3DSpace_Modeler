@@ -9,6 +9,19 @@ module ULOL
           Sketchup.active_model.edit_transform * entity.transformation
         end
 
+        def self.entity_transformation_for_current_context(entity)
+          return entity.transformation unless entity&.valid?
+
+          active_entities = Sketchup.active_model&.active_entities
+          if active_entities && active_entities.to_a.include?(entity)
+            entity_transformation_in_active_context(entity)
+          else
+            entity_world_transformation(entity)
+          end
+        rescue StandardError
+          entity&.transformation || Geom::Transformation.new
+        end
+
         def self.entity_origin_in_root_local(entity, root_group)
           return entity.transformation.origin unless root_group&.valid?
 

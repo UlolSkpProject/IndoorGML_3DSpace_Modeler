@@ -10,6 +10,7 @@ require_relative 'val3dity_report_schema'
 require_relative 'val3dity_report_renderer'
 require_relative 'val3dity_overlap_recheck_policy'
 require_relative 'val3dity_run_orchestration'
+require_relative '../utils/geometry/polygon2d_public_api'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -636,7 +637,7 @@ module ULOL
           def point_inside_candidate_projection?(point, candidate)
             projected = project_point_for_axis(point, candidate[:axis])
             candidate[:overlap_polygons].any? do |polygon|
-              Utils::Geometry.send(:point_in_polygon?, projected, polygon, OVERLAP_RECHECK_TOLERANCE)
+              Utils::Geometry.point_in_polygon_2d?(projected, polygon, OVERLAP_RECHECK_TOLERANCE)
             end
           end
 
@@ -650,10 +651,10 @@ module ULOL
               polygon1 = Utils::Geometry.project_points_for_axis(triangle1, axis)
               face2[:triangles].each do |triangle2|
                 polygon2 = Utils::Geometry.project_points_for_axis(triangle2, axis)
-                overlap = Utils::Geometry.send(:clip_polygon, polygon1, polygon2)
+                overlap = Utils::Geometry.intersect_polygons_2d(polygon1, polygon2)
                 next if overlap.length < 3
 
-                area = Utils::Geometry.send(:polygon_area_2d, overlap).abs
+                area = Utils::Geometry.polygon_area_2d_value(overlap).abs
                 next if area <= Utils::Geometry.area_tolerance(tolerance)
 
                 polygons << overlap
