@@ -24,7 +24,7 @@ module ULOL
           placed_group = Object.new
           state = Object.new
           callbacks = lifecycle_callbacks(calls, source_group: source_group, placed_group: placed_group, state: state)
-          service = CellSpaceLifecycleService.new(callbacks)
+          service = build_lifecycle_service(callbacks)
 
           cell_space = service.create_from_group(source_group, cell_type: :input_type, category_code: 'Room')
 
@@ -57,7 +57,7 @@ module ULOL
         def test_duplicate_source_raises_before_geometry_validation
           calls = []
           callbacks = lifecycle_callbacks(calls).merge(converted_group?: proc { |_group| calls << :converted_group?; true })
-          service = CellSpaceLifecycleService.new(callbacks)
+          service = build_lifecycle_service(callbacks)
 
           error = assert_raises(ArgumentError) { service.create_from_group(Object.new) }
 
@@ -70,7 +70,7 @@ module ULOL
           callbacks = lifecycle_callbacks(calls).merge(
             prepare_cell_space_source_group!: proc { |_group| calls << :prepare_cell_space_source_group!; { valid: false, reason: 'not solid' } }
           )
-          service = CellSpaceLifecycleService.new(callbacks)
+          service = build_lifecycle_service(callbacks)
 
           error = assert_raises(ArgumentError) { service.create_from_group(Object.new) }
 
@@ -81,7 +81,7 @@ module ULOL
         def test_change_type_runs_existing_update_sequence
           calls = []
           cell_space = fake_mutable_cell_space(calls: calls)
-          service = CellSpaceLifecycleService.new(lifecycle_callbacks(calls))
+          service = build_lifecycle_service(lifecycle_callbacks(calls))
 
           result = service.change_type(cell_space, cell_type: :transition, category_code: 'Door')
 
@@ -99,7 +99,7 @@ module ULOL
         end
 
         def test_change_type_keeps_existing_error_messages
-          service = CellSpaceLifecycleService.new(lifecycle_callbacks([]))
+          service = build_lifecycle_service(lifecycle_callbacks([]))
 
           assert_equal(
             'Selected entity is not a registered CellSpace',
@@ -115,7 +115,7 @@ module ULOL
           calls = []
           state = fake_state(calls)
           cell_space = fake_erasable_cell_space(state: state, calls: calls)
-          service = CellSpaceLifecycleService.new(lifecycle_callbacks(calls))
+          service = build_lifecycle_service(lifecycle_callbacks(calls))
 
           service.erase(cell_space, erase_sketchup_group: true)
 
@@ -134,7 +134,7 @@ module ULOL
         def test_erase_can_keep_sketchup_group
           calls = []
           cell_space = fake_erasable_cell_space(state: fake_state(calls), calls: calls)
-          service = CellSpaceLifecycleService.new(lifecycle_callbacks(calls))
+          service = build_lifecycle_service(lifecycle_callbacks(calls))
 
           service.erase(cell_space, erase_sketchup_group: false)
 
@@ -144,6 +144,43 @@ module ULOL
         end
 
         private
+
+        def build_lifecycle_service(callbacks)
+          CellSpaceLifecycleService.new(
+            cell_space_class: callbacks.fetch(:cell_space_class),
+            source_preparer: CellSpaceLifecycleSourcePreparer.new(
+              converted_group: callbacks.fetch(:converted_group?),
+              type_resolver: callbacks.fetch(:resolve_cell_space_type_and_category),
+              geometry_preparer: callbacks.fetch(:prepare_cell_space_source_group!)
+            ),
+            scene_policy: CellSpaceLifecycleScenePolicy.new(
+              ensure_space_features_groups: callbacks.fetch(:ensure_space_features_groups),
+              place_cell_group: callbacks.fetch(:place_cell_group),
+              default_storey_name: callbacks.fetch(:default_storey_name),
+              fixed_state_height_offset: callbacks.fetch(:fixed_state_height_offset),
+              recenter_cell_space_geometry: callbacks.fetch(:recenter_cell_space_geometry),
+              name_cell_space_entity: callbacks.fetch(:name_cell_space_entity),
+              apply_cell_space_material: callbacks.fetch(:apply_cell_space_material),
+              track_cell_space_entity: callbacks.fetch(:track_cell_space_entity),
+              apply_indoor_lock_policy: callbacks.fetch(:apply_indoor_lock_policy)
+            ),
+            repository: CellSpaceLifecycleRepository.new(
+              register_cell_space: callbacks.fetch(:register_cell_space),
+              register_state: callbacks.fetch(:register_state),
+              unregister_cell_space: callbacks.fetch(:unregister_cell_space),
+              unregister_state: callbacks.fetch(:unregister_state)
+            ),
+            persistence: CellSpaceLifecyclePersistence.new(
+              write_attributes: callbacks.fetch(:write_attributes),
+              write_cell_space_attributes: callbacks.fetch(:write_cell_space_attributes)
+            ),
+            topology: CellSpaceLifecycleTopologyGateway.new(
+              synchronize_adjacency_and_transitions_for_cell_space: callbacks.fetch(:synchronize_adjacency_and_transitions_for_cell_space),
+              erase_transitions_for_state: callbacks.fetch(:erase_transitions_for_state),
+              erase_adjacency_for_cell_space: callbacks.fetch(:erase_adjacency_for_cell_space)
+            )
+          )
+        end
 
         def lifecycle_callbacks(calls, source_group: Object.new, placed_group: Object.new, state: Object.new)
           {
