@@ -185,39 +185,6 @@ module ULOL
             HTML
           end
 
-          def report_metadata_line(raw_report)
-            parts = [
-              "val3dity #{raw_report['val3dity_version'] || 'unknown'}",
-              raw_report['input_file_type'] || 'IndoorGML',
-              report_checked_at(raw_report['time'])
-            ].reject { |part| part.to_s.strip.empty? || part == '-' }
-            <<~HTML
-              <p class="report-meta-line">#{html_escape(parts.join(' · '))}</p>
-            HTML
-          end
-
-          def report_error_kinds_section(raw_report)
-            rows = error_kind_rows(raw_report)
-            body = if rows.empty?
-                     '<p class="empty">No errors.</p>'
-                   else
-                     <<~HTML
-                       <table>
-                         <thead><tr><th>Code</th><th>Error</th><th>Count</th></tr></thead>
-                         <tbody>
-                           #{rows.map { |row| "<tr><td><code>#{html_escape(row[:code])}</code></td><td>#{html_escape(row[:description])}</td><td>#{row[:count]}</td></tr>" }.join}
-                         </tbody>
-                       </table>
-                     HTML
-                   end
-            <<~HTML
-              <section class="card">
-                <h2>Error 종류</h2>
-                #{body}
-              </section>
-            HTML
-          end
-
           def report_issue_sections(raw_report)
             [
               report_error_items_section(
@@ -275,16 +242,6 @@ module ULOL
             HTML
           end
 
-          def metric_html(label, value, class_name = nil)
-            value_class = ['value', class_name].compact.join(' ')
-            <<~HTML
-              <div class="metric">
-                <div class="label">#{html_escape(label)}</div>
-                <div class="#{value_class}">#{html_escape(value)}</div>
-              </div>
-            HTML
-          end
-
           def result_hero_message(raw_report, final_errors, suppressed, kept, inconclusive)
             total_rechecks = suppressed + kept + inconclusive
             return 'strict val3dity 오류가 없습니다.' if raw_report[VALIDATION_STATUS_KEY] == 'exact_valid'
@@ -294,17 +251,6 @@ module ULOL
             return "실제 수정이 필요한 오류가 #{final_errors}건 남아 있습니다." if total_rechecks.zero?
 
             "실제 수정이 필요한 오류가 #{final_errors}건 남아 있습니다. Overlap 재검사 후보 #{total_rechecks}건 중 #{suppressed}건은 억제, #{kept}건은 유지, #{inconclusive}건은 불명확입니다."
-          end
-
-          def validation_status_label(raw_report)
-            case raw_report[VALIDATION_STATUS_KEY]
-            when 'exact_valid'
-              'Exact Valid'
-            when 'extension_policy_valid', 'tolerance_valid'
-              'Extension Policy Valid'
-            else
-              'Invalid'
-            end
           end
 
           def final_error_count(raw_report)

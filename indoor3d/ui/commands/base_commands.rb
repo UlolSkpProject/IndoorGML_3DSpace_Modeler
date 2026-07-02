@@ -101,27 +101,6 @@ module ULOL
           ActivePathController.new(model, logger: Logger).restore(active_path, close_when_nil: false)
         end
 
-        def move_groups_to_root_context(model, groups)
-          return groups if model.active_path().nil?
-
-          groups.map { |group| move_group_to_root_context(model, group) }.compact
-        end
-
-        def move_group_to_root_context(model, group)
-          return group unless group&.valid?()
-
-          transformation = Utils::Transformation.entity_transformation_in_active_context(group)
-          copy = model.entities().add_instance(group.definition, transformation)
-          copy = copy.to_group() if copy.respond_to?(:to_group)
-          copy.make_unique() if copy.respond_to?(:make_unique)
-          copy.name = group.name if copy.respond_to?(:name=)
-          copy.material = group.material if copy.respond_to?(:material=)
-          copy.layer = group.layer if copy.respond_to?(:layer=)
-          copy.visible = group.visible?() if copy.respond_to?(:visible=)
-          group.erase!() if group.valid?()
-          copy
-        end
-
       end
     end
   end

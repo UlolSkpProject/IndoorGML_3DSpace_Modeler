@@ -10,38 +10,6 @@ module ULOL
           @validation_operation_running == true
         end
 
-        def create_temp_indoorgml
-          progress = IndoorGmlConverter::ExportProgressDialog.new
-          state = validation_close_state
-          configure_validation_close_handler(progress, state)
-          configure_validation_cancel_handler(progress, state)
-          state[:after_temp_export] = proc do |temp_path|
-            progress.on_create_gml do
-              create_gml_from_temp(temp_path, progress)
-            end
-            progress.result(
-              status: :success,
-              title: 'IndoorGML temp GML created',
-              message: "Temporary GML created:\n#{temp_path}",
-              actions: [:createGml, :close]
-            )
-          end
-          progress.on_ready do
-            next if state[:started]
-
-            state[:started] = true
-            start_temp_file_creation(progress, state)
-          end
-          progress.show
-        rescue StandardError => e
-          progress&.result(
-            status: :error,
-            title: 'IndoorGML temp GML creation failed',
-            message: e.message,
-            actions: [:close]
-          )
-        end
-
         def export_gml
           return if validation_operation_running?
 
