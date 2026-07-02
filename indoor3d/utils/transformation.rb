@@ -114,20 +114,6 @@ module ULOL
         end
         private_class_method :parent_instance_world_transformation
 
-        def self.move_entity_origin_in_root_local_to(entity, root_group, local_position)
-          current_root_local_position = entity_origin_in_root_local(entity, root_group)
-          vector = current_root_local_position.vector_to(local_position)
-          return true if vector.length <= 0.001
-
-          entity.transform!(Geom::Transformation.translation(vector))
-          true
-        end
-
-        def self.editing_root_group?(root_group)
-          active_path = Sketchup.active_model.active_path
-          active_path&.include?(root_group)
-        end
-
         def self.direct_child_of_root?(entity, root_group)
           return false unless entity&.valid? && valid_container?(root_group)
 
@@ -167,12 +153,6 @@ module ULOL
           z_length = axis_length(values, 8)
 
           !same_float?(x_length, 1.0) || !same_float?(y_length, 1.0) || !same_float?(z_length, 1.0)
-        end
-
-        def self.same?(transformation1, transformation2)
-          values1 = transformation1.to_a
-          values2 = transformation2.to_a
-          values1.each_index.all? { |index| same_float?(values1[index], values2[index]) }
         end
 
         def self.axis_length(values, start_index)

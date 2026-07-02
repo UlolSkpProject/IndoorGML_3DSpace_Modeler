@@ -6,7 +6,6 @@ module ULOL
   module Indoor3DGmlModeler
 
     require_relative 'utils/logger'
-    require_relative 'utils/html_helpers'
     require_relative 'utils/change_snapshot'
     require_relative 'utils/geometry'
     require_relative 'utils/transformation'

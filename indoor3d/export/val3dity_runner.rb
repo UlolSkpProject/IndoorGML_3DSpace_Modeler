@@ -25,12 +25,6 @@ module ULOL
           STRICT_OVERLAP_TOL     = -1
           OVERLAP_RECHECK_TOLERANCE = Utils::Geometry::DEFAULT_TOLERANCE
           OVERLAP_RECHECK_TOLERANCE_MM = OVERLAP_RECHECK_TOLERANCE * 25.4
-          OVERLAP_RECHECK_VOLUME_TOLERANCE = OVERLAP_RECHECK_TOLERANCE**3
-          OVERLAP_RECHECK_REPORT_KEY = 'indoorgml_modeler_overlap_recheck'
-          STRICT_VALIDITY_KEY = 'strict_val3dity_validity'
-          EXTENSION_VALIDITY_KEY = 'extension_policy_validity'
-          VALIDATION_STATUS_KEY = 'indoorgml_modeler_validation_status'
-          STRICT_ERRORS_REPORT_KEY = 'indoorgml_modeler_strict_errors'
           OVERLAP_RECHECK_NUMERIC_EPSILON = OVERLAP_RECHECK_TOLERANCE * 0.01
 
           attr_reader :report_json_path, :report_html_path
@@ -74,10 +68,6 @@ module ULOL
 
             def valid?
               @valid == true
-            end
-
-            def failed?
-              @valid == false && @error.nil?
             end
 
             def error?
@@ -601,46 +591,6 @@ module ULOL
             end
           end
 
-          def match_intersection_components_to_slabs(components, candidates)
-            components.map do |component|
-              candidates.filter_map { |candidate| component_slab_match(component, candidate) }
-                        .max_by { |match| [match[:candidate][:overlap_area].to_f, -match[:normal_thickness].to_f] }
-            end
-          end
-
-          def component_slab_match(component, candidate)
-            samples = component[:samples]
-            return nil if samples.empty?
-
-            normal = candidate[:normal]
-            normal_values = samples.map { |point| plane_constant(normal, point) }
-            thickness = normal_values.max - normal_values.min
-            return nil if thickness > OVERLAP_RECHECK_TOLERANCE + OVERLAP_RECHECK_NUMERIC_EPSILON
-
-            min_plane, max_plane = [candidate[:plane1], candidate[:plane2]].minmax
-            return nil unless normal_values.all? do |value|
-              value >= min_plane - OVERLAP_RECHECK_NUMERIC_EPSILON &&
-                value <= max_plane + OVERLAP_RECHECK_NUMERIC_EPSILON
-            end
-
-            return nil unless samples.all? do |point|
-              point_inside_candidate_projection?(point, candidate)
-            end
-
-            volume_limit = (candidate[:overlap_area].to_f + Utils::Geometry.area_tolerance(OVERLAP_RECHECK_TOLERANCE)) *
-                           (candidate[:penetration_depth].to_f + OVERLAP_RECHECK_NUMERIC_EPSILON)
-            return nil if component[:volume].to_f > volume_limit
-
-            { candidate: candidate, normal_thickness: thickness }
-          end
-
-          def point_inside_candidate_projection?(point, candidate)
-            projected = project_point_for_axis(point, candidate[:axis])
-            candidate[:overlap_polygons].any? do |polygon|
-              Utils::Geometry.point_in_polygon_2d?(projected, polygon, OVERLAP_RECHECK_TOLERANCE)
-            end
-          end
-
           def coplanar_overlap_polygons(face1, face2, tolerance)
             return { area: 0.0, polygons: [] } if face1[:triangles].empty? || face2[:triangles].empty?
 
@@ -748,17 +698,6 @@ module ULOL
             nil
           end
 
-          def intersection_components(faces)
-            face_components(faces).map do |component_faces|
-              samples = intersection_component_samples(component_faces)
-              {
-                faces: component_faces,
-                samples: samples,
-                volume: component_signed_volume(component_faces).abs
-              }
-            end
-          end
-
           def face_components(faces)
             remaining = faces.each_with_object({}) { |face, memo| memo[face] = true }
             components = []
@@ -780,73 +719,6 @@ module ULOL
               components << component
             end
             components
-          end
-
-          def intersection_component_samples(faces)
-            points = []
-            faces.each do |face|
-              face.vertices.each { |vertex| points << vertex.position }
-              face.edges.each do |edge|
-                vertices = edge.vertices
-                next unless vertices.length == 2
-
-                points << Geom::Point3d.new(
-                  (vertices[0].position.x + vertices[1].position.x) / 2.0,
-                  (vertices[0].position.y + vertices[1].position.y) / 2.0,
-                  (vertices[0].position.z + vertices[1].position.z) / 2.0
-                )
-              end
-              face_mesh_triangles_from_face(face).each do |triangle|
-                points << Geom::Point3d.new(
-                  triangle.map(&:x).sum / 3.0,
-                  triangle.map(&:y).sum / 3.0,
-                  triangle.map(&:z).sum / 3.0
-                )
-              end
-            end
-            unique_points(points)
-          end
-
-          def face_mesh_triangles_from_face(face)
-            mesh = face.mesh
-            points = (1..mesh.count_points).map { |index| mesh.point_at(index) }
-            (1..mesh.count_polygons).flat_map do |index|
-              polygon = mesh.polygon_at(index).map { |point_index| points[point_index.abs - 1] }.compact
-              next [] if polygon.length < 3
-
-              polygon.length == 3 ? [polygon] : triangulate_points(polygon)
-            end
-          end
-
-          def unique_points(points)
-            seen = {}
-            points.each_with_object([]) do |point, unique|
-              key = [point.x, point.y, point.z].map { |value| (value / OVERLAP_RECHECK_NUMERIC_EPSILON).round }.join(',')
-              next if seen[key]
-
-              seen[key] = true
-              unique << point
-            end
-          end
-
-          def component_signed_volume(faces)
-            faces.sum do |face|
-              points = face.outer_loop.vertices.map(&:position)
-              next 0.0 if points.length < 3
-
-              origin = points.first
-              (1...(points.length - 1)).sum do |index|
-                signed_tetrahedron_volume(origin, points[index], points[index + 1])
-              end
-            end
-          end
-
-          def signed_tetrahedron_volume(point1, point2, point3)
-            (
-              (point1.x * ((point2.y * point3.z) - (point2.z * point3.y))) -
-              (point1.y * ((point2.x * point3.z) - (point2.z * point3.x))) +
-              (point1.z * ((point2.x * point3.y) - (point2.y * point3.x)))
-            ) / 6.0
           end
 
           def overlap_recheck_missing_pair_reason(code)
@@ -871,17 +743,6 @@ module ULOL
               Geom::Vector3d.new(point.x.to_f, point.y.to_f, point.z.to_f),
               normal
             ).to_f
-          end
-
-          def project_point_for_axis(point, axis)
-            case axis
-            when :x
-              [point.y.to_f, point.z.to_f]
-            when :y
-              [point.x.to_f, point.z.to_f]
-            else
-              [point.x.to_f, point.y.to_f]
-            end
           end
 
           def face_centroid(face)
@@ -914,10 +775,6 @@ module ULOL
             @overlap_recheck_policy ||= Val3dityOverlapRecheckPolicy.new(
               tolerance_mm: OVERLAP_RECHECK_TOLERANCE_MM
             )
-          end
-
-          def error_code_number(code)
-            Val3dityReportSchema.error_code_number(code)
           end
 
           def export_geometry_snapshot
@@ -1112,38 +969,6 @@ module ULOL
                                         expanded_name == local_name || expanded_name.split(':').last == local_name
             end
             nil
-          end
-
-          def error_kind_rows(raw_report)
-            Val3dityReportSchema.error_kind_rows(raw_report)
-          end
-
-          def error_item_rows(raw_report)
-            Val3dityReportSchema.error_item_rows(raw_report)
-          end
-
-          def error_row(scope, item, error)
-            Val3dityReportSchema.error_row(scope, item, error)
-          end
-
-          def report_error_row_refs(row)
-            Val3dityReportSchema.report_error_row_refs(row)
-          end
-
-          def error_item_label(row)
-            Val3dityReportSchema.error_item_label(row)
-          end
-
-          def total_count(overview)
-            Val3dityReportSchema.total_count(overview)
-          end
-
-          def valid_count(overview)
-            Val3dityReportSchema.valid_count(overview)
-          end
-
-          def invalid_count(overview)
-            Val3dityReportSchema.invalid_count(overview)
           end
 
           def decode_report_content(content)

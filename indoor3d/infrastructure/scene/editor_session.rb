@@ -18,7 +18,6 @@ module ULOL
         def initialize(indoor_model)
           @indoor_model = indoor_model
           @editing = false
-          @editable_entity_ids = {}
           @dialog = EditModeDialog.new(@indoor_model)
           @previous_active_path = nil
           @editing_active_path_target = nil
@@ -88,7 +87,6 @@ module ULOL
           reset_edit_mode_visibility_filter
           @editing = true
           @indoor_model.attach_edit_selection_observer(model)
-          mark_editable_primal_entities()
           activated = false
           @indoor_model.with_space_feature_constraint do
             apply_lock_policy()
@@ -96,7 +94,6 @@ module ULOL
           end
           unless activated
             @editing = false
-            @editable_entity_ids = {}
             @editing_active_path_target = nil
             @indoor_model.detach_edit_selection_observer(model)
             apply_lock_policy()
@@ -141,7 +138,6 @@ module ULOL
             restore_validation_focus_visibility
             normalize_visibility_for_non_edit_mode
             @editing = false
-            @editable_entity_ids = {}
             @editing_active_path_target = nil
             reset_edit_mode_visibility_filter
             restore_validation_focus_rendering_options
@@ -155,17 +151,6 @@ module ULOL
             apply_geometry_visibility()
             invalidate_view(model)
             true
-          end
-        end
-
-        def editable_entity?(entity)
-          begin
-            return false unless @editing
-            return false unless entity&.valid?()
-
-            @editable_entity_ids[entity.entityID] == true
-          rescue StandardError
-            false
           end
         end
 
@@ -392,14 +377,6 @@ module ULOL
           false
         end
 
-        def validation_focus_cell_spaces
-          return [] unless validation_focus_active?
-
-          validation_focus_controller.focus_cell_spaces(@indoor_model.cell_spaces)
-        rescue StandardError
-          []
-        end
-
         def validation_visible_cell_space?(cell_space)
           return true unless validation_focus_active?
           return false unless cell_space&.valid?
@@ -534,10 +511,6 @@ module ULOL
           IndoorCore::Logger.puts "[IndoorGML] Validation focus rendering option restore failed: #{e.class}: #{e.message}"
         end
 
-        def validation_focus_cell_gml_id(cell_space)
-          validation_focus_controller.cell_gml_id(cell_space)
-        end
-
         def active_path_changed(model)
           begin
             model ||= Sketchup.active_model()
@@ -586,7 +559,6 @@ module ULOL
             @dialog.close_without_finish()
             restore_validation_focus_visibility
             @editing = false
-            @editable_entity_ids = {}
             @editing_active_path_target = nil
             @previous_active_path = nil
             restore_validation_focus_rendering_options
@@ -825,7 +797,6 @@ module ULOL
           primal_group = @indoor_model.primal_group
           if editing_cell_space_path?(current_path, primal_group)
             @editing_active_path_target = current_path
-            mark_editable_primal_entities()
             apply_lock_policy()
             selection_changed()
             invalidate_view(model)
@@ -937,21 +908,6 @@ module ULOL
           model.close_active() while model.active_path()
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Edit context close failed: #{e.class}: #{e.message}"
-        end
-
-        def mark_editable_primal_entities
-          @editable_entity_ids = {}
-          mark_editable(@indoor_model.primal_group)
-        end
-
-        def mark_editable(entity)
-          begin
-            return unless entity&.valid?()
-
-            @editable_entity_ids[entity.entityID] = true
-          rescue StandardError
-            true
-          end
         end
 
       end

@@ -598,24 +598,6 @@ module ULOL
             end
           end
 
-          def selected_solid_groups
-            selection = Sketchup.active_model&.selection
-            return [] unless selection
-            entities = selection.to_a
-            return [] if entities.empty?
-
-            groups = entities.select { |entity| entity.is_a?(Sketchup::Group) || entity.is_a?(Sketchup::ComponentInstance) }
-            return [] unless groups.length == entities.length
-
-            solid_groups = groups.select do |group|
-              group&.valid? &&
-                group.respond_to?(:manifold?) &&
-                group.manifold? &&
-                find_cell_space_for_entity(group).nil?
-            end
-            solid_groups.length == groups.length ? solid_groups : []
-          end
-
           def selected_cell_space_conversion_jobs
             selection = Sketchup.active_model&.selection
             return [] unless selection

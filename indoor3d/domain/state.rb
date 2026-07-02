@@ -41,14 +41,6 @@ module ULOL
           @fallback_position || ORIGIN
         end
 
-        def update_position(position)
-          unless position.is_a?(Geom::Point3d)
-            raise ArgumentError, 'Geom::Point3d position expected'
-          end
-
-          @fallback_position = position
-        end
-
         def add_transition(transition)
           @transitions << transition unless @transitions.include?(transition)
         end
@@ -77,23 +69,6 @@ module ULOL
           state = allocate
           state.send(:initialize_restored, cell_space, position, id, name)
           state
-        end
-
-        def sketchup_component_instance
-          nil
-        end
-
-        def valid_component_instance
-          entity = sketchup_component_instance
-          return nil unless entity&.valid?
-
-          entity
-        rescue StandardError
-          nil
-        end
-
-        def sketchup_component_instance_id
-          nil
         end
 
         private

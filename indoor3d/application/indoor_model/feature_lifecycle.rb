@@ -15,31 +15,6 @@ module ULOL
             end
           end
 
-          def auto_create_tagged_cell_spaces_in_primal
-            with_indoor_model_operation('IndoorGML Auto Create Tagged CellSpaces') do
-              ensure_space_features_groups
-              next 0 unless @primal_group&.valid?
-
-              converted_count = 0
-              begin
-                @relocating_entity = true
-                @primal_group.entities.to_a.each do |entity|
-                  next unless entity&.valid?
-                  next if indoor_feature(entity) == 'CellSpace'
-
-                  if auto_convert_tagged_primal_entity(entity)
-                    converted_count += 1
-                  elsif convertible_cell_space_container?(entity)
-                    converted_count += 1 if auto_convert_direct_tagged_children(entity)
-                  end
-                end
-              ensure
-                @relocating_entity = false
-              end
-              converted_count
-            end
-          end
-
           def change_cell_space_type(sketchup_group, cell_type, category_code = nil)
             with_indoor_model_operation('IndoorGML Change CellSpace Type') do
               cell_space = find_cell_space_for_entity(sketchup_group)
