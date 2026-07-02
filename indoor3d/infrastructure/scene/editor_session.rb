@@ -10,6 +10,7 @@ module ULOL
         require_relative 'editor_session/visibility_controller'
         require_relative 'editor_session/overlay_controller'
         require_relative 'editor_session/validation_focus_controller'
+        require_relative 'editor_session/edit_active_path_controller'
         include BatchProgress
 
         GRAPH_VISIBLE_ATTRIBUTE = 'graph_visible'
@@ -19,10 +20,6 @@ module ULOL
           @indoor_model = indoor_model
           @editing = false
           @dialog = EditModeDialog.new(@indoor_model)
-          @previous_active_path = nil
-          @editing_active_path_target = nil
-          @enforcing_active_path = false
-          @active_path_enforcement_suspended = false
           @progress = nil
           @dual_overlay_visible = model_boolean_attribute(GRAPH_VISIBLE_ATTRIBUTE, true)
           @geometry_visible = model_boolean_attribute(GEOMETRY_VISIBLE_ATTRIBUTE, true)
@@ -30,6 +27,12 @@ module ULOL
           @lock_controller = LockController.new(indoor_model: @indoor_model)
           @visibility_controller = VisibilityController.new
           @overlay_controller = OverlayController.new(indoor_model: @indoor_model)
+          @active_path_controller = EditActivePathController.new(
+            indoor_model: @indoor_model,
+            on_lock: -> { apply_lock_policy },
+            on_selection: -> { selection_changed },
+            on_invalidate: ->(model) { invalidate_view(model) }
+          )
         end
 
         def editing?
@@ -83,7 +86,7 @@ module ULOL
           return false unless primal_group&.valid?()
 
           ensure_overlay_registered(model)
-          @previous_active_path = active_path_snapshot(model)
+          active_path_controller.remember_current_path(model)
           reset_edit_mode_visibility_filter
           @editing = true
           @indoor_model.attach_edit_selection_observer(model)
@@ -94,7 +97,7 @@ module ULOL
           end
           unless activated
             @editing = false
-            @editing_active_path_target = nil
+            active_path_controller.reset_target
             @indoor_model.detach_edit_selection_observer(model)
             apply_lock_policy()
             return false
@@ -134,17 +137,17 @@ module ULOL
 
           model = Sketchup.active_model()
           with_active_path_enforcement_suspended do
-            prepare_active_path_for_finish(model)
+            active_path_controller.prepare_for_finish(model)
             restore_validation_focus_visibility
             normalize_visibility_for_non_edit_mode
             @editing = false
-            @editing_active_path_target = nil
+            active_path_controller.reset_target
             reset_edit_mode_visibility_filter
             restore_validation_focus_rendering_options
             clear_validation_focus
             @indoor_model.detach_edit_selection_observer(model)
-            close_active_path(model)
-            @previous_active_path = nil
+            active_path_controller.close(model)
+            active_path_controller.clear_previous_path
             update_overlay_enabled()
             @dialog.close()
             apply_lock_policy()
@@ -266,21 +269,11 @@ module ULOL
         end
 
         def cell_space_geometry_editing?
-          @editing && valid_editing_active_path_target().length > 1
+          active_path_controller.cell_space_geometry_editing?(editing: @editing)
         end
 
         def editing_cell_space
-          begin
-            target_path = valid_editing_active_path_target()
-            return nil unless target_path.length > 1
-
-            target_group = target_path[1]
-            @indoor_model.cell_spaces.find do |cell_space|
-              cell_space&.valid? && cell_space.sketchup_group == target_group
-            end
-          rescue StandardError
-            nil
-          end
+          active_path_controller.editing_cell_space
         end
 
         def edit_cell_space_geometry(cell_space)
@@ -294,10 +287,10 @@ module ULOL
 
             model = Sketchup.active_model()
             target_path = [primal_group, group]
-            @editing_active_path_target = target_path
+            active_path_controller.set_target_path(target_path)
             mark_editable_primal_entities()
             apply_lock_policy()
-            set_active_path(model, target_path)
+            active_path_controller.set(model, target_path)
             selection_changed()
             invalidate_view(model)
             true
@@ -316,8 +309,8 @@ module ULOL
             return false unless primal_group&.valid?
 
             model = Sketchup.active_model()
-            @editing_active_path_target = [primal_group]
-            set_active_path(model, [primal_group])
+            active_path_controller.set_target_path([primal_group])
+            active_path_controller.set(model, [primal_group])
             selection_changed()
             invalidate_view(model)
             true
@@ -512,31 +505,15 @@ module ULOL
         end
 
         def active_path_changed(model)
-          begin
-            model ||= Sketchup.active_model()
-            if !@editing && primal_group_active_path?(model)
-              reenter_editing_from_primal_path(model)
-              return
-            end
-
-            return unless @editing
-            return if @enforcing_active_path
-            return if @active_path_enforcement_suspended
-
-            enforce_edit_context(model)
-          rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] Edit active path enforcement failed: #{e.class}: #{e.message}"
-          end
+          active_path_controller.active_path_changed(
+            model,
+            editing: @editing,
+            reenter: -> { reenter_editing_from_primal_path }
+          )
         end
 
         def with_active_path_enforcement_suspended
-          begin
-            previous = @active_path_enforcement_suspended
-            @active_path_enforcement_suspended = true
-            yield
-          ensure
-            @active_path_enforcement_suspended = previous
-          end
+          active_path_controller.with_suspended_enforcement { yield }
         end
 
         def selection_changed
@@ -559,8 +536,7 @@ module ULOL
             @dialog.close_without_finish()
             restore_validation_focus_visibility
             @editing = false
-            @editing_active_path_target = nil
-            @previous_active_path = nil
+            active_path_controller.reset
             restore_validation_focus_rendering_options
             restore_edit_mode_visibility
             reset_edit_mode_visibility_filter
@@ -577,18 +553,11 @@ module ULOL
         end
 
         def recover_unlocked_primal_after_transaction(model)
-          begin
-            return false if @editing
-
-            primal_group = @indoor_model.primal_group
-            return false unless primal_group&.valid?
-            return false unless primal_group_active_path?(model || Sketchup.active_model)
-
-            reenter_editing_from_primal_path(model || Sketchup.active_model)
-          rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] Unlocked primal recovery failed: #{e.class}: #{e.message}"
-            false
-          end
+          active_path_controller.recover_unlocked_primal_after_transaction(
+            model,
+            editing: @editing,
+            reenter: -> { reenter_editing_from_primal_path }
+          )
         end
 
         private
@@ -611,6 +580,15 @@ module ULOL
 
         def validation_focus_controller
           @validation_focus_controller ||= ValidationFocusController.new
+        end
+
+        def active_path_controller
+          @active_path_controller ||= EditActivePathController.new(
+            indoor_model: @indoor_model,
+            on_lock: -> { apply_lock_policy },
+            on_selection: -> { selection_changed },
+            on_invalidate: ->(model) { invalidate_view(model) }
+          )
         end
 
         def with_visibility_update_operation
@@ -752,162 +730,18 @@ module ULOL
           false
         end
 
-        def active_path_snapshot(model)
-          path = model.active_path()
-          path ? path.dup : nil
-        end
-
         def activate_edit_context(model, target_path)
-          begin
-            return false unless model.respond_to?(:active_path=)
-
-            @editing_active_path_target = target_path
-            set_active_path(model, target_path)
-            true
-          rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] Edit context activation failed: #{e.class}: #{e.message}"
-            false
-          end
+          active_path_controller.activate(model, target_path)
         end
 
-        def enforce_edit_context(model)
-          target_path = valid_editing_active_path_target()
-          return if target_path.empty?
-          return if active_path_matches?(model, target_path)
-
-          current_path = model.active_path
-          if current_path.nil?
-            set_active_path(model, target_path)
-            selection_changed()
-            invalidate_view(model)
-            return
-          end
-
-          # # root 탈출 시 → 종료 확인 : viewport의 빈 곳을 클릭해도 root로 나가지는 issue가 있어서 일단 제외하는 목적으로 주석처리.
-          # if current_path.nil? && target_path == [@indoor_model.primal_group]
-          #   if @indoor_model.request_finish_editing()
-          #     return
-          #   else
-          #     set_active_path(model, target_path)
-          #     return
-          #   end
-          # end
-
-          # cell 편집 중 primal_group으로 돌아오는 경우 → 허용
-          primal_group = @indoor_model.primal_group
-          if editing_cell_space_path?(current_path, primal_group)
-            @editing_active_path_target = current_path
-            apply_lock_policy()
-            selection_changed()
-            invalidate_view(model)
-            return
-          end
-
-          if current_path == [primal_group] && target_path.length > 1 && target_path.first == primal_group
-            @editing_active_path_target = [primal_group]
-            apply_lock_policy()
-            selection_changed()
-            invalidate_view(model)
-            return
-          end
-
-          set_active_path(model, target_path)
-        end
-
-        def valid_editing_active_path_target
-          target_path = Array(@editing_active_path_target).select { |entity| entity&.valid?() }
-          return target_path unless target_path.empty?
-
-          primal_group = @indoor_model.primal_group
-          primal_group&.valid?() ? [primal_group] : []
-        end
-
-        def active_path_matches?(model, target_path)
-          active_path = model.active_path()
-          return false unless active_path && active_path.length == target_path.length
-
-          active_path.each_with_index.all? { |entity, index| entity == target_path[index] }
-        end
-
-        def primal_group_active_path?(model)
-          primal_group = @indoor_model.primal_group
-          return false unless primal_group&.valid?
-
-          active_path_matches?(model, [primal_group])
-        end
-
-        def reenter_editing_from_primal_path(model)
+        def reenter_editing_from_primal_path
           return false unless begin_editing
 
-          @previous_active_path = nil
+          active_path_controller.clear_previous_path
           true
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Edit mode reentry from primal active path failed: #{e.class}: #{e.message}"
           false
-        end
-
-        def editing_cell_space_path?(path, primal_group)
-          return false unless path&.length == 2
-          return false unless path.first == primal_group
-
-          cell_group = path.last
-          @indoor_model.cell_spaces.any? do |cell_space|
-            cell_space&.valid? && cell_space.sketchup_group == cell_group
-          end
-        rescue StandardError
-          false
-        end
-
-        def set_active_path(model, target_path)
-          begin
-            @enforcing_active_path = true
-            model.active_path = target_path
-          ensure
-            @enforcing_active_path = false
-          end
-        end
-
-        def restore_active_path(model)
-          begin
-            if @previous_active_path
-              valid_path = @previous_active_path.select { |entity| entity&.valid?() }
-              if model.respond_to?(:active_path=) && !valid_path.empty?()
-                model.active_path = valid_path
-                return
-              end
-            end
-
-            model.close_active() while model.active_path()
-          rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] Edit context restore failed: #{e.class}: #{e.message}"
-          end
-        end
-
-        def prepare_active_path_for_finish(model)
-          begin
-            active_path = model.active_path()
-            return if active_path.nil?
-
-            primal_group = @indoor_model.primal_group
-            if active_path_matches?(model, [primal_group])
-              return
-            end
-
-            if primal_group && active_path.first == primal_group
-              set_active_path(model, [primal_group])
-              return
-            end
-
-            close_active_path(model)
-          rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] Edit context finish preparation failed: #{e.class}: #{e.message}"
-          end
-        end
-
-        def close_active_path(model)
-          model.close_active() while model.active_path()
-        rescue StandardError => e
-          IndoorCore::Logger.puts "[IndoorGML] Edit context close failed: #{e.class}: #{e.message}"
         end
 
       end
