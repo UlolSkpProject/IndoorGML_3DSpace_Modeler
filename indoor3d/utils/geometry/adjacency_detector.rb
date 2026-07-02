@@ -41,11 +41,6 @@ module ULOL
           end.compact
         end
 
-        # Compatibility alias; this returns parent-space faces, not model-world faces.
-        def self.world_faces(entity)
-          entity_faces_in_parent_space(entity)
-        end
-
         def self.coplanar_overlap_metrics(face1, face2, tolerance)
           return nil if face1[:triangles].empty? || face2[:triangles].empty?
 
@@ -245,21 +240,10 @@ module ULOL
           tolerance.to_f * tolerance.to_f
         end
 
-        def self.normals_parallel?(normal1, normal2)
-          dot = dot_product(normal1, normal2).abs
-          (1.0 - dot) <= 0.000001
-        end
-
         def self.normals_opposite?(normal1, normal2)
           dot = dot_product(normal1, normal2)
           (dot + 1.0).abs <= 0.000001
         end
-
-        def self.snapshot_normals_parallel?(normal1, normal2)
-          dot = snapshot_dot_product(normal1, normal2).abs
-          (1.0 - dot) <= 0.000001
-        end
-        private_class_method :snapshot_normals_parallel?
 
         def self.snapshot_normals_opposite?(normal1, normal2)
           dot = snapshot_dot_product(normal1, normal2)

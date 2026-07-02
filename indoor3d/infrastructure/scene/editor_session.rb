@@ -5,9 +5,11 @@ module ULOL
     module IndoorCore
 
       class EditorSession
-        require_relative 'editor_session/lock_policy'
+        require_relative 'editor_session/lock_controller'
         require_relative 'editor_session/batch_progress'
-        include LockPolicy
+        require_relative 'editor_session/visibility_controller'
+        require_relative 'editor_session/overlay_controller'
+        require_relative 'editor_session/validation_focus_controller'
         include BatchProgress
 
         GRAPH_VISIBLE_ATTRIBUTE = 'graph_visible'
@@ -16,10 +18,6 @@ module ULOL
         def initialize(indoor_model)
           @indoor_model = indoor_model
           @editing = false
-          @editable_entity_ids = {}
-          @overlay = nil
-          @overlay_registered = false
-          @overlay_model = nil
           @dialog = EditModeDialog.new(@indoor_model)
           @previous_active_path = nil
           @editing_active_path_target = nil
@@ -28,14 +26,10 @@ module ULOL
           @progress = nil
           @dual_overlay_visible = model_boolean_attribute(GRAPH_VISIBLE_ATTRIBUTE, true)
           @geometry_visible = model_boolean_attribute(GEOMETRY_VISIBLE_ATTRIBUTE, true)
-          @validation_focus_cell_ids = nil
-          @validation_highlight_cell_ids = nil
-          @validation_highlight_code = nil
-          @validation_focus_visibility = {}
-          @validation_focus_hide_rest_previous = nil
-          @visible_storeys = []
-          @visible_cell_types = []
-          @edit_mode_visibility_snapshots = {}
+          @validation_focus_controller = ValidationFocusController.new
+          @lock_controller = LockController.new(indoor_model: @indoor_model)
+          @visibility_controller = VisibilityController.new
+          @overlay_controller = OverlayController.new(indoor_model: @indoor_model)
         end
 
         def editing?
@@ -93,15 +87,13 @@ module ULOL
           reset_edit_mode_visibility_filter
           @editing = true
           @indoor_model.attach_edit_selection_observer(model)
-          mark_editable_primal_entities()
           activated = false
-          @indoor_model.send(:with_guard_flag, :@constraining_space_features) do
+          @indoor_model.with_space_feature_constraint do
             apply_lock_policy()
             activated = activate_edit_context(model, [primal_group])
           end
           unless activated
             @editing = false
-            @editable_entity_ids = {}
             @editing_active_path_target = nil
             @indoor_model.detach_edit_selection_observer(model)
             apply_lock_policy()
@@ -117,7 +109,7 @@ module ULOL
           ids = Array(cell_gml_ids).map(&:to_s).reject(&:empty?)
           return false if ids.empty?
 
-          @validation_focus_cell_ids = ids.each_with_object({}) { |id, memo| memo[id] = true }
+          validation_focus_controller.begin(ids)
           capture_and_apply_validation_focus_rendering_options(ids.length)
           started = @editing ? true : begin_editing
           unless started
@@ -146,7 +138,6 @@ module ULOL
             restore_validation_focus_visibility
             normalize_visibility_for_non_edit_mode
             @editing = false
-            @editable_entity_ids = {}
             @editing_active_path_target = nil
             reset_edit_mode_visibility_filter
             restore_validation_focus_rendering_options
@@ -163,23 +154,28 @@ module ULOL
           end
         end
 
-        def editable_entity?(entity)
-          begin
-            return false unless @editing
-            return false unless entity&.valid?()
+        def lock_entity(entity)
+          lock_controller.lock_entity(entity)
+        end
 
-            @editable_entity_ids[entity.entityID] == true
-          rescue StandardError
-            false
-          end
+        def unlock_entity(entity)
+          lock_controller.unlock_entity(entity)
+        end
+
+        def with_unlocked(entity)
+          lock_controller.with_unlocked(entity) { yield }
+        end
+
+        def apply_lock_policy
+          lock_controller.apply(editing: @editing)
         end
 
         def validation_focus_active?
-          @validation_focus_cell_ids.is_a?(Hash) && !@validation_focus_cell_ids.empty?
+          validation_focus_controller.active?
         end
 
         def visible_storeys
-          @visible_storeys ||= []
+          visibility_controller.visible_storeys
         end
 
         def visible_cell_type_labels
@@ -187,8 +183,10 @@ module ULOL
         end
 
         def set_visibility_filter(storeys:, cell_types:)
-          @visible_storeys = normalize_storey_filter(storeys)
-          @visible_cell_types = normalize_cell_type_filter(cell_types)
+          visibility_controller.set_filter(
+            storeys: normalize_storey_filter(storeys),
+            cell_types: normalize_cell_type_filter(cell_types)
+          )
           invalidate_overlay_transition_points
           apply_edit_mode_visibility_filter
           selection_changed
@@ -225,7 +223,7 @@ module ULOL
           return true unless validation_focus_active?
           return false unless cell_space&.valid?
 
-          @validation_focus_cell_ids[validation_focus_cell_gml_id(cell_space)] == true
+          validation_focus_controller.focus_cell_space?(cell_space)
         rescue StandardError
           false
         end
@@ -239,9 +237,7 @@ module ULOL
         end
 
         def set_validation_focus_highlight(cell_gml_ids, code = nil)
-          ids = Array(cell_gml_ids).map(&:to_s).reject(&:empty?)
-          @validation_highlight_cell_ids = ids.empty? ? nil : ids.each_with_object({}) { |id, memo| memo[id] = true }
-          @validation_highlight_code = code.to_s
+          validation_focus_controller.set_highlight(cell_gml_ids, code)
           apply_validation_focus_visibility
           invalidate_view(Sketchup.active_model())
           true
@@ -251,36 +247,20 @@ module ULOL
         end
 
         def validation_focus_highlight_cell_spaces
-          return [] unless @validation_highlight_cell_ids.is_a?(Hash) && !@validation_highlight_cell_ids.empty?
-
-          @indoor_model.cell_spaces.select do |cell_space|
-            cell_space&.valid? && @validation_highlight_cell_ids[validation_focus_cell_gml_id(cell_space)] == true
-          end
+          validation_focus_controller.highlight_cell_spaces(@indoor_model.cell_spaces)
         rescue StandardError
           []
         end
 
         def validation_focus_highlight_code
-          @validation_highlight_code
+          validation_focus_controller.highlight_code
         end
 
         def validation_focus_elements
-          cells = validation_focus_cell_spaces
-          cell_set = cells.each_with_object({}) { |cell, memo| memo[cell.object_id] = true }
-          states = cells.map(&:duality_state).select { |state| state&.valid? }
-          transitions = @indoor_model.transitions.select do |transition|
-            next false unless transition&.valid?
-
-            cell1 = transition.state1&.duality_cell
-            cell2 = transition.state2&.duality_cell
-            cell1&.valid? && cell2&.valid? && cell_set[cell1.object_id] && cell_set[cell2.object_id]
-          end
-
-          {
-            cell_spaces: cells,
-            states: states,
-            transitions: transitions
-          }
+          validation_focus_controller.elements(
+            cell_spaces: @indoor_model.cell_spaces,
+            transitions: @indoor_model.transitions
+          )
         rescue StandardError
           { cell_spaces: [], states: [], transitions: [] }
         end
@@ -352,8 +332,10 @@ module ULOL
           return false unless primal_group&.valid?
           return false unless primal_group.respond_to?(:visible=)
 
-          with_unlocked(primal_group) do
-            primal_group.visible = geometry_visible?
+          with_visibility_update_operation do
+            with_unlocked(primal_group) do
+              primal_group.visible = geometry_visible?
+            end
           end
           invalidate_view(Sketchup.active_model())
           true
@@ -365,16 +347,28 @@ module ULOL
         def apply_validation_focus_visibility
           return false unless validation_focus_active?
 
-          @validation_focus_visibility ||= {}
-          @indoor_model.cell_spaces.each do |cell_space|
-            next unless cell_space&.valid?
+          with_visibility_update_operation do
+            @indoor_model.cell_spaces.each do |cell_space|
+              next unless cell_space&.valid?
 
-            group = cell_space.sketchup_group
-            next unless group&.valid? && group.respond_to?(:visible=)
+              group = cell_space.sketchup_group
+              next unless cell_space_visibility_target?(group)
 
-            persistent_id = group.persistent_id
-            @validation_focus_visibility[persistent_id] = group.visible? unless @validation_focus_visibility.key?(persistent_id)
-            with_unlocked(group) { group.visible = edit_mode_visible_cell_space?(cell_space) }
+              persistent_id = group.persistent_id
+              unless validation_focus_controller.visibility_snapshot?(persistent_id)
+                validation_focus_controller.remember_visibility_snapshot(
+                  persistent_id,
+                  capture_cell_space_visibility(group)
+                )
+              end
+              with_unlocked(group) do
+                set_cell_space_render_visible(
+                  group,
+                  edit_mode_visible_cell_space?(cell_space),
+                  validation_focus_controller.visibility_snapshot(persistent_id)
+                )
+              end
+            end
           end
           invalidate_view(Sketchup.active_model())
           true
@@ -383,40 +377,30 @@ module ULOL
           false
         end
 
-        def validation_focus_cell_spaces
-          return [] unless validation_focus_active?
-
-          @indoor_model.cell_spaces.select { |cell_space| validation_focus_cell_space?(cell_space) }
-        rescue StandardError
-          []
-        end
-
         def validation_visible_cell_space?(cell_space)
           return true unless validation_focus_active?
           return false unless cell_space&.valid?
-          if @validation_highlight_cell_ids.is_a?(Hash) && !@validation_highlight_cell_ids.empty?
-            return @validation_highlight_cell_ids[validation_focus_cell_gml_id(cell_space)] == true
-          end
-
-          validation_focus_cell_space?(cell_space)
+          validation_focus_controller.visible_cell_space?(cell_space)
         rescue StandardError
           false
         end
 
         def restore_validation_focus_visibility
-          snapshots = @validation_focus_visibility || {}
+          snapshots = validation_focus_controller.visibility_snapshots
           return true if snapshots.empty?
 
-          @indoor_model.cell_spaces.each do |cell_space|
-            next unless cell_space&.valid?
+          with_visibility_update_operation do
+            @indoor_model.cell_spaces.each do |cell_space|
+              next unless cell_space&.valid?
 
-            group = cell_space.sketchup_group
-            next unless group&.valid? && group.respond_to?(:visible=)
-            next unless snapshots.key?(group.persistent_id)
+              group = cell_space.sketchup_group
+              next unless cell_space_visibility_target?(group)
+              next unless snapshots.key?(group.persistent_id)
 
-            with_unlocked(group) { group.visible = snapshots[group.persistent_id] }
+              with_unlocked(group) { restore_cell_space_visibility(group, snapshots[group.persistent_id]) }
+            end
           end
-          @validation_focus_visibility = {}
+          validation_focus_controller.clear_visibility_snapshots
           apply_edit_mode_visibility_filter(ignore_validation: true) if visibility_filter_active?
           invalidate_view(Sketchup.active_model())
           true
@@ -426,10 +410,7 @@ module ULOL
         end
 
         def clear_validation_focus
-          @validation_focus_cell_ids = nil
-          @validation_highlight_cell_ids = nil
-          @validation_highlight_code = nil
-          @validation_focus_visibility = {}
+          validation_focus_controller.clear
         end
 
         def apply_edit_mode_visibility_filter(ignore_validation: false)
@@ -437,15 +418,21 @@ module ULOL
             return apply_all_edit_mode_cell_space_visibility
           end
 
-          @indoor_model.cell_spaces.each do |cell_space|
-            next unless cell_space&.valid?
+          with_visibility_update_operation do
+            @indoor_model.cell_spaces.each do |cell_space|
+              next unless cell_space&.valid?
 
-            group = cell_space.sketchup_group
-            next unless group&.valid? && group.respond_to?(:visible=)
+              group = cell_space.sketchup_group
+              next unless cell_space_visibility_target?(group)
 
-            remember_edit_mode_visibility(group) if visibility_filter_active?
-            with_unlocked(group) do
-              group.visible = edit_mode_visible_cell_space?(cell_space, include_validation: !ignore_validation)
+              remember_edit_mode_visibility(group) if visibility_filter_active?
+              with_unlocked(group) do
+                set_cell_space_render_visible(
+                  group,
+                  edit_mode_visible_cell_space?(cell_space, include_validation: !ignore_validation),
+                  visibility_controller.edit_mode_visibility_snapshot(group)
+                )
+              end
             end
           end
           invalidate_view(Sketchup.active_model())
@@ -456,15 +443,20 @@ module ULOL
         end
 
         def apply_all_edit_mode_cell_space_visibility
-          @indoor_model.cell_spaces.each do |cell_space|
-            next unless cell_space&.valid?
+          with_visibility_update_operation do
+            @indoor_model.cell_spaces.each do |cell_space|
+              next unless cell_space&.valid?
 
-            group = cell_space.sketchup_group
-            next unless group&.valid? && group.respond_to?(:visible=)
+              group = cell_space.sketchup_group
+              next unless cell_space_visibility_target?(group)
 
-            with_unlocked(group) { group.visible = true }
+              snapshot = visibility_controller.edit_mode_visibility_snapshot(group)
+              with_unlocked(group) do
+                snapshot ? restore_cell_space_visibility(group, snapshot) : set_cell_space_render_visible(group, true)
+              end
+            end
           end
-          @edit_mode_visibility_snapshots = {}
+          visibility_controller.clear_edit_mode_snapshots
           invalidate_view(Sketchup.active_model())
           true
         rescue StandardError => e
@@ -473,19 +465,21 @@ module ULOL
         end
 
         def restore_edit_mode_visibility
-          snapshots = @edit_mode_visibility_snapshots || {}
-          return true if snapshots.empty?
+          return true if visibility_controller.edit_mode_visibility_snapshots_empty?
 
-          @indoor_model.cell_spaces.each do |cell_space|
-            next unless cell_space&.valid?
+          with_visibility_update_operation do
+            @indoor_model.cell_spaces.each do |cell_space|
+              next unless cell_space&.valid?
 
-            group = cell_space.sketchup_group
-            next unless group&.valid? && group.respond_to?(:visible=)
-            next unless snapshots.key?(group.persistent_id)
+              group = cell_space.sketchup_group
+              next unless cell_space_visibility_target?(group)
+              next unless visibility_controller.edit_mode_visibility_snapshot?(group)
 
-            with_unlocked(group) { group.visible = snapshots[group.persistent_id] }
+              snapshot = visibility_controller.edit_mode_visibility_snapshot(group)
+              with_unlocked(group) { restore_cell_space_visibility(group, snapshot) }
+            end
           end
-          @edit_mode_visibility_snapshots = {}
+          visibility_controller.clear_edit_mode_snapshots
           invalidate_view(Sketchup.active_model())
           true
         rescue StandardError => e
@@ -506,30 +500,15 @@ module ULOL
         def capture_and_apply_validation_focus_rendering_options(focus_cell_count)
           return unless focus_cell_count.to_i >= 2
 
-          options = Sketchup.active_model&.rendering_options
-          return unless options
-
-          @validation_focus_hide_rest_previous = options['HideRestOfModel'] if @validation_focus_hide_rest_previous.nil?
-          options['HideRestOfModel'] = false
-          Sketchup.active_model&.active_view&.invalidate
+          validation_focus_controller.capture_and_apply_rendering_options(Sketchup.active_model, focus_cell_count)
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Validation focus rendering option update failed: #{e.class}: #{e.message}"
         end
 
         def restore_validation_focus_rendering_options
-          return if @validation_focus_hide_rest_previous.nil?
-
-          options = Sketchup.active_model&.rendering_options
-          options['HideRestOfModel'] = @validation_focus_hide_rest_previous unless options.nil?
-          @validation_focus_hide_rest_previous = nil
-          Sketchup.active_model&.active_view&.invalidate
+          validation_focus_controller.restore_rendering_options(Sketchup.active_model)
         rescue StandardError => e
-          @validation_focus_hide_rest_previous = nil
           IndoorCore::Logger.puts "[IndoorGML] Validation focus rendering option restore failed: #{e.class}: #{e.message}"
-        end
-
-        def validation_focus_cell_gml_id(cell_space)
-          "cell_#{cell_space.id.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')}"
         end
 
         def active_path_changed(model)
@@ -580,7 +559,6 @@ module ULOL
             @dialog.close_without_finish()
             restore_validation_focus_visibility
             @editing = false
-            @editable_entity_ids = {}
             @editing_active_path_target = nil
             @previous_active_path = nil
             restore_validation_focus_rendering_options
@@ -595,9 +573,7 @@ module ULOL
         end
 
         def invalidate_overlay_transition_points
-          @overlay&.invalidate_transition_points
-        rescue StandardError => e
-          IndoorCore::Logger.puts "[IndoorGML] Overlay transition cache invalidation failed: #{e.class}: #{e.message}"
+          overlay_controller.invalidate_transition_points
         end
 
         def recover_unlocked_primal_after_transaction(model)
@@ -618,24 +594,79 @@ module ULOL
         private
 
         def visible_cell_types
-          @visible_cell_types ||= []
+          visibility_controller.visible_cell_types
+        end
+
+        def lock_controller
+          @lock_controller ||= LockController.new(indoor_model: @indoor_model)
+        end
+
+        def visibility_controller
+          @visibility_controller ||= VisibilityController.new
+        end
+
+        def overlay_controller
+          @overlay_controller ||= OverlayController.new(indoor_model: @indoor_model)
+        end
+
+        def validation_focus_controller
+          @validation_focus_controller ||= ValidationFocusController.new
+        end
+
+        def with_visibility_update_operation
+          model = Sketchup.active_model
+          return with_visibility_observer_suppression { yield } unless model
+
+          if model.respond_to?(:active_operation_name) && model.active_operation_name.to_s.length.positive?
+            return with_visibility_observer_suppression { yield }
+          end
+
+          operation_started = false
+          begin
+            result = nil
+            with_visibility_observer_suppression do
+              operation_started = model.start_operation('IndoorGML Edit Visibility', true)
+              result = yield
+              model.commit_operation if operation_started
+              operation_started = false
+            end
+            result
+          rescue StandardError
+            model.abort_operation if operation_started
+            raise
+          end
+        end
+
+        def with_visibility_observer_suppression
+          if @indoor_model.respond_to?(:with_runtime_observer_suppression)
+            @indoor_model.with_runtime_observer_suppression { yield }
+          else
+            yield
+          end
+        end
+
+        def cell_space_visibility_target?(group)
+          visibility_controller.cell_space_visibility_target?(group)
+        end
+
+        def capture_cell_space_visibility(group)
+          visibility_controller.capture_cell_space_visibility(group)
+        end
+
+        def restore_cell_space_visibility(group, snapshot)
+          visibility_controller.restore_cell_space_visibility(group, snapshot)
+        end
+
+        def set_cell_space_render_visible(group, visible, snapshot = nil)
+          visibility_controller.set_cell_space_render_visible(group, visible, snapshot)
         end
 
         def reset_edit_mode_visibility_filter
-          @visible_storeys = []
-          @visible_cell_types = []
-          @edit_mode_visibility_snapshots = {}
+          visibility_controller.reset_filter
         end
 
         def normalize_storey_filter(values)
-          Array(values).map { |value| normalize_storey_filter_label(value) }.compact.uniq.sort
-        end
-
-        def normalize_storey_filter_label(value)
-          match = value.to_s.strip.upcase.match(/\A([FB])(\d{1,2})\z/)
-          return nil unless match
-
-          "#{match[1]}#{format('%02d', match[2].to_i)}"
+          StoreyFilterParser.normalize_labels(values)
         end
 
         def normalize_cell_type_filter(values)
@@ -648,20 +679,13 @@ module ULOL
         end
 
         def visibility_filter_active?
-          visible_storeys.any? || visible_cell_types.any?
+          visibility_controller.filter_active?
         end
 
         def remember_edit_mode_visibility(group)
-          @edit_mode_visibility_snapshots ||= {}
           persistent_id = group.persistent_id
-          return if @edit_mode_visibility_snapshots.key?(persistent_id)
-
-          @edit_mode_visibility_snapshots[persistent_id] =
-            if @validation_focus_visibility&.key?(persistent_id)
-              @validation_focus_visibility[persistent_id]
-            else
-              group.visible?
-            end
+          snapshot = validation_focus_controller.visibility_snapshot(persistent_id) if validation_focus_controller.visibility_snapshot?(persistent_id)
+          visibility_controller.remember_edit_mode_visibility(group, snapshot: snapshot)
         rescue StandardError
           nil
         end
@@ -677,7 +701,7 @@ module ULOL
         def storey_filter_visible?(cell_space)
           return true if visible_storeys.empty?
 
-          cell_storeys = storey_filter_labels(cell_space&.storey)
+          cell_storeys = StoreyFilterParser.labels_for(cell_space&.storey)
           cell_storeys.any? { |storey| visible_storeys.include?(storey) }
         end
 
@@ -687,79 +711,24 @@ module ULOL
           visible_cell_types.include?(cell_space&.cell_type)
         end
 
-        def storey_filter_labels(value)
-          parts = value.to_s.strip.upcase.split('~', 2)
-          from = parse_storey_filter_part(parts[0])
-          to = parse_storey_filter_part(parts[1] || parts[0])
-          return [CellSpace::DEFAULT_STOREY] if from.nil?
-          return [format_storey_filter_part(from)] if to.nil?
-
-          if from[:kind] == to[:kind]
-            min, max = [from[:level], to[:level]].minmax
-            return (min..max).map { |level| "#{from[:kind]}#{format('%02d', level)}" }
-          end
-
-          [format_storey_filter_part(from), format_storey_filter_part(to)].compact.uniq
-        end
-
-        def parse_storey_filter_part(value)
-          match = value.to_s.strip.upcase.match(/\A([FB])(\d{1,2})\z/)
-          return nil unless match
-
-          level = [[match[2].to_i, 1].max, 99].min
-          { kind: match[1], level: level }
-        end
-
-        def format_storey_filter_part(part)
-          "#{part[:kind]}#{format('%02d', part[:level])}"
-        end
-
         def ensure_overlay_registered(model)
-          begin
-            if @overlay_registered && @overlay_model == model
-              set_overlay_enabled(true)
-              return
-            end
-            return unless model.respond_to?(:overlays)
-
-            @overlay ||= EditModeOverlay.new(@indoor_model)
-            remove_stale_overlay_instances(model)
-            model.overlays().add(@overlay)
-            @overlay_registered = true
-            @overlay_model = model
-            set_overlay_enabled(true)
-          rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] Edit mode overlay registration failed: #{e.class}: #{e.message}"
-          end
-        end
-
-        def remove_stale_overlay_instances(model)
-          stale_overlays = []
-          model.overlays().each do |overlay|
-            next unless overlay.overlay_id == EditModeOverlay::OVERLAY_ID
-            next if overlay.equal?(@overlay)
-
-            stale_overlays << overlay
-          end
-          stale_overlays.each { |overlay| model.overlays().remove(overlay) }
+          overlay_controller.ensure_registered(model)
         end
 
         def set_overlay_enabled(enabled)
-          begin
-            return unless @overlay&.valid?()
-
-            @overlay.enabled = enabled
-          rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] Edit mode overlay enable failed: #{e.class}: #{e.message}"
-          end
+          overlay_controller.set_enabled(enabled)
         end
 
         def update_overlay_enabled
-          set_overlay_enabled(@editing || @dual_overlay_visible == true || progress_active?)
+          overlay_controller.update_enabled(
+            editing: @editing,
+            dual_overlay_visible: @dual_overlay_visible,
+            progress_active: progress_active?
+          )
         end
 
         def invalidate_view(model)
-          model.active_view().invalidate() if model&.active_view()
+          overlay_controller.invalidate_view(model)
         end
 
         def model_boolean_attribute(key, default)
@@ -828,7 +797,6 @@ module ULOL
           primal_group = @indoor_model.primal_group
           if editing_cell_space_path?(current_path, primal_group)
             @editing_active_path_target = current_path
-            mark_editable_primal_entities()
             apply_lock_policy()
             selection_changed()
             invalidate_view(model)
@@ -940,21 +908,6 @@ module ULOL
           model.close_active() while model.active_path()
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Edit context close failed: #{e.class}: #{e.message}"
-        end
-
-        def mark_editable_primal_entities
-          @editable_entity_ids = {}
-          mark_editable(@indoor_model.primal_group)
-        end
-
-        def mark_editable(entity)
-          begin
-            return unless entity&.valid?()
-
-            @editable_entity_ids[entity.entityID] = true
-          rescue StandardError
-            true
-          end
         end
 
       end

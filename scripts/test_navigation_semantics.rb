@@ -136,9 +136,9 @@ module ULOL
 
         def test_exporter_writes_values_and_per_property_code_spaces
           parent = REXML::Element.new('navi:TransitionSpace')
-          exporter = IndoorGmlConverter::GmlExporter.allocate
+          writer = IndoorGmlConverter::GmlWriter.allocate
 
-          exporter.send(
+          writer.send(
             :append_navigable_space_codes,
             parent,
             fake_cell(CellSpaceType::TRANSITION, 'Stair')
@@ -151,9 +151,9 @@ module ULOL
 
         def test_exporter_writes_anchor_space_codes
           parent = REXML::Element.new('navi:AnchorSpace')
-          exporter = IndoorGmlConverter::GmlExporter.allocate
+          writer = IndoorGmlConverter::GmlWriter.allocate
 
-          exporter.send(
+          writer.send(
             :append_navigable_space_codes,
             parent,
             fake_cell(CellSpaceType::ANCHOR, 'ExteriorDoor')

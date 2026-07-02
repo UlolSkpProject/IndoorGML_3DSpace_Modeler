@@ -6,7 +6,6 @@ module ULOL
   module Indoor3DGmlModeler
 
     require_relative 'utils/logger'
-    require_relative 'utils/html_helpers'
     require_relative 'utils/change_snapshot'
     require_relative 'utils/geometry'
     require_relative 'utils/transformation'
@@ -31,7 +30,11 @@ module ULOL
     require_relative 'infrastructure/observers/app_observer'
     require_relative 'infrastructure/persistence/attribute_serializer'
     require_relative 'infrastructure/persistence/runtime_restorer'
+    require_relative 'application/storey_filter_parser'
+    require_relative 'application/storey_filter_options_builder'
     require_relative 'infrastructure/scene/scene_group_guard'
+    require_relative 'infrastructure/scene/entity_copy_helper'
+    require_relative 'infrastructure/scene/active_path_controller'
     require_relative 'infrastructure/scene/editor_session'
     require_relative 'application/feature_registry'
     require_relative 'application/adjacency_service'
@@ -42,6 +45,7 @@ module ULOL
     require_relative 'application/indoor_model/observer_routing'
     require_relative 'application/indoor_model/entity_relocation'
     require_relative 'application/indoor_model/primal_normalization'
+    require_relative 'application/indoor_model/edit_mode_selection_projection'
     require_relative 'application/indoor_model/editor_control'
     require_relative 'application/indoor_model'
     require_relative 'export/gml_exporter'

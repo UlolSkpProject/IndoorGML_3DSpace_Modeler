@@ -4,6 +4,18 @@ module ULOL
   module Indoor3DGmlModeler
     module Utils
       module Geometry
+        def self.intersect_polygons_2d(subject_polygon, clipping_polygon)
+          clip_polygon(subject_polygon, clipping_polygon)
+        end
+
+        def self.polygon_area_2d_value(points)
+          polygon_area_2d(points)
+        end
+
+        def self.point_in_polygon_2d?(point, polygon, tolerance = DEFAULT_TOLERANCE)
+          point_in_polygon?(point, polygon, tolerance)
+        end
+
         def self.clip_polygon(subject_polygon, clip_polygon)
           return [] if subject_polygon.empty? || clip_polygon.length < 3
 
