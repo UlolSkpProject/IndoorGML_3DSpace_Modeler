@@ -117,7 +117,7 @@ module ULOL
               return
             end
 
-            wrapper.name = 'IndoorGML_NonCellSpaceEntities' if wrapper.respond_to?(:name=)
+            wrapper.name = 'Unconverted Geometry' if wrapper.respond_to?(:name=)
             move_remaining_primal_container_to_root(wrapper)
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Raw primal entities relocate failed: #{e.class}: #{e.message}"
