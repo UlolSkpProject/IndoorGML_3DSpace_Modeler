@@ -7,29 +7,28 @@ module ULOL
         module RuntimeSupport
           def refresh_runtime_data
             with_indoor_model_operation('IndoorGML Refresh Runtime Data', transparent: true) do
-              next true if @refreshing_runtime
+              next true if guard_active?(:@refreshing_runtime)
 
-              @refreshing_runtime = true
-              sync do
-                @model ||= Sketchup.active_model
-                find_existing_space_features_groups
-                attach_existing_space_features_observers
-                reset_runtime_collections
-                @runtime_restorer.restore(model: @model, primal_group: @primal_group)
-                ensure_default_storey
-                assign_default_storey_to_unassigned_cell_spaces
-                write_storey_attributes
-                recenter_runtime_cell_spaces
-                rebuild_runtime_transitions_from_cell_adjacency
+              with_guard_flag(:@refreshing_runtime) do
+                sync do
+                  @model ||= Sketchup.active_model
+                  find_existing_space_features_groups
+                  attach_existing_space_features_observers
+                  reset_runtime_collections
+                  @runtime_restorer.restore(model: @model, primal_group: @primal_group)
+                  ensure_default_storey
+                  assign_default_storey_to_unassigned_cell_spaces
+                  write_storey_attributes
+                  recenter_runtime_cell_spaces
+                  rebuild_runtime_transitions_from_cell_adjacency
+                end
+                invalidate_overlay_transition_points
+                apply_indoor_lock_policy()
+                @editor_session.apply_display_state()
+                IndoorCore::Logger.puts "[IndoorGML] Runtime refreshed: cells=#{@cell_spaces.length}, states=#{@states.length}, transitions=#{@transitions.length}"
+                true
               end
-              invalidate_overlay_transition_points
-              apply_indoor_lock_policy()
-              @editor_session.apply_display_state()
-              IndoorCore::Logger.puts "[IndoorGML] Runtime refreshed: cells=#{@cell_spaces.length}, states=#{@states.length}, transitions=#{@transitions.length}"
-              true
             end
-          ensure
-            @refreshing_runtime = false
           end
 
           def diagnostic_snapshot

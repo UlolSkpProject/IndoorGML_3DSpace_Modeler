@@ -17,25 +17,24 @@ module ULOL
             begin
               return unless entity&.valid?
               return unless target_entities
-              return if @relocating_entity
+              return if guard_active?(:@relocating_entity)
 
               if target_root_group&.valid? && Utils::Transformation.direct_child_of_root?(entity, target_root_group)
                 lock_indoor_entity(entity) unless cell_space_entity?(entity)
                 return entity
               end
 
-              @relocating_entity = true
-              copy = copy_entity_to_entities(entity, target_entities, target_root_group)
-              unlock_indoor_entity(entity) unless cell_space_entity?(entity)
-              entity.erase! if entity.valid?
-              lock_indoor_entity(copy) unless cell_space_entity?(copy)
-              copy
+              with_guard_flag(:@relocating_entity) do
+                copy = copy_entity_to_entities(entity, target_entities, target_root_group)
+                unlock_indoor_entity(entity) unless cell_space_entity?(entity)
+                entity.erase! if entity.valid?
+                lock_indoor_entity(copy) unless cell_space_entity?(copy)
+                copy
+              end
             rescue StandardError => e
               IndoorCore::Logger.puts "[IndoorGML] Entity relocation failed: #{e.class}: #{e.message}"
               lock_indoor_entity(entity) unless cell_space_entity?(entity)
               nil
-            ensure
-              @relocating_entity = false
             end
           end
 
