@@ -24,57 +24,20 @@ module ULOL
             end
 
             indoor_model = IndoorModel.current
-            converted_count = 0
-            errors = []
-            executor = toolbar_conversion_executor(model, indoor_model)
-
-            model.start_operation('Convert Solid Groups to CellSpace', true)
-            indoor_model.with_active_path_enforcement_suspended do
-              activate_root_context(model)
-              if conversion_jobs.empty?
-                restore_active_path(model, original_active_path)
-                model.abort_operation()
-                UI.messagebox('No valid solid groups were available for conversion.')
-                return
-              end
-
-              scheduled = indoor_model.run_batched(
-                conversion_jobs,
-                message: 'Converting CellSpaces...',
-                batch_size: 20,
-                complete: proc do
-                  indoor_model.with_active_path_enforcement_suspended do
-                    restore_active_path(model, original_active_path)
-                  end
-                  model.commit_operation()
-
-                  UI.messagebox(ConversionMessageFormatter.result_message(converted_count, errors))
-                end,
-                failure: proc do |error|
-                  indoor_model.with_active_path_enforcement_suspended do
-                    restore_active_path(model, original_active_path)
-                  end
-                  model.abort_operation()
-                  UI.messagebox("CellSpace conversion failed:\n#{error.message}")
-                end
-              ) do |job, _index|
-                result = executor.execute(job, fallback_target: [cell_type, category_code])
-                converted_count += 1 if result.converted?
-                errors.concat(result.errors)
-              end
-              unless scheduled
-                restore_active_path(model, original_active_path)
-                model.abort_operation()
-                UI.messagebox('CellSpace conversion could not be scheduled.')
-              end
-            end
+            result = indoor_model.convert_cell_space_jobs_bulk(
+              conversion_jobs,
+              fallback_target: [cell_type, category_code],
+              original_active_path: original_active_path,
+              operation_name: 'Convert Solid Groups to CellSpace',
+              activate_root_context: true
+            )
+            UI.messagebox(ConversionMessageFormatter.result_message(result.converted_count, result.errors))
           rescue StandardError => e
-            if model && original_active_path
+            if model && defined?(original_active_path) && original_active_path
               IndoorModel.current.with_active_path_enforcement_suspended do
                 restore_active_path(model, original_active_path)
               end
             end
-            model.abort_operation() if model
             UI.messagebox("CellSpace conversion failed:\n#{e.message}")
           end
         end
@@ -128,16 +91,6 @@ module ULOL
 
         private
 
-        def toolbar_conversion_executor(model, indoor_model)
-          CellSpaceConversionExecutor.new(
-            target_entities: model.entities,
-            converter: lambda { |source, cell_type, category_code|
-              indoor_model.convert_single_group_to_cell_space(source, cell_type, category_code)
-            },
-            logger: Logger,
-            labeler: ConversionMessageFormatter.method(:group_label)
-          )
-        end
       end
     end
   end

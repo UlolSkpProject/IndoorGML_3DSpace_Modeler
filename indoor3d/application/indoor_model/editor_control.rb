@@ -262,43 +262,22 @@ module ULOL
               return false if jobs.empty?
 
               model = Sketchup.active_model
-              operation_started = false
-              converted_count = 0
-              errors = []
-              executor = edit_mode_conversion_executor
-              model.start_operation('Convert Selected Solid Groups to CellSpaces', true)
-              operation_started = true
-              scheduled = run_batched(
+              original_active_path = ActivePathController.new(model, logger: IndoorCore::Logger).snapshot
+              result = convert_cell_space_jobs_bulk(
                 jobs,
-                message: 'Converting CellSpaces...',
-                batch_size: 20,
-                complete: proc do
-                  model.commit_operation
-                  operation_started = false
-                  @editor_session.selection_changed()
-                  Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
-                  UI.messagebox(ConversionMessageFormatter.result_message(converted_count, errors))
-                end,
-                failure: proc do |error|
-                  model.abort_operation if operation_started
-                  operation_started = false
-                  IndoorCore::Logger.puts "[IndoorGML] Selected solid group conversion failed: #{error.class}: #{error.message}"
-                  UI.messagebox("CellSpace conversion failed:\n#{error.message}")
-                end
-              ) do |job, _index|
-                result = executor.execute(job, fallback_target: [cell_type, category_code])
-                converted_count += 1 if result.converted?
-                errors.concat(result.errors)
-              end
-              unless scheduled
-                model.abort_operation if operation_started
-                operation_started = false
-                return false
-              end
+                fallback_target: [cell_type, category_code],
+                original_active_path: original_active_path,
+                preserve_source: method(:inside_primal_group?),
+                operation_name: 'Convert Selected Solid Groups to CellSpaces',
+                activate_root_context: true
+              )
+              @editor_session.selection_changed()
+              Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
+              UI.messagebox(ConversionMessageFormatter.result_message(result.converted_count, result.errors))
               true
             rescue StandardError => e
-              model.abort_operation if operation_started
               IndoorCore::Logger.puts "[IndoorGML] Selected solid group conversion failed: #{e.class}: #{e.message}"
+              UI.messagebox("CellSpace conversion failed:\n#{e.message}")
               false
             end
           end
@@ -574,15 +553,6 @@ module ULOL
             CellSpaceConversionJobBuilder.new(entities: selection.to_a).build
           end
 
-          def edit_mode_conversion_executor
-            CellSpaceConversionExecutor.new(
-              target_entities: (@model || Sketchup.active_model).entities,
-              converter: method(:convert_single_group_to_cell_space),
-              preserve_source: method(:inside_primal_group?),
-              logger: IndoorCore::Logger,
-              labeler: ConversionMessageFormatter.method(:group_label)
-            )
-          end
         end
       end
     end

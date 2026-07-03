@@ -11,6 +11,26 @@ module ULOL
         end
 
         def create_from_group(sketchup_group, cell_type: CellSpaceType::GENERAL, category_code: nil)
+          create_from_group_internal(
+            sketchup_group,
+            cell_type: cell_type,
+            category_code: category_code,
+            synchronize_adjacency: true,
+            apply_lock_policy: true
+          )
+        end
+
+        def create_from_group_deferred(sketchup_group, cell_type: CellSpaceType::GENERAL, category_code: nil)
+          create_from_group_internal(
+            sketchup_group,
+            cell_type: cell_type,
+            category_code: category_code,
+            synchronize_adjacency: false,
+            apply_lock_policy: false
+          )
+        end
+
+        def create_from_group_internal(sketchup_group, cell_type:, category_code:, synchronize_adjacency:, apply_lock_policy:)
           raise ArgumentError, 'Group is already converted to CellSpace' if @source_preparer.converted?(sketchup_group)
 
           resolved_cell_type, resolved_category_code = @source_preparer.resolve_type_and_category(
@@ -27,10 +47,16 @@ module ULOL
           cell_space = @cell_space_class.new(cell_group, resolved_cell_type, resolved_category_code)
           @context.initialize_scene(cell_space)
           state = cell_space.create_duality_state(nil)
-          @context.register_created(cell_space, state)
+          @context.register_created(
+            cell_space,
+            state,
+            synchronize_adjacency: synchronize_adjacency,
+            apply_lock_policy: apply_lock_policy
+          )
 
           cell_space
         end
+        private :create_from_group_internal
 
         def change_type(cell_space, cell_type:, category_code:)
           raise ArgumentError, 'Selected entity is not a registered CellSpace' if cell_space.nil?
@@ -106,13 +132,13 @@ module ULOL
           @apply_cell_space_material.call(cell_space)
         end
 
-        def register_created(cell_space, state)
+        def register_created(cell_space, state, synchronize_adjacency: true, apply_lock_policy: true)
           @register_cell_space.call(cell_space)
           @register_state.call(state)
           @write_attributes.call(cell_space)
           @track_cell_space_entity.call(cell_space.sketchup_group)
-          @synchronize_adjacency_and_transitions_for_cell_space.call(cell_space)
-          @apply_indoor_lock_policy.call
+          @synchronize_adjacency_and_transitions_for_cell_space.call(cell_space) if synchronize_adjacency
+          @apply_indoor_lock_policy.call if apply_lock_policy
         end
 
         def persist_type_change(cell_space)

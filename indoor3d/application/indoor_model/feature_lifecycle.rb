@@ -15,6 +15,44 @@ module ULOL
             end
           end
 
+          def convert_cell_space_jobs_bulk(jobs, fallback_target:, original_active_path:, preserve_source: nil, operation_name: 'Convert Solid Groups to CellSpace', activate_root_context: true)
+            model = @model || Sketchup.active_model
+            active_path = ActivePathController.new(model, logger: IndoorCore::Logger)
+            progress = BulkCellSpaceConversionProgress.new(
+              start: proc { |total, message| @editor_session.start_progress(total, message) },
+              update: proc { |current, message| @editor_session.update_progress(current, message) },
+              finish: proc { @editor_session.finish_progress }
+            )
+
+            service = BulkCellSpaceConversionService.new(
+              model: model,
+              jobs: jobs,
+              fallback_target: fallback_target,
+              target_entities: model.entities,
+              converter: proc do |source, cell_type, category_code|
+                cell_space_lifecycle_service.create_from_group_deferred(
+                  source,
+                  cell_type: cell_type,
+                  category_code: category_code
+                )
+              end,
+              synchronize_all: proc { @adjacency_service.synchronize_all },
+              apply_lock_policy: proc { apply_indoor_lock_policy },
+              runtime_snapshot: proc { bulk_conversion_runtime_snapshot },
+              runtime_restore: proc { |snapshot| restore_bulk_conversion_runtime(snapshot) },
+              apply_guards: proc { |&block| with_bulk_cell_space_conversion(&block) },
+              restore_active_path: proc { active_path.restore(original_active_path, close_when_nil: true) },
+              activate_root_context: activate_root_context ? proc { active_path.close_to_root } : nil,
+              clear_dirty_topology: proc { clear_bulk_dirty_topology },
+              progress: progress,
+              logger: IndoorCore::Logger,
+              labeler: ConversionMessageFormatter.method(:group_label),
+              preserve_source: preserve_source,
+              operation_name: operation_name
+            )
+            service.call
+          end
+
           def change_cell_space_type(sketchup_group, cell_type, category_code = nil)
             with_indoor_model_operation('IndoorGML Change CellSpace Type') do
               cell_space = find_cell_space_for_entity(sketchup_group)
@@ -135,6 +173,25 @@ module ULOL
                 erase_adjacency_for_cell_space: method(:erase_adjacency_for_cell_space)
               )
             )
+          end
+
+          def with_bulk_cell_space_conversion
+            with_active_path_enforcement_suspended do
+              with_runtime_observer_suppression do
+                with_guard_flag(:@bulk_cell_space_conversion) do
+                  previous_depth = @indoor_operation_depth.to_i
+                  @indoor_operation_depth = previous_depth + 1
+                  yield
+                ensure
+                  @indoor_operation_depth = previous_depth
+                end
+              end
+            end
+          end
+
+          def clear_bulk_dirty_topology
+            @dirty_cell_space_pids.clear
+            @cell_space_sync_scheduled = false
           end
 
           def tag_cell_space_type_change_target(cell_space, cell_type, category_code)
