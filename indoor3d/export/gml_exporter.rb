@@ -114,10 +114,6 @@ module ULOL
             export_snapshot.cell_spaces
           end
 
-          def exportable_transitions
-            export_snapshot.transitions
-          end
-
           def export_snapshot
             @export_snapshot ||= ExportSnapshot.build(
               indoor_model: @indoor_model,

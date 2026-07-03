@@ -35,16 +35,12 @@ module ULOL
           attr_reader :cell_spaces, :transitions
 
           def self.build(indoor_model:, cell_spaces: nil, transitions: nil)
-            new_builder(indoor_model: indoor_model, cell_spaces: cell_spaces, transitions: transitions).build
+            Builder.new(indoor_model: indoor_model, cell_spaces: cell_spaces, transitions: transitions).build
           end
 
           def initialize(cell_spaces:, transitions:)
             @cell_spaces = Array(cell_spaces).freeze
             @transitions = Array(transitions).freeze
-          end
-
-          def self.new_builder(indoor_model:, cell_spaces:, transitions:)
-            Builder.new(indoor_model: indoor_model, cell_spaces: cell_spaces, transitions: transitions)
           end
 
           class Builder
@@ -157,7 +153,7 @@ module ULOL
 
             def oriented_ring_points(loop, transform, normal, align_with_normal)
               ring = loop_points(loop, transform)
-              polygon_normal = polygon_normal(ring)
+              polygon_normal = Utils::Geometry.polygon_normal(ring, epsilon: 0.000001)
               if normal && polygon_normal
                 same_direction = polygon_normal.dot(normal) >= 0.0
                 ring.reverse! if same_direction != align_with_normal
@@ -168,25 +164,6 @@ module ULOL
 
             def transformed_face_normal(face, transform)
               normal = face.normal.transform(transform)
-              return nil if normal.length <= 0.000001
-
-              normal.normalize!
-              normal
-            end
-
-            def polygon_normal(points)
-              return nil if points.length < 3
-
-              x = 0.0
-              y = 0.0
-              z = 0.0
-              points.each_with_index do |point, index|
-                next_point = points[(index + 1) % points.length]
-                x += (point.y - next_point.y) * (point.z + next_point.z)
-                y += (point.z - next_point.z) * (point.x + next_point.x)
-                z += (point.x - next_point.x) * (point.y + next_point.y)
-              end
-              normal = Geom::Vector3d.new(x, y, z)
               return nil if normal.length <= 0.000001
 
               normal.normalize!

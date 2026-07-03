@@ -71,7 +71,7 @@ module ULOL
               interior_points.length >= 3 ? interior_points : nil
             end
 
-            normal = polygon_normal(points)
+            normal = Utils::Geometry.polygon_normal(points, epsilon: @numeric_epsilon)
             return { unsupported: true } unless normal
 
             {
@@ -124,23 +124,6 @@ module ULOL
             when 'm' then 0.0254
             else 1.0
             end
-          end
-
-          def polygon_normal(points)
-            x = 0.0
-            y = 0.0
-            z = 0.0
-            points.each_with_index do |point, index|
-              next_point = points[(index + 1) % points.length]
-              x += (point.y - next_point.y) * (point.z + next_point.z)
-              y += (point.z - next_point.z) * (point.x + next_point.x)
-              z += (point.x - next_point.x) * (point.y + next_point.y)
-            end
-            normal = Geom::Vector3d.new(x, y, z)
-            return nil if normal.length <= @numeric_epsilon
-
-            normal.normalize!
-            normal
           end
 
           def triangulate_points(points)

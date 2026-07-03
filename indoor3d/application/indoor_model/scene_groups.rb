@@ -23,7 +23,6 @@ module ULOL
               write_space_features_attributes(@primal_group, PRIMAL_GROUP_FEATURE)
               ensure_space_features_origin_point(@primal_group)
               attach_entities_observers
-              lock_space_features_groups
             end
           end
 
@@ -36,21 +35,9 @@ module ULOL
           def attach_existing_space_features_observers
             model = @model || Sketchup.active_model
             attach_entities_observer(:root, model.entities, @root_entities_observer)
-            attach_existing_space_features_observer(@primal_group, PRIMAL_GROUP_NAME)
+            attach_space_features_observer(@primal_group, PRIMAL_GROUP_NAME, normalize: false)
             attach_entities_observer(:primal, @primal_group.entities, @primal_entities_observer) if @primal_group&.valid?
             @primal_entities_observer.track_entities(@primal_group.entities) if @primal_group&.valid?
-          end
-
-          def attach_existing_space_features_observer(group, expected_name)
-            return unless group&.valid?
-
-            observer_key = entity_observer_key(group)
-            @scene_group_guard.track(group, expected_name)
-            remember_space_features_change_snapshot(group)
-            return if @space_features_observed_ids[observer_key]
-
-            group.add_observer(@space_features_observer)
-            @space_features_observed_ids[observer_key] = true
           end
 
           def find_group(entities, name)
@@ -141,12 +128,12 @@ module ULOL
             )
           end
 
-          def attach_space_features_observer(group, expected_name)
+          def attach_space_features_observer(group, expected_name, normalize: true)
             return unless group&.valid?
 
             observer_key = entity_observer_key(group)
             @scene_group_guard.track(group, expected_name)
-            ensure_space_features_name(group, expected_name)
+            ensure_space_features_name(group, expected_name) if normalize
             remember_space_features_change_snapshot(group)
             return if @space_features_observed_ids[observer_key]
 
@@ -219,10 +206,6 @@ module ULOL
             end
           end
 
-          def lock_space_features_groups
-            true
-          end
-
           def enforce_space_features_constraints
             ensure_space_features_guard_tracking
             @scene_group_guard.enforce(ordered_space_features_groups)
@@ -266,10 +249,6 @@ module ULOL
             rescue StandardError
               false
             end
-          end
-
-          def state_local_position(state)
-            state.position
           end
 
           def ensure_cell_space_is_child_of_primal_space!(cell_space)

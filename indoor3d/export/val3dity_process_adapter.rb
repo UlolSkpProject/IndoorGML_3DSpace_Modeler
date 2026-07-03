@@ -9,7 +9,7 @@ module ULOL
     module IndoorCore
       module IndoorGmlConverter
 
-        class Val3dityProcessSession
+        class Val3dityProcessAdapter
           CREATE_NO_WINDOW        = 0x08000000
           STARTF_USESTDHANDLES    = 0x00000100
           HANDLE_FLAG_INHERIT     = 0x00000001
@@ -329,8 +329,6 @@ module ULOL
             "#{value}\x00".encode('UTF-16LE')
           end
         end
-
-        Val3dityProcessAdapter = Val3dityProcessSession unless const_defined?(:Val3dityProcessAdapter)
 
       end
     end

@@ -266,6 +266,7 @@ module ULOL
               operation_started = false
               converted_count = 0
               errors = []
+              executor = edit_mode_conversion_executor
               model.start_operation('Convert Selected Solid Groups to CellSpaces', true)
               operation_started = true
               scheduled = run_batched(
@@ -286,19 +287,9 @@ module ULOL
                   UI.messagebox("CellSpace conversion failed:\n#{error.message}")
                 end
               ) do |job, _index|
-                begin
-                  target_cell_type, target_category_code = job[:target] || [cell_type, category_code]
-                  source_is_primal_child = inside_primal_group?(job[:source])
-                  source = source_is_primal_child ? job[:source] : copy_conversion_job_to_model_root(job)
-                  convert_single_group_to_cell_space(source, target_cell_type, target_category_code)
-                  job[:source].erase! if !source_is_primal_child && job[:source]&.valid?
-                  cleanup_empty_conversion_ancestors(job)
-                  converted_count += 1
-                rescue StandardError => e
-                  IndoorCore::Logger.puts "[IndoorGML] Selected solid group conversion failed: #{e.class}: #{e.message}"
-                  source.erase! if source&.valid? && indoor_feature(source) != 'CellSpace'
-                  errors << { group: ConversionMessageFormatter.group_label(job[:source]), reason: e.message }
-                end
+                result = executor.execute(job, fallback_target: [cell_type, category_code])
+                converted_count += 1 if result.converted?
+                errors.concat(result.errors)
               end
               unless scheduled
                 model.abort_operation if operation_started
@@ -562,13 +553,6 @@ module ULOL
             types.length == 1 ? types.first : nil
           end
 
-          def multi_cell_space_storey_value(cell_spaces)
-            storeys = cell_spaces.map { |cell_space| cell_space.storey.to_s }.reject(&:empty?).uniq
-            return storeys.first if storeys.length == 1
-
-            cell_spaces.first&.storey || CellSpace::DEFAULT_STOREY
-          end
-
           def storey_range_allowed_for_cell_spaces(cell_spaces)
             cell_spaces = Array(cell_spaces).select { |cell_space| cell_space&.valid? }
             return false if cell_spaces.empty?
@@ -583,130 +567,21 @@ module ULOL
             value.to_s.split('~', 2).first
           end
 
-          def resolved_navigation_semantic_value(cell_space, key)
-            NavigationSemanticResolver.resolve(cell_space).public_send(key)
-          rescue NavigationSemanticError
-            nil
-          end
-
-          def cell_space_type_change_locked_by_tag?(cell_spaces)
-            return false if cell_spaces.empty?
-
-            cell_spaces.all? do |cell_space|
-              target = IndoorCore.tag_cell_space_type_and_category(cell_space.sketchup_group)
-              target && cell_space.cell_type == target[0] && cell_space.category_code == target[1]
-            end
-          end
-
           def selected_cell_space_conversion_jobs
             selection = Sketchup.active_model&.selection
             return [] unless selection
 
-            parent_target = active_context_parent_tag_target
-            active_ancestors = active_context_conversion_ancestors
-            selection.to_a.each_with_object([]) do |entity, jobs|
-              next unless convertible_cell_space_container?(entity)
-
-              collect_selected_cell_space_conversion_jobs(
-                entity,
-                Utils::Transformation.entity_transformation_in_active_context(entity),
-                parent_target,
-                active_ancestors,
-                jobs
-              )
-            end
+            CellSpaceConversionJobBuilder.new(entities: selection.to_a).build
           end
 
-          def active_context_parent_tag_target
-            parent = Sketchup.active_model&.active_path&.last
-            parent ? IndoorCore.tag_cell_space_type_and_category(parent) : nil
-          rescue StandardError
-            nil
-          end
-
-          def active_context_conversion_ancestors
-            (Sketchup.active_model&.active_path || []).select { |entity| cleanup_candidate_container?(entity) }
-          rescue StandardError
-            []
-          end
-
-          def collect_selected_cell_space_conversion_jobs(entity, world_transformation, parent_target, ancestors, jobs)
-            return unless entity&.valid?
-            return unless convertible_cell_space_container?(entity)
-            return if indoor_feature(entity) == 'CellSpace'
-
-            if solid_container?(entity)
-              jobs << {
-                source: entity,
-                transformation: world_transformation,
-                ancestors: ancestors.dup,
-                target: selected_entity_tag_target(entity, parent_target)
-              }
-              return
-            end
-
-            entity_target = IndoorCore.tag_cell_space_type_and_category(entity)
-            return unless entity.respond_to?(:definition) && entity.definition&.valid?
-
-            child_ancestors = cleanup_candidate_container?(entity) ? ancestors + [entity] : ancestors
-            entity.definition.entities.to_a.each do |child|
-              next unless child&.valid?
-              next unless convertible_cell_space_container?(child)
-
-              collect_selected_cell_space_conversion_jobs(
-                child,
-                world_transformation * child.transformation,
-                entity_target,
-                child_ancestors,
-                jobs
-              )
-            end
-          end
-
-          def selected_entity_tag_target(entity, parent_target)
-            entity_target = IndoorCore.tag_cell_space_type_and_category(entity)
-            return entity_target if entity_target
-            return parent_target unless IndoorCore.tag_assigned?(entity)
-
-            nil
-          end
-
-          def copy_conversion_job_to_model_root(job)
-            source = job[:source]
-            EntityCopyHelper.copy_instance(
-              source: source,
+          def edit_mode_conversion_executor
+            CellSpaceConversionExecutor.new(
               target_entities: (@model || Sketchup.active_model).entities,
-              transformation: job[:transformation],
-              convert_to_group: :source_group,
-              make_unique: :source_group,
-              copy_attributes: [:name, :material, :layer, :visible]
+              converter: method(:convert_single_group_to_cell_space),
+              preserve_source: method(:inside_primal_group?),
+              logger: IndoorCore::Logger,
+              labeler: ConversionMessageFormatter.method(:group_label)
             )
-          end
-
-          def cleanup_empty_conversion_ancestors(job)
-            Array(job[:ancestors]).reverse_each do |entity|
-              cleanup_empty_conversion_container(entity)
-            end
-          end
-
-          def cleanup_empty_conversion_container(entity)
-            return false unless cleanup_candidate_container?(entity)
-            return false unless entity.respond_to?(:definition) && entity.definition&.valid?
-            return false unless entity.definition.entities.to_a.empty?
-
-            entity.erase!
-            true
-          rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] Empty source group cleanup failed: #{e.class}: #{e.message}"
-            false
-          end
-
-          def cleanup_candidate_container?(entity)
-            entity&.valid? &&
-              convertible_cell_space_container?(entity) &&
-              indoor_feature(entity).to_s.empty?
-          rescue StandardError
-            false
           end
         end
       end

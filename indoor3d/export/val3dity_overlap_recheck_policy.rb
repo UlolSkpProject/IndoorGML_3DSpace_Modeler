@@ -10,11 +10,11 @@ module ULOL
       module IndoorGmlConverter
 
         class Val3dityOverlapRecheckPolicy
-          REPORT_KEY = 'indoorgml_modeler_overlap_recheck'
-          STRICT_VALIDITY_KEY = 'strict_val3dity_validity'
-          EXTENSION_VALIDITY_KEY = 'extension_policy_validity'
-          VALIDATION_STATUS_KEY = 'indoorgml_modeler_validation_status'
-          STRICT_ERRORS_REPORT_KEY = 'indoorgml_modeler_strict_errors'
+          REPORT_KEY = Val3dityReportSchema::OVERLAP_RECHECK_REPORT_KEY
+          STRICT_VALIDITY_KEY = Val3dityReportSchema::STRICT_VALIDITY_KEY
+          EXTENSION_VALIDITY_KEY = Val3dityReportSchema::EXTENSION_VALIDITY_KEY
+          VALIDATION_STATUS_KEY = Val3dityReportSchema::VALIDATION_STATUS_KEY
+          STRICT_ERRORS_REPORT_KEY = Val3dityReportSchema::STRICT_ERRORS_REPORT_KEY
           RECHECKABLE_CODES = [701, 704].freeze
 
           def initialize(tolerance_mm:)

@@ -8,6 +8,12 @@ module ULOL
       module IndoorGmlConverter
 
         module Val3dityReportSchema
+          OVERLAP_RECHECK_REPORT_KEY = 'indoorgml_modeler_overlap_recheck'
+          STRICT_VALIDITY_KEY = 'strict_val3dity_validity'
+          EXTENSION_VALIDITY_KEY = 'extension_policy_validity'
+          VALIDATION_STATUS_KEY = 'indoorgml_modeler_validation_status'
+          STRICT_ERRORS_REPORT_KEY = 'indoorgml_modeler_strict_errors'
+
           module_function
 
           def error_code_number(code)
