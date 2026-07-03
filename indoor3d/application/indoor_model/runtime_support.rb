@@ -134,6 +134,68 @@ module ULOL
             bind_registry_collections
           end
 
+          def bulk_conversion_runtime_snapshot
+            {
+              registry: @feature_registry.snapshot,
+              cell_space_change_snapshots: @cell_space_change_snapshots.dup,
+              space_features_change_snapshots: @space_features_change_snapshots.dup,
+              dirty_cell_space_pids: @dirty_cell_space_pids.dup,
+              cell_space_sync_scheduled: @cell_space_sync_scheduled,
+              cell_space_observed_ids: @cell_space_observed_ids.dup,
+              space_features_observed_ids: @space_features_observed_ids.dup,
+              entities_observed_ids: @entities_observed_ids.dup,
+              state_instances: mutable_instance_snapshot(@states),
+              transition_instances: mutable_instance_snapshot(@transitions)
+            }
+          end
+
+          def restore_bulk_conversion_runtime(snapshot)
+            restore_mutable_instances(snapshot[:state_instances])
+            restore_mutable_instances(snapshot[:transition_instances])
+            @feature_registry.restore!(snapshot[:registry])
+            bind_registry_collections
+            @cell_space_change_snapshots = snapshot[:cell_space_change_snapshots].dup
+            @space_features_change_snapshots = snapshot[:space_features_change_snapshots].dup
+            @dirty_cell_space_pids = snapshot[:dirty_cell_space_pids].dup
+            @cell_space_sync_scheduled = snapshot[:cell_space_sync_scheduled]
+            @cell_space_observed_ids = snapshot[:cell_space_observed_ids].dup
+            @space_features_observed_ids = snapshot[:space_features_observed_ids].dup
+            @entities_observed_ids = snapshot[:entities_observed_ids].dup
+          end
+
+          def mutable_instance_snapshot(objects)
+            Array(objects).each_with_object({}) do |object, snapshot|
+              next if object.nil?
+
+              snapshot[object.object_id] = {
+                object: object,
+                variables: object.instance_variables.each_with_object({}) do |name, values|
+                  values[name] = duplicate_runtime_value(object.instance_variable_get(name))
+                end
+              }
+            end
+          end
+
+          def restore_mutable_instances(snapshot)
+            Hash(snapshot).each_value do |entry|
+              object = entry[:object]
+              Hash(entry[:variables]).each do |name, value|
+                object.instance_variable_set(name, duplicate_runtime_value(value))
+              end
+            end
+          end
+
+          def duplicate_runtime_value(value)
+            case value
+            when Array
+              value.dup
+            when Hash
+              value.dup
+            else
+              value
+            end
+          end
+
           def recenter_runtime_cell_spaces
             @cell_spaces.each do |cell_space|
               next unless cell_space&.valid?

@@ -27,6 +27,32 @@ module ULOL
           @transitions_by_cell_pair = {}
         end
 
+        def snapshot
+          {
+            cell_spaces: @cell_spaces.dup,
+            storeys: @storeys.dup,
+            states: @states.dup,
+            transitions: @transitions.dup,
+            cell_spaces_by_entity_object: @cell_spaces_by_entity_object.dup,
+            cell_spaces_by_persistent_id: @cell_spaces_by_persistent_id.dup,
+            cell_spaces_by_entity_id_for_removed_callback: @cell_spaces_by_entity_id_for_removed_callback.dup,
+            adjacent_cell_space_pairs: @adjacent_cell_space_pairs.dup,
+            transitions_by_cell_pair: @transitions_by_cell_pair.dup
+          }
+        end
+
+        def restore!(snapshot)
+          @cell_spaces = Array(snapshot[:cell_spaces]).dup
+          @storeys = Array(snapshot[:storeys]).dup
+          @states = Array(snapshot[:states]).dup
+          @transitions = Array(snapshot[:transitions]).dup
+          @cell_spaces_by_entity_object = Hash(snapshot[:cell_spaces_by_entity_object]).dup
+          @cell_spaces_by_persistent_id = Hash(snapshot[:cell_spaces_by_persistent_id]).dup
+          @cell_spaces_by_entity_id_for_removed_callback = Hash(snapshot[:cell_spaces_by_entity_id_for_removed_callback]).dup
+          @adjacent_cell_space_pairs = Hash(snapshot[:adjacent_cell_space_pairs]).dup
+          @transitions_by_cell_pair = Hash(snapshot[:transitions_by_cell_pair]).dup
+        end
+
         def add_storey(storey)
           @storeys << storey unless @storeys.include?(storey)
         end

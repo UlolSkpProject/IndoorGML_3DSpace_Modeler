@@ -54,6 +54,36 @@ module ULOL
           ], calls
         end
 
+        def test_create_from_group_deferred_skips_immediate_adjacency_and_lock_policy
+          calls = []
+          source_group = Object.new
+          placed_group = Object.new
+          state = Object.new
+          callbacks = lifecycle_callbacks(calls, source_group: source_group, placed_group: placed_group, state: state)
+          service = build_lifecycle_service(callbacks)
+
+          cell_space = service.create_from_group_deferred(source_group, cell_type: :input_type, category_code: 'Room')
+
+          assert_equal placed_group, cell_space.sketchup_group
+          assert_equal [
+            :converted_group?,
+            :resolve_cell_space_type_and_category,
+            :prepare_cell_space_source_group!,
+            :ensure_space_features_groups,
+            :place_cell_group,
+            :default_storey_name,
+            :fixed_state_height_offset,
+            :recenter_cell_space_geometry,
+            :name_cell_space_entity,
+            :apply_cell_space_material,
+            :create_duality_state,
+            :register_cell_space,
+            :register_state,
+            :write_attributes,
+            :track_cell_space_entity
+          ], calls
+        end
+
         def test_duplicate_source_raises_before_geometry_validation
           calls = []
           callbacks = lifecycle_callbacks(calls).merge(converted_group?: proc { |_group| calls << :converted_group?; true })

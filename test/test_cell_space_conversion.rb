@@ -2,6 +2,18 @@
 
 require 'minitest/autorun'
 
+module UI
+  class << self
+    attr_accessor :timers
+  end
+
+  def self.start_timer(interval, repeat, &block)
+    self.timers ||= []
+    timers << { interval: interval, repeat: repeat, block: block }
+    true
+  end
+end
+
 module Sketchup
   class Group; end unless const_defined?(:Group, false)
   class ComponentInstance; end unless const_defined?(:ComponentInstance, false)
@@ -141,6 +153,93 @@ module ULOL
           refute source.erased?
         end
 
+        def test_bulk_service_uses_one_synchronous_operation_without_timer
+          UI.timers = []
+          model = FakeOperationModel.new
+          calls = []
+          service = bulk_service(
+            model: model,
+            jobs: [job_for(FakeGroup.new(manifold: true)), job_for(FakeGroup.new(manifold: true))],
+            converter: proc { |_source, _cell_type, _category_code| calls << :convert },
+            synchronize_all: proc { calls << :synchronize_all; { pair_comparison_count: 1, total_duration: 0.01 } },
+            apply_lock_policy: proc { calls << :apply_lock_policy }
+          )
+
+          result = service.call
+
+          assert_equal 2, result.converted_count
+          assert_equal [[:start, 'Bulk Convert', true], [:commit]], model.operations
+          assert_empty UI.timers
+          assert_equal [:convert, :convert, :synchronize_all, :apply_lock_policy], calls
+          assert_equal 1, result.metrics[:pair_comparison_count]
+        end
+
+        def test_bulk_service_aborts_once_and_restores_runtime_when_apply_fails
+          model = FakeOperationModel.new
+          restored = []
+          calls = []
+          service = bulk_service(
+            model: model,
+            jobs: [job_for(FakeGroup.new(manifold: true)), job_for(FakeGroup.new(manifold: true))],
+            converter: proc do |_source, _cell_type, _category_code|
+              calls << :convert
+              raise 'creation failed' if calls.length == 2
+            end,
+            runtime_restore: proc { |snapshot| restored << snapshot }
+          )
+
+          error = assert_raises(RuntimeError) { service.call }
+
+          assert_equal 'creation failed', error.message
+          assert_equal [[:start, 'Bulk Convert', true], [:abort]], model.operations
+          assert_equal [:runtime_snapshot], restored
+        end
+
+        def test_bulk_service_aborts_and_restores_runtime_when_commit_fails
+          model = FakeOperationModel.new(commit_result: false)
+          restored = []
+          service = bulk_service(
+            model: model,
+            jobs: [job_for(FakeGroup.new(manifold: true))],
+            runtime_restore: proc { |snapshot| restored << snapshot }
+          )
+
+          error = assert_raises(RuntimeError) { service.call }
+
+          assert_equal 'Failed to commit CellSpace conversion operation', error.message
+          assert_equal [[:start, 'Bulk Convert', true], [:commit], [:abort]], model.operations
+          assert_equal [:runtime_snapshot], restored
+        end
+
+        def test_bulk_service_keeps_original_error_when_active_path_restore_also_fails
+          model = FakeOperationModel.new
+          restore_calls = 0
+          service = bulk_service(
+            model: model,
+            jobs: [job_for(FakeGroup.new(manifold: true))],
+            converter: proc { |_source, _cell_type, _category_code| raise 'creation failed' },
+            restore_active_path: proc { restore_calls += 1; raise 'restore failed' }
+          )
+
+          error = assert_raises(RuntimeError) { service.call }
+
+          assert_equal 'creation failed', error.message
+          assert_equal 1, restore_calls
+          assert_equal [[:start, 'Bulk Convert', true], [:abort]], model.operations
+        end
+
+        def test_multi_conversion_entrypoints_do_not_use_run_batched
+          toolbar_method = method_source('indoor3d/ui/commands/cell_space_commands.rb', 'convert_selected_solid_groups_to_cell_spaces', 'change_selected_cell_space_type')
+          edit_mode_method = method_source('indoor3d/application/indoor_model/editor_control.rb', 'convert_selected_solid_groups_to_cell_spaces', 'set_selected_cell_space_type')
+
+          assert_includes toolbar_method, 'convert_cell_space_jobs_bulk'
+          assert_includes edit_mode_method, 'convert_cell_space_jobs_bulk'
+          refute_includes toolbar_method, 'run_batched'
+          refute_includes edit_mode_method, 'run_batched'
+          refute_includes toolbar_method, 'start_operation'
+          refute_includes edit_mode_method, 'start_operation'
+        end
+
         private
 
         def job_for(source, target: nil, ancestors: [])
@@ -154,6 +253,38 @@ module ULOL
 
         def failing_converter
           proc { |_group, _cell_type, _category_code| raise 'not solid' }
+        end
+
+        def method_source(relative_path, method_name, next_method_name)
+          source = File.read(File.expand_path("../#{relative_path}", __dir__))
+          source[/def #{method_name}.*?^\s*def #{next_method_name}/m].sub(/^\s*def #{next_method_name}.*/m, '')
+        end
+
+        def bulk_service(model:, jobs:, converter: proc { |_source, _cell_type, _category_code| true }, synchronize_all: proc { {} }, apply_lock_policy: proc {}, runtime_restore: proc { |_snapshot| }, restore_active_path: proc {})
+          BulkCellSpaceConversionService.new(
+            model: model,
+            jobs: jobs,
+            fallback_target: [:general, nil],
+            target_entities: FakeTargetEntities.new,
+            converter: converter,
+            synchronize_all: synchronize_all,
+            apply_lock_policy: apply_lock_policy,
+            runtime_snapshot: proc { :runtime_snapshot },
+            runtime_restore: runtime_restore,
+            apply_guards: proc { |&block| block.call },
+            restore_active_path: restore_active_path,
+            activate_root_context: proc {},
+            clear_dirty_topology: proc {},
+            progress: BulkCellSpaceConversionProgress.new(
+              start: proc { |_total, _message| },
+              update: proc { |_current, _message| },
+              finish: proc {}
+            ),
+            logger: FakeLogger.new,
+            labeler: proc { |entity| entity.respond_to?(:name) ? entity.name : 'entity' },
+            preserve_source: proc { |_source| true },
+            operation_name: 'Bulk Convert'
+          )
         end
 
         class FakeLogger
@@ -270,6 +401,30 @@ module ULOL
 
           def add_instance(_definition, _transformation)
             @last_copy = FakeGroup.new(manifold: true, name: 'copy')
+          end
+        end
+
+        class FakeOperationModel
+          attr_reader :operations
+
+          def initialize(commit_result: true)
+            @commit_result = commit_result
+            @operations = []
+          end
+
+          def start_operation(name, transparent)
+            @operations << [:start, name, transparent]
+            true
+          end
+
+          def commit_operation
+            @operations << [:commit]
+            @commit_result
+          end
+
+          def abort_operation
+            @operations << [:abort]
+            true
           end
         end
       end
