@@ -18,12 +18,6 @@ module ULOL
           def convert_cell_space_jobs_bulk(jobs, fallback_target:, original_active_path:, preserve_source: nil, operation_name: 'Convert Solid Groups to CellSpace', activate_root_context: true)
             model = @model || Sketchup.active_model
             active_path = ActivePathController.new(model, logger: IndoorCore::Logger)
-            progress = BulkCellSpaceConversionProgress.new(
-              start: proc { |total, message| @editor_session.start_progress(total, message) },
-              update: proc { |current, message| @editor_session.update_progress(current, message) },
-              finish: proc { @editor_session.finish_progress }
-            )
-
             service = BulkCellSpaceConversionService.new(
               model: model,
               jobs: jobs,
@@ -44,7 +38,6 @@ module ULOL
               restore_active_path: proc { active_path.restore(original_active_path, close_when_nil: true) },
               activate_root_context: activate_root_context ? proc { active_path.close_to_root } : nil,
               clear_dirty_topology: proc { clear_bulk_dirty_topology },
-              progress: progress,
               logger: IndoorCore::Logger,
               labeler: ConversionMessageFormatter.method(:group_label),
               preserve_source: preserve_source,

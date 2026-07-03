@@ -208,30 +208,10 @@ module ULOL
         end
       end
 
-      class BulkCellSpaceConversionProgress
-        def initialize(start:, update:, finish:)
-          @start = start
-          @update = update
-          @finish = finish
-        end
-
-        def start(total, message)
-          @start.call(total, message) if @start
-        end
-
-        def update(current, message)
-          @update.call(current, message) if @update
-        end
-
-        def finish
-          @finish.call if @finish
-        end
-      end
-
       class BulkCellSpaceConversionService
         Result = Struct.new(:converted_count, :errors, :metrics, keyword_init: true)
 
-        def initialize(model:, jobs:, fallback_target:, target_entities:, converter:, synchronize_all:, apply_lock_policy:, runtime_snapshot:, runtime_restore:, apply_guards:, restore_active_path:, activate_root_context:, clear_dirty_topology:, progress:, logger: Logger, labeler: nil, preserve_source: nil, operation_name: 'Convert Solid Groups to CellSpace')
+        def initialize(model:, jobs:, fallback_target:, target_entities:, converter:, synchronize_all:, apply_lock_policy:, runtime_snapshot:, runtime_restore:, apply_guards:, restore_active_path:, activate_root_context:, clear_dirty_topology:, logger: Logger, labeler: nil, preserve_source: nil, operation_name: 'Convert Solid Groups to CellSpace')
           @model = model
           @jobs = Array(jobs)
           @fallback_target = fallback_target
@@ -245,7 +225,6 @@ module ULOL
           @restore_active_path = restore_active_path
           @activate_root_context = activate_root_context
           @clear_dirty_topology = clear_dirty_topology
-          @progress = progress
           @logger = logger
           @labeler = labeler || proc { |entity| entity.respond_to?(:name) ? entity.name.to_s : entity.to_s }
           @preserve_source = preserve_source
@@ -255,21 +234,13 @@ module ULOL
         def call
           started_at = monotonic_time
           metrics = {}
-          progress_total = [@jobs.length + 4, 1].max
-          @progress.start(progress_total, 'Preparing conversion jobs')
           plan = timed(metrics, :job_preparation) { prepare_plan }
-          @progress.update(1, 'Validating geometry')
           timed(metrics, :geometry_validation) { validate_plan_geometry(plan) }
-          @progress.update(2, 'Computing adjacency plan')
           timed(metrics, :adjacency_candidate_generation) { validate_plan_targets(plan) }
-          @progress.update(3, 'Applying CellSpaces...')
           converted_count, apply_metrics = timed(metrics, :cell_space_entity_apply) { apply_plan(plan) }
           metrics.merge!(apply_metrics)
           metrics[:total_duration] = elapsed_since(started_at)
-          @progress.update(progress_total, 'Complete')
           Result.new(converted_count: converted_count, errors: [], metrics: metrics)
-        ensure
-          @progress.finish
         end
 
         private
