@@ -91,7 +91,10 @@ module ULOL
           def move_remaining_primal_container_to_root(container)
             return unless container&.valid?
             return unless container.respond_to?(:definition) && container.respond_to?(:transformation)
-            return unless primal_direct_container?(container)
+            unless primal_direct_container?(container)
+              IndoorCore::Logger.puts "[IndoorGML] Primal container move skipped: not a direct primal child entity_id=#{container.entityID}"
+              return
+            end
 
             model = Sketchup.active_model
             copy = model.entities.add_instance(container.definition, @primal_group.transformation * container.transformation)
@@ -110,17 +113,72 @@ module ULOL
             return if raw_entities.empty?
             return unless @primal_group&.valid?
 
-            wrapper = @primal_group.entities.add_group(raw_entities)
+            wrapper = Sketchup.active_model.entities.add_group
             return unless wrapper&.valid?
-            if wrapper.entities.to_a.empty?
+
+            wrapper.name = 'Unconverted Geometry' if wrapper.respond_to?(:name=)
+            copied_entities = copy_raw_primal_entities_to_root_group(raw_entities, wrapper.entities)
+            if copied_entities.empty? || wrapper.entities.to_a.empty?
               wrapper.erase!
               return
             end
 
-            wrapper.name = 'Unconverted Geometry' if wrapper.respond_to?(:name=)
-            move_remaining_primal_container_to_root(wrapper)
+            copied_entities.each { |entity| entity.erase! if entity&.valid? }
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Raw primal entities relocate failed: #{e.class}: #{e.message}"
+            nil
+          end
+
+          def copy_raw_primal_entities_to_root_group(raw_entities, target_entities)
+            primal_to_model = Utils::Transformation.root_transformation_in_model(@primal_group)
+            copied_entities = []
+            copied_edges = {}
+            faces = raw_entities.select { |entity| entity.is_a?(Sketchup::Face) }
+
+            faces.each do |face|
+              copied_face = copy_raw_face_to_entities(face, target_entities, primal_to_model)
+              next unless copied_face
+
+              copied_entities << face
+              Array(face.edges).each { |edge| copied_edges[edge] = true if edge&.valid? }
+            end
+
+            raw_entities.select { |entity| entity.is_a?(Sketchup::Edge) }.each do |edge|
+              if copied_edges[edge]
+                copied_entities << edge
+                next
+              end
+
+              copied_edge = copy_raw_edge_to_entities(edge, target_entities, primal_to_model)
+              next unless copied_edge
+
+              copied_entities << edge
+            end
+
+            copied_entities
+          end
+
+          def copy_raw_face_to_entities(face, target_entities, transform)
+            points = face.outer_loop.vertices.map { |vertex| vertex.position.transform(transform) }
+            copied = target_entities.add_face(points)
+            return nil unless copied&.valid?
+
+            copied.material = face.material if copied.respond_to?(:material=) && face.respond_to?(:material)
+            copied.back_material = face.back_material if copied.respond_to?(:back_material=) && face.respond_to?(:back_material)
+            copied
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Raw primal face copy failed: #{e.class}: #{e.message}"
+            nil
+          end
+
+          def copy_raw_edge_to_entities(edge, target_entities, transform)
+            vertices = edge.vertices
+            return nil unless vertices.length == 2
+
+            points = vertices.map { |vertex| vertex.position.transform(transform) }
+            target_entities.add_line(points[0], points[1])
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Raw primal edge copy failed: #{e.class}: #{e.message}"
             nil
           end
 
