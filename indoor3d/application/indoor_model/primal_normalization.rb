@@ -156,16 +156,30 @@ module ULOL
           end
 
           def copy_raw_face_to_entities(face, target_entities, transform)
-            points = face.outer_loop.vertices.map { |vertex| vertex.position.transform(transform) }
+            points = transformed_loop_points(face.outer_loop, transform)
             copied = target_entities.add_face(points)
             return nil unless copied&.valid?
 
+            raw_face_inner_loops(face).each do |loop|
+              inner = target_entities.add_face(transformed_loop_points(loop, transform))
+              inner.erase! if inner&.valid?
+            end
             copied.material = face.material if copied.respond_to?(:material=) && face.respond_to?(:material)
             copied.back_material = face.back_material if copied.respond_to?(:back_material=) && face.respond_to?(:back_material)
             copied
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Raw primal face copy failed: #{e.class}: #{e.message}"
             nil
+          end
+
+          def raw_face_inner_loops(face)
+            Array(face.loops).reject { |loop| loop == face.outer_loop }
+          rescue StandardError
+            []
+          end
+
+          def transformed_loop_points(loop, transform)
+            loop.vertices.map { |vertex| vertex.position.transform(transform) }
           end
 
           def copy_raw_edge_to_entities(edge, target_entities, transform)

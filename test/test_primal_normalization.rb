@@ -85,6 +85,42 @@ module ULOL
           assert edge.erased?
         end
 
+        def test_raw_face_inner_loop_is_recreated_as_hole
+          outer_edges = [
+            FakeEdge.new([point(0, 0, 0), point(4, 0, 0)]),
+            FakeEdge.new([point(4, 0, 0), point(4, 4, 0)]),
+            FakeEdge.new([point(4, 4, 0), point(0, 4, 0)]),
+            FakeEdge.new([point(0, 4, 0), point(0, 0, 0)])
+          ]
+          inner_edges = [
+            FakeEdge.new([point(1, 1, 0), point(2, 1, 0)]),
+            FakeEdge.new([point(2, 1, 0), point(2, 2, 0)]),
+            FakeEdge.new([point(2, 2, 0), point(1, 2, 0)]),
+            FakeEdge.new([point(1, 2, 0), point(1, 1, 0)])
+          ]
+          face = FakeFace.new(
+            [point(0, 0, 0), point(4, 0, 0), point(4, 4, 0), point(0, 4, 0)],
+            edges: outer_edges + inner_edges,
+            inner_loops: [[point(1, 1, 0), point(2, 1, 0), point(2, 2, 0), point(1, 2, 0)]]
+          )
+          (outer_edges + inner_edges).each { |edge| edge.faces = [face] }
+          model = FakeModel.new
+          Sketchup.test_active_model = model
+          normalizer = FakeIndoorModel.new(FakePrimalGroup.new(FakeTransformation.new(10, 0, 0)))
+
+          normalizer.move_raw([face] + outer_edges + inner_edges)
+
+          wrapper = model.entities.created_groups.first
+          assert_equal [
+            [point(10, 0, 0), point(14, 0, 0), point(14, 4, 0), point(10, 4, 0)],
+            [point(11, 1, 0), point(12, 1, 0), point(12, 2, 0), point(11, 2, 0)]
+          ], wrapper.entities.faces
+          assert_equal false, wrapper.entities.copied_faces[0].erased?
+          assert_equal true, wrapper.entities.copied_faces[1].erased?
+          assert face.erased?
+          assert (outer_edges + inner_edges).all?(&:erased?)
+        end
+
         private
 
         def point(x, y, z)
@@ -175,10 +211,11 @@ module ULOL
 
         class FakeFace < Sketchup::Face
           attr_accessor :material, :back_material
-          attr_reader :outer_loop, :edges
+          attr_reader :outer_loop, :edges, :loops
 
-          def initialize(points, edges:)
+          def initialize(points, edges:, inner_loops: [])
             @outer_loop = FakeLoop.new(points)
+            @loops = [@outer_loop] + inner_loops.map { |loop_points| FakeLoop.new(loop_points) }
             @edges = edges
             @valid = true
           end
@@ -241,18 +278,31 @@ module ULOL
         class FakeCopiedFace
           attr_accessor :material, :back_material
 
+          def initialize
+            @valid = true
+          end
+
           def valid?
-            true
+            @valid == true
+          end
+
+          def erase!
+            @valid = false
+          end
+
+          def erased?
+            !valid?
           end
         end
 
         class FakeEntities
-          attr_reader :created_groups, :faces, :lines
+          attr_reader :created_groups, :faces, :lines, :copied_faces
 
           def initialize
             @created_groups = []
             @faces = []
             @lines = []
+            @copied_faces = []
           end
 
           def add_group
@@ -263,7 +313,7 @@ module ULOL
 
           def add_face(points)
             @faces << points
-            FakeCopiedFace.new
+            FakeCopiedFace.new.tap { |face| @copied_faces << face }
           end
 
           def add_line(point1, point2)

@@ -58,15 +58,19 @@ module ULOL
           def run_batched(items, message:, batch_size: 20, complete: nil, failure: nil, &block)
             items = Array(items)
             return false if items.empty?
+            return false if progress_active?
 
             batch_size = [batch_size.to_i, 1].max
             index = 0
             total = items.length
+            batch_model = Sketchup.active_model
             start_progress(total, message)
 
             processor = nil
             processor = proc do
               begin
+                raise 'Batched operation model changed or closed' unless batch_model_current?(batch_model)
+
                 limit = [index + batch_size, total].min
                 while index < limit
                   block.call(items[index], index) if block
@@ -90,6 +94,14 @@ module ULOL
             end
             UI.start_timer(0, false) { processor.call }
             true
+          end
+
+          def batch_model_current?(batch_model)
+            return true unless batch_model
+
+            Sketchup.active_model.equal?(batch_model)
+          rescue StandardError
+            false
           end
         end
       end
