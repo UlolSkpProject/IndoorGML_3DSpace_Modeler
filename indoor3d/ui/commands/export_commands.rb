@@ -121,9 +121,11 @@ module ULOL
         end
 
         def start_val3dity_validation(progress, state, temp_path)
+          indoor_model = IndoorModel.current
           validator = IndoorGmlConverter::Val3dityRunner.new(
             temp_path,
-            overlap_tol: state[:overlap_tol]
+            overlap_tol: state[:overlap_tol],
+            indoor_model: indoor_model
           )
 
           state[:val_running] = true
