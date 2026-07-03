@@ -305,11 +305,11 @@ module ULOL
               adjacency_metrics = @synchronize_all.call || {}
               @apply_lock_policy.call
               @clear_dirty_topology.call
-              @restore_active_path.call
               committed = @model.commit_operation
               raise 'Failed to commit CellSpace conversion operation' if committed == false
 
               operation_started = false
+              safely_restore_active_path(success: true)
               [
                 converted_count,
                 {
@@ -318,19 +318,32 @@ module ULOL
                   transition_apply: adjacency_metrics[:total_duration].to_f
                 }
               ]
-            rescue StandardError => e
-              safely_restore_active_path
-              @model.abort_operation if operation_started
-              @runtime_restore.call(snapshot)
-              raise e
+            rescue StandardError
+              safely_abort_operation if operation_started
+              safely_restore_runtime(snapshot)
+              safely_restore_active_path(success: false)
+              raise
             end
           end
         end
 
-        def safely_restore_active_path
+        def safely_abort_operation
+          @model.abort_operation
+        rescue StandardError => e
+          @logger.puts "[IndoorGML] CellSpace conversion abort failed: #{e.class}: #{e.message}"
+        end
+
+        def safely_restore_runtime(snapshot)
+          @runtime_restore.call(snapshot)
+        rescue StandardError => e
+          @logger.puts "[IndoorGML] CellSpace conversion runtime restore failed: #{e.class}: #{e.message}"
+        end
+
+        def safely_restore_active_path(success:)
           @restore_active_path.call
         rescue StandardError => e
-          @logger.puts "[IndoorGML] Active path restore failed during CellSpace conversion rollback: #{e.class}: #{e.message}"
+          context = success ? 'after CellSpace conversion commit' : 'during CellSpace conversion rollback'
+          @logger.puts "[IndoorGML] Active path restore failed #{context}: #{e.class}: #{e.message}"
         end
 
         def timed(metrics, key)
