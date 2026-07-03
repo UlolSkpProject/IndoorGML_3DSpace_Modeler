@@ -442,7 +442,8 @@ module ULOL
             runner = IndoorGmlConverter::Val3dityRunner.new(
               output_path,
               overlap_tol: IndoorGmlConverter::Val3dityRunner::STRICT_OVERLAP_TOL,
-              report_name: report_name
+              report_name: report_name,
+              indoor_model: self
             )
             state[:session] = runner.start(progress: progress) do |result|
               state[:completed] = true

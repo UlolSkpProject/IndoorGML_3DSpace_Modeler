@@ -33,12 +33,32 @@ module ULOL
             @active_sessions ||= []
           end
 
-          def self.register_session(session)
+          def self.session_owner_keys
+            @session_owner_keys ||= {}
+          end
+
+          def self.owner_key_for_model(model)
+            model&.object_id
+          rescue StandardError
+            nil
+          end
+
+          def self.default_owner_key
+            return nil unless defined?(Sketchup)
+
+            owner_key_for_model(Sketchup.active_model)
+          rescue StandardError
+            nil
+          end
+
+          def self.register_session(session, owner_key: nil)
             active_sessions << session unless active_sessions.include?(session)
+            session_owner_keys[session] = owner_key
           end
 
           def self.unregister_session(session)
             active_sessions.delete(session)
+            session_owner_keys.delete(session)
           end
 
           def self.shutting_down?
@@ -51,8 +71,26 @@ module ULOL
           def self.terminate_all(wait_ms: TERMINATE_WAIT_MS)
             active_sessions.dup.each { |session| session.terminate(wait_ms: wait_ms) }
             active_sessions.clear
+            session_owner_keys.clear
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] val3dity terminate_all failed: #{e.class}: #{e.message}"
+          end
+
+          def self.terminate_for_model(model, wait_ms: TERMINATE_WAIT_MS)
+            terminate_for_owner(owner_key_for_model(model), wait_ms: wait_ms)
+          end
+
+          def self.terminate_for_owner(owner_key, wait_ms: TERMINATE_WAIT_MS)
+            return if owner_key.nil?
+
+            session_owner_keys.dup.each do |session, session_owner_key|
+              next unless session_owner_key == owner_key
+
+              session.terminate(wait_ms: wait_ms)
+              unregister_session(session)
+            end
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] val3dity terminate_for_owner failed: #{e.class}: #{e.message}"
           end
 
           class Val3dityResult
@@ -75,7 +113,7 @@ module ULOL
             end
           end
 
-          def initialize(gml_path, overlap_tol: DEFAULT_OVERLAP_TOL, report_name: 'report')
+          def initialize(gml_path, overlap_tol: DEFAULT_OVERLAP_TOL, report_name: 'report', indoor_model: nil, owner_key: nil)
             @gml_path = File.expand_path(gml_path)
             @work_dir = GmlExporter.output_root
             @report_name = sanitize_report_name(report_name)
@@ -83,6 +121,8 @@ module ULOL
             @report_dir = File.join(@work_dir, @report_name)
             @report_html_path = File.join(@report_dir, 'report.html')
             @overlap_tol = normalize_overlap_tol(overlap_tol)
+            @indoor_model = indoor_model
+            @owner_key = owner_key || self.class.owner_key_for_model(indoor_model&.model) || self.class.default_owner_key
           end
 
           def validate(progress: nil)
@@ -117,7 +157,7 @@ module ULOL
               args: args,
               current_dir: VENDOR_ROOT
             )
-            indoor_model = IndoorModel.current
+            indoor_model = @indoor_model || IndoorModel.current
             totals = validation_progress_totals(indoor_model)
             session.start(
               total_states: totals[:states],
@@ -129,7 +169,7 @@ module ULOL
               progress: progress,
               progress_step: progress_step,
               callback: callback,
-              register_session: ->(active_session) { self.class.register_session(active_session) },
+              register_session: ->(active_session) { self.class.register_session(active_session, owner_key: @owner_key) },
               unregister_session: ->(active_session) { self.class.unregister_session(active_session) },
               drain_progress: ->(active_session, active_progress, active_step) { drain_val3dity_progress(active_session, active_progress, active_step) },
               build_result: lambda { |exit_code|
