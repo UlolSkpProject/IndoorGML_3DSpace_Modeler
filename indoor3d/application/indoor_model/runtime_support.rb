@@ -137,6 +137,8 @@ module ULOL
           def bulk_conversion_runtime_snapshot
             {
               registry: @feature_registry.snapshot,
+              primal_group: @primal_group,
+              scene_group_guard: @scene_group_guard.snapshot,
               cell_space_change_snapshots: @cell_space_change_snapshots.dup,
               space_features_change_snapshots: @space_features_change_snapshots.dup,
               dirty_cell_space_pids: @dirty_cell_space_pids.dup,
@@ -154,6 +156,8 @@ module ULOL
             restore_mutable_instances(snapshot[:transition_instances])
             @feature_registry.restore!(snapshot[:registry])
             bind_registry_collections
+            @primal_group = snapshot[:primal_group]
+            @scene_group_guard.restore!(snapshot[:scene_group_guard])
             @cell_space_change_snapshots = snapshot[:cell_space_change_snapshots].dup
             @space_features_change_snapshots = snapshot[:space_features_change_snapshots].dup
             @dirty_cell_space_pids = snapshot[:dirty_cell_space_pids].dup

@@ -29,6 +29,14 @@ module ULOL
           nil
         end
 
+        def snapshot
+          @expected_names.dup
+        end
+
+        def restore!(snapshot)
+          @expected_names = Hash(snapshot).dup
+        end
+
         def enforce(groups)
           groups.each do |group|
             next unless group&.valid?
