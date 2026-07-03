@@ -38,9 +38,11 @@ module ULOL
             @cell_space_sync_scheduled = false
             return if pids.empty?
 
+            processing_index = nil
             with_transparent_cell_space_operation('IndoorGML Dirty CellSpace Sync') do
               sync do
-                pids.each do |persistent_id|
+                pids.each_with_index do |persistent_id, index|
+                  processing_index = index
                   cell_space = @feature_registry.find_cell_space_by_persistent_id(persistent_id)
                   next unless cell_space&.valid?
 
@@ -49,11 +51,21 @@ module ULOL
                 end
               end
             end
+            processing_index = nil
             Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
             invalidate_overlay_transition_points
           rescue StandardError => e
+            requeue_dirty_cell_space_pids(pids, processing_index)
             @cell_space_sync_scheduled = false
+            schedule_dirty_cell_space_sync unless @dirty_cell_space_pids.empty?
             IndoorCore::Logger.puts "[IndoorGML] Dirty CellSpace sync failed: #{e.class}: #{e.message}"
+          end
+
+          def requeue_dirty_cell_space_pids(pids, failed_index)
+            remaining = failed_index ? pids[failed_index..] : pids
+            Array(remaining).each { |persistent_id| @dirty_cell_space_pids[persistent_id] = true }
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Dirty CellSpace requeue failed: #{e.class}: #{e.message}"
           end
 
           def erase_adjacency_for_cell_space(cell_space)
