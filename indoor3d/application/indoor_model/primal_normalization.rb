@@ -11,15 +11,12 @@ module ULOL
             return unless @primal_group&.valid?
 
             with_indoor_model_operation('IndoorGML Normalize Primal Children On Finish', transparent: true) do
-              begin
-                @relocating_entity = true
+              with_guard_flag(:@relocating_entity) do
                 raw_entities = []
                 @primal_group.entities.to_a.each do |entity|
                   normalize_primal_child_for_finish(entity, raw_entities)
                 end
                 move_raw_primal_entities_to_root(raw_entities)
-              ensure
-                @relocating_entity = false
               end
               # refresh_runtime_data
               Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view

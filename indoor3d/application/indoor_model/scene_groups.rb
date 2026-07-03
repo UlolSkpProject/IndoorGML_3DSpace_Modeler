@@ -78,7 +78,7 @@ module ULOL
             with_indoor_model_operation('IndoorGML Recenter CellSpace Geometry', transparent: true) do
               fixed_z = fixed_z_offset_from_bottom.nil? ? nil : fixed_local_z_from_world_offset(cell_space_entity, fixed_z_offset_from_bottom)
               center = Utils::Geometry.find_shell_inner_centroid(cell_space_entity, fixed_z: fixed_z)
-              IndoorCore::Logger.puts "[IndoorGML] recenter_cell_space_geometry center=#{center} distance=#{center.distance(ORIGIN)}"
+              # IndoorCore::Logger.puts "[IndoorGML] recenter_cell_space_geometry center=#{center} distance=#{center.distance(ORIGIN)}"
               next if center.distance(ORIGIN) <= 0.001
 
               set_group_transformation(
