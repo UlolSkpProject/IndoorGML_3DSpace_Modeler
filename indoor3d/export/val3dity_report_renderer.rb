@@ -8,10 +8,10 @@ module ULOL
       module IndoorGmlConverter
 
         class Val3dityReportRenderer
-          OVERLAP_RECHECK_REPORT_KEY = 'indoorgml_modeler_overlap_recheck'
-          STRICT_VALIDITY_KEY = 'strict_val3dity_validity'
-          EXTENSION_VALIDITY_KEY = 'extension_policy_validity'
-          VALIDATION_STATUS_KEY = 'indoorgml_modeler_validation_status'
+          OVERLAP_RECHECK_REPORT_KEY = Val3dityReportSchema::OVERLAP_RECHECK_REPORT_KEY
+          STRICT_VALIDITY_KEY = Val3dityReportSchema::STRICT_VALIDITY_KEY
+          EXTENSION_VALIDITY_KEY = Val3dityReportSchema::EXTENSION_VALIDITY_KEY
+          VALIDATION_STATUS_KEY = Val3dityReportSchema::VALIDATION_STATUS_KEY
 
           def render(raw_report)
             fallback_report_html(raw_report)

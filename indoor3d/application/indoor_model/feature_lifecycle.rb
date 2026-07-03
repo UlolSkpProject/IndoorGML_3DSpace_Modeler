@@ -114,7 +114,7 @@ module ULOL
                 type_resolver: IndoorCore.method(:resolve_cell_space_type_and_category),
                 geometry_preparer: Utils::Geometry.method(:prepare_cell_space_source_group!)
               ),
-              scene_policy: CellSpaceLifecycleScenePolicy.new(
+              context: CellSpaceLifecycleContext.new(
                 ensure_space_features_groups: method(:ensure_space_features_groups),
                 place_cell_group: method(:place_cell_group),
                 default_storey_name: method(:default_storey_name),
@@ -123,19 +123,13 @@ module ULOL
                 name_cell_space_entity: method(:name_cell_space_entity),
                 apply_cell_space_material: method(:apply_cell_space_material),
                 track_cell_space_entity: method(:track_cell_space_entity),
-                apply_indoor_lock_policy: method(:apply_indoor_lock_policy)
-              ),
-              repository: CellSpaceLifecycleRepository.new(
+                apply_indoor_lock_policy: method(:apply_indoor_lock_policy),
                 register_cell_space: method(:register_cell_space),
                 register_state: method(:register_state),
                 unregister_cell_space: method(:unregister_cell_space),
-                unregister_state: method(:unregister_state)
-              ),
-              persistence: CellSpaceLifecyclePersistence.new(
+                unregister_state: method(:unregister_state),
                 write_attributes: method(:write_attributes),
-                write_cell_space_attributes: method(:write_cell_space_attributes)
-              ),
-              topology: CellSpaceLifecycleTopologyGateway.new(
+                write_cell_space_attributes: method(:write_cell_space_attributes),
                 synchronize_adjacency_and_transitions_for_cell_space: method(:synchronize_adjacency_and_transitions_for_cell_space),
                 erase_transitions_for_state: method(:erase_transitions_for_state),
                 erase_adjacency_for_cell_space: method(:erase_adjacency_for_cell_space)

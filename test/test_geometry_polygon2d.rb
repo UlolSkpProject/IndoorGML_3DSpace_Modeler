@@ -7,7 +7,7 @@ require_relative '../indoor3d/utils/geometry'
 module ULOL
   module Indoor3DGmlModeler
     module Utils
-      class GeometryPolygon2dPublicApiTest < Minitest::Test
+      class GeometryPolygon2dTest < Minitest::Test
         def test_point_in_polygon_2d_matches_boundary_and_interior_cases
           polygon = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]
 

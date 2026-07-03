@@ -153,7 +153,7 @@ module ULOL
               type_resolver: callbacks.fetch(:resolve_cell_space_type_and_category),
               geometry_preparer: callbacks.fetch(:prepare_cell_space_source_group!)
             ),
-            scene_policy: CellSpaceLifecycleScenePolicy.new(
+            context: CellSpaceLifecycleContext.new(
               ensure_space_features_groups: callbacks.fetch(:ensure_space_features_groups),
               place_cell_group: callbacks.fetch(:place_cell_group),
               default_storey_name: callbacks.fetch(:default_storey_name),
@@ -162,19 +162,13 @@ module ULOL
               name_cell_space_entity: callbacks.fetch(:name_cell_space_entity),
               apply_cell_space_material: callbacks.fetch(:apply_cell_space_material),
               track_cell_space_entity: callbacks.fetch(:track_cell_space_entity),
-              apply_indoor_lock_policy: callbacks.fetch(:apply_indoor_lock_policy)
-            ),
-            repository: CellSpaceLifecycleRepository.new(
+              apply_indoor_lock_policy: callbacks.fetch(:apply_indoor_lock_policy),
               register_cell_space: callbacks.fetch(:register_cell_space),
               register_state: callbacks.fetch(:register_state),
               unregister_cell_space: callbacks.fetch(:unregister_cell_space),
-              unregister_state: callbacks.fetch(:unregister_state)
-            ),
-            persistence: CellSpaceLifecyclePersistence.new(
+              unregister_state: callbacks.fetch(:unregister_state),
               write_attributes: callbacks.fetch(:write_attributes),
-              write_cell_space_attributes: callbacks.fetch(:write_cell_space_attributes)
-            ),
-            topology: CellSpaceLifecycleTopologyGateway.new(
+              write_cell_space_attributes: callbacks.fetch(:write_cell_space_attributes),
               synchronize_adjacency_and_transitions_for_cell_space: callbacks.fetch(:synchronize_adjacency_and_transitions_for_cell_space),
               erase_transitions_for_state: callbacks.fetch(:erase_transitions_for_state),
               erase_adjacency_for_cell_space: callbacks.fetch(:erase_adjacency_for_cell_space)

@@ -187,7 +187,7 @@ module ULOL
 
             cell_space_root_local_transformation(state.duality_cell).origin
           rescue StandardError
-            state_local_position(state)
+            state&.position || ORIGIN
           end
 
           def cell_space_root_local_transformation(cell_space)

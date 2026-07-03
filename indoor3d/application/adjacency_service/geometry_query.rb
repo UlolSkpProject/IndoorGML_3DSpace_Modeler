@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative '../../utils/geometry/polygon2d_public_api'
+require_relative '../../utils/geometry/polygon2d'
 
 module ULOL
   module Indoor3DGmlModeler

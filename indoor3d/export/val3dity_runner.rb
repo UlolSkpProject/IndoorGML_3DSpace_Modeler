@@ -113,7 +113,7 @@ module ULOL
             args.concat(['--overlap_tol', format_tolerance(@overlap_tol)]) unless @overlap_tol.nil?
             args.concat(['-r', @report_json_path])
 
-            session = Val3dityProcessSession.new(
+            session = Val3dityProcessAdapter.new(
               args: args,
               current_dir: VENDOR_ROOT
             )

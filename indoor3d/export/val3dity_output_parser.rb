@@ -189,8 +189,6 @@ module ULOL
           end
         end
 
-        Val3dityOutputProgress = Val3dityOutputParser unless const_defined?(:Val3dityOutputProgress, false)
-
       end
     end
   end

@@ -20,7 +20,7 @@ It does not calculate transformations, choose the target collection, erase the s
 - `IndoorModel::FeatureLifecycle#convert_primal_child_to_cell_space`
   - Keeps group-only `to_group` and `make_unique`.
   - Keeps name/material/layer/visible copy.
-- `IndoorModel::EditorControl#copy_conversion_job_to_model_root`
+- `IndoorCore::CellSpaceConversionExecutor`
   - Keeps group-only `to_group` and `make_unique`.
   - Keeps name/material/layer/visible copy.
 
@@ -28,8 +28,8 @@ It does not calculate transformations, choose the target collection, erase the s
 
 - `IndoorModel::PrimalNormalization`
   - It contains active-path and primal wrapping normalization logic. Apply the helper after that flow has dedicated coverage.
-- `ui/commands/base_commands.rb` and `ui/commands/cell_space_commands.rb`
-  - These appear to be UI command-side copy paths with behavior similar to application code. Apply the helper only after confirming they are still active entry points.
+- `ui/commands/cell_space_commands.rb`
+  - The toolbar conversion path now uses `CellSpaceConversionExecutor`, which delegates mechanical copying to `EntityCopyHelper`.
 - `FeatureLifecycle#make_cell_space_entity_unique`
   - This is not a copy operation. It repairs copied CellSpace identity and should remain separate.
 
