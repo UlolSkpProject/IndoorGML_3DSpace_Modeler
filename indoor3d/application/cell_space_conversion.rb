@@ -124,15 +124,17 @@ module ULOL
 
         def execute(job, fallback_target:)
           source = nil
+          erase_original_after_success = false
+          cleanup_source_on_failure = false
           target_cell_type, target_category_code = job[:target] || fallback_target
-          source, erase_original = prepare_source(job)
+          source, erase_original_after_success, cleanup_source_on_failure = prepare_source(job)
           @converter.call(source, target_cell_type, target_category_code)
-          job[:source].erase! if erase_original && job[:source]&.valid?
+          job[:source].erase! if erase_original_after_success && job[:source]&.valid?
           cleanup_empty_ancestors(job)
           Result.new(converted: true, errors: [])
         rescue StandardError => e
           @logger.puts "[IndoorGML] CellSpace conversion failed: #{e.class}: #{e.message}"
-          source.erase! if source&.valid? && indoor_feature(source) != 'CellSpace'
+          cleanup_failed_source(source) if cleanup_source_on_failure
           Result.new(
             converted: false,
             errors: [{ group: @labeler.call(job[:source]), reason: e.message }]
@@ -143,7 +145,7 @@ module ULOL
 
         def prepare_source(job)
           source = job[:source]
-          return [source, false] if @preserve_source&.call(source)
+          return [source, false, false] if @preserve_source&.call(source)
 
           [
             EntityCopyHelper.copy_instance(
@@ -154,8 +156,13 @@ module ULOL
               make_unique: :source_group,
               copy_attributes: COPY_ATTRIBUTES
             ),
+            true,
             true
           ]
+        end
+
+        def cleanup_failed_source(source)
+          source.erase! if source&.valid? && indoor_feature(source) != 'CellSpace'
         end
 
         def cleanup_empty_ancestors(job)
