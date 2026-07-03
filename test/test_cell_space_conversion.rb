@@ -275,11 +275,6 @@ module ULOL
             restore_active_path: restore_active_path,
             activate_root_context: proc {},
             clear_dirty_topology: proc {},
-            progress: BulkCellSpaceConversionProgress.new(
-              start: proc { |_total, _message| },
-              update: proc { |_current, _message| },
-              finish: proc {}
-            ),
             logger: FakeLogger.new,
             labeler: proc { |entity| entity.respond_to?(:name) ? entity.name : 'entity' },
             preserve_source: proc { |_source| true },
