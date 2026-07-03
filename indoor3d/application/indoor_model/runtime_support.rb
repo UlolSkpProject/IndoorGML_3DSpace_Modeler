@@ -11,11 +11,7 @@ module ULOL
 
               with_guard_flag(:@refreshing_runtime) do
                 sync do
-                  @model ||= Sketchup.active_model
-                  find_existing_space_features_groups
-                  attach_existing_space_features_observers
-                  reset_runtime_collections
-                  @runtime_restorer.restore(model: @model, primal_group: @primal_group)
+                  restore_runtime_from_current_model
                   ensure_default_storey
                   assign_default_storey_to_unassigned_cell_spaces
                   write_storey_attributes
@@ -29,6 +25,32 @@ module ULOL
                 true
               end
             end
+          end
+
+          def reconcile_runtime_after_transaction(source: nil, generation: nil)
+            return true if guard_active?(:@transaction_reconciliation)
+
+            started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+            metrics = nil
+            with_guard_flag(:@transaction_reconciliation) do
+              sync do
+                restore_runtime_from_current_model
+                rebuild_runtime_transitions_from_cell_adjacency_without_persistence
+                prune_runtime_observer_tracking
+                rebuild_scene_group_guard_tracking
+              end
+              @editor_session.reconcile_after_transaction(@model, source: source) if @editor_session&.respond_to?(:reconcile_after_transaction)
+              metrics = {
+                source: source,
+                generation: generation,
+                cell_spaces: diagnostic_count(@cell_spaces),
+                states: diagnostic_count(@states),
+                transitions: diagnostic_count(@transitions),
+                pair_comparison_count: @adjacency_service&.last_metrics&.fetch(:pair_comparison_count, 0).to_i,
+                total_duration: Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at
+              }
+            end
+            metrics
           end
 
           def diagnostic_snapshot
@@ -95,6 +117,7 @@ module ULOL
 
           def with_indoor_model_operation(name, transparent: false)
             return yield if @indoor_operation_depth.to_i.positive?
+            return yield if indoor_operation_suppressed?
 
             model = @model || Sketchup.active_model
             return yield unless model
@@ -118,11 +141,25 @@ module ULOL
             end
           end
 
+          def indoor_operation_suppressed?
+            respond_to?(:observer_routing_suppressed?) && observer_routing_suppressed?
+          rescue StandardError
+            false
+          end
+
           def bind_registry_collections
             @cell_spaces = @feature_registry.cell_spaces
             @storeys = @feature_registry.storeys
             @states = @feature_registry.states
             @transitions = @feature_registry.transitions
+          end
+
+          def restore_runtime_from_current_model
+            @model ||= Sketchup.active_model
+            find_existing_space_features_groups
+            attach_existing_space_features_observers
+            reset_runtime_collections
+            @runtime_restorer.restore(model: @model, primal_group: @primal_group)
           end
 
           def reset_runtime_collections
@@ -132,6 +169,40 @@ module ULOL
             @dirty_cell_space_pids.clear
             @cell_space_sync_scheduled = false
             bind_registry_collections
+          end
+
+          def prune_runtime_observer_tracking
+            @cell_space_observed_ids ||= {}
+            @space_features_observed_ids ||= {}
+            @entities_observed_ids ||= {}
+
+            current_cell_observer_keys = @cell_spaces.each_with_object({}) do |cell_space, keys|
+              group = cell_space&.sketchup_group
+              key = entity_observer_key(group)
+              keys[key] = true if group&.valid? && key
+            end
+            @cell_space_observed_ids.select! { |key, _| current_cell_observer_keys[key] }
+
+            current_space_feature_keys = {}
+            key = entity_observer_key(@primal_group)
+            current_space_feature_keys[key] = true if @primal_group&.valid? && key
+            @space_features_observed_ids.select! { |observer_key, _| current_space_feature_keys[observer_key] }
+
+            current_entities_keys = {}
+            model = @model || Sketchup.active_model
+            current_entities_keys[[:root, model.entities.object_id]] = true if model&.respond_to?(:entities) && model.entities
+            current_entities_keys[[:primal, @primal_group.entities.object_id]] = true if @primal_group&.valid? && @primal_group.respond_to?(:entities)
+            @entities_observed_ids.select! { |observer_key, _| current_entities_keys[observer_key] }
+          end
+
+          def rebuild_scene_group_guard_tracking
+            tracking = {}
+            tracking[@primal_group.persistent_id] = PRIMAL_GROUP_NAME if @primal_group&.valid?
+            @cell_spaces.each do |cell_space|
+              group = cell_space&.sketchup_group
+              tracking[group.persistent_id] = group.name if group&.valid?
+            end
+            @scene_group_guard.restore!(tracking)
           end
 
           def bulk_conversion_runtime_snapshot

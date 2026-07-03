@@ -41,6 +41,31 @@ module ULOL
           assert_equal 3, metrics[:pair_comparison_count]
         end
 
+        def test_synchronize_all_can_use_runtime_only_callbacks
+          cell_a = fake_cell('A', adjacent_to: ['B'])
+          cell_b = fake_cell('B', adjacent_to: ['A'])
+          registry = FakeRegistry.new([cell_a, cell_b], adjacent_pair_keys: ['A:C'])
+          default_calls = []
+          runtime_calls = []
+          erased = []
+          stub_snapshot_geometry
+          service = AdjacencyService.new(
+            registry,
+            transition_builder: proc { |_cell1, _cell2| default_calls << :default_builder },
+            transition_eraser: proc { |_pair_key| default_calls << :default_eraser }
+          )
+
+          service.synchronize_all(
+            transition_builder: proc { |cell1, cell2| runtime_calls << [cell1.id, cell2.id] },
+            transition_eraser: proc { |pair_key| erased << pair_key; registry.delete_adjacent_pair(pair_key) }
+          )
+
+          assert_empty default_calls
+          assert_equal [['A', 'B']], runtime_calls
+          assert_equal ['A:C'], erased
+          assert_equal ['A:B'], registry.adjacent_pair_keys
+        end
+
         def test_pair_computation_uses_snapshot_values
           service = AdjacencyService.new(
             FakeRegistry.new([]),

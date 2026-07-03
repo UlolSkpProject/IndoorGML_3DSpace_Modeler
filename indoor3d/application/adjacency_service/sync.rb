@@ -38,7 +38,7 @@ module ULOL
           end
         end
 
-        def synchronize_all
+        def synchronize_all(transition_builder: nil, transition_eraser: nil)
           started_at = monotonic_time
           entries = adjacency_snapshot_entries
           if entries.empty?
@@ -47,7 +47,12 @@ module ULOL
           end
 
           pair_results = compute_pair_results(entries, tolerance: Utils::Geometry::DEFAULT_TOLERANCE)
-          apply_pair_results(entries, pair_results)
+          apply_pair_results(
+            entries,
+            pair_results,
+            transition_builder: transition_builder || @transition_builder,
+            transition_eraser: transition_eraser || @transition_eraser
+          )
           @last_metrics = {
             total_duration: elapsed_since(started_at),
             pair_comparison_count: @last_pair_comparison_count.to_i,
@@ -166,7 +171,7 @@ module ULOL
           end
         end
 
-        def apply_pair_results(entries, pair_results)
+        def apply_pair_results(entries, pair_results, transition_builder:, transition_eraser:)
           next_pairs = {}
           pair_results.each do |index1, index2, adjacency_axis|
             cell1 = entries[index1][:cell_space]
@@ -177,10 +182,10 @@ module ULOL
             next_pairs[pair_key] = [cell1, cell2]
           end
 
-          stale_pair_keys(next_pairs.keys).each { |pair_key| @transition_eraser.call(pair_key) }
+          stale_pair_keys(next_pairs.keys).each { |pair_key| transition_eraser.call(pair_key) }
           next_pairs.each do |pair_key, (cell1, cell2)|
             @registry.set_adjacent_pair(pair_key, cell1, cell2)
-            @transition_builder.call(cell1, cell2)
+            transition_builder.call(cell1, cell2)
           end
         end
 
