@@ -9,6 +9,7 @@ module ULOL
           super()
           @active_path_keys_by_model_id = {}
           @recovering_unlocked_primal_by_model_id = {}
+          @transaction_generations_by_model_id = {}
         end
 
         def onActivePathChanged(model)
@@ -33,6 +34,7 @@ module ULOL
 
           @active_path_keys_by_model_id.delete(key)
           @recovering_unlocked_primal_by_model_id.delete(key)
+          transaction_generations_by_model_id.delete(key)
         end
 
         private
@@ -44,11 +46,20 @@ module ULOL
         end
 
         def handle_transaction_replayed(model, source:)
+          key = model&.object_id
+          return if key.nil?
+
+          generations = transaction_generations_by_model_id
+          generation = generations[key].to_i + 1
+          generations[key] = generation
           previous_key_known = remembered_active_path_key?(model)
           previous_key = remembered_active_path_key(model)
           UI.start_timer(0, false) do
             begin
+              next unless transaction_generations_by_model_id[key] == generation
+
               current_key = active_path_key(model)
+              IndoorModel.for(model).reconcile_runtime_after_transaction(source: source, generation: generation)
               if previous_key_known && previous_key == current_key
                 remember_active_path_key(model, current_key)
                 recover_unlocked_primal_after_transaction(model)
@@ -71,6 +82,10 @@ module ULOL
           IndoorModel.for(model).recover_unlocked_primal_after_transaction(model)
         ensure
           @recovering_unlocked_primal_by_model_id.delete(key) if @recovering_unlocked_primal_by_model_id
+        end
+
+        def transaction_generations_by_model_id
+          @transaction_generations_by_model_id ||= {}
         end
 
         def remember_active_path(model)
