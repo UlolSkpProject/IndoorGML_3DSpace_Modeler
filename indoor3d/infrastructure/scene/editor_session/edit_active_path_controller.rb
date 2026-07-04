@@ -13,6 +13,7 @@ module ULOL
             @logger = logger || (defined?(IndoorCore::Logger) && IndoorCore::Logger)
             @previous_active_path = nil
             @editing_active_path_target = nil
+            @editing_active_path_suspended = false
             @enforcing_active_path = false
             @active_path_enforcement_suspended = false
           end
@@ -27,11 +28,13 @@ module ULOL
 
           def reset_target
             @editing_active_path_target = nil
+            @editing_active_path_suspended = false
           end
 
           def reset
             @previous_active_path = nil
             @editing_active_path_target = nil
+            @editing_active_path_suspended = false
             @enforcing_active_path = false
             @active_path_enforcement_suspended = false
           end
@@ -40,6 +43,7 @@ module ULOL
             return false unless model.respond_to?(:active_path=)
 
             @editing_active_path_target = target_path
+            @editing_active_path_suspended = false
             set(model, target_path)
             true
           rescue StandardError => e
@@ -49,6 +53,7 @@ module ULOL
 
           def set_target_path(path)
             @editing_active_path_target = path
+            @editing_active_path_suspended = false
           end
 
           def target_path
@@ -108,6 +113,26 @@ module ULOL
             false
           end
 
+          def reconcile_transaction_replay_path(model, editing:)
+            return false unless editing
+
+            raw_path = Array(model&.active_path)
+            path = raw_path.select { |entity| entity&.valid? }
+            primal_group = @indoor_model.primal_group
+            @editing_active_path_target =
+              if raw_path.length == path.length && (editing_cell_space_path?(path, primal_group) || matches_path?(path, [primal_group]))
+                @editing_active_path_suspended = false
+                path
+              else
+                @editing_active_path_suspended = true
+                nil
+              end
+            true
+          rescue StandardError => e
+            log("Edit context transaction replay path reconciliation failed: #{e.class}: #{e.message}")
+            false
+          end
+
           def reconcile_after_runtime_restore(model, editing:)
             return false unless editing
 
@@ -118,6 +143,7 @@ module ULOL
             else
               @editing_active_path_target = primal_group&.valid? ? [primal_group] : nil
             end
+            @editing_active_path_suspended = false
             true
           rescue StandardError => e
             log("Edit context transaction reconciliation failed: #{e.class}: #{e.message}")
@@ -197,6 +223,8 @@ module ULOL
           end
 
           def valid_target_path
+            return [] if @editing_active_path_suspended
+
             target = Array(@editing_active_path_target).select { |entity| entity&.valid? }
             return target unless target.empty?
 
