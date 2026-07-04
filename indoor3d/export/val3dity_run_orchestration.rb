@@ -6,7 +6,7 @@ module ULOL
       module IndoorGmlConverter
 
         class Val3dityRunOrchestration
-          def initialize(session:, progress:, progress_step:, callback:, register_session:, unregister_session:, drain_progress:, build_result:, error_result:)
+          def initialize(session:, progress:, progress_step:, callback:, register_session:, unregister_session:, drain_progress:, build_result:, error_result:, active: nil)
             @session = session
             @progress = progress
             @progress_step = progress_step
@@ -16,6 +16,7 @@ module ULOL
             @drain_progress = drain_progress
             @build_result = build_result
             @error_result = error_result
+            @active = active || proc { true }
             @completed = false
           end
 
@@ -33,6 +34,7 @@ module ULOL
 
           def start_progress_timer
             UI.start_timer(0.1, true) do
+              next false unless active?
               next false if @completed
 
               @drain_progress.call(@session, @progress, @progress_step)
@@ -42,6 +44,7 @@ module ULOL
 
           def start_completion_timer
             UI.start_timer(0.2, true) do
+              next false unless active?
               next false if @completed
               next true unless @session.finished?
 
@@ -55,6 +58,11 @@ module ULOL
             exit_code = nil
             build_report_later = false
             begin
+              unless active?
+                cleanup_session
+                return
+              end
+
               if @session.terminated?
                 result = @error_result.call(RuntimeError.new('val3dity validation was canceled.'))
               else
@@ -68,7 +76,7 @@ module ULOL
             rescue StandardError => e
               result = @error_result.call(e)
             ensure
-              cleanup_session
+              cleanup_session unless @completed
             end
 
             if build_report_later
@@ -80,6 +88,8 @@ module ULOL
 
           def start_report_timer(exit_code)
             UI.start_timer(0.05, false) do
+              next false unless active?
+
               result = nil
               begin
                 result = @build_result.call(exit_code)
@@ -92,7 +102,15 @@ module ULOL
             end
           end
 
+          def active?
+            @active.call == true
+          rescue StandardError
+            false
+          end
+
           def cleanup_session
+            return if @completed
+
             @session.close
             @unregister_session.call(@session)
             @completed = true

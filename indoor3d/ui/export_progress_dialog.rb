@@ -156,6 +156,16 @@ module ULOL
             @request_close_callback = block
           end
 
+          def clear_callbacks
+            @create_gml_callback = nil
+            @open_report_callback = nil
+            @validation_focus_callback = nil
+            @fix_validation_callback = nil
+            @cancel_callback = nil
+            @request_close_callback = nil
+            @ready_callback = nil
+          end
+
           def on_ready(&block)
             @ready_callback = block
             block.call if @dom_ready && block

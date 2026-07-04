@@ -87,9 +87,33 @@ module ULOL
             assert_same error, callback_result.error
           end
 
+          def test_inactive_report_timer_does_not_build_result_or_callback
+            session = FakeSession.new(finished: true, terminated: false, exit_code: 0)
+            events = []
+            callback_called = false
+            active_calls = 0
+
+            build_orchestration(
+              session,
+              events: events,
+              active: proc {
+                active_calls += 1
+                active_calls < 3
+              },
+              build_result: ->(_exit_code) {
+                events << [:build_result]
+                FakeResult.new(error: nil)
+              },
+              callback: ->(_result) { callback_called = true }
+            ).start
+
+            refute_includes events, [:build_result]
+            refute callback_called
+          end
+
           private
 
-          def build_orchestration(session, events:, build_result:, callback:)
+          def build_orchestration(session, events:, build_result:, callback:, active: nil)
             progress = FakeProgress.new(events)
             Val3dityRunOrchestration.new(
               session: session,
@@ -100,7 +124,8 @@ module ULOL
               unregister_session: ->(active_session) { events << [:unregister, active_session] },
               drain_progress: ->(_active_session, _active_progress, active_step) { events << [:drain, active_step] },
               build_result: build_result,
-              error_result: ->(error) { FakeResult.new(error: error) }
+              error_result: ->(error) { FakeResult.new(error: error) },
+              active: active
             )
           end
 
