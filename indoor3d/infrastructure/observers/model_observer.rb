@@ -8,7 +8,6 @@ module ULOL
         def initialize
           super()
           @active_path_keys_by_model_id = {}
-          @recovering_unlocked_primal_by_model_id = {}
           @transaction_generations_by_model_id = {}
         end
 
@@ -33,7 +32,6 @@ module ULOL
           return if key.nil?
 
           @active_path_keys_by_model_id.delete(key)
-          @recovering_unlocked_primal_by_model_id.delete(key)
           transaction_generations_by_model_id.delete(key)
         end
 
@@ -55,7 +53,9 @@ module ULOL
           generations = transaction_generations_by_model_id
           generation = generations[key].to_i + 1
           generations[key] = generation
-          IndoorModel.for(model).begin_transaction_replay(source: source, generation: generation)
+          indoor_model = IndoorModel.for(model)
+          indoor_model.begin_transaction_replay(source: source, generation: generation)
+          log_transaction_replay_callback(model, indoor_model, source: source, generation: generation)
           UI.start_timer(0, false) do
             indoor_model = nil
             begin
@@ -79,18 +79,17 @@ module ULOL
           end
         end
 
-        def recover_unlocked_primal_after_transaction(model)
-          key = model.object_id
-          return if @recovering_unlocked_primal_by_model_id[key]
-
-          @recovering_unlocked_primal_by_model_id[key] = true
-          IndoorModel.for(model).recover_unlocked_primal_after_transaction(model)
-        ensure
-          @recovering_unlocked_primal_by_model_id.delete(key) if @recovering_unlocked_primal_by_model_id
-        end
-
         def transaction_generations_by_model_id
           @transaction_generations_by_model_id ||= {}
+        end
+
+        def log_transaction_replay_callback(model, indoor_model, source:, generation:)
+          diagnostic = indoor_model.respond_to?(:diagnostic_snapshot) ? indoor_model.diagnostic_snapshot : {}
+          IndoorCore::Logger.puts(
+            "[IndoorGML] transaction replay callback source=#{source} generation=#{generation} replay_pending=#{indoor_model.transaction_replay_pending?} active_path=#{active_path_key(model).inspect} dirty_queue=#{diagnostic[:dirty_topology_count].to_i}"
+          )
+        rescue StandardError
+          nil
         end
 
         def remember_active_path(model)
