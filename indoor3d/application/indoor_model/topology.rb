@@ -27,12 +27,22 @@ module ULOL
             return if @cell_space_sync_scheduled
 
             @cell_space_sync_scheduled = true
+            generation = current_dirty_cell_space_sync_generation
             UI.start_timer(0, false) do
+              next unless generation == current_dirty_cell_space_sync_generation
+              if dirty_sync_replay_pending?
+                @dirty_cell_space_pids.clear
+                @cell_space_sync_scheduled = false
+                next
+              end
+
               flush_dirty_cell_space_sync
             end
           end
 
           def flush_dirty_cell_space_sync
+            return if dirty_sync_replay_pending?
+
             pids = @dirty_cell_space_pids.keys
             @dirty_cell_space_pids.clear
             @cell_space_sync_scheduled = false
@@ -66,6 +76,23 @@ module ULOL
             Array(remaining).each { |persistent_id| @dirty_cell_space_pids[persistent_id] = true }
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Dirty CellSpace requeue failed: #{e.class}: #{e.message}"
+          end
+
+          def invalidate_dirty_cell_space_sync!
+            @dirty_cell_space_sync_generation = current_dirty_cell_space_sync_generation + 1
+            @dirty_cell_space_pids.clear
+            @cell_space_sync_scheduled = false
+            true
+          end
+
+          def current_dirty_cell_space_sync_generation
+            @dirty_cell_space_sync_generation ||= 0
+          end
+
+          def dirty_sync_replay_pending?
+            respond_to?(:transaction_replay_pending?) && transaction_replay_pending?
+          rescue StandardError
+            false
           end
 
           def erase_adjacency_for_cell_space(cell_space)

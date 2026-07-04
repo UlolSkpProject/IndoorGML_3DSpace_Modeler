@@ -373,6 +373,8 @@ module ULOL
         end
 
         def active_path_changed(model)
+          return reconcile_after_transaction(model, source: :transaction_replay) if @indoor_model.transaction_replay_pending?
+
           active_path_controller.active_path_changed(
             model,
             editing: @editing,
@@ -381,7 +383,11 @@ module ULOL
         end
 
         def reconcile_after_transaction(model, source: nil)
-          active_path_controller.reconcile_after_runtime_restore(model, editing: @editing)
+          if @indoor_model.transaction_replay_pending?
+            active_path_controller.reconcile_transaction_replay_path(model, editing: @editing)
+          else
+            active_path_controller.reconcile_after_runtime_restore(model, editing: @editing)
+          end
           invalidate_overlay_transition_points
           selection_changed if @editing
           invalidate_view(model)
@@ -429,14 +435,6 @@ module ULOL
 
         def invalidate_overlay_transition_points
           overlay_controller.invalidate_transition_points
-        end
-
-        def recover_unlocked_primal_after_transaction(model)
-          active_path_controller.recover_unlocked_primal_after_transaction(
-            model,
-            editing: @editing,
-            reenter: -> { reenter_editing_from_primal_path }
-          )
         end
 
         private

@@ -67,7 +67,7 @@ module ULOL
 
           def cell_space_changed(entity)
             begin
-              return false if guard_active?(:@syncing) || guard_active?(:@erasing)
+              return false if observer_routing_suppressed? || guard_active?(:@syncing) || guard_active?(:@erasing)
 
               cell_space = find_cell_space_for_entity(entity)
               cell_space = refresh_and_find_cell_space(entity) if stale_cell_space_runtime?(cell_space, entity)
@@ -94,7 +94,7 @@ module ULOL
           end
 
           def cell_space_closed(entity)
-            return if @syncing || @erasing
+            return if observer_routing_suppressed? || @syncing || @erasing
 
             cell_space = find_cell_space_for_entity(entity)
             cell_space = refresh_and_find_cell_space(entity) if stale_cell_space_runtime?(cell_space, entity)
@@ -117,7 +117,7 @@ module ULOL
           end
 
           def cell_space_erased(entity)
-            return if @erasing
+            return if observer_routing_suppressed? || @erasing
 
             cell_space = find_cell_space_for_entity(entity)
             with_transparent_cell_space_operation('IndoorGML CellSpace Erased') do
@@ -417,9 +417,7 @@ module ULOL
           end
 
           def handle_cell_space_transform_changed(cell_space)
-            with_transparent_cell_space_operation('IndoorGML CellSpace Transform Change') do
-              sync { mark_cell_space_dirty(cell_space) }
-            end
+            sync { mark_cell_space_dirty(cell_space) }
             remember_cell_space_change_snapshot(cell_space.sketchup_group)
             true
           end

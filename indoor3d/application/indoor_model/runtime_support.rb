@@ -53,6 +53,40 @@ module ULOL
             metrics
           end
 
+          def begin_transaction_replay(source:, generation:)
+            @transaction_replay_pending = true
+            @transaction_replay_source = source
+            @transaction_replay_generation = generation
+            invalidate_dirty_cell_space_sync! if respond_to?(:invalidate_dirty_cell_space_sync!, true)
+            true
+          end
+
+          def finish_transaction_replay(generation:)
+            return false unless @transaction_replay_generation == generation
+
+            clear_transaction_replay!
+            true
+          end
+
+          def clear_transaction_replay!
+            @transaction_replay_pending = false
+            @transaction_replay_source = nil
+            @transaction_replay_generation = nil
+            true
+          end
+
+          def transaction_replay_pending?
+            @transaction_replay_pending == true
+          end
+
+          def transaction_replay_generation
+            @transaction_replay_generation
+          end
+
+          def transaction_replay_source
+            @transaction_replay_source
+          end
+
           def diagnostic_snapshot
             {
               cell_spaces: diagnostic_count(@cell_spaces),
@@ -68,6 +102,7 @@ module ULOL
                 syncing: @syncing == true,
                 erasing: @erasing == true,
                 restoring: @refreshing_runtime == true,
+                transaction_replay_pending: transaction_replay_pending?,
                 relocating: @relocating_entity == true,
                 constraining: @constraining_space_features == true,
                 finishing_editing: @finishing_editing == true
