@@ -286,7 +286,7 @@ module ULOL
 
           @apply_guards.call do
             begin
-              @activate_root_context.call if @activate_root_context
+              activate_root_context!
               operation_started = @model.start_operation(@operation_name, true)
               raise 'Failed to start CellSpace conversion operation' unless operation_started
 
@@ -325,6 +325,13 @@ module ULOL
               raise
             end
           end
+        end
+
+        def activate_root_context!
+          return unless @activate_root_context
+
+          activated = @activate_root_context.call
+          raise 'Failed to activate root context for CellSpace conversion' unless activated == true
         end
 
         def safely_abort_operation
