@@ -256,6 +256,58 @@ module ULOL
           def rebuild_runtime_transitions_from_cell_adjacency
             @adjacency_service.synchronize_all
           end
+
+          def rebuild_runtime_transitions_from_cell_adjacency_without_persistence
+            @adjacency_service.synchronize_all(
+              transition_builder: method(:create_or_update_runtime_transition_for_pair),
+              transition_eraser: method(:erase_runtime_transition_for_pair_key)
+            )
+          end
+
+          def create_or_update_runtime_transition_for_pair(cell1, cell2)
+            return nil if cell1.nil? || cell2.nil?
+            return nil if cell1 == cell2
+            return nil unless cell1.valid? && cell2.valid?
+            return nil unless cell1.duality_state&.valid? && cell2.duality_state&.valid?
+
+            pair_key = cell_pair_key(cell1, cell2)
+            transition = @feature_registry.transition_for_pair(pair_key)
+            unless transition&.valid?
+              transition = Transition.new(
+                cell1.duality_state,
+                cell2.duality_state,
+                nil,
+                cell1: cell1,
+                cell2: cell2
+              )
+              @feature_registry.add_transition(transition, pair_key: pair_key)
+            end
+
+            return nil unless update_transition(transition)
+
+            register_runtime_transition_with_states(transition)
+            transition
+          end
+
+          def erase_runtime_transition_for_pair_key(pair_key)
+            transition = @feature_registry.delete_transition_for_pair(pair_key)
+            return if transition.nil?
+
+            unregister_runtime_transition_from_states(transition)
+            transition.erase!
+            @feature_registry.remove_transition(transition)
+            @feature_registry.delete_adjacent_pair(pair_key)
+          end
+
+          def register_runtime_transition_with_states(transition)
+            transition.state1.add_transition(transition)
+            transition.state2.add_transition(transition)
+          end
+
+          def unregister_runtime_transition_from_states(transition)
+            transition.state1.remove_transition(transition) if transition.state1
+            transition.state2.remove_transition(transition) if transition.state2
+          end
         end
       end
     end

@@ -380,6 +380,17 @@ module ULOL
           )
         end
 
+        def reconcile_after_transaction(model, source: nil)
+          active_path_controller.reconcile_after_runtime_restore(model, editing: @editing)
+          invalidate_overlay_transition_points
+          selection_changed if @editing
+          invalidate_view(model)
+          true
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Edit session #{source || 'transaction'} reconciliation failed: #{e.class}: #{e.message}"
+          false
+        end
+
         def with_active_path_enforcement_suspended
           active_path_controller.with_suspended_enforcement { yield }
         end

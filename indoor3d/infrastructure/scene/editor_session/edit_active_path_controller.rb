@@ -108,6 +108,22 @@ module ULOL
             false
           end
 
+          def reconcile_after_runtime_restore(model, editing:)
+            return false unless editing
+
+            path = Array(model&.active_path).select { |entity| entity&.valid? }
+            primal_group = @indoor_model.primal_group
+            if editing_cell_space_path?(path, primal_group) || matches_path?(path, [primal_group])
+              @editing_active_path_target = path
+            else
+              @editing_active_path_target = primal_group&.valid? ? [primal_group] : nil
+            end
+            true
+          rescue StandardError => e
+            log("Edit context transaction reconciliation failed: #{e.class}: #{e.message}")
+            false
+          end
+
           def prepare_for_finish(model)
             active_path = model.active_path
             return if active_path.nil?
@@ -190,6 +206,10 @@ module ULOL
 
           def matches?(model, target_path)
             active_path = model.active_path
+            matches_path?(active_path, target_path)
+          end
+
+          def matches_path?(active_path, target_path)
             return false unless active_path && active_path.length == target_path.length
 
             active_path.each_with_index.all? { |entity, index| entity == target_path[index] }

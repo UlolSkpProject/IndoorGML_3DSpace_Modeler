@@ -82,6 +82,35 @@ module ULOL
           assert_equal 1, callbacks.reenter_count
         end
 
+        def test_reconcile_after_runtime_restore_reconnects_current_cell_space_path
+          primal = FakeEntity.new
+          stale_cell_group = FakeEntity.new
+          current_cell_group = FakeEntity.new
+          indoor_model = FakeIndoorModel.new(primal, [FakeCellSpace.new(current_cell_group)])
+          controller = build_controller(indoor_model)
+          model = FakeModel.new([primal, current_cell_group])
+
+          controller.set_target_path([primal, stale_cell_group])
+          controller.reconcile_after_runtime_restore(model, editing: true)
+
+          assert_equal [primal, current_cell_group], controller.target_path
+          assert_equal indoor_model.cell_spaces.first, controller.editing_cell_space
+        end
+
+        def test_reconcile_after_runtime_restore_falls_back_to_primal_when_target_disappears
+          primal = FakeEntity.new
+          missing_cell_group = FakeEntity.new(valid: false)
+          indoor_model = FakeIndoorModel.new(primal, [])
+          controller = build_controller(indoor_model)
+          model = FakeModel.new([primal, missing_cell_group])
+
+          controller.set_target_path([primal, missing_cell_group])
+          controller.reconcile_after_runtime_restore(model, editing: true)
+
+          assert_equal [primal], controller.target_path
+          assert_nil controller.editing_cell_space
+        end
+
         private
 
         def build_controller(indoor_model, callbacks = CallbackLog.new)
@@ -121,8 +150,12 @@ module ULOL
         end
 
         class FakeEntity
+          def initialize(valid: true)
+            @valid = valid
+          end
+
           def valid?
-            true
+            @valid == true
           end
         end
 
