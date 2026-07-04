@@ -165,7 +165,7 @@ module ULOL
             apply_lock_policy: proc { calls << :apply_lock_policy },
             clear_dirty_topology: proc { calls << :clear_dirty_topology },
             restore_active_path: proc { calls << :restore_active_path },
-            activate_root_context: proc { calls << :activate_root_context }
+            activate_root_context: proc { calls << :activate_root_context; true }
           )
 
           result = service.call
@@ -353,6 +353,74 @@ module ULOL
           assert_equal [:runtime_snapshot], restored
         end
 
+        def test_bulk_service_rejects_non_true_root_context_activation_result
+          [false, nil, :not_true].each do |activation_result|
+            calls = []
+            model = FakeOperationModel.new(calls: calls)
+            restored = []
+            service = bulk_service(
+              model: model,
+              jobs: [job_for(FakeGroup.new(manifold: true))],
+              activate_root_context: proc { calls << :activate_root_context; activation_result },
+              converter: proc { |_source, _cell_type, _category_code| calls << :convert },
+              synchronize_all: proc { calls << :synchronize_all; {} },
+              apply_lock_policy: proc { calls << :apply_lock_policy },
+              clear_dirty_topology: proc { calls << :clear_dirty_topology },
+              runtime_restore: proc { |snapshot| calls << :runtime_restore; restored << snapshot },
+              restore_active_path: proc { calls << :restore_active_path }
+            )
+
+            error = assert_raises(RuntimeError) { service.call }
+
+            assert_equal 'Failed to activate root context for CellSpace conversion', error.message
+            assert_empty model.operations
+            assert_equal [:runtime_snapshot], restored
+            assert_equal [:activate_root_context, :runtime_restore, :restore_active_path], calls
+          end
+        end
+
+        def test_bulk_service_preserves_root_context_activation_exception
+          calls = []
+          model = FakeOperationModel.new(calls: calls)
+          restored = []
+          service = bulk_service(
+            model: model,
+            jobs: [job_for(FakeGroup.new(manifold: true))],
+            activate_root_context: proc { calls << :activate_root_context; raise 'close failed' },
+            converter: proc { |_source, _cell_type, _category_code| calls << :convert },
+            synchronize_all: proc { calls << :synchronize_all; {} },
+            apply_lock_policy: proc { calls << :apply_lock_policy },
+            clear_dirty_topology: proc { calls << :clear_dirty_topology },
+            runtime_restore: proc { |snapshot| calls << :runtime_restore; restored << snapshot },
+            restore_active_path: proc { calls << :restore_active_path }
+          )
+
+          error = assert_raises(RuntimeError) { service.call }
+
+          assert_equal 'close failed', error.message
+          assert_empty model.operations
+          assert_equal [:runtime_snapshot], restored
+          assert_equal [:activate_root_context, :runtime_restore, :restore_active_path], calls
+        end
+
+        def test_bulk_service_allows_missing_root_context_activation_callback
+          calls = []
+          model = FakeOperationModel.new(calls: calls)
+          service = bulk_service(
+            model: model,
+            jobs: [job_for(FakeGroup.new(manifold: true))],
+            activate_root_context: nil,
+            converter: proc { |_source, _cell_type, _category_code| calls << :convert },
+            restore_active_path: proc { calls << :restore_active_path }
+          )
+
+          result = service.call
+
+          assert_equal 1, result.converted_count
+          assert_equal [[:start, 'Bulk Convert', true], [:commit]], model.operations
+          assert_equal [:start_operation, :convert, :commit_operation, :restore_active_path], calls
+        end
+
         def test_bulk_service_aborts_and_preserves_commit_exception
           calls = []
           model = FakeOperationModel.new(calls: calls, commit_error: RuntimeError.new('commit exploded'))
@@ -403,7 +471,7 @@ module ULOL
           source[/def #{method_name}.*?^\s*def #{next_method_name}/m].sub(/^\s*def #{next_method_name}.*/m, '')
         end
 
-        def bulk_service(model:, jobs:, converter: proc { |_source, _cell_type, _category_code| true }, synchronize_all: proc { {} }, apply_lock_policy: proc {}, runtime_restore: proc { |_snapshot| }, restore_active_path: proc {}, activate_root_context: proc {}, clear_dirty_topology: proc {}, logger: FakeLogger.new)
+        def bulk_service(model:, jobs:, converter: proc { |_source, _cell_type, _category_code| true }, synchronize_all: proc { {} }, apply_lock_policy: proc {}, runtime_restore: proc { |_snapshot| }, restore_active_path: proc {}, activate_root_context: proc { true }, clear_dirty_topology: proc {}, logger: FakeLogger.new)
           BulkCellSpaceConversionService.new(
             model: model,
             jobs: jobs,
