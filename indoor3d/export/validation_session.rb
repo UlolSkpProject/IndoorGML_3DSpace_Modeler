@@ -36,17 +36,6 @@ module ULOL
               session.cancel(reason: reason, close_dialog: true, notify: false)
             end
 
-            def cancel_except_model(model, reason: :model_changed)
-              keep_id = model&.object_id
-              cancelled = false
-              sessions_by_model_id.values.dup.each do |session|
-                next if session.model_id == keep_id
-
-                cancelled = true if session.cancel(reason: reason, close_dialog: true, notify: false)
-              end
-              cancelled
-            end
-
             def cancel_all(reason: :model_closed)
               cancelled = false
               sessions_by_model_id.values.dup.each do |session|
