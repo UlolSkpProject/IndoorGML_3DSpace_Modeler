@@ -25,7 +25,8 @@ module ULOL
           def observer_routing_suppressed?
             guard_active?(:@syncing) ||
               guard_active?(:@bulk_cell_space_conversion) ||
-              guard_active?(:@transaction_reconciliation)
+              guard_active?(:@transaction_reconciliation) ||
+              (respond_to?(:transaction_replay_pending?, true) && transaction_replay_pending?)
           end
 
           def classify_space_features_change(entity)

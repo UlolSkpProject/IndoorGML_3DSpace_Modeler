@@ -8,7 +8,6 @@ module ULOL
         def initialize
           super()
           @active_path_keys_by_model_id = {}
-          @recovering_unlocked_primal_by_model_id = {}
           @transaction_generations_by_model_id = {}
         end
 
@@ -33,7 +32,6 @@ module ULOL
           return if key.nil?
 
           @active_path_keys_by_model_id.delete(key)
-          @recovering_unlocked_primal_by_model_id.delete(key)
           transaction_generations_by_model_id.delete(key)
         end
 
@@ -41,7 +39,10 @@ module ULOL
 
         def handle_active_path_changed(model, source:)
           IndoorCore::Logger.puts "[IndoorGML] active path changed source=#{source}"
-          IndoorModel.for(model).active_path_changed(model)
+          indoor_model = IndoorModel.for(model)
+          unless indoor_model.transaction_replay_pending?
+            indoor_model.active_path_changed(model)
+          end
           remember_active_path(model)
         end
 
@@ -52,40 +53,43 @@ module ULOL
           generations = transaction_generations_by_model_id
           generation = generations[key].to_i + 1
           generations[key] = generation
-          previous_key_known = remembered_active_path_key?(model)
-          previous_key = remembered_active_path_key(model)
+          indoor_model = IndoorModel.for(model)
+          indoor_model.begin_transaction_replay(source: source, generation: generation)
+          log_transaction_replay_callback(model, indoor_model, source: source, generation: generation)
           UI.start_timer(0, false) do
+            indoor_model = nil
             begin
               next unless transaction_generations_by_model_id[key] == generation
 
-              current_key = active_path_key(model)
-              IndoorModel.for(model).reconcile_runtime_after_transaction(source: source, generation: generation)
-              if previous_key_known && previous_key == current_key
-                remember_active_path_key(model, current_key)
-                recover_unlocked_primal_after_transaction(model)
-                next
-              end
-
-              handle_active_path_changed(model, source: source)
-              recover_unlocked_primal_after_transaction(model)
+              indoor_model = IndoorModel.for(model)
+              indoor_model.reconcile_runtime_after_transaction(source: source, generation: generation)
+              remember_active_path(model)
             rescue StandardError => e
               IndoorCore::Logger.puts "[IndoorGML] Active path #{source} handling failed: #{e.class}: #{e.message}"
+            ensure
+              if transaction_generations_by_model_id[key] == generation
+                begin
+                  indoor_model ||= IndoorModel.for(model)
+                rescue StandardError
+                  indoor_model = nil
+                end
+                indoor_model&.finish_transaction_replay(generation: generation)
+              end
             end
           end
         end
 
-        def recover_unlocked_primal_after_transaction(model)
-          key = model.object_id
-          return if @recovering_unlocked_primal_by_model_id[key]
-
-          @recovering_unlocked_primal_by_model_id[key] = true
-          IndoorModel.for(model).recover_unlocked_primal_after_transaction(model)
-        ensure
-          @recovering_unlocked_primal_by_model_id.delete(key) if @recovering_unlocked_primal_by_model_id
-        end
-
         def transaction_generations_by_model_id
           @transaction_generations_by_model_id ||= {}
+        end
+
+        def log_transaction_replay_callback(model, indoor_model, source:, generation:)
+          diagnostic = indoor_model.respond_to?(:diagnostic_snapshot) ? indoor_model.diagnostic_snapshot : {}
+          IndoorCore::Logger.puts(
+            "[IndoorGML] transaction replay callback source=#{source} generation=#{generation} replay_pending=#{indoor_model.transaction_replay_pending?} active_path=#{active_path_key(model).inspect} dirty_queue=#{diagnostic[:dirty_topology_count].to_i}"
+          )
+        rescue StandardError
+          nil
         end
 
         def remember_active_path(model)

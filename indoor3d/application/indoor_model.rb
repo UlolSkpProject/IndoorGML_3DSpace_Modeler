@@ -63,6 +63,7 @@ module ULOL
           IndoorGmlConverter::Val3dityRunner.terminate_for_model(@model, wait_ms: 0)
           @editor_session.close_dialog_only()
           detach_edit_selection_observer(@model)
+          clear_transaction_replay! if respond_to?(:clear_transaction_replay!)
           reset_runtime_collections
           @cell_space_observed_ids.clear
           @space_features_observed_ids.clear
@@ -95,6 +96,9 @@ module ULOL
           @erasing = false
           @relocating_entity = false
           @refreshing_runtime = false
+          @transaction_replay_pending = false
+          @transaction_replay_source = nil
+          @transaction_replay_generation = nil
           @constraining_space_features = false
           @primal_group = nil
           @attribute_serializer = AttributeSerializer.new(
