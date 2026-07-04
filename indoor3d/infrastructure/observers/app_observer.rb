@@ -25,11 +25,13 @@ module ULOL
         end
 
         def onNewModel(model)
+          cancel_validation_sessions_except(model)
           register_model(model)
           refresh_runtime_data(model)
         end
 
         def onOpenModel(model)
+          cancel_validation_sessions_except(model)
           register_model(model)
           refresh_runtime_data(model)
         end
@@ -43,6 +45,7 @@ module ULOL
         end
 
         def onQuit
+          IndoorGmlConverter::ValidationSession.cancel_all(reason: :model_closed) if defined?(IndoorGmlConverter::ValidationSession)
           IndoorGmlConverter::Val3dityRunner.shutting_down!
           IndoorGmlConverter::Val3dityRunner.terminate_all(wait_ms: 0)
         rescue StandardError => e
@@ -50,6 +53,14 @@ module ULOL
         end
 
         private
+
+        def cancel_validation_sessions_except(model)
+          return unless defined?(IndoorGmlConverter::ValidationSession)
+
+          IndoorGmlConverter::ValidationSession.cancel_except_model(model, reason: :model_changed)
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Validation session cleanup on model switch failed: #{e.class}: #{e.message}"
+        end
 
         def release_model(model)
           begin

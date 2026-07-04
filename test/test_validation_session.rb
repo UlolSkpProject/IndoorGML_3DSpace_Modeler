@@ -72,6 +72,35 @@ module ULOL
             assert_equal [0], runner_session.terminated_waits
           end
 
+          def test_cancel_except_model_cancels_stale_sessions_only
+            model_a = FakeModel.new('A')
+            model_b = FakeModel.new('B')
+            progress_a = FakeProgress.new
+            progress_b = FakeProgress.new
+            session_a = ValidationSession.new(
+              model: model_a,
+              indoor_model: FakeIndoorModel.new(model_a),
+              progress: progress_a,
+              state: {}
+            )
+            session_b = ValidationSession.new(
+              model: model_b,
+              indoor_model: FakeIndoorModel.new(model_b),
+              progress: progress_b,
+              state: {}
+            )
+
+            assert ValidationSession.cancel_except_model(model_b, reason: :model_changed)
+
+            assert_equal :cancelled, session_a.status
+            assert_equal :model_changed, session_a.cancel_reason
+            assert_equal :running, session_b.status
+            assert_equal 1, progress_a.close_count
+            assert_equal 0, progress_b.close_count
+            assert_nil ValidationSession.for_model(model_a)
+            assert_same session_b, ValidationSession.for_model(model_b)
+          end
+
           def test_perform_check_validity_uses_captured_session_indoor_model
             model_a = FakeModel.new('A')
             model_b = FakeModel.new('B')
