@@ -76,6 +76,31 @@ module ULOL
           assert_equal [1], model.snapshot_pids
         end
 
+        def test_replay_invalidates_existing_dirty_timer
+          cell = fake_cell(1)
+          model = FakeIndoorModel.new(cells: [cell])
+
+          model.mark_dirty(cell)
+          assert_equal [1], model.dirty_pids
+          assert_equal true, model.sync_scheduled?
+          assert_equal 1, UI.timers.length
+
+          model.begin_replay
+          UI.timers.first[:block].call
+
+          assert_empty model.dirty_pids
+          assert_equal false, model.sync_scheduled?
+          assert_empty model.synchronized_pids
+          assert_empty model.snapshot_pids
+
+          model.finish_replay
+          model.mark_dirty(cell)
+          UI.timers.last[:block].call
+
+          assert_equal [1], model.synchronized_pids
+          assert_equal [1], model.snapshot_pids
+        end
+
         private
 
         def fake_cell(pid)
@@ -83,6 +108,10 @@ module ULOL
           Struct.new(:pid, :sketchup_group) do
             def valid?
               true
+            end
+
+            def valid_sketchup_group
+              sketchup_group
             end
           end.new(pid, group)
         end
@@ -111,10 +140,24 @@ module ULOL
             @synchronized_pids = []
             @snapshot_pids = []
             @overlay_invalidated = false
+            @transaction_replay_pending = false
           end
 
           def queue(*pids)
             pids.each { |pid| @dirty_cell_space_pids[pid] = true }
+          end
+
+          def mark_dirty(cell_space)
+            mark_cell_space_dirty(cell_space)
+          end
+
+          def begin_replay
+            @transaction_replay_pending = true
+            invalidate_dirty_cell_space_sync!
+          end
+
+          def finish_replay
+            @transaction_replay_pending = false
           end
 
           def dirty_pids
@@ -127,6 +170,10 @@ module ULOL
 
           def flush_dirty
             flush_dirty_cell_space_sync
+          end
+
+          def transaction_replay_pending?
+            @transaction_replay_pending == true
           end
 
           private

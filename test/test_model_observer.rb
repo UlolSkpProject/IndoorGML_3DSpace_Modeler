@@ -64,6 +64,10 @@ module ULOL
           UI.timers[1][:block].call
 
           assert_equal [[:redo, 2]], model.runtime.reconciliations
+          assert_equal [[:undo, 1], [:redo, 2]], model.runtime.replay_begins
+          assert_equal [2], model.runtime.replay_finishes
+          assert_equal 0, model.runtime.recoveries
+          assert_equal false, model.runtime.transaction_replay_pending?
         end
 
         def test_generation_is_model_scoped
@@ -77,6 +81,8 @@ module ULOL
 
           assert_equal [[:undo, 1]], model_a.runtime.reconciliations
           assert_equal [[:redo, 1]], model_b.runtime.reconciliations
+          assert_equal false, model_a.runtime.transaction_replay_pending?
+          assert_equal false, model_b.runtime.transaction_replay_pending?
         end
 
         def test_undo_redo_undo_runs_only_latest_generation
@@ -89,6 +95,8 @@ module ULOL
           UI.timers.each { |timer| timer[:block].call }
 
           assert_equal [[:undo, 3]], model.runtime.reconciliations
+          assert_equal [3], model.runtime.replay_finishes
+          assert_equal 0, model.runtime.recoveries
         end
 
         def test_forget_model_cancels_pending_generation
@@ -102,17 +110,36 @@ module ULOL
           assert_empty model.runtime.reconciliations
         end
 
+        def test_reconciliation_exception_still_finishes_replay
+          observer = Indoor3DGmlModelObserver.new
+          model = FakeModel.new
+          model.runtime.raise_on_reconcile = true
+
+          observer.onTransactionUndo(model)
+          UI.timers.first[:block].call
+
+          assert_equal [[:undo, 1]], model.runtime.reconciliations
+          assert_equal [1], model.runtime.replay_finishes
+          assert_equal false, model.runtime.transaction_replay_pending?
+          assert_equal 0, model.runtime.recoveries
+        end
+
         class FakeRuntime
-          attr_reader :reconciliations, :active_path_sources, :recoveries
+          attr_accessor :raise_on_reconcile
+          attr_reader :reconciliations, :active_path_sources, :recoveries, :replay_begins, :replay_finishes
 
           def initialize
             @reconciliations = []
             @active_path_sources = []
             @recoveries = 0
+            @replay_begins = []
+            @replay_finishes = []
+            @replay_pending = false
           end
 
           def reconcile_runtime_after_transaction(source:, generation:)
             @reconciliations << [source, generation]
+            raise 'reconcile failed' if @raise_on_reconcile
           end
 
           def active_path_changed(_model)
@@ -121,6 +148,20 @@ module ULOL
 
           def recover_unlocked_primal_after_transaction(_model)
             @recoveries += 1
+          end
+
+          def begin_transaction_replay(source:, generation:)
+            @replay_pending = true
+            @replay_begins << [source, generation]
+          end
+
+          def finish_transaction_replay(generation:)
+            @replay_finishes << generation
+            @replay_pending = false
+          end
+
+          def transaction_replay_pending?
+            @replay_pending == true
           end
         end
 

@@ -111,6 +111,50 @@ module ULOL
           assert_nil controller.editing_cell_space
         end
 
+        def test_transaction_replay_reconciles_cell_path_without_active_path_write
+          primal = FakeEntity.new
+          cell_group = FakeEntity.new
+          indoor_model = FakeIndoorModel.new(primal, [FakeCellSpace.new(cell_group)])
+          controller = build_controller(indoor_model)
+          model = FakeModel.new([primal, cell_group])
+
+          controller.set_target_path([primal])
+          controller.reconcile_transaction_replay_path(model, editing: true)
+
+          assert_equal [primal, cell_group], controller.target_path
+          assert_equal 0, model.active_path_write_count
+        end
+
+        def test_transaction_replay_suspends_target_at_root_without_active_path_write
+          primal = FakeEntity.new
+          cell_group = FakeEntity.new
+          indoor_model = FakeIndoorModel.new(primal, [FakeCellSpace.new(cell_group)])
+          controller = build_controller(indoor_model)
+          model = FakeModel.new(nil)
+
+          controller.set_target_path([primal, cell_group])
+          controller.reconcile_transaction_replay_path(model, editing: true)
+
+          assert_empty controller.target_path
+          refute controller.cell_space_geometry_editing?(editing: true)
+          assert_equal 0, model.active_path_write_count
+        end
+
+        def test_transaction_replay_suspends_invalid_path_without_active_path_write
+          primal = FakeEntity.new
+          invalid_cell_group = FakeEntity.new(valid: false)
+          indoor_model = FakeIndoorModel.new(primal, [])
+          controller = build_controller(indoor_model)
+          model = FakeModel.new([primal, invalid_cell_group])
+
+          controller.set_target_path([primal, invalid_cell_group])
+          controller.reconcile_transaction_replay_path(model, editing: true)
+
+          assert_empty controller.target_path
+          assert_nil controller.editing_cell_space
+          assert_equal 0, model.active_path_write_count
+        end
+
         private
 
         def build_controller(indoor_model, callbacks = CallbackLog.new)
@@ -181,10 +225,16 @@ module ULOL
         end
 
         class FakeModel
-          attr_accessor :active_path
+          attr_reader :active_path, :active_path_write_count
 
           def initialize(active_path)
             @active_path = active_path
+            @active_path_write_count = 0
+          end
+
+          def active_path=(path)
+            @active_path_write_count += 1
+            @active_path = path
           end
 
           def close_active
