@@ -6,7 +6,7 @@ module ULOL
       class IndoorModel
         module ObserverRouting
           def space_features_changed(entity)
-            return false if guard_active?(:@constraining_space_features) || guard_active?(:@erasing) || @finishing_editing
+            return false if observer_routing_suppressed? || guard_active?(:@constraining_space_features) || guard_active?(:@erasing) || @finishing_editing
             return false unless entity&.valid?
 
             change_kind = classify_space_features_change(entity)
@@ -20,6 +20,12 @@ module ULOL
             else
               handle_space_features_etc_changed(entity)
             end
+          end
+
+          def observer_routing_suppressed?
+            guard_active?(:@syncing) ||
+              guard_active?(:@bulk_cell_space_conversion) ||
+              guard_active?(:@transaction_reconciliation)
           end
 
           def classify_space_features_change(entity)
@@ -170,7 +176,7 @@ module ULOL
           end
 
           def root_entity_added(entity)
-            return if @relocating_entity
+            return if observer_routing_suppressed? || @relocating_entity
             return unless indoor_gml_entity?(entity)
 
             feature = indoor_feature(entity)
@@ -189,7 +195,7 @@ module ULOL
           end
 
           def primal_entity_added(entity)
-            return if @relocating_entity
+            return if observer_routing_suppressed? || @relocating_entity
             unless indoor_gml_entity?(entity)
               return
             end
@@ -220,7 +226,7 @@ module ULOL
           end
 
           def primal_entity_removed(entity_id)
-            return if @erasing || @relocating_entity
+            return if observer_routing_suppressed? || @erasing || @relocating_entity
 
             cell_space = @feature_registry.find_cell_space_by_removed_entity_id(entity_id)
             IndoorCore::Logger.puts "[IndoorGML] Primal entity removed: entity_id=#{entity_id} cell_space=#{cell_space&.id || 'missing'}"
