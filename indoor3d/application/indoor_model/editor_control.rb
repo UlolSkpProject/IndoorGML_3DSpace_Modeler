@@ -207,10 +207,6 @@ module ULOL
             @editor_session.active_path_changed(model)
           end
 
-          def recover_unlocked_primal_after_transaction(model)
-            @editor_session.recover_unlocked_primal_after_transaction(model)
-          end
-
           def cleanup_before_quit
             @editor_session.cleanup_before_quit()
           end

@@ -83,6 +83,10 @@ module ULOL
             @transaction_replay_generation
           end
 
+          def transaction_replay_source
+            @transaction_replay_source
+          end
+
           def diagnostic_snapshot
             {
               cell_spaces: diagnostic_count(@cell_spaces),

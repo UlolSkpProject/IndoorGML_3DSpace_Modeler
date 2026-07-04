@@ -437,14 +437,6 @@ module ULOL
           overlay_controller.invalidate_transition_points
         end
 
-        def recover_unlocked_primal_after_transaction(model)
-          active_path_controller.recover_unlocked_primal_after_transaction(
-            model,
-            editing: @editing,
-            reenter: -> { reenter_editing_from_primal_path }
-          )
-        end
-
         private
 
         def visible_cell_types

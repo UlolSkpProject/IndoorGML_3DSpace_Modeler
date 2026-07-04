@@ -86,6 +86,7 @@ module ULOL
             return unless editing
             return if @enforcing_active_path
             return if @active_path_enforcement_suspended
+            return adopt_suspended_active_path(model) if @editing_active_path_suspended
 
             enforce_edit_context(model)
           rescue StandardError => e
@@ -98,19 +99,6 @@ module ULOL
             yield
           ensure
             @active_path_enforcement_suspended = previous
-          end
-
-          def recover_unlocked_primal_after_transaction(model, editing:, reenter:)
-            return false if editing
-
-            primal_group = @indoor_model.primal_group
-            return false unless primal_group&.valid?
-            return false unless primal_group_active_path?(model || Sketchup.active_model)
-
-            reenter.call
-          rescue StandardError => e
-            log("Unlocked primal recovery failed: #{e.class}: #{e.message}")
-            false
           end
 
           def reconcile_transaction_replay_path(model, editing:)
@@ -188,6 +176,19 @@ module ULOL
           end
 
           private
+
+          def adopt_suspended_active_path(model)
+            raw_path = Array(model&.active_path)
+            path = raw_path.select { |entity| entity&.valid? }
+            primal_group = @indoor_model.primal_group
+            return false unless raw_path.length == path.length
+            return false unless editing_cell_space_path?(path, primal_group) || matches_path?(path, [primal_group])
+
+            @editing_active_path_target = path
+            @editing_active_path_suspended = false
+            notify_selection_and_view(model)
+            true
+          end
 
           def snapshot(model)
             path = model.active_path
