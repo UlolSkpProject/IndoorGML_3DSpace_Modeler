@@ -199,7 +199,7 @@ module ULOL
             session = @val_session || @state&.[](:val_session)
             return true unless session&.respond_to?(:terminate)
 
-            session.terminate(wait_ms: terminate_wait_ms)
+            return false unless session.terminate(wait_ms: terminate_wait_ms)
             return session.finished? if session.respond_to?(:finished?)
 
             true
@@ -231,8 +231,8 @@ module ULOL
               end
 
               if process_session.nil? || !process_session.respond_to?(:finished?) || process_session.finished?
-                cleanup_workspace
-                next false
+                finalize_process_session(process_session)
+                next !cleanup_workspace
               end
 
               true
@@ -242,6 +242,15 @@ module ULOL
             end
           rescue StandardError => e
             log("Validation pending workspace cleanup timer failed: #{e.class}: #{e.message}")
+          end
+
+          def finalize_process_session(process_session)
+            return unless process_session
+
+            process_session.join_reader if process_session.respond_to?(:join_reader)
+            process_session.close if process_session.respond_to?(:close)
+          rescue StandardError => e
+            log("Validation process finalization failed: #{e.class}: #{e.message}")
           end
 
           def clear_dialog_callbacks
