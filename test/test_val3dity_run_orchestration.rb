@@ -87,6 +87,21 @@ module ULOL
             assert_same error, callback_result.error
           end
 
+          def test_reader_timeout_is_returned_to_callback_without_building_report
+            session = FakeSession.new(finished: true, terminated: false, exit_code: 0, reader_finished: false)
+            callback_result = nil
+
+            build_orchestration(
+              session,
+              events: [],
+              build_result: ->(_exit_code) { raise 'should not build report' },
+              callback: ->(result) { callback_result = result }
+            ).start
+
+            assert_instance_of RuntimeError, callback_result.error
+            assert_match(/output reader did not finish/, callback_result.error.message)
+          end
+
           def test_finished_error_is_returned_to_callback_without_polling_forever
             error = RuntimeError.new('wait failed')
             session = FakeSession.new(finished: error, terminated: false, exit_code: nil)
@@ -161,10 +176,11 @@ module ULOL
           class FakeSession
             attr_reader :exit_code
 
-            def initialize(finished:, terminated:, exit_code:)
+            def initialize(finished:, terminated:, exit_code:, reader_finished: nil)
               @finished = finished
               @terminated = terminated
               @exit_code = exit_code
+              @reader_finished = reader_finished
             end
 
             def finished?
@@ -179,6 +195,7 @@ module ULOL
 
             def join_reader
               current_events << [:join_reader]
+              @reader_finished
             end
 
             def close

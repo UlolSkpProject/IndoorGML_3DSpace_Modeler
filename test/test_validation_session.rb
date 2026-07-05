@@ -110,6 +110,31 @@ module ULOL
             assert state[:workspace_cleanup_pending]
           end
 
+          def test_pending_cleanup_retries_after_process_finishes
+            model = FakeModel.new('A')
+            workspace = FakeWorkspace.new
+            runner_session = FakeRunnerSession.new(finished: false)
+            session = ValidationSession.new(
+              model: model,
+              indoor_model: FakeIndoorModel.new(model),
+              progress: FakeProgress.new,
+              state: {},
+              workspace: workspace
+            )
+            session.assign_val_session(runner_session)
+
+            assert session.cancel(reason: :model_closed)
+            assert_equal 0, workspace.cleanup_count
+            assert_equal 1, UI.timers.length
+
+            runner_session.finished = true
+            refute UI.timers.last.call
+
+            assert_equal 1, workspace.cleanup_count
+            refute session.cleanup_pending?
+            assert_equal 1, runner_session.close_count
+          end
+
           def test_complete_cleans_workspace_once
             model = FakeModel.new('A')
             workspace = FakeWorkspace.new
@@ -229,12 +254,18 @@ module ULOL
           def fake_ui
             Class.new do
               @messages = []
+              @timers = []
               class << self
                 attr_reader :messages
+                attr_reader :timers
 
                 def messagebox(message, *_args)
                   @messages << message
                   nil
+                end
+
+                def start_timer(_interval, _repeat, &block)
+                  @timers << block
                 end
               end
             end
@@ -372,11 +403,14 @@ module ULOL
           end
 
           class FakeRunnerSession
+            attr_accessor :finished
             attr_reader :terminated_waits
+            attr_reader :close_count
 
             def initialize(finished: nil)
               @terminated_waits = []
               @finished = finished
+              @close_count = 0
             end
 
             def terminate(wait_ms:)
@@ -385,6 +419,12 @@ module ULOL
 
             def finished?
               @finished == true
+            end
+
+            def join_reader; end
+
+            def close
+              @close_count += 1
             end
           end
 

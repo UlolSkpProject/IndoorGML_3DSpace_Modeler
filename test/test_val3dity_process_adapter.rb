@@ -51,18 +51,77 @@ module ULOL
             assert_match(/WaitForSingleObject failed/, error.message)
           end
 
+          def test_terminate_timeout_keeps_process_open_for_later_polling
+            wait = FakeWaitSequence.new([
+              Val3dityProcessAdapter::WAIT_TIMEOUT,
+              Val3dityProcessAdapter::WAIT_TIMEOUT,
+              Val3dityProcessAdapter::WAIT_TIMEOUT
+            ])
+            adapter = build_adapter(
+              wait_result: wait,
+              exit_code: Val3dityProcessAdapter::STILL_ACTIVE,
+              terminate_result: 1
+            )
+
+            refute adapter.terminate(wait_ms: 1)
+
+            refute adapter.finished?
+            refute adapter.closed?
+          end
+
+          def test_terminate_failure_keeps_process_open_for_later_polling
+            adapter = build_adapter(
+              wait_result: Val3dityProcessAdapter::WAIT_TIMEOUT,
+              exit_code: Val3dityProcessAdapter::STILL_ACTIVE,
+              terminate_result: 0
+            )
+
+            refute adapter.terminate(wait_ms: 1)
+
+            refute adapter.finished?
+            refute adapter.closed?
+          end
+
+          def test_confirmed_terminate_finishes_and_closes_process
+            wait = FakeWaitSequence.new([
+              Val3dityProcessAdapter::WAIT_TIMEOUT,
+              Val3dityProcessAdapter::WAIT_OBJECT_0
+            ])
+            adapter = build_adapter(
+              wait_result: wait,
+              exit_code: Val3dityProcessAdapter::TERMINATE_EXIT_CODE,
+              terminate_result: 1
+            )
+
+            assert adapter.terminate(wait_ms: 1)
+            assert adapter.finished?
+            assert adapter.closed?
+            assert_equal Val3dityProcessAdapter::TERMINATE_EXIT_CODE, adapter.exit_code
+          end
+
           private
 
-          def build_adapter(wait_result:, exit_code:)
+          def build_adapter(wait_result:, exit_code:, terminate_result: 1)
             adapter = Val3dityProcessAdapter.new(args: [], current_dir: Dir.tmpdir)
             adapter.instance_variable_set(:@process_handle, 123)
             adapter.define_singleton_method(:wait_for_single_object) do
-              FakeWait.new(wait_result)
+              wait_result.respond_to?(:call) ? wait_result : FakeWait.new(wait_result)
             end
             adapter.define_singleton_method(:get_process_exit_code) do
               raise 'exit code unavailable' if exit_code.nil?
 
               exit_code
+            end
+            adapter.define_singleton_method(:terminate_process) do
+              FakeWait.new(terminate_result)
+            end
+            adapter.define_singleton_method(:kill_process_tree) {}
+            adapter.define_singleton_method(:close) do
+              @closed = true
+              @process_handle = 0
+            end
+            adapter.define_singleton_method(:closed?) do
+              @closed == true
             end
             adapter
           end
@@ -74,6 +133,16 @@ module ULOL
 
             def call(*_args)
               @result
+            end
+          end
+
+          class FakeWaitSequence
+            def initialize(results)
+              @results = results
+            end
+
+            def call(*_args)
+              @results.length > 1 ? @results.shift : @results.first
             end
           end
         end

@@ -34,6 +34,8 @@ module ULOL
             return false if @cleaned
 
             FileUtils.rm_rf(@root_dir)
+            return false if File.exist?(@root_dir)
+
             @cleaned = true
             true
           end

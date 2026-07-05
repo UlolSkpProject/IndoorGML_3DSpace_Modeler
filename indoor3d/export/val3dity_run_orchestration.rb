@@ -79,7 +79,9 @@ module ULOL
               if @session.terminated?
                 result = @error_result.call(RuntimeError.new('val3dity validation was canceled.'))
               else
-                @session.join_reader
+                reader_finished = @session.join_reader
+                raise 'val3dity output reader did not finish.' if reader_finished == false
+
                 @drain_progress.call(@session, @progress, @progress_step)
 
                 @progress&.complete(@progress_step)

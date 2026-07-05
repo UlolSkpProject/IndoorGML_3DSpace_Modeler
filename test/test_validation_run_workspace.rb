@@ -48,6 +48,18 @@ module ULOL
             assert File.exist?(second.report_html_path)
             assert_equal 'second', File.read(second.report_html_path)
           end
+
+          def test_cleanup_does_not_mark_cleaned_when_directory_remains
+            workspace = ValidationRunWorkspace.create(base_dir: @base_dir)
+            original = FileUtils.method(:rm_rf)
+            FileUtils.define_singleton_method(:rm_rf) { |_path| nil }
+
+            refute workspace.cleanup
+            refute workspace.cleaned?
+            assert File.exist?(workspace.root_dir)
+          ensure
+            FileUtils.define_singleton_method(:rm_rf) { |*args| original.call(*args) } if original
+          end
         end
       end
     end
