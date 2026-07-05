@@ -80,6 +80,15 @@ module ULOL
             assert_equal [0], session.terminated_waits
           end
 
+          def test_runner_uses_explicit_work_dir_for_report_paths
+            Dir.mktmpdir('val3dity-runner-work-dir-') do |work_dir|
+              runner = Val3dityRunner.new(__FILE__, work_dir: work_dir, report_name: 'report')
+
+              assert_equal File.join(work_dir, 'report.json'), runner.report_json_path
+              assert_equal File.join(work_dir, 'report', 'report.html'), runner.report_html_path
+            end
+          end
+
           private
 
           def reset_sessions

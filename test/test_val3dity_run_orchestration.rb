@@ -87,6 +87,24 @@ module ULOL
             assert_same error, callback_result.error
           end
 
+          def test_finished_error_is_returned_to_callback_without_polling_forever
+            error = RuntimeError.new('wait failed')
+            session = FakeSession.new(finished: error, terminated: false, exit_code: nil)
+            events = []
+            callback_result = nil
+
+            build_orchestration(
+              session,
+              events: events,
+              build_result: ->(_exit_code) { raise 'should not build report' },
+              callback: ->(result) { callback_result = result }
+            ).start
+
+            assert_same error, callback_result.error
+            assert_includes events, [:close]
+            assert_includes events, [:unregister, session]
+          end
+
           def test_inactive_report_timer_does_not_build_result_or_callback
             session = FakeSession.new(finished: true, terminated: false, exit_code: 0)
             events = []
@@ -150,6 +168,8 @@ module ULOL
             end
 
             def finished?
+              raise @finished if @finished.is_a?(Exception)
+
               @finished
             end
 

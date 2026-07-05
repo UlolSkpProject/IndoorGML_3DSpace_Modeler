@@ -49,7 +49,7 @@ module ULOL
             assert_equal :model_closed, session.status
             assert_equal :model_closed, session.cancel_reason
             assert_equal [:model_closed], [state[:cancel_reason]]
-            assert_equal [0], runner_session.terminated_waits
+            assert_equal [200], runner_session.terminated_waits
             assert_equal 1, progress.close_count
             assert progress.callbacks_cleared
             assert_nil ValidationSession.for_model(model)
@@ -69,7 +69,62 @@ module ULOL
 
             assert session.cancel(reason: :model_closed)
             refute session.cancel(reason: :model_closed)
-            assert_equal [0], runner_session.terminated_waits
+            assert_equal [200], runner_session.terminated_waits
+          end
+
+          def test_cancel_cleans_workspace_after_process_termination
+            model = FakeModel.new('A')
+            workspace = FakeWorkspace.new
+            session = ValidationSession.new(
+              model: model,
+              indoor_model: FakeIndoorModel.new(model),
+              progress: FakeProgress.new,
+              state: {},
+              workspace: workspace
+            )
+            session.assign_val_session(FakeRunnerSession.new(finished: true))
+
+            assert session.cancel(reason: :model_closed)
+
+            assert_equal 1, workspace.cleanup_count
+            refute session.cleanup_pending?
+          end
+
+          def test_cancel_marks_cleanup_pending_when_process_is_still_running
+            model = FakeModel.new('A')
+            workspace = FakeWorkspace.new
+            state = {}
+            session = ValidationSession.new(
+              model: model,
+              indoor_model: FakeIndoorModel.new(model),
+              progress: FakeProgress.new,
+              state: state,
+              workspace: workspace
+            )
+            session.assign_val_session(FakeRunnerSession.new(finished: false))
+
+            assert session.cancel(reason: :model_closed)
+
+            assert_equal 0, workspace.cleanup_count
+            assert session.cleanup_pending?
+            assert state[:workspace_cleanup_pending]
+          end
+
+          def test_complete_cleans_workspace_once
+            model = FakeModel.new('A')
+            workspace = FakeWorkspace.new
+            session = ValidationSession.new(
+              model: model,
+              indoor_model: FakeIndoorModel.new(model),
+              progress: FakeProgress.new,
+              state: {},
+              workspace: workspace
+            )
+
+            assert session.complete
+            refute session.complete
+
+            assert_equal 1, workspace.cleanup_count
           end
 
           def test_perform_check_validity_uses_captured_session_indoor_model
@@ -81,7 +136,8 @@ module ULOL
               model: model_a,
               indoor_model: indoor_a,
               progress: progress,
-              state: {}
+              state: {},
+              workspace: FakeWorkspace.new
             )
             dispatcher = CapturingDispatcher.new
 
@@ -89,6 +145,7 @@ module ULOL
             dispatcher.send(:perform_check_validity, session)
 
             assert_same indoor_a, dispatcher.seen_indoor_model
+            assert_equal session.workspace.gml_path, dispatcher.seen_output_path
           end
 
           def test_stale_report_focus_action_expires_without_editing_new_model
@@ -202,9 +259,11 @@ module ULOL
 
           class CapturingDispatcher < Dispatcher
             attr_reader :seen_indoor_model
+            attr_reader :seen_output_path
 
-            def start_temp_file_creation(session, **_kwargs)
+            def start_temp_file_creation(session, **kwargs)
               @seen_indoor_model = session.indoor_model
+              @seen_output_path = kwargs[:output_path]
             end
           end
 
@@ -297,15 +356,35 @@ module ULOL
             end
           end
 
+          class FakeWorkspace
+            attr_reader :cleanup_count
+            attr_reader :gml_path
+
+            def initialize
+              @cleanup_count = 0
+              @gml_path = 'workspace/input.gml'
+            end
+
+            def cleanup
+              @cleanup_count += 1
+              @cleanup_count == 1
+            end
+          end
+
           class FakeRunnerSession
             attr_reader :terminated_waits
 
-            def initialize
+            def initialize(finished: nil)
               @terminated_waits = []
+              @finished = finished
             end
 
             def terminate(wait_ms:)
               @terminated_waits << wait_ms
+            end
+
+            def finished?
+              @finished == true
             end
           end
 

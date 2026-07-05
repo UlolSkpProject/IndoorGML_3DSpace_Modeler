@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'fileutils'
+require_relative '../../export/validation_run_workspace'
 require_relative '../../export/validation_session'
 
 module ULOL
@@ -30,6 +31,9 @@ module ULOL
         def check_validity
           return if validation_operation_running?
 
+          workspace = nil
+          session = nil
+          progress = nil
           if validation_dialog_visible?
             @validation_progress_dialog.bring_to_front
             return
@@ -39,6 +43,9 @@ module ULOL
           captured_indoor_model = IndoorModel.for(captured_model)
           captured_indoor_model.finish_editing if captured_indoor_model.editing?
           @validation_operation_running = true
+          workspace = IndoorGmlConverter::ValidationRunWorkspace.create(
+            base_dir: IndoorGmlConverter::GmlExporter.output_root
+          )
           progress = IndoorGmlConverter::ExportProgressDialog.new
           @validation_progress_dialog = progress
           state = validation_close_state
@@ -47,6 +54,7 @@ module ULOL
             indoor_model: captured_indoor_model,
             progress: progress,
             state: state,
+            workspace: workspace,
             on_cancel: proc { |active_session, _reason| validation_session_cancelled(active_session) },
             on_complete: proc { |active_session, _reason| validation_session_completed(active_session) },
             logger: Logger
@@ -66,7 +74,11 @@ module ULOL
           progress.show
         rescue StandardError => e
           @validation_operation_running = false
-          @validation_session&.cancel(reason: :failed, close_dialog: false, terminate_process: true)
+          if session
+            session.cancel(reason: :failed, close_dialog: false, terminate_process: true)
+          else
+            workspace&.cleanup
+          end
           progress&.result(
             status: :error,
             title: 'IndoorGML temp GML creation failed',
@@ -80,7 +92,11 @@ module ULOL
           state[:after_temp_export] = proc do |temp_path|
             start_val3dity_validation(session, temp_path)
           end
-          start_temp_file_creation(session, step: :temp_file)
+          start_temp_file_creation(
+            session,
+            output_path: session.workspace&.gml_path,
+            step: :temp_file
+          )
         end
 
         def start_temp_file_creation(session, output_path: nil, step: :temp_file)
@@ -151,6 +167,7 @@ module ULOL
           validator = IndoorGmlConverter::Val3dityRunner.new(
             temp_path,
             overlap_tol: state[:overlap_tol],
+            work_dir: session.workspace&.root_dir,
             indoor_model: indoor_model
           )
 
@@ -285,6 +302,7 @@ module ULOL
           end
 
           if result.error?
+            session.cleanup_workspace
             progress&.fail(:val3dity)
             progress&.result(
               status: :error,
@@ -311,6 +329,7 @@ module ULOL
             )
           end
         rescue StandardError => e
+          session.cleanup_workspace
           progress&.result(
             status: :error,
             title: 'IndoorGML validity result handling failed',

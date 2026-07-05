@@ -57,13 +57,15 @@ module ULOL
           attr_reader :status
           attr_reader :cancel_reason
           attr_reader :generation
+          attr_reader :workspace
 
-          def initialize(model:, indoor_model:, progress:, state:, on_cancel: nil, on_complete: nil, logger: nil)
+          def initialize(model:, indoor_model:, progress:, state:, workspace: nil, on_cancel: nil, on_complete: nil, logger: nil)
             @model = model
             @indoor_model = indoor_model
             @model_id = model&.object_id
             @progress = progress
             @state = state
+            @workspace = workspace
             @on_cancel = on_cancel
             @on_complete = on_complete
             @logger = logger || (defined?(IndoorCore::Logger) && IndoorCore::Logger)
@@ -71,6 +73,7 @@ module ULOL
             @cancel_reason = nil
             @generation = 0
             @val_session = nil
+            @cleanup_pending = false
             self.class.register(self)
           end
 
@@ -107,6 +110,7 @@ module ULOL
             @status = :completed
             invalidate_callbacks!
             clear_dialog_callbacks
+            cleanup_workspace
             self.class.unregister(self)
             @on_complete&.call(self, reason)
             true
@@ -119,10 +123,16 @@ module ULOL
             @cancel_reason = reason
             invalidate_callbacks!
             mark_state_cancelled(reason)
-            terminate_runner if terminate_process
+            terminated = terminate_process ? terminate_runner : true
             clear_dialog_callbacks
             notify_expired if notify
             close_progress_dialog if close_dialog
+            if terminated
+              cleanup_workspace
+            else
+              mark_cleanup_pending
+              schedule_pending_cleanup
+            end
             self.class.unregister(self)
             @on_cancel&.call(self, reason)
             true
@@ -154,6 +164,21 @@ module ULOL
             false
           end
 
+          def cleanup_workspace
+            return false unless @workspace&.respond_to?(:cleanup)
+
+            cleaned = @workspace.cleanup
+            @cleanup_pending = false if cleaned
+            cleaned
+          rescue StandardError => e
+            log("Validation workspace cleanup failed: #{e.class}: #{e.message}")
+            false
+          end
+
+          def cleanup_pending?
+            @cleanup_pending == true
+          end
+
           private
 
           def invalidate_callbacks!
@@ -172,11 +197,51 @@ module ULOL
 
           def terminate_runner
             session = @val_session || @state&.[](:val_session)
-            return unless session&.respond_to?(:terminate)
+            return true unless session&.respond_to?(:terminate)
 
-            session.terminate(wait_ms: 0)
+            session.terminate(wait_ms: terminate_wait_ms)
+            return session.finished? if session.respond_to?(:finished?)
+
+            true
           rescue StandardError => e
             log("Validation process terminate skipped: #{e.class}: #{e.message}")
+            false
+          end
+
+          def terminate_wait_ms
+            if defined?(IndoorGmlConverter::Val3dityRunner::TERMINATE_WAIT_MS)
+              IndoorGmlConverter::Val3dityRunner::TERMINATE_WAIT_MS
+            else
+              200
+            end
+          end
+
+          def mark_cleanup_pending
+            @cleanup_pending = true
+            @state[:workspace_cleanup_pending] = true if @state
+          end
+
+          def schedule_pending_cleanup
+            return unless defined?(UI) && UI.respond_to?(:start_timer)
+
+            process_session = @val_session || @state&.[](:val_session)
+            UI.start_timer(0.2, true) do
+              unless cleanup_pending?
+                next false
+              end
+
+              if process_session.nil? || !process_session.respond_to?(:finished?) || process_session.finished?
+                cleanup_workspace
+                next false
+              end
+
+              true
+            rescue StandardError => e
+              log("Validation pending workspace cleanup failed: #{e.class}: #{e.message}")
+              false
+            end
+          rescue StandardError => e
+            log("Validation pending workspace cleanup timer failed: #{e.class}: #{e.message}")
           end
 
           def clear_dialog_callbacks
