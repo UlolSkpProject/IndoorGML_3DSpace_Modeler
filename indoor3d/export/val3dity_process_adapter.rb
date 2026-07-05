@@ -15,6 +15,7 @@ module ULOL
           HANDLE_FLAG_INHERIT     = 0x00000001
           WAIT_OBJECT_0           = 0
           WAIT_TIMEOUT            = 258
+          WAIT_FAILED             = 0xFFFFFFFF
           STILL_ACTIVE            = 259
           STDOUT_READ_BUFFER_SIZE = 4096
           TERMINATE_EXIT_CODE     = 1
@@ -69,22 +70,16 @@ module ULOL
             return true if @finished
 
             result = wait_for_single_object.call(@process_handle, 0)
-            if result == WAIT_TIMEOUT
-              return mark_finished_from_output if @output_finished
-
-              return false
+            case result
+            when WAIT_TIMEOUT
+              false
+            when WAIT_OBJECT_0
+              finish_from_exit_code(get_process_exit_code)
+            when WAIT_FAILED
+              raise "WaitForSingleObject failed: #{Fiddle.last_error}"
+            else
+              finish_from_unexpected_wait_result(result)
             end
-
-            if result == WAIT_OBJECT_0
-              @exit_code = get_process_exit_code
-              @finished = true
-              return true
-            end
-
-            return mark_finished_from_output if @output_finished
-
-            IndoorCore::Logger.puts "[IndoorGML] WaitForSingleObject returned #{result}; waiting for val3dity stdout EOF"
-            false
           end
 
           def pop_progress
@@ -201,15 +196,22 @@ module ULOL
             end
           end
 
-          def mark_finished_from_output
-            @exit_code ||= begin
-              code = get_process_exit_code
-              code == STILL_ACTIVE ? 0 : code
-            rescue StandardError
-              0
-            end
+          def finish_from_exit_code(code)
+            raise 'val3dity process is still active.' if code == STILL_ACTIVE
+
+            @exit_code = code
             @finished = true
             true
+          end
+
+          def finish_from_unexpected_wait_result(result)
+            code = get_process_exit_code
+            return finish_from_exit_code(code) unless code == STILL_ACTIVE
+
+            IndoorCore::Logger.puts "[IndoorGML] WaitForSingleObject returned #{result}; val3dity process is still active"
+            false
+          rescue StandardError => e
+            raise "Unexpected WaitForSingleObject result #{result}: #{e.message}"
           end
 
           def read_process_output

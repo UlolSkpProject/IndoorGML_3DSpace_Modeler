@@ -49,6 +49,7 @@ module ULOL
     require_relative 'application/indoor_model/editor_control'
     require_relative 'application/indoor_model'
     require_relative 'export/gml_exporter'
+    require_relative 'export/validation_run_workspace'
     require_relative 'export/val3dity_runner'
     require_relative 'export/validation_session'
     require_relative 'ui/commands/conversion_message_formatter'

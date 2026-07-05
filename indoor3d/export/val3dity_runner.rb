@@ -113,9 +113,9 @@ module ULOL
             end
           end
 
-          def initialize(gml_path, overlap_tol: DEFAULT_OVERLAP_TOL, report_name: 'report', indoor_model: nil, owner_key: nil)
+          def initialize(gml_path, overlap_tol: DEFAULT_OVERLAP_TOL, report_name: 'report', work_dir: nil, indoor_model: nil, owner_key: nil)
             @gml_path = File.expand_path(gml_path)
-            @work_dir = GmlExporter.output_root
+            @work_dir = File.expand_path(work_dir || GmlExporter.output_root)
             @report_name = sanitize_report_name(report_name)
             @report_json_path = File.join(@work_dir, "#{@report_name}.json")
             @report_dir = File.join(@work_dir, @report_name)

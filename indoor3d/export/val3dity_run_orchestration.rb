@@ -46,11 +46,24 @@ module ULOL
             UI.start_timer(0.2, true) do
               next false unless active?
               next false if @completed
-              next true unless @session.finished?
+
+              begin
+                finished = @session.finished?
+              rescue StandardError => e
+                finish_with_error(e)
+                next false
+              end
+
+              next true unless finished
 
               finish_session
               false
             end
+          end
+
+          def finish_with_error(error)
+            cleanup_session
+            @callback.call(@error_result.call(error))
           end
 
           def finish_session
