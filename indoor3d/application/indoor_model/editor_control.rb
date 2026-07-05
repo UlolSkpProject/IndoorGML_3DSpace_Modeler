@@ -27,12 +27,19 @@ module ULOL
             end
 
             progress = IndoorGmlConverter::ExportProgressDialog.active || IndoorGmlConverter::ExportProgressDialog.new
-            state = { session: nil, completed: false }
+            state = {
+              session: nil,
+              completed: false,
+              workspace: IndoorGmlConverter::ValidationRunWorkspace.create(
+                base_dir: IndoorGmlConverter::GmlExporter.output_root
+              ),
+              workspace_cleaned: false
+            }
             progress.on_create_gml do
               UI.messagebox('오류 요소 재검사 report에서는 GML export를 사용할 수 없습니다.')
             end
             progress.on_cancel do
-              state[:session]&.terminate
+              terminate_validation_focus_recheck(state)
               state[:completed] = true
               progress.fail(:val3dity)
               progress.result(
@@ -43,7 +50,8 @@ module ULOL
               )
             end
             progress.on_request_close do
-              state[:session]&.terminate unless state[:completed]
+              terminate_validation_focus_recheck(state) unless state[:completed]
+              cleanup_validation_focus_recheck_workspace(state) if state[:completed]
               :close
             end
             progress.on_ready do
@@ -55,6 +63,7 @@ module ULOL
             progress.show
             focus
           rescue StandardError => e
+            cleanup_validation_focus_recheck_workspace(state) if defined?(state) && state
             IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck failed: #{e.class}: #{e.message}"
             UI.messagebox("오류 요소 재검사 실패:\n#{e.message}")
             nil
@@ -395,8 +404,8 @@ module ULOL
           private
 
           def start_validation_focus_recheck(progress, state, focus)
-            report_name = validation_focus_recheck_report_name
-            output_path = File.join(IndoorGmlConverter::GmlExporter.output_root, "#{report_name}.gml")
+            workspace = state[:workspace]
+            output_path = workspace.gml_path
 
             progress.running(:temp_file)
             progress.detail(
@@ -417,15 +426,16 @@ module ULOL
             runner = IndoorGmlConverter::Val3dityRunner.new(
               output_path,
               overlap_tol: IndoorGmlConverter::Val3dityRunner::STRICT_OVERLAP_TOL,
-              report_name: report_name,
+              work_dir: workspace.root_dir,
               indoor_model: self
             )
             state[:session] = runner.start(progress: progress) do |result|
               state[:completed] = true
-              handle_validation_focus_recheck_result(progress, result)
+              handle_validation_focus_recheck_result(progress, state, result)
             end
           rescue StandardError => e
             state[:completed] = true
+            cleanup_validation_focus_recheck_workspace(state)
             progress.fail(:temp_file)
             progress.result(
               status: :error,
@@ -435,8 +445,9 @@ module ULOL
             )
           end
 
-          def handle_validation_focus_recheck_result(progress, result)
+          def handle_validation_focus_recheck_result(progress, state, result)
             if result.error?
+              cleanup_validation_focus_recheck_workspace(state)
               progress.fail(:val3dity)
               progress.result(
                 status: :error,
@@ -457,6 +468,7 @@ module ULOL
               actions: [:openReport, :close]
             )
           rescue StandardError => e
+            cleanup_validation_focus_recheck_workspace(state)
             progress.result(
               status: :error,
               title: '오류 요소 재검사 결과 처리 실패',
@@ -465,8 +477,85 @@ module ULOL
             )
           end
 
-          def validation_focus_recheck_report_name
-            "fix_recheck_#{Time.now.strftime('%Y%m%d_%H%M%S')}"
+          def cleanup_validation_focus_recheck_workspace(state)
+            return unless state
+            return if state[:workspace_cleaned]
+            unless validation_focus_recheck_process_finished?(state)
+              state[:workspace_cleanup_pending] = true
+              schedule_validation_focus_recheck_workspace_cleanup(state)
+              return false
+            end
+
+            finalize_validation_focus_recheck_session(state)
+
+            workspace = state[:workspace]
+            return unless workspace&.respond_to?(:cleanup)
+
+            cleaned = workspace.cleanup
+            state[:workspace_cleaned] = true if cleaned
+            cleaned
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck workspace cleanup failed: #{e.class}: #{e.message}"
+            false
+          end
+
+          def terminate_validation_focus_recheck(state)
+            session = state[:session]
+            unless validation_focus_recheck_process_finished?(state)
+              terminated = session&.respond_to?(:terminate) && session.terminate(wait_ms: IndoorGmlConverter::Val3dityRunner::TERMINATE_WAIT_MS)
+              state[:workspace_cleanup_pending] = true unless terminated && validation_focus_recheck_process_finished?(state)
+            end
+            cleanup_validation_focus_recheck_workspace(state)
+          rescue StandardError => e
+            state[:workspace_cleanup_pending] = true
+            schedule_validation_focus_recheck_workspace_cleanup(state)
+            IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck terminate failed: #{e.class}: #{e.message}"
+            false
+          end
+
+          def validation_focus_recheck_process_finished?(state)
+            session = state[:session]
+            return true unless session&.respond_to?(:finished?)
+
+            session.finished?
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck process status failed: #{e.class}: #{e.message}"
+            false
+          end
+
+          def schedule_validation_focus_recheck_workspace_cleanup(state)
+            return if state[:workspace_cleanup_timer_scheduled]
+            return unless defined?(UI) && UI.respond_to?(:start_timer)
+
+            state[:workspace_cleanup_timer_scheduled] = true
+            UI.start_timer(0.2, true) do
+              if state[:workspace_cleaned]
+                next false
+              end
+
+              if validation_focus_recheck_process_finished?(state)
+                state[:workspace_cleanup_timer_scheduled] = false
+                next !cleanup_validation_focus_recheck_workspace(state)
+              end
+
+              true
+            rescue StandardError => e
+              state[:workspace_cleanup_timer_scheduled] = false
+              IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck pending cleanup failed: #{e.class}: #{e.message}"
+              false
+            end
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck cleanup timer failed: #{e.class}: #{e.message}"
+          end
+
+          def finalize_validation_focus_recheck_session(state)
+            session = state[:session]
+            return unless session
+
+            session.join_reader if session.respond_to?(:join_reader)
+            session.close if session.respond_to?(:close)
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck session finalize failed: #{e.class}: #{e.message}"
           end
 
           def validation_focus_recheck_summary(focus)

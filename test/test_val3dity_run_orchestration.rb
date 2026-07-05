@@ -87,9 +87,66 @@ module ULOL
             assert_same error, callback_result.error
           end
 
+          def test_reader_timeout_is_returned_to_callback_without_building_report
+            session = FakeSession.new(finished: true, terminated: false, exit_code: 0, reader_finished: false)
+            callback_result = nil
+
+            build_orchestration(
+              session,
+              events: [],
+              build_result: ->(_exit_code) { raise 'should not build report' },
+              callback: ->(result) { callback_result = result }
+            ).start
+
+            assert_instance_of RuntimeError, callback_result.error
+            assert_match(/output reader did not finish/, callback_result.error.message)
+          end
+
+          def test_finished_error_is_returned_to_callback_without_polling_forever
+            error = RuntimeError.new('wait failed')
+            session = FakeSession.new(finished: error, terminated: false, exit_code: nil)
+            events = []
+            callback_result = nil
+
+            build_orchestration(
+              session,
+              events: events,
+              build_result: ->(_exit_code) { raise 'should not build report' },
+              callback: ->(result) { callback_result = result }
+            ).start
+
+            assert_same error, callback_result.error
+            assert_includes events, [:close]
+            assert_includes events, [:unregister, session]
+          end
+
+          def test_inactive_report_timer_does_not_build_result_or_callback
+            session = FakeSession.new(finished: true, terminated: false, exit_code: 0)
+            events = []
+            callback_called = false
+            active_calls = 0
+
+            build_orchestration(
+              session,
+              events: events,
+              active: proc {
+                active_calls += 1
+                active_calls < 3
+              },
+              build_result: ->(_exit_code) {
+                events << [:build_result]
+                FakeResult.new(error: nil)
+              },
+              callback: ->(_result) { callback_called = true }
+            ).start
+
+            refute_includes events, [:build_result]
+            refute callback_called
+          end
+
           private
 
-          def build_orchestration(session, events:, build_result:, callback:)
+          def build_orchestration(session, events:, build_result:, callback:, active: nil)
             progress = FakeProgress.new(events)
             Val3dityRunOrchestration.new(
               session: session,
@@ -100,7 +157,8 @@ module ULOL
               unregister_session: ->(active_session) { events << [:unregister, active_session] },
               drain_progress: ->(_active_session, _active_progress, active_step) { events << [:drain, active_step] },
               build_result: build_result,
-              error_result: ->(error) { FakeResult.new(error: error) }
+              error_result: ->(error) { FakeResult.new(error: error) },
+              active: active
             )
           end
 
@@ -118,13 +176,16 @@ module ULOL
           class FakeSession
             attr_reader :exit_code
 
-            def initialize(finished:, terminated:, exit_code:)
+            def initialize(finished:, terminated:, exit_code:, reader_finished: nil)
               @finished = finished
               @terminated = terminated
               @exit_code = exit_code
+              @reader_finished = reader_finished
             end
 
             def finished?
+              raise @finished if @finished.is_a?(Exception)
+
               @finished
             end
 
@@ -134,6 +195,7 @@ module ULOL
 
             def join_reader
               current_events << [:join_reader]
+              @reader_finished
             end
 
             def close
