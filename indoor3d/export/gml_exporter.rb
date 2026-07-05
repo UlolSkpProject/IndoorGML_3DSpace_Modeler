@@ -81,7 +81,7 @@ module ULOL
           end
 
           def with_root_model_coordinates
-            model = Sketchup.active_model
+            model = export_model
             return yield unless model
 
             active_path = ActivePathController.new(model)
@@ -124,7 +124,7 @@ module ULOL
 
           def export_coordinate_unit
             @export_coordinate_unit ||= begin
-              model = Sketchup.active_model
+              model = export_model
               unit_key = model&.options&.[]('UnitsOptions')&.[]('LengthUnit').to_i
               EXPORT_COORDINATE_UNITS[unit_key] || EXPORT_COORDINATE_UNITS[0]
             rescue StandardError => e
@@ -141,6 +141,10 @@ module ULOL
             end
             total = @export_total_elapsed ? " total=#{format('%.4fs', @export_total_elapsed)}" : ''
             IndoorCore::Logger.puts("[IndoorGML] Export timing: #{timings.join(', ')}#{total}")
+          end
+
+          def export_model
+            @indoor_model&.model || Sketchup.active_model
           end
 
         end

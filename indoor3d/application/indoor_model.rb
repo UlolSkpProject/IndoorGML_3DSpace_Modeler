@@ -47,6 +47,7 @@ module ULOL
         def self.release(model)
           return unless model
 
+          IndoorGmlConverter::ValidationSession.cancel_for_model(model, reason: :model_closed) if defined?(IndoorGmlConverter::ValidationSession)
           instance = @instances&.delete(model.object_id)
           instance&.cleanup_for_model_close
         end

@@ -15,6 +15,7 @@ module ULOL
           HANDLE_FLAG_INHERIT     = 0x00000001
           WAIT_OBJECT_0           = 0
           WAIT_TIMEOUT            = 258
+          WAIT_FAILED             = 0xFFFFFFFF
           STILL_ACTIVE            = 259
           STDOUT_READ_BUFFER_SIZE = 4096
           TERMINATE_EXIT_CODE     = 1
@@ -69,22 +70,16 @@ module ULOL
             return true if @finished
 
             result = wait_for_single_object.call(@process_handle, 0)
-            if result == WAIT_TIMEOUT
-              return mark_finished_from_output if @output_finished
-
-              return false
+            case result
+            when WAIT_TIMEOUT
+              false
+            when WAIT_OBJECT_0
+              finish_from_exit_code(get_process_exit_code)
+            when WAIT_FAILED
+              raise "WaitForSingleObject failed: #{Fiddle.last_error}"
+            else
+              finish_from_unexpected_wait_result(result)
             end
-
-            if result == WAIT_OBJECT_0
-              @exit_code = get_process_exit_code
-              @finished = true
-              return true
-            end
-
-            return mark_finished_from_output if @output_finished
-
-            IndoorCore::Logger.puts "[IndoorGML] WaitForSingleObject returned #{result}; waiting for val3dity stdout EOF"
-            false
           end
 
           def pop_progress
@@ -93,8 +88,9 @@ module ULOL
             nil
           end
 
-          def join_reader
-            @reader_thread&.join(1.0)
+          def join_reader(timeout = 1.0)
+            @reader_thread&.join(timeout)
+            @output_finished == true
           end
 
           def terminated?
@@ -114,20 +110,41 @@ module ULOL
           end
 
           def terminate(wait_ms: TERMINATE_WAIT_MS)
-            return if @closed
-            return close if @process_handle.to_i <= 0
+            return true if @closed
+            return close_and_report_finished if @process_handle.to_i <= 0
 
-            unless finished?
-              ok = terminate_process.call(@process_handle, TERMINATE_EXIT_CODE)
-              IndoorCore::Logger.puts "[IndoorGML] TerminateProcess failed: #{Fiddle.last_error}" if ok == 0
-              wait_result = wait_ms.to_i.positive? ? wait_for_single_object.call(@process_handle, wait_ms.to_i) : WAIT_TIMEOUT
-              kill_process_tree if wait_ms.to_i.positive? && wait_result == WAIT_TIMEOUT
+            if finished?
+              @terminated = true
+              join_reader if wait_ms.to_i.positive?
+              close
+              return true
+            end
+
+            ok = terminate_process.call(@process_handle, TERMINATE_EXIT_CODE)
+            if ok == 0
+              IndoorCore::Logger.puts "[IndoorGML] TerminateProcess failed: #{Fiddle.last_error}"
+              return false
             end
 
             @terminated = true
-            @finished = true
-            @exit_code = TERMINATE_EXIT_CODE
+            wait_result = wait_ms.to_i.positive? ? wait_for_single_object.call(@process_handle, wait_ms.to_i) : WAIT_TIMEOUT
+            if wait_result == WAIT_TIMEOUT && wait_ms.to_i.positive?
+              kill_process_tree
+              wait_result = wait_for_single_object.call(@process_handle, wait_ms.to_i)
+            end
+
+            return false if wait_result == WAIT_TIMEOUT
+            raise "WaitForSingleObject failed after TerminateProcess: #{Fiddle.last_error}" if wait_result == WAIT_FAILED
+
+            if wait_result == WAIT_OBJECT_0
+              finish_from_exit_code(get_process_exit_code)
+            else
+              return false unless finish_from_unexpected_wait_result(wait_result)
+            end
+
             join_reader if wait_ms.to_i.positive?
+            close
+            true
           rescue StandardError => e
             @progress_queue << {
               percent: nil,
@@ -135,8 +152,7 @@ module ULOL
               message: "terminate failed: #{e.class}: #{e.message}",
               current: nil
             }
-          ensure
-            close
+            false
           end
 
           private
@@ -201,14 +217,26 @@ module ULOL
             end
           end
 
-          def mark_finished_from_output
-            @exit_code ||= begin
-              code = get_process_exit_code
-              code == STILL_ACTIVE ? 0 : code
-            rescue StandardError
-              0
-            end
+          def finish_from_exit_code(code)
+            raise 'val3dity process is still active.' if code == STILL_ACTIVE
+
+            @exit_code = code
             @finished = true
+            true
+          end
+
+          def finish_from_unexpected_wait_result(result)
+            code = get_process_exit_code
+            return finish_from_exit_code(code) unless code == STILL_ACTIVE
+
+            IndoorCore::Logger.puts "[IndoorGML] WaitForSingleObject returned #{result}; val3dity process is still active"
+            false
+          rescue StandardError => e
+            raise "Unexpected WaitForSingleObject result #{result}: #{e.message}"
+          end
+
+          def close_and_report_finished
+            close
             true
           end
 

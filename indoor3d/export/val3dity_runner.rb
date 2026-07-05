@@ -113,15 +113,16 @@ module ULOL
             end
           end
 
-          def initialize(gml_path, overlap_tol: DEFAULT_OVERLAP_TOL, report_name: 'report', indoor_model: nil, owner_key: nil)
+          def initialize(gml_path, overlap_tol: DEFAULT_OVERLAP_TOL, report_name: 'report', work_dir: nil, indoor_model: nil, owner_key: nil)
             @gml_path = File.expand_path(gml_path)
-            @work_dir = GmlExporter.output_root
+            @work_dir = File.expand_path(work_dir || GmlExporter.output_root)
             @report_name = sanitize_report_name(report_name)
             @report_json_path = File.join(@work_dir, "#{@report_name}.json")
             @report_dir = File.join(@work_dir, @report_name)
             @report_html_path = File.join(@report_dir, 'report.html')
             @overlap_tol = normalize_overlap_tol(overlap_tol)
             @indoor_model = indoor_model
+            @model = indoor_model&.model
             @owner_key = owner_key || self.class.owner_key_for_model(indoor_model&.model) || self.class.default_owner_key
           end
 
@@ -129,7 +130,7 @@ module ULOL
             raise 'Val3dityRunner#validate is deprecated. Use #start with a completion callback.'
           end
 
-          def start(progress: nil, progress_step: :val3dity, recheck_step: :extension_recheck, report_step: :report, report_view_step: nil, &callback)
+          def start(progress: nil, progress_step: :val3dity, recheck_step: :extension_recheck, report_step: :report, report_view_step: nil, active: nil, &callback)
             raise ArgumentError, 'callback is required' unless callback
 
             ensure_supported_platform!
@@ -181,7 +182,8 @@ module ULOL
                   report_view_step: report_view_step
                 )
               },
-              error_result: ->(error) { error_result(error) }
+              error_result: ->(error) { error_result(error) },
+              active: active
             ).start
           rescue StandardError => e
             self.class.unregister_session(session) if session
@@ -571,6 +573,7 @@ module ULOL
                 @gml_path,
                 numeric_epsilon: OVERLAP_RECHECK_NUMERIC_EPSILON
               ),
+              model: @model,
               tolerance: OVERLAP_RECHECK_TOLERANCE,
               logger: IndoorCore::Logger
             )

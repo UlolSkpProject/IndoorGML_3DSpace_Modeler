@@ -7,9 +7,10 @@ module ULOL
     module IndoorCore
       module IndoorGmlConverter
         class Val3dityOverlapGeometryRechecker
-          def initialize(snapshot_reader:, tolerance:, logger: nil)
+          def initialize(snapshot_reader:, tolerance:, model: nil, logger: nil)
             @snapshot_reader = snapshot_reader
             @tolerance = tolerance
+            @model = model
             @logger = logger || (defined?(IndoorCore::Logger) && IndoorCore::Logger)
             @pair_analysis = {}
           end
@@ -129,7 +130,7 @@ module ULOL
           end
 
           def exported_solid_intersection(cell1, cell2)
-            model = Sketchup.active_model
+            model = @model || Sketchup.active_model
             return { status: :inconclusive, reason: 'BOOLEAN_OPERATION_FAILED' } unless model
 
             started = false
@@ -176,7 +177,10 @@ module ULOL
           end
 
           def build_temp_solid_group(cell)
-            group = Sketchup.active_model.entities.add_group
+            model = @model || Sketchup.active_model
+            return nil unless model&.respond_to?(:entities)
+
+            group = model.entities.add_group
             cell[:faces].each do |face|
               created = group.entities.add_face(face[:points])
               unless created&.valid?
