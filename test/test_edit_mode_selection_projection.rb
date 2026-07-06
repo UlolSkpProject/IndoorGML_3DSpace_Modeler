@@ -75,6 +75,26 @@ module ULOL
           assert_equal true, snapshot[:classification_locked]
         end
 
+        def test_multi_cell_space_snapshot_counts_selected_types
+          projection = build_projection
+
+          snapshot = projection.snapshot(
+            selected_cell_spaces: [
+              fake_cell_space(cell_type: CellSpaceType::GENERAL),
+              fake_cell_space(cell_type: CellSpaceType::GENERAL),
+              fake_cell_space(cell_type: CellSpaceType::TRANSITION, category_code: 'Stair')
+            ],
+            solid_jobs: []
+          )
+
+          assert_equal 'cell_spaces', snapshot[:mode]
+          assert_equal 3, snapshot[:cell_space_count]
+          assert_equal [
+            { label: 'GeneralSpace', count: 2 },
+            { label: 'TransitionSpace', count: 1 }
+          ], snapshot[:selected_cell_type_counts]
+        end
+
         private
 
         def build_projection(cell_spaces: [], states: [], transitions: [], editor_session: FakeSession.new(nil, false))

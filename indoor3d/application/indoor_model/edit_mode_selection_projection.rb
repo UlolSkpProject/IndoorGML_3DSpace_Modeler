@@ -55,6 +55,7 @@ module ULOL
           {
             mode: 'cell_spaces',
             cell_space_count: cell_spaces.length,
+            selected_cell_type_counts: selected_cell_type_counts_snapshot(cell_spaces),
             classification: common_cell_space_classification(cell_spaces),
             classification_locked: cell_space_type_change_locked_by_tag?(cell_spaces),
             storey: multi_cell_space_storey_value(cell_spaces),
@@ -89,6 +90,18 @@ module ULOL
             {
               label: label,
               count: @cell_spaces.count { |cell_space| cell_space&.valid? && cell_space.cell_type == type }
+            }
+          end
+        end
+
+        def selected_cell_type_counts_snapshot(cell_spaces)
+          CellSpaceType::LABELS.filter_map do |type, label|
+            count = cell_spaces.count { |cell_space| cell_space.cell_type == type }
+            next if count.zero?
+
+            {
+              label: label,
+              count: count
             }
           end
         end
