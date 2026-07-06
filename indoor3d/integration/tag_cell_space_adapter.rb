@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+# [미완] TAG를 이용한 CellSpaceType 자동 결정과 관련된 부분입니다.
 
 module ULOL
   module Indoor3DGmlModeler
