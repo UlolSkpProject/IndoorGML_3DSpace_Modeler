@@ -32,6 +32,15 @@ module ULOL
     module IndoorCore
       module IndoorGmlConverter
         class GmlWriterTest < Minitest::Test
+          def test_writer_uses_official_schema_version_for_namespaces
+            assert_includes GmlWriter::CORE_NAMESPACE, "/#{Definition::INDOOR_GML_SCHEMA_VERSION}/core"
+            assert_includes GmlWriter::NAVIGATION_NAMESPACE, "/#{Definition::INDOOR_GML_SCHEMA_VERSION}/navigation"
+            assert_includes GmlWriter::CORE_SCHEMA_LOCATION, "/#{Definition::INDOOR_GML_SCHEMA_VERSION}/indoorgmlcore.xsd"
+            assert_includes GmlWriter::NAVIGATION_SCHEMA_LOCATION, "/#{Definition::INDOOR_GML_SCHEMA_VERSION}/indoorgmlnavi.xsd"
+            refute_includes GmlWriter::CORE_SCHEMA_LOCATION, "/#{Definition::INDOOR_GML_VERSION}/"
+            refute_includes GmlWriter::NAVIGATION_SCHEMA_LOCATION, "/#{Definition::INDOOR_GML_VERSION}/"
+          end
+
           def test_writer_builds_core_xml_with_snapshot_geometry_and_graph
             state = fake_state('S 1')
             cell = fake_cell_space('Cell A', :unknown, 'B02', state, surfaces: [fake_surface])

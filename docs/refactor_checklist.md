@@ -8,7 +8,7 @@
 
 - SketchUp 버전: SketchUp 2026
 - 확장 프로그램: IndoorGML SketchUp extension
-- IndoorGML 대상 버전: IndoorGML 1.0.3
+- IndoorGML 대상 버전: IndoorGML 1.0
 - 목적: 구현 구조를 리팩토링하는 동안 기능 동작이 바뀌지 않았는지 확인한다.
 
 ## 기준 테스트 시나리오

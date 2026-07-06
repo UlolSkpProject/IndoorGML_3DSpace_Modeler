@@ -96,7 +96,7 @@ The result is in world coordinates.
 
 ## Curved Or Segmented Contact
 
-IndoorGML 1.0.3 does not imply that CellSpace adjacency must only occur through one planar face. However, this SketchUp extension currently works with polygonal faces. A curved wall is represented as many small planar faces.
+IndoorGML 1.0 does not imply that CellSpace adjacency must only occur through one planar face. However, this SketchUp extension currently works with polygonal faces. A curved wall is represented as many small planar faces.
 
 In such cases, common face detection can return many planar patches:
 
