@@ -242,7 +242,7 @@ input[type="number"]:focus {
   border-color: var(--focus);
 }
 
-/* CellSpace panel: 1행 2열 + 2행 전체 너비 */
+/* CellSpace panel */
 .cell-panel {
   padding: 0;
 }
@@ -253,12 +253,8 @@ input[type="number"]:focus {
 
 .cell-top {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  align-items: stretch;
-}
-
-.cell-top.single-column {
   grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
 }
 
 .cell-column {
@@ -269,13 +265,6 @@ input[type="number"]:focus {
 .cell-overview {
   display: flex;
   flex-direction: column;
-}
-
-.navigation-column {
-  display: grid;
-  align-content: start;
-  gap: 10px;
-  border-left: 1px solid var(--border);
 }
 
 .meta-list {

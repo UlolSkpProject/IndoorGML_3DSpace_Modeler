@@ -46,11 +46,6 @@ module ULOL
             storey: cell_space.storey,
             storey_editable: true,
             storey_range_allowed: storey_range_allowed_for_cell_spaces([cell_space]),
-            navigation_semantics_enabled: cell_space.navigable?,
-            navigation_class: resolved_navigation_semantic_value(cell_space, :class_value),
-            navigation_function: resolved_navigation_semantic_value(cell_space, :function_value),
-            navigation_usage: resolved_navigation_semantic_value(cell_space, :usage_value),
-            navigation_semantics_editable: cell_space.navigable?,
             transition_count: cell_space.duality_state&.transition_ids&.length.to_i,
             cell_geometry_editing: @editor_session.cell_space_geometry_editing?
           }
@@ -153,12 +148,6 @@ module ULOL
             cell_space.cell_type == CellSpaceType::TRANSITION &&
               %w[Stair Elevator].include?(cell_space.category_code.to_s)
           end
-        end
-
-        def resolved_navigation_semantic_value(cell_space, key)
-          NavigationSemanticResolver.resolve(cell_space).public_send(key)
-        rescue NavigationSemanticError
-          nil
         end
 
         def cell_space_type_change_locked_by_tag?(cell_spaces)

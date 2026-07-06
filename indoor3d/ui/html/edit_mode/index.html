@@ -68,9 +68,8 @@
     <!-- CellSpace 선택 -->
     <section id="cellPanel" class="mode-panel cell-panel hidden">
       <div class="cell-editor">
-        <!-- 1행: 좌우 2열 -->
+        <!-- 1행: 기본 정보 -->
         <div id="cellTop" class="cell-top">
-          <!-- 1행 1열: 기본 정보 -->
           <section class="cell-column cell-overview" aria-label="CellSpace 기본 정보">
             <div id="singleCellInfo" class="meta-list">
               <div class="meta-row">
@@ -130,33 +129,6 @@
             </div>
           </section>
 
-          <!-- 1행 2열: Navigation semantics -->
-          <section
-            id="navigationSemantics"
-            class="cell-column navigation-column hidden"
-            aria-label="Navigation semantics"
-          >
-            <div class="field-group">
-              <label class="field-label" for="navigationClass">
-                Class <small>공간 분류</small>
-              </label>
-              <input id="navigationClass" type="text" spellcheck="false">
-            </div>
-
-            <div class="field-group">
-              <label class="field-label" for="navigationFunction">
-                Function <small>설계상 역할</small>
-              </label>
-              <input id="navigationFunction" type="text" spellcheck="false">
-            </div>
-
-            <div class="field-group">
-              <label class="field-label" for="navigationUsage">
-                Usage <small>사용/접근 성격</small>
-              </label>
-              <input id="navigationUsage" type="text" spellcheck="false">
-            </div>
-          </section>
         </div>
 
         <!-- 2행: 전체 너비 -->

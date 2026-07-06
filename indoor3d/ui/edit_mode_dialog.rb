@@ -83,16 +83,6 @@ module ULOL
               @indoor_model.set_selected_cell_space_classification(selection_value)
             end
           end
-          dialog.add_action_callback('setSelectedCellSpaceNavigationSemantics') do |_context, navigation_class, navigation_function, navigation_usage|
-            IndoorCore::Logger.puts '[IndoorGML] EditModeDialog#setSelectedCellSpaceNavigationSemantics'
-            UI.start_timer(0, false) do
-              @indoor_model.set_selected_cell_space_navigation_semantics(
-                navigation_class,
-                navigation_function,
-                navigation_usage
-              )
-            end
-          end
           dialog.add_action_callback('setSelectedCellSpaceStorey') do |_context, storey|
             IndoorCore::Logger.puts "[IndoorGML] EditModeDialog#setSelectedCellSpaceStorey value=#{storey}"
             UI.start_timer(0, false) do
@@ -194,10 +184,6 @@ module ULOL
                 storey: #{js_string(snapshot[:storey])},
                 storeyEditable: #{snapshot[:storey_editable] ? 'true' : 'false'},
                 storeyRangeAllowed: #{snapshot[:storey_range_allowed] ? 'true' : 'false'},
-                navigationSemanticsEnabled: #{snapshot[:navigation_semantics_enabled] ? 'true' : 'false'},
-                navigationClass: #{js_string(snapshot[:navigation_class])},
-                navigationFunction: #{js_string(snapshot[:navigation_function])},
-                navigationUsage: #{js_string(snapshot[:navigation_usage])},
                 transitionCount: #{snapshot[:transition_count].to_i},
                 cellSpaceCount: #{snapshot[:cell_space_count].to_i},
                 solidGroupCount: #{snapshot[:solid_group_count].to_i},
