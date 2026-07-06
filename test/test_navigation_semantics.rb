@@ -16,7 +16,6 @@ module ULOL
           :id,
           :cell_type,
           :category_code,
-          :category_label,
           :navigation_class,
           :navigation_class_code_space,
           :navigation_function,
@@ -125,15 +124,6 @@ module ULOL
           assert_equal '1010', semantic.usage_value
         end
 
-        def test_legacy_escalator_category_migrates_to_stair
-          category = CellSpaceCategory.normalize(CellSpaceType::TRANSITION, 'Escalator')
-          semantic = resolve(CellSpaceType::TRANSITION, 'Escalator')
-
-          assert_equal 'Stair', category[:code]
-          assert_equal 'Stair', category[:label]
-          assert_equal '1120', semantic.function_value
-        end
-
         def test_exporter_writes_values_and_per_property_code_spaces
           parent = REXML::Element.new('navi:TransitionSpace')
           writer = IndoorGmlConverter::GmlWriter.allocate
@@ -175,7 +165,6 @@ module ULOL
             id: 'cell_test',
             cell_type: cell_type,
             category_code: category_code,
-            category_label: category_code,
             **overrides
           )
         end

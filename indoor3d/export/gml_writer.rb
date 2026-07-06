@@ -13,6 +13,7 @@ module ULOL
           NAVIGATION_NAMESPACE       = 'http://www.opengis.net/indoorgml/1.0/navigation'
           CORE_SCHEMA_LOCATION       = 'http://schemas.opengis.net/indoorgml/1.0/indoorgmlcore.xsd'
           NAVIGATION_SCHEMA_LOCATION = 'http://schemas.opengis.net/indoorgml/1.0/indoorgmlnavi.xsd'
+          DEFAULT_STOREY = 'F01'
           CELL_SPACE_TAGS = {
             CellSpaceType::GENERAL => 'navi:GeneralSpace',
             CellSpaceType::TRANSITION => 'navi:TransitionSpace',
@@ -242,7 +243,7 @@ module ULOL
 
           def storey_name_for(cell_space)
             storey = cell_space&.storey.to_s
-            storey.empty? ? Storey::DEFAULT_NAME : storey
+            storey.empty? ? DEFAULT_STOREY : storey
           end
 
           def append_nil_bounded_by(parent)

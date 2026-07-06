@@ -213,7 +213,6 @@ h1 {
 }
 
 select,
-input[type="text"],
 input[type="number"] {
   height: 31px;
   border: 1px solid var(--field-border);
@@ -225,8 +224,7 @@ input[type="number"] {
   font-size: 12px;
 }
 
-select,
-input[type="text"] {
+select {
   width: 100%;
   padding: 0 8px;
 }
@@ -236,13 +234,7 @@ select {
   -webkit-user-select: none;
 }
 
-input[type="text"] {
-  user-select: text;
-  -webkit-user-select: text;
-}
-
 select:focus,
-input[type="text"]:focus,
 input[type="number"]:focus {
   border-color: var(--focus);
 }
@@ -334,10 +326,6 @@ input[type="number"]:focus {
 .storey-separator {
   color: var(--text-muted);
   text-align: center;
-}
-
-.field-group {
-  min-width: 0;
 }
 
 /* 2행: 전체 너비 */
@@ -445,7 +433,6 @@ button {
 
 button:disabled,
 select:disabled,
-input[type="text"]:disabled,
 input[type="number"]:disabled {
   cursor: not-allowed;
   opacity: 0.55;

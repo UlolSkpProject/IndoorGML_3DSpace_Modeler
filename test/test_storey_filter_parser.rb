@@ -6,7 +6,7 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class CellSpace
-        DEFAULT_STOREY = 'F01'
+        DEFAULT_STOREY = 'F01' unless const_defined?(:DEFAULT_STOREY, false)
       end
     end
   end

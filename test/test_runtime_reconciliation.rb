@@ -81,10 +81,6 @@ require_relative '../indoor3d/domain/abstract_feature'
 require_relative '../indoor3d/domain/cell_space_type'
 require_relative '../indoor3d/domain/cell_space_category'
 require_relative '../indoor3d/domain/navigation_semantic'
-unless defined?(ULOL::Indoor3DGmlModeler::IndoorCore::Storey) &&
-       ULOL::Indoor3DGmlModeler::IndoorCore::Storey.const_defined?(:DEFAULT_NAME)
-  require_relative '../indoor3d/domain/storey'
-end
 require_relative '../indoor3d/domain/cell_space'
 require_relative '../indoor3d/domain/state'
 require_relative '../indoor3d/domain/transition'
@@ -339,10 +335,6 @@ module ULOL
             yield
           end
 
-          def write_storey_attributes
-            @serializer.write_storeys(nil, [], nil)
-          end
-
           def write_cell_space_attributes(cell_space)
             @serializer.write_cell_space(cell_space)
           end
@@ -402,20 +394,12 @@ module ULOL
             @write_count = 0
           end
 
-          def read_storeys(_model)
-            []
-          end
-
           def attribute(entity, key)
             entity.get_attribute('IndoorGml', key)
           end
 
           def feature(entity)
             attribute(entity, 'feature')
-          end
-
-          def write_storeys(*)
-            @write_count += 1
           end
 
           def write_cell_space(*)

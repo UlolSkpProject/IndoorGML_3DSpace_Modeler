@@ -34,7 +34,6 @@ module ULOL
         end
 
         def test_single_cell_space_snapshot_projects_dialog_fields
-          session = FakeSession.new(nil, true)
           cell_space = fake_cell_space(
             id: 'cell_A',
             name: 'Room A',
@@ -43,18 +42,16 @@ module ULOL
             storey: '2F',
             transition_ids: %w[t1 t2]
           )
-          projection = build_projection(editor_session: session)
+          projection = build_projection
 
           snapshot = projection.snapshot(selected_cell_spaces: [cell_space], solid_jobs: [])
 
           assert_equal 'cell_space', snapshot[:mode]
           assert_equal 'cell_A', snapshot[:id]
           assert_equal 'Room A', snapshot[:name]
-          assert_equal 'GeneralSpace', snapshot[:cell_type]
           assert_equal CellSpaceCategory.selection_value(CellSpaceType::GENERAL, 'Room'), snapshot[:classification]
           assert_equal '2F', snapshot[:storey]
           assert_equal 2, snapshot[:transition_count]
-          assert_equal true, snapshot[:cell_geometry_editing]
         end
 
         def test_solid_jobs_snapshot_uses_common_tag_classification
@@ -97,7 +94,7 @@ module ULOL
 
         private
 
-        def build_projection(cell_spaces: [], states: [], transitions: [], editor_session: FakeSession.new(nil, false))
+        def build_projection(cell_spaces: [], states: [], transitions: [], editor_session: FakeSession.new(nil))
           EditModeSelectionProjection.new(
             cell_spaces: cell_spaces,
             states: states,
@@ -116,14 +113,9 @@ module ULOL
             :category_code,
             :storey,
             :duality_state,
-            :category_label,
             keyword_init: true
           ) do
             def valid?
-              true
-            end
-
-            def navigable?
               true
             end
           end.new(
@@ -132,8 +124,7 @@ module ULOL
             cell_type: cell_type,
             category_code: category_code,
             storey: storey,
-            duality_state: FakeState.new(transition_ids),
-            category_label: category_code
+            duality_state: FakeState.new(transition_ids)
           )
         end
 
@@ -150,16 +141,11 @@ module ULOL
         end
 
         class FakeSession
-          def initialize(editing_cell_space, cell_geometry_editing)
+          def initialize(editing_cell_space)
             @editing_cell_space = editing_cell_space
-            @cell_geometry_editing = cell_geometry_editing
           end
 
           attr_reader :editing_cell_space
-
-          def cell_space_geometry_editing?
-            @cell_geometry_editing
-          end
         end
       end
     end

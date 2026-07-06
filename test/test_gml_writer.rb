@@ -13,10 +13,6 @@ module ULOL
         ANCHOR = :anchor
       end unless const_defined?(:CellSpaceType)
 
-      class Storey
-        DEFAULT_NAME = 'F01'
-      end unless const_defined?(:Storey)
-
       module NavigationSemanticResolver
         Semantic = Struct.new(:class_value, :class_code_space, :function_value, :function_code_space, :usage_value, :usage_code_space)
 
@@ -102,8 +98,7 @@ module ULOL
               storey: storey,
               duality_state: state,
               surfaces: surfaces,
-              category_code: 'Room',
-              category_label: 'Room'
+              category_code: 'Room'
             )
           end
 

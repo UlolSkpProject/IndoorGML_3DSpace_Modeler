@@ -32,19 +32,16 @@ module ULOL
         end
 
         def self.find(cell_type, code)
-          normalized_code = migrate_legacy_code(code)
-          list_for(cell_type).find { |category| category[:code] == normalized_code }
+          list_for(cell_type).find { |category| category[:code] == code.to_s }
         end
 
-        def self.normalize(cell_type, category_code = nil, category_label = nil, category_code_space = nil, category_standard = nil)
-          normalized_category_code = migrate_legacy_code(category_code)
-          normalized_category_label = legacy_escalator?(category_label) ? 'Stair' : category_label
-          category = find(cell_type, normalized_category_code) || default_for(cell_type)
+        def self.normalize(cell_type, category_code = nil)
+          category = find(cell_type, category_code) || default_for(cell_type)
           {
-            code: normalized_category_code.to_s.empty? ? category[:code] : normalized_category_code.to_s,
-            label: normalized_category_label.to_s.empty? ? category[:label] : normalized_category_label.to_s,
-            code_space: category_code_space.to_s.empty? ? category[:code_space] : category_code_space.to_s,
-            standard: category_standard.nil? ? category[:standard] : truthy?(category_standard)
+            code: category[:code],
+            label: category[:label],
+            code_space: category[:code_space],
+            standard: category[:standard]
           }
         end
 
@@ -80,18 +77,6 @@ module ULOL
           [cell_type, category_code || default_for(cell_type)[:code]]
         end
 
-        def self.migrate_legacy_code(code)
-          legacy_escalator?(code) ? 'Stair' : code.to_s
-        end
-
-        def self.legacy_escalator?(value)
-          value.to_s.casecmp('Escalator').zero?
-        end
-
-        def self.truthy?(value)
-          value == true || value.to_s.downcase == 'true'
-        end
-        private_class_method :truthy?
       end
 
     end

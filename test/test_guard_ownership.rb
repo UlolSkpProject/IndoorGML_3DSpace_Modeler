@@ -134,9 +134,8 @@ module ULOL
             @cell_spaces = []
             @states = []
             @transitions = []
-            @storeys = []
             @runtime_restorer = Struct.new(:owner) do
-              def restore(model:, primal_group:); end
+              def restore(primal_group:); end
             end.new(self)
             @editor_session = FakeEditorSession.new
             @model = nil
@@ -194,12 +193,6 @@ module ULOL
           def attach_existing_space_features_observers; end
 
           def reset_runtime_collections; end
-
-          def ensure_default_storey; end
-
-          def assign_default_storey_to_unassigned_cell_spaces; end
-
-          def write_storey_attributes; end
 
           def recenter_runtime_cell_spaces; end
 

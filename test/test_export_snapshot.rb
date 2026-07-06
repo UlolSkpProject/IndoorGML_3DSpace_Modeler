@@ -55,14 +55,13 @@ module ULOL
 
           def fake_cell_space(valid_group:, state_valid:)
             @cell_index = @cell_index.to_i + 1
-            cell_class = Struct.new(:id, :cell_type, :storey, :valid_sketchup_group, :duality_state, :category_code, :category_label)
+            cell_class = Struct.new(:id, :cell_type, :storey, :valid_sketchup_group, :duality_state, :category_code)
             state_class = Struct.new(:id, :duality_cell, :valid?, :position)
-            cell = cell_class.new(nil, nil, nil, valid_group ? Object.new : nil, nil, nil, nil)
+            cell = cell_class.new(nil, nil, nil, valid_group ? Object.new : nil, nil, nil)
             cell.id = "cell_#{@cell_index}"
             cell.cell_type = :general
             cell.storey = 'F01'
             cell.category_code = 'Room'
-            cell.category_label = 'Room'
             cell.duality_state = state_class.new("state_#{@cell_index}", cell, state_valid, point(@cell_index, 0, 0))
             cell
           end

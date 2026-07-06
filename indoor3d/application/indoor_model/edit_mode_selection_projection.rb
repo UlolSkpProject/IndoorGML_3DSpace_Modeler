@@ -36,18 +36,14 @@ module ULOL
           group = cell_space.sketchup_group
           {
             mode: 'cell_space',
-            feature: 'CellSpace',
             id: cell_space.id,
             name: group&.name.to_s,
-            cell_type: CellSpaceType.label(cell_space.cell_type),
-            category_code: cell_space.category_code,
             classification: CellSpaceCategory.selection_value(cell_space.cell_type, cell_space.category_code),
             classification_locked: cell_space_type_change_locked_by_tag?([cell_space]),
             storey: cell_space.storey,
             storey_editable: true,
             storey_range_allowed: storey_range_allowed_for_cell_spaces([cell_space]),
-            transition_count: cell_space.duality_state&.transition_ids&.length.to_i,
-            cell_geometry_editing: @editor_session.cell_space_geometry_editing?
+            transition_count: cell_space.duality_state&.transition_ids&.length.to_i
           }
         end
 
