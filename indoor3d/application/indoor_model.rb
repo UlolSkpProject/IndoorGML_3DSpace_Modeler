@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../definition'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -8,7 +10,6 @@ module ULOL
         PRIMAL_GROUP_NAME = 'IndoorGML_PrimalSpaceFeatures'
         PRIMAL_GROUP_FEATURE = 'primalspace'
         ATTRIBUTE_DICTIONARY_NAME = 'IndoorGml'
-        INDOOR_GML_VERSION = '1.0'
 
         require_relative 'cell_space_lifecycle_service'
         require_relative 'cell_space_conversion'
@@ -103,7 +104,7 @@ module ULOL
           @primal_group = nil
           @attribute_serializer = AttributeSerializer.new(
             dictionary_name: ATTRIBUTE_DICTIONARY_NAME,
-            indoor_gml_version: INDOOR_GML_VERSION
+            indoor_gml_version: Definition::INDOOR_GML_VERSION
           )
           @adjacency_service = AdjacencyService.new(
             @feature_registry,

@@ -2,7 +2,7 @@
 
 ## Transition Creation Policy
 
-The extension currently targets IndoorGML 1.0 transition behavior: any two valid CellSpaces with a detected shared boundary can produce an adjacency Transition. A dedicated ConnectionSpace is not required for two General CellSpaces.
+The extension currently targets IndoorGML 1.0.3 transition behavior: any two valid CellSpaces with a detected shared boundary can produce an adjacency Transition. A dedicated ConnectionSpace is not required for two General CellSpaces.
 
 If IndoorGML 1.1 behavior is added later, the policy should be introduced as an explicit compatibility mode instead of leaving alternative rules commented in `AdjacencyService`.
 

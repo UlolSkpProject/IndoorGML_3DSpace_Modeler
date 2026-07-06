@@ -2,6 +2,7 @@
 
 require 'rexml/document'
 require 'rexml/formatters/pretty'
+require_relative '../definition'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -9,10 +10,10 @@ module ULOL
       module IndoorGmlConverter
         class GmlWriter
           ROOT_ID                    = 'IF_001'
-          CORE_NAMESPACE             = 'http://www.opengis.net/indoorgml/1.0/core'
-          NAVIGATION_NAMESPACE       = 'http://www.opengis.net/indoorgml/1.0/navigation'
-          CORE_SCHEMA_LOCATION       = 'http://schemas.opengis.net/indoorgml/1.0/indoorgmlcore.xsd'
-          NAVIGATION_SCHEMA_LOCATION = 'http://schemas.opengis.net/indoorgml/1.0/indoorgmlnavi.xsd'
+          CORE_NAMESPACE             = "http://www.opengis.net/indoorgml/#{Definition::INDOOR_GML_VERSION}/core"
+          NAVIGATION_NAMESPACE       = "http://www.opengis.net/indoorgml/#{Definition::INDOOR_GML_VERSION}/navigation"
+          CORE_SCHEMA_LOCATION       = "http://schemas.opengis.net/indoorgml/#{Definition::INDOOR_GML_VERSION}/indoorgmlcore.xsd"
+          NAVIGATION_SCHEMA_LOCATION = "http://schemas.opengis.net/indoorgml/#{Definition::INDOOR_GML_VERSION}/indoorgmlnavi.xsd"
           DEFAULT_STOREY = 'F01'
           CELL_SPACE_TAGS = {
             CellSpaceType::GENERAL => 'navi:GeneralSpace',

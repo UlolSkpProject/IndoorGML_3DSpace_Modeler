@@ -1,4 +1,5 @@
 require 'sketchup.rb'
+require_relative 'definition'
 
 module ULOL
   include Sketchup

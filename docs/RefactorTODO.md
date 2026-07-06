@@ -1,6 +1,6 @@
 # Refactor TODO - IndoorGML SketchUp 2026 Extension
 
-이 문서는 SketchUp 2026용 IndoorGML 1.0 플러그인 리팩토링 작업을 단계별로 진행하기 위한 체크리스트다.
+이 문서는 SketchUp 2026용 IndoorGML 1.0.3 플러그인 리팩토링 작업을 단계별로 진행하기 위한 체크리스트다.
 
 ## 진행 규칙
 

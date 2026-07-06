@@ -206,7 +206,7 @@ module ULOL
           )
         end
 
-        def lifecycle_callbacks(calls, source_group: Object.new, placed_group: Object.new, state: Object.new)
+        def lifecycle_callbacks(calls, placed_group: Object.new, state: Object.new, **)
           {
             cell_space_class: fake_cell_space_class(calls, state),
             converted_group?: proc { |_group| calls << :converted_group?; false },

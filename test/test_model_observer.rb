@@ -190,6 +190,7 @@ module ULOL
           end
 
           def reconcile_runtime_after_transaction(source:, generation:)
+            generation
             super
             @editor_session.reconcile_after_transaction(@model, source: source)
           end

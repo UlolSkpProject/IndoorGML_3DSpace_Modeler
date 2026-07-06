@@ -331,6 +331,7 @@ module ULOL
           end
 
           def with_indoor_model_operation(_name, transparent: false)
+            transparent
             @operation_count += 1
             yield
           end
@@ -361,6 +362,7 @@ module ULOL
           end
 
           def synchronize_all(transition_builder: nil, transition_eraser: nil)
+            transition_eraser
             cells = @registry&.cell_spaces || []
             if @adjacent && cells.length >= 2
               transition_builder.call(cells[0], cells[1])
