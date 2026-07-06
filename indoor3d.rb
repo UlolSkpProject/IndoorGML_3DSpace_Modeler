@@ -11,7 +11,7 @@ module ULOL
       EXTENSION_NAME = "IndoorGML 3D Modeler"
       EXTENSION_VERSION = Definition::EXTENSION_VERSION
       EXTENSION_CREATOR = "ULOL"
-      EXTENSION_DESCRIPTION = "SketchUp2026에서 IndoorGML(v#{Definition::INDOOR_GML_VERSION}) 실내 공간 모델을 구축하고 CellSpace 변환, 위상 연결, GML 내보내기, geometry 검증을 수행하는 Extension."
+      EXTENSION_DESCRIPTION = "SketchUp2026에서 IndoorGML(v#{Definition::INDOOR_GML_SCHEMA_VERSION}) 실내 공간 모델을 구축하고 CellSpace 변환, 위상 연결, GML 내보내기, geometry 검증을 수행하는 Extension."
 
       EXTENSION = SketchupExtension.new(
         EXTENSION_NAME,
