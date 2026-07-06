@@ -2,7 +2,7 @@
 
 require 'minitest/autorun'
 
-require_relative '../indoor3d/application/storey_filter_parser'
+require_relative '../indoor3d/application/storey_filter'
 require_relative '../indoor3d/infrastructure/scene/editor_session/visibility_controller'
 require_relative '../indoor3d/infrastructure/scene/editor_session/validation_focus_controller'
 require_relative '../indoor3d/infrastructure/scene/editor_session/edit_visibility_service'

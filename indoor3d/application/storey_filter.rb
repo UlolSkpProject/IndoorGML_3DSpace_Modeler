@@ -3,10 +3,19 @@
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
-      module StoreyFilterParser
+      module StoreyFilter
         PART_PATTERN = /\A([FB])(\d{1,2})\z/
 
         module_function
+
+        def options_for(cell_spaces)
+          labels = Array(cell_spaces).each_with_object([]) do |cell_space, result|
+            next unless cell_space&.valid?
+
+            result.concat(labels_for(cell_space.storey))
+          end
+          labels.uniq.sort.map { |label| { value: label, label: label } }
+        end
 
         def normalize_labels(values)
           Array(values).map { |value| normalize_label(value) }.compact.uniq.sort

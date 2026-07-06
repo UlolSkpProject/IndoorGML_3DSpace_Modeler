@@ -3,7 +3,8 @@
 require 'minitest/autorun'
 
 require_relative '../indoor3d/utils/geometry'
-require_relative '../indoor3d/application/adjacency_service'
+require_relative '../indoor3d/application/adjacency_service/geometry_query'
+require_relative '../indoor3d/application/adjacency_service/sync'
 
 module ULOL
   module Indoor3DGmlModeler
