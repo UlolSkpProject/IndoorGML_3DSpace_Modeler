@@ -320,36 +320,6 @@ module ULOL
             set_selected_cell_space_type(CellSpaceType.label(cell_type), category_code)
           end
 
-          def set_selected_cell_space_navigation_semantics(navigation_class, navigation_function, navigation_usage)
-            begin
-              cell_space = selected_cell_space
-              cell_space = @editor_session.editing_cell_space if cell_space.nil?
-              return false unless cell_space&.valid?
-              return false unless cell_space.navigable?
-
-              model = Sketchup.active_model()
-              operation_started = false
-              model.start_operation('Change CellSpace Navigation Semantics', true)
-              operation_started = true
-              sync do
-                cell_space.set_navigation_semantics(
-                  navigation_class: navigation_class,
-                  navigation_function: navigation_function,
-                  navigation_usage: navigation_usage
-                )
-                write_cell_space_attributes(cell_space)
-              end
-              model.commit_operation()
-              remember_cell_space_change_snapshot(cell_space.sketchup_group)
-              @editor_session.selection_changed()
-              true
-            rescue StandardError => e
-              model.abort_operation() if operation_started
-              IndoorCore::Logger.puts "[IndoorGML] CellSpace navigation semantics update failed: #{e.class}: #{e.message}"
-              false
-            end
-          end
-
           def set_selected_cell_space_storey(storey)
             begin
               cell_spaces = selected_cell_spaces

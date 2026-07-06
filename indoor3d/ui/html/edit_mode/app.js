@@ -4,7 +4,6 @@
 var emptyPanel = document.getElementById('emptyPanel');
 var solidPanel = document.getElementById('solidPanel');
 var cellPanel = document.getElementById('cellPanel');
-var cellTop = document.getElementById('cellTop');
 var filterPanel = document.getElementById('filterPanel');
 var storeyFilterAll = document.getElementById('storeyFilterAll');
 var storeyFilterOptions = document.getElementById('storeyFilterOptions');
@@ -32,11 +31,6 @@ var storeyFromKind = document.getElementById('storeyFromKind');
 var storeyFromLevel = document.getElementById('storeyFromLevel');
 var storeyToKind = document.getElementById('storeyToKind');
 var storeyToLevel = document.getElementById('storeyToLevel');
-
-var navigationSemantics = document.getElementById('navigationSemantics');
-var navigationClass = document.getElementById('navigationClass');
-var navigationFunction = document.getElementById('navigationFunction');
-var navigationUsage = document.getElementById('navigationUsage');
 
 var selectedClassification = document.getElementById('selectedClassification');
 var changeTypeButton = document.getElementById('changeType');
@@ -393,11 +387,6 @@ function selectionKey(snapshot) {
     snapshot.storey || '',
     snapshot.storeyEditable ? 'storey-editable' : 'storey-readonly',
     snapshot.storeyRangeAllowed ? 'storey-range' : 'storey-single',
-    snapshot.navigationSemanticsEnabled ? 'navi' : 'core',
-    snapshot.navigationSemanticsEditable ? 'editable' : 'readonly',
-    snapshot.navigationClass || '',
-    snapshot.navigationFunction || '',
-    snapshot.navigationUsage || '',
     snapshot.transitionCount || 0,
     snapshot.cellSpaceCount || 0,
     snapshot.solidGroupCount || 0,
@@ -493,31 +482,10 @@ function renderCellSpace(snapshot) {
   selectedClassification.value = snapshot.classification || 'GeneralSpace|Room';
 
   setStorey(snapshot.storey || 'F01', Boolean(snapshot.storeyRangeAllowed));
-  setNavigationSemantics(snapshot, Boolean(snapshot.navigationSemanticsEnabled));
 
   setControlLocked(
     [selectedClassification, changeTypeButton],
     snapshot.classificationLocked
-  );
-}
-
-function setNavigationSemantics(snapshot, enabled) {
-  setVisible(navigationSemantics, enabled);
-  cellTop.classList.toggle('single-column', !enabled);
-
-  if (!enabled) {
-    navigationClass.value = '';
-    navigationFunction.value = '';
-    navigationUsage.value = '';
-    return;
-  }
-
-  navigationClass.value = snapshot.navigationClass || '';
-  navigationFunction.value = snapshot.navigationFunction || '';
-  navigationUsage.value = snapshot.navigationUsage || '';
-  setControlLocked(
-    [navigationClass, navigationFunction, navigationUsage],
-    !snapshot.navigationSemanticsEditable
   );
 }
 
@@ -526,14 +494,6 @@ function setNavigationSemantics(snapshot, enabled) {
 // ────────────────────────────────────────────────────────────────
 function commitStorey() {
   invokeSketchup('setSelectedCellSpaceStorey', [composeStorey()]);
-}
-
-function commitNavigationSemantics() {
-  invokeSketchup('setSelectedCellSpaceNavigationSemantics', [
-    navigationClass.value,
-    navigationFunction.value,
-    navigationUsage.value
-  ]);
 }
 
 function onStoreyLevelChange(input) {
@@ -562,10 +522,6 @@ storeyFromLevel.addEventListener('keydown', function (event) {
 storeyToLevel.addEventListener('keydown', function (event) {
   if (event.key === 'Enter') storeyToLevel.blur();
 });
-
-navigationClass.addEventListener('change', commitNavigationSemantics);
-navigationFunction.addEventListener('change', commitNavigationSemantics);
-navigationUsage.addEventListener('change', commitNavigationSemantics);
 
 storeyFilterAll.addEventListener('change', onFilterAllChanged);
 typeFilterAll.addEventListener('change', onFilterAllChanged);

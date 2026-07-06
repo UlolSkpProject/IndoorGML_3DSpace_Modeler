@@ -4,7 +4,6 @@ require 'minitest/autorun'
 
 require_relative '../indoor3d/domain/cell_space_type'
 require_relative '../indoor3d/domain/cell_space_category'
-require_relative '../indoor3d/domain/navigation_semantic'
 require_relative '../indoor3d/application/indoor_model/edit_mode_selection_projection'
 
 module ULOL
@@ -54,8 +53,6 @@ module ULOL
           assert_equal 'GeneralSpace', snapshot[:cell_type]
           assert_equal CellSpaceCategory.selection_value(CellSpaceType::GENERAL, 'Room'), snapshot[:classification]
           assert_equal '2F', snapshot[:storey]
-          assert_equal true, snapshot[:navigation_semantics_enabled]
-          assert_equal '1000', snapshot[:navigation_class]
           assert_equal 2, snapshot[:transition_count]
           assert_equal true, snapshot[:cell_geometry_editing]
         end
@@ -99,9 +96,6 @@ module ULOL
             :category_code,
             :storey,
             :duality_state,
-            :navigation_class,
-            :navigation_function,
-            :navigation_usage,
             :category_label,
             keyword_init: true
           ) do

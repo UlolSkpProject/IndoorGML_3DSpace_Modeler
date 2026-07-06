@@ -17,7 +17,7 @@ module ULOL
         DEFAULT_NAME = 'F01'
       end unless const_defined?(:Storey)
 
-      class NavigationSemanticResolver
+      module NavigationSemanticResolver
         Semantic = Struct.new(:class_value, :class_code_space, :function_value, :function_code_space, :usage_value, :usage_code_space)
 
         def self.resolve(_cell_space)
