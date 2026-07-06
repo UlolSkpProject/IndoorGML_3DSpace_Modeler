@@ -243,7 +243,7 @@ module ULOL
           def storey_filter_visible?(cell_space)
             return true if @visibility_controller.visible_storeys.empty?
 
-            cell_storeys = StoreyFilterParser.labels_for(cell_space&.storey)
+            cell_storeys = StoreyFilter.labels_for(cell_space&.storey)
             cell_storeys.any? { |storey| @visibility_controller.visible_storeys.include?(storey) }
           end
 

@@ -477,7 +477,7 @@ module ULOL
         end
 
         def normalize_storey_filter(values)
-          StoreyFilterParser.normalize_labels(values)
+          StoreyFilter.normalize_labels(values)
         end
 
         def normalize_cell_type_filter(values)

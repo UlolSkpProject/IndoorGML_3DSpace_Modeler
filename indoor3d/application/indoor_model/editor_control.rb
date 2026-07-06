@@ -558,7 +558,7 @@ module ULOL
           end
 
           def edit_mode_storey_filter_options
-            StoreyFilterOptionsBuilder.build(@cell_spaces)
+            StoreyFilter.options_for(@cell_spaces)
           end
 
           def edit_mode_cell_type_filter_options
