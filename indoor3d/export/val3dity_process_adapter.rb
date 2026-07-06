@@ -11,8 +11,12 @@ module ULOL
 
         class Val3dityProcessAdapter
           CREATE_NO_WINDOW        = 0x08000000
+          EXTENDED_STARTUPINFO_PRESENT = 0x00080000
+          PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x00020002
           STARTF_USESTDHANDLES    = 0x00000100
           HANDLE_FLAG_INHERIT     = 0x00000001
+          STARTUPINFO_SIZE        = 104
+          STARTUPINFOEX_SIZE      = STARTUPINFO_SIZE + Fiddle::SIZEOF_VOIDP
           WAIT_OBJECT_0           = 0
           WAIT_TIMEOUT            = 258
           WAIT_FAILED             = 0xFFFFFFFF
@@ -43,7 +47,8 @@ module ULOL
           def start(total_states:, total_transitions:)
             @stdout_read, @stdout_write = create_stdout_pipe
 
-            startup_info = build_startup_info(@stdout_write)
+            startup_context = build_startup_context(@stdout_write)
+            startup_info = startup_context[:startup_info]
             process_info = [0, 0, 0, 0].pack('Q<Q<L<L<')
 
             command = wide_string(@args.map { |arg| command_quote(arg) }.join(' '))
@@ -52,7 +57,7 @@ module ULOL
             created = create_process_w.call(
               0, command, 0, 0,
               1,
-              CREATE_NO_WINDOW,
+              CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
               0, current_dir,
               startup_info, process_info
             )
@@ -64,6 +69,8 @@ module ULOL
             @stdout_write = 0
 
             start_reader_thread(total_states: total_states, total_transitions: total_transitions)
+          ensure
+            cleanup_startup_context(startup_context) if defined?(startup_context)
           end
 
           def finished?
@@ -174,9 +181,57 @@ module ULOL
             [read_handle, write_handle]
           end
 
-          def build_startup_info(stdout_write)
+          def build_startup_context(stdout_write)
+            # Keep handle_list alive until CreateProcessW returns; the attribute
+            # list may reference it while creating the child process.
+            handle_list = pack_handle_list([stdout_write])
+            attribute_list = build_handle_attribute_list(handle_list)
+            {
+              attribute_list: attribute_list,
+              handle_list: handle_list,
+              startup_info: build_startup_info_ex(stdout_write, attribute_list)
+            }
+          end
+
+          def build_handle_attribute_list(handle_list)
+            size_ptr = pack_size_t(0)
+            initialize_proc_thread_attribute_list.call(0, 1, 0, size_ptr)
+            size = unpack_size_t(size_ptr)
+            raise "InitializeProcThreadAttributeList size query failed: #{Fiddle.last_error}" if size.to_i <= 0
+
+            attribute_list = "\0".b * size
+            initialized = false
+            ok = initialize_proc_thread_attribute_list.call(attribute_list, 1, 0, size_ptr)
+            raise "InitializeProcThreadAttributeList failed: #{Fiddle.last_error}" if ok == 0
+
+            initialized = true
+            ok = update_proc_thread_attribute.call(
+              attribute_list,
+              0,
+              PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+              handle_list,
+              handle_list.bytesize,
+              0,
+              0
+            )
+            raise "UpdateProcThreadAttribute failed: #{Fiddle.last_error}" if ok == 0
+
+            attribute_list
+          rescue StandardError
+            delete_proc_thread_attribute_list.call(attribute_list) if initialized
+            raise
+          end
+
+          def cleanup_startup_context(startup_context)
+            attribute_list = startup_context && startup_context[:attribute_list]
+            delete_proc_thread_attribute_list.call(attribute_list) if attribute_list
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Startup attribute cleanup failed: #{e.class}: #{e.message}"
+          end
+
+          def build_startup_info_ex(stdout_write, attribute_list)
             [
-              104,
+              STARTUPINFOEX_SIZE,
               0,
               0,
               0,
@@ -189,8 +244,34 @@ module ULOL
               0,
               0,
               stdout_write,
-              stdout_write
-            ].pack('L<x4Q<Q<Q<L<L<L<L<L<L<L<L<S<Sx4Q<Q<Q<Q<')
+              stdout_write,
+              Fiddle::Pointer[attribute_list].to_i
+            ].pack('L<x4Q<Q<Q<L<L<L<L<L<L<L<L<S<Sx4Q<Q<Q<Q<Q<')
+          end
+
+          def pack_handle_list(handles)
+            unique_handles = handles.compact.map(&:to_i).uniq
+            if Fiddle::SIZEOF_VOIDP == 8
+              unique_handles.pack('Q<*')
+            else
+              unique_handles.pack('L<*')
+            end
+          end
+
+          def pack_size_t(value)
+            if Fiddle::SIZEOF_SIZE_T == 8
+              [value].pack('Q<')
+            else
+              [value].pack('L<')
+            end
+          end
+
+          def unpack_size_t(buffer)
+            if Fiddle::SIZEOF_SIZE_T == 8
+              buffer.unpack1('Q<')
+            else
+              buffer.unpack1('L<')
+            end
           end
 
           def start_reader_thread(total_states:, total_transitions:)
@@ -281,6 +362,34 @@ module ULOL
               kernel32['SetHandleInformation'],
               [Fiddle::TYPE_VOIDP, Fiddle::TYPE_LONG, Fiddle::TYPE_LONG],
               Fiddle::TYPE_INT
+            )
+          end
+
+          def initialize_proc_thread_attribute_list
+            @initialize_proc_thread_attribute_list ||= Fiddle::Function.new(
+              kernel32['InitializeProcThreadAttributeList'],
+              [Fiddle::TYPE_VOIDP, Fiddle::TYPE_LONG, Fiddle::TYPE_LONG, Fiddle::TYPE_VOIDP],
+              Fiddle::TYPE_INT
+            )
+          end
+
+          def update_proc_thread_attribute
+            @update_proc_thread_attribute ||= Fiddle::Function.new(
+              kernel32['UpdateProcThreadAttribute'],
+              [
+                Fiddle::TYPE_VOIDP, Fiddle::TYPE_LONG, Fiddle::TYPE_UINTPTR_T,
+                Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T,
+                Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP
+              ],
+              Fiddle::TYPE_INT
+            )
+          end
+
+          def delete_proc_thread_attribute_list
+            @delete_proc_thread_attribute_list ||= Fiddle::Function.new(
+              kernel32['DeleteProcThreadAttributeList'],
+              [Fiddle::TYPE_VOIDP],
+              Fiddle::TYPE_VOID
             )
           end
 
