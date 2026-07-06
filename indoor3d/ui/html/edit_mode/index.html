@@ -14,22 +14,21 @@
 
   <main class="dialog-main">
     <section id="filterPanel" class="filter-panel" aria-label="View filter">
-      <div class="filter-section">
-        <div class="filter-title">Storey</div>
-        <label class="filter-option filter-all">
-          <input id="storeyFilterAll" type="checkbox" checked>
-          <span>All</span>
-        </label>
-        <div id="storeyFilterOptions" class="filter-options"></div>
-      </div>
+      <button id="filterToggle" class="filter-toggle" type="button" aria-expanded="true" aria-controls="filterBody">
+        <span>Filter</span>
+        <span class="filter-toggle-icon" aria-hidden="true"></span>
+      </button>
 
-      <div class="filter-section">
-        <div class="filter-title">Type</div>
-        <label class="filter-option filter-all">
-          <input id="typeFilterAll" type="checkbox" checked>
-          <span>All</span>
-        </label>
-        <div id="typeFilterOptions" class="filter-options"></div>
+      <div id="filterBody" class="filter-body">
+        <div class="filter-section">
+          <div class="filter-title">Storey</div>
+          <div id="storeyFilterOptions" class="filter-options storey-filter-options"></div>
+        </div>
+
+        <div class="filter-section">
+          <div class="filter-title">Type</div>
+          <div id="typeFilterOptions" class="filter-options type-filter-options"></div>
+        </div>
       </div>
     </section>
     <!-- 선택 없음 -->

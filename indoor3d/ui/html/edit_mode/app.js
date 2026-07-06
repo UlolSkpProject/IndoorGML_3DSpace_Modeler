@@ -5,9 +5,8 @@ var emptyPanel = document.getElementById('emptyPanel');
 var solidPanel = document.getElementById('solidPanel');
 var cellPanel = document.getElementById('cellPanel');
 var filterPanel = document.getElementById('filterPanel');
-var storeyFilterAll = document.getElementById('storeyFilterAll');
+var filterToggle = document.getElementById('filterToggle');
 var storeyFilterOptions = document.getElementById('storeyFilterOptions');
-var typeFilterAll = document.getElementById('typeFilterAll');
 var typeFilterOptions = document.getElementById('typeFilterOptions');
 
 var modeTitle = document.getElementById('modeTitle');
@@ -143,16 +142,13 @@ function renderVisibilityFilter(filter) {
   };
 
   suppressFilterEvents = true;
-  renderFilterGroup(
+  renderStoreyFilterGroup(
     storeyFilterOptions,
-    storeyFilterAll,
     currentVisibilityFilter.storeyOptions,
-    currentVisibilityFilter.selectedStoreys,
-    'storey'
+    currentVisibilityFilter.selectedStoreys
   );
   renderFilterGroup(
     typeFilterOptions,
-    typeFilterAll,
     currentVisibilityFilter.cellTypeOptions,
     currentVisibilityFilter.selectedCellTypes,
     'type'
@@ -160,38 +156,102 @@ function renderVisibilityFilter(filter) {
   suppressFilterEvents = false;
 }
 
-function renderFilterGroup(container, allCheckbox, options, selectedValues, name) {
-  var selected = selectedSet(selectedValues);
-  var allSelected = selectedValues.length === 0;
+function renderFilterGroup(container, options, selectedValues, name) {
+  var state = filterSelectionState(options, selectedValues);
 
-  allCheckbox.checked = allSelected;
   container.innerHTML = '';
 
   if (!options.length) {
-    var empty = document.createElement('span');
-    empty.className = 'filter-option empty';
-    empty.textContent = '-';
-    container.appendChild(empty);
+    appendEmptyFilterOption(container);
     return;
   }
 
   options.forEach(function (option) {
-    var label = document.createElement('label');
-    var input = document.createElement('input');
-    var text = document.createElement('span');
-
-    label.className = 'filter-option';
-    input.type = 'checkbox';
-    input.name = name + 'Filter';
-    input.value = option.value;
-    input.checked = !allSelected && selected[String(option.value)] === true;
-    input.addEventListener('change', onFilterOptionChanged);
-    text.textContent = option.label || option.value;
-
-    label.appendChild(input);
-    label.appendChild(text);
-    container.appendChild(label);
+    appendFilterOption(container, option, name, state.allSelected || state.selected[String(option.value)] === true);
   });
+}
+
+function renderStoreyFilterGroup(container, options, selectedValues) {
+  var state = filterSelectionState(options, selectedValues);
+  var groups = [
+    { title: '지상층', options: [] },
+    { title: '지하층', options: [] }
+  ];
+
+  container.innerHTML = '';
+
+  if (!options.length) {
+    appendEmptyFilterOption(container);
+    return;
+  }
+
+  options.forEach(function (option) {
+    var kind = String(option.value || '').charAt(0).toUpperCase();
+    var group = kind === 'B' ? groups[1] : groups[0];
+    group.options.push(option);
+  });
+
+  groups.forEach(function (group) {
+    if (!group.options.length) return;
+
+    var section = document.createElement('div');
+    var title = document.createElement('div');
+    var optionsContainer = document.createElement('div');
+
+    section.className = 'storey-filter-group';
+    title.className = 'storey-filter-group-title';
+    title.textContent = group.title;
+    optionsContainer.className = 'filter-options storey-filter-group-options';
+
+    group.options.forEach(function (option) {
+      appendFilterOption(optionsContainer, option, 'storey', state.allSelected || state.selected[String(option.value)] === true);
+    });
+
+    section.appendChild(title);
+    section.appendChild(optionsContainer);
+    container.appendChild(section);
+  });
+}
+
+function filterSelectionState(options, selectedValues) {
+  var selected = selectedSet(selectedValues);
+  var optionValues = normalizeArray(options).map(function (option) {
+    return String(option.value);
+  });
+  var selectedOptionCount = optionValues.filter(function (value) {
+    return selected[value] === true;
+  }).length;
+  var allSelected = selectedValues.length === 0 || (optionValues.length > 0 && selectedOptionCount === optionValues.length);
+
+  return {
+    selected: selected,
+    allSelected: allSelected
+  };
+}
+
+function appendEmptyFilterOption(container) {
+  var empty = document.createElement('span');
+  empty.className = 'filter-option empty';
+  empty.textContent = '-';
+  container.appendChild(empty);
+}
+
+function appendFilterOption(container, option, name, checked) {
+  var label = document.createElement('label');
+  var input = document.createElement('input');
+  var text = document.createElement('span');
+
+  label.className = 'filter-option';
+  input.type = 'checkbox';
+  input.name = name + 'Filter';
+  input.value = option.value;
+  input.checked = checked;
+  input.addEventListener('change', onFilterOptionChanged);
+  text.textContent = option.label || option.value;
+
+  label.appendChild(input);
+  label.appendChild(text);
+  container.appendChild(label);
 }
 
 function checkedFilterValues(container) {
@@ -201,11 +261,24 @@ function checkedFilterValues(container) {
   );
 }
 
+function filterValuesForCommit(container) {
+  var inputs = Array.prototype.slice.call(container.querySelectorAll('input[type="checkbox"]'));
+  var checked = checkedFilterValues(container);
+
+  return inputs.length === 0 || checked.length === inputs.length ? [] : checked;
+}
+
+function checkAllFilterOptions(container) {
+  Array.prototype.forEach.call(container.querySelectorAll('input[type="checkbox"]'), function (input) {
+    input.checked = true;
+  });
+}
+
 function commitVisibilityFilter() {
   if (suppressFilterEvents) return;
 
-  var selectedStoreys = storeyFilterAll.checked ? [] : checkedFilterValues(storeyFilterOptions);
-  var selectedTypes = typeFilterAll.checked ? [] : checkedFilterValues(typeFilterOptions);
+  var selectedStoreys = filterValuesForCommit(storeyFilterOptions);
+  var selectedTypes = filterValuesForCommit(typeFilterOptions);
 
   invokeSketchup('setEditModeVisibilityFilter', [
     JSON.stringify(selectedStoreys),
@@ -213,38 +286,28 @@ function commitVisibilityFilter() {
   ]);
 }
 
-function onFilterAllChanged(event) {
-  if (suppressFilterEvents) return;
-
-  var allCheckbox = event.currentTarget;
-  var container = allCheckbox === storeyFilterAll ? storeyFilterOptions : typeFilterOptions;
-
-  if (allCheckbox.checked) {
-    Array.prototype.forEach.call(container.querySelectorAll('input[type="checkbox"]'), function (input) {
-      input.checked = false;
-    });
-  } else if (!checkedFilterValues(container).length) {
-    allCheckbox.checked = true;
-  }
-
-  commitVisibilityFilter();
-}
-
 function onFilterOptionChanged(event) {
   if (suppressFilterEvents) return;
 
   var input = event.currentTarget;
   var isStorey = input.name === 'storeyFilter';
-  var allCheckbox = isStorey ? storeyFilterAll : typeFilterAll;
   var container = isStorey ? storeyFilterOptions : typeFilterOptions;
 
-  if (checkedFilterValues(container).length) {
-    allCheckbox.checked = false;
-  } else {
-    allCheckbox.checked = true;
+  if (!checkedFilterValues(container).length) {
+    checkAllFilterOptions(container);
   }
 
   commitVisibilityFilter();
+}
+
+function setFilterCollapsed(collapsed) {
+  filterPanel.classList.toggle('is-collapsed', collapsed);
+  filterToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  fitDialogToContent();
+}
+
+function toggleFilterPanel() {
+  setFilterCollapsed(!filterPanel.classList.contains('is-collapsed'));
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -310,6 +373,7 @@ function setStorey(value, rangeAllowed) {
   storeyToKind.value = currentStoreyRangeAllowed ? parsed.to.kind : parsed.from.kind;
   storeyToLevel.value = currentStoreyRangeAllowed ? parsed.to.level : parsed.from.level;
   setControlLocked([storeyToKind, storeyToLevel], !currentStoreyRangeAllowed);
+  storeyFields.classList.toggle('is-single-storey', !currentStoreyRangeAllowed);
   show(storeyFields);
 }
 
@@ -529,8 +593,7 @@ storeyToLevel.addEventListener('keydown', function (event) {
   if (event.key === 'Enter') storeyToLevel.blur();
 });
 
-storeyFilterAll.addEventListener('change', onFilterAllChanged);
-typeFilterAll.addEventListener('change', onFilterAllChanged);
+filterToggle.addEventListener('click', toggleFilterPanel);
 
 changeTypeButton.addEventListener('click', function () {
   invokeSketchup('setSelectedCellSpaceClassification', [selectedClassification.value]);

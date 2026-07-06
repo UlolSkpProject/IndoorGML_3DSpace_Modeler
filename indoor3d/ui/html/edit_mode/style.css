@@ -82,12 +82,46 @@ h1 {
 
 .filter-panel {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 10px;
+  gap: 8px;
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--panel);
+}
+
+.filter-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-strong);
+  text-align: left;
+}
+
+.filter-toggle-icon {
+  width: 8px;
+  height: 8px;
+  margin-right: 2px;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  transform: rotate(45deg);
+}
+
+.filter-toggle[aria-expanded="false"] .filter-toggle-icon {
+  transform: rotate(-45deg);
+}
+
+.filter-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.filter-panel.is-collapsed .filter-body {
+  display: none;
 }
 
 .filter-section {
@@ -108,6 +142,33 @@ h1 {
   flex-wrap: wrap;
   gap: 5px;
   min-height: 24px;
+}
+
+.storey-filter-options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.storey-filter-group {
+  display: grid;
+  gap: 5px;
+}
+
+.storey-filter-group-title {
+  color: var(--text-subtle);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.storey-filter-group-options {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.type-filter-options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .filter-option {
@@ -132,13 +193,13 @@ h1 {
   margin: 0;
 }
 
+.type-filter-options .filter-option {
+  width: 100%;
+}
+
 .filter-option.empty {
   color: var(--text-subtle);
   font-weight: 400;
-}
-
-.filter-all {
-  justify-self: start;
 }
 
 .description {
@@ -302,6 +363,16 @@ input[type="number"]:focus {
   grid-template-columns: minmax(0, 1fr) 38px 14px minmax(0, 1fr) 38px;
   align-items: center;
   gap: 4px;
+}
+
+.storey-fields.is-single-storey .storey-range {
+  grid-template-columns: minmax(0, 1fr) 38px;
+}
+
+.storey-fields.is-single-storey .storey-separator,
+.storey-fields.is-single-storey #storeyToKind,
+.storey-fields.is-single-storey #storeyToLevel {
+  display: none;
 }
 
 .storey-range select {
