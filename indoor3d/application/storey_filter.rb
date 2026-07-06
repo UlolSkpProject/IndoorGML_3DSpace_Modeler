@@ -14,11 +14,11 @@ module ULOL
 
             result.concat(labels_for(cell_space.storey))
           end
-          labels.uniq.sort.map { |label| { value: label, label: label } }
+          sort_labels(labels.uniq).map { |label| { value: label, label: label } }
         end
 
         def normalize_labels(values)
-          Array(values).map { |value| normalize_label(value) }.compact.uniq.sort
+          sort_labels(Array(values).map { |value| normalize_label(value) }.compact.uniq)
         end
 
         def normalize_label(value)
@@ -53,6 +53,17 @@ module ULOL
 
         def format_part(part)
           "#{part[:kind]}#{format('%02d', part[:level])}"
+        end
+
+        def sort_labels(labels)
+          Array(labels).sort_by { |label| storey_sort_key(label) }
+        end
+
+        def storey_sort_key(label)
+          part = parse_part(label)
+          return [2, 0, label.to_s] if part.nil?
+
+          [part[:kind] == 'F' ? 0 : 1, part[:level], label.to_s]
         end
       end
     end

@@ -19,7 +19,7 @@ module ULOL
     module IndoorCore
       class StoreyFilterTest < Minitest::Test
         def test_normalize_labels_filters_invalid_values
-          assert_equal %w[B02 F01], StoreyFilter.normalize_labels(['f1', 'B02', 'x', '', nil])
+          assert_equal %w[F01 B02], StoreyFilter.normalize_labels(['f1', 'B02', 'x', '', nil])
         end
 
         def test_labels_for_single_storey
@@ -51,8 +51,10 @@ module ULOL
 
           assert_equal [
             { value: 'F01', label: 'F01' },
-            { value: 'F02', label: 'F02' }
-          ], StoreyFilter.options_for([cell_space.new('F01~F02')])
+            { value: 'F02', label: 'F02' },
+            { value: 'B01', label: 'B01' },
+            { value: 'B02', label: 'B02' }
+          ], StoreyFilter.options_for([cell_space.new('B02~B01'), cell_space.new('F02~F01')])
         end
       end
     end
