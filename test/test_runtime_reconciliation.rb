@@ -330,8 +330,7 @@ module ULOL
             true
           end
 
-          def with_indoor_model_operation(_name, transparent: false)
-            transparent
+          def with_indoor_model_operation(_name, **_options)
             @operation_count += 1
             yield
           end
@@ -361,8 +360,7 @@ module ULOL
             @last_metrics = {}
           end
 
-          def synchronize_all(transition_builder: nil, transition_eraser: nil)
-            transition_eraser
+          def synchronize_all(transition_builder: nil, **_options)
             cells = @registry&.cell_spaces || []
             if @adjacent && cells.length >= 2
               transition_builder.call(cells[0], cells[1])

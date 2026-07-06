@@ -135,9 +135,7 @@ module ULOL
             @states = []
             @transitions = []
             @runtime_restorer = Struct.new(:owner) do
-              def restore(primal_group:)
-                primal_group
-              end
+              def restore(**_options); end
             end.new(self)
             @editor_session = FakeEditorSession.new
             @model = nil
@@ -182,8 +180,7 @@ module ULOL
             end.new([]))
           end
 
-          def with_indoor_model_operation(_name, transparent: false)
-            transparent
+          def with_indoor_model_operation(_name, **_options)
             yield
           end
 
