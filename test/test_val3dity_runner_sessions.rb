@@ -4,7 +4,7 @@ require 'minitest/autorun'
 require 'tmpdir'
 
 require_relative '../indoor3d/utils/geometry'
-require_relative '../indoor3d/export/val3dity_runner'
+require_relative '../indoor3d/validity/val3dity_runner'
 
 module ULOL
   module Indoor3DGmlModeler

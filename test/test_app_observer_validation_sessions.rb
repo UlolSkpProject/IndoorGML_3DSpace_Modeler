@@ -23,7 +23,7 @@ module ULOL
   end
 end
 
-require_relative '../indoor3d/export/validation_session'
+require_relative '../indoor3d/validity/validation_session'
 require_relative '../indoor3d/infrastructure/observers/app_observer'
 
 module ULOL

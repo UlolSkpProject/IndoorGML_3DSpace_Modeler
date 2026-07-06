@@ -43,7 +43,7 @@ module Geom
   end
 end unless defined?(Geom::Point3d)
 
-require_relative '../indoor3d/export/val3dity_exported_solid_snapshot_reader'
+require_relative '../indoor3d/validity/val3dity_exported_solid_snapshot_reader'
 
 module ULOL
   module Indoor3DGmlModeler

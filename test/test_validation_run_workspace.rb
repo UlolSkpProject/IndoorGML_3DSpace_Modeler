@@ -4,7 +4,7 @@ require 'fileutils'
 require 'minitest/autorun'
 require 'tmpdir'
 
-require_relative '../indoor3d/export/validation_run_workspace'
+require_relative '../indoor3d/validity/validation_run_workspace'
 
 module ULOL
   module Indoor3DGmlModeler

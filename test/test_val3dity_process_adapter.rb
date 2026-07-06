@@ -3,7 +3,7 @@
 require 'minitest/autorun'
 require 'tmpdir'
 
-require_relative '../indoor3d/export/val3dity_process_adapter'
+require_relative '../indoor3d/validity/val3dity_process_adapter'
 
 module ULOL
   module Indoor3DGmlModeler

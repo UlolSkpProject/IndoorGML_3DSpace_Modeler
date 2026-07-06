@@ -2,7 +2,7 @@
 
 require 'minitest/autorun'
 
-require_relative '../indoor3d/export/validation_session'
+require_relative '../indoor3d/validity/validation_session'
 require_relative '../indoor3d/ui/commands/export_commands'
 
 module ULOL

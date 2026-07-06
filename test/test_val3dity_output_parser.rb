@@ -3,7 +3,7 @@
 require 'minitest/autorun'
 require 'thread'
 
-require_relative '../indoor3d/export/val3dity_output_parser'
+require_relative '../indoor3d/validity/val3dity_output_parser'
 
 module ULOL
   module Indoor3DGmlModeler

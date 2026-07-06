@@ -2,7 +2,7 @@
 
 require 'minitest/autorun'
 
-require_relative '../indoor3d/export/val3dity_overlap_recheck_policy'
+require_relative '../indoor3d/validity/val3dity_overlap_recheck_policy'
 
 module ULOL
   module Indoor3DGmlModeler

@@ -2,7 +2,7 @@
 
 require 'minitest/autorun'
 
-require_relative '../indoor3d/export/val3dity_run_orchestration'
+require_relative '../indoor3d/validity/val3dity_run_orchestration'
 
 module ULOL
   module Indoor3DGmlModeler

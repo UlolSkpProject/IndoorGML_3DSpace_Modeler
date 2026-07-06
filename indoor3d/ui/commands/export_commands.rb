@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 require 'fileutils'
-require_relative '../../export/validation_run_workspace'
-require_relative '../../export/validation_session'
+require_relative '../../validity/validation_run_workspace'
+require_relative '../../validity/validation_session'
 
 module ULOL
   module Indoor3DGmlModeler
