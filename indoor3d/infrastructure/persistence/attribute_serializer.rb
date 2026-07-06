@@ -6,7 +6,7 @@ module ULOL
 
       class AttributeSerializer
         ATTRIBUTE_DICTIONARY_NAME = 'IndoorGml'
-        INDOOR_GML_VERSION = '1.0'
+        INDOOR_GML_VERSION = '1.0.3'
 
         def initialize(dictionary_name: ATTRIBUTE_DICTIONARY_NAME, indoor_gml_version: INDOOR_GML_VERSION)
           @dictionary_name = dictionary_name
