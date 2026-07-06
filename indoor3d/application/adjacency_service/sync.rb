@@ -29,7 +29,7 @@ module ULOL
 
             pair_key = cell_pair_key(cell_space, other_cell_space)
             adjacency_axis = Utils::Geometry.adjacency_axis(cell_space.sketchup_group, other_cell_space.sketchup_group)
-            if transition_allowed_between?(cell_space, other_cell_space, adjacency_axis)
+            if transition_allowed_for_axis?(adjacency_axis)
               @registry.set_adjacent_pair(pair_key, cell_space, other_cell_space)
               @transition_builder.call(cell_space, other_cell_space)
             else
@@ -176,7 +176,7 @@ module ULOL
           pair_results.each do |index1, index2, adjacency_axis|
             cell1 = entries[index1][:cell_space]
             cell2 = entries[index2][:cell_space]
-            next unless transition_allowed_between?(cell1, cell2, adjacency_axis)
+            next unless transition_allowed_for_axis?(adjacency_axis)
 
             pair_key = cell_pair_key(cell1, cell2)
             next_pairs[pair_key] = [cell1, cell2]
@@ -196,7 +196,7 @@ module ULOL
           end
         end
 
-        def transition_allowed_between?(cell1, cell2, adjacency_axis)
+        def transition_allowed_for_axis?(adjacency_axis)
           return !adjacency_axis.nil?
         end
 

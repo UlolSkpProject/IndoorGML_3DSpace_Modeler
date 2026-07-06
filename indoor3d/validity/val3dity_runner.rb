@@ -126,7 +126,7 @@ module ULOL
             @owner_key = owner_key || self.class.owner_key_for_model(indoor_model&.model) || self.class.default_owner_key
           end
 
-          def start(progress: nil, progress_step: :val3dity, recheck_step: :extension_recheck, report_step: :report, report_view_step: nil, active: nil, &callback)
+          def start(progress: nil, progress_step: :val3dity, recheck_step: :extension_recheck, report_step: :report, active: nil, &callback)
             raise ArgumentError, 'callback is required' unless callback
 
             ensure_supported_platform!
@@ -174,8 +174,7 @@ module ULOL
                   exit_code,
                   progress,
                   recheck_step: recheck_step,
-                  report_step: report_step,
-                  report_view_step: report_view_step
+                  report_step: report_step
                 )
               },
               error_result: ->(error) { error_result(error) },
@@ -273,7 +272,7 @@ module ULOL
             )
           end
 
-          def build_result_after_process(exit_code, progress = nil, recheck_step: :extension_recheck, report_step: :report, report_view_step: nil)
+          def build_result_after_process(exit_code, progress = nil, recheck_step: :extension_recheck, report_step: :report)
             raise "val3dity failed: exit code #{exit_code}" unless exit_code == 0
             raise 'val3dity failed to create report.json.' unless File.exist?(@report_json_path)
 

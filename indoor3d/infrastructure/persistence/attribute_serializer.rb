@@ -1,14 +1,15 @@
 # frozen_string_literal: true
 
+require_relative '../../definition'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
 
       class AttributeSerializer
         ATTRIBUTE_DICTIONARY_NAME = 'IndoorGml'
-        INDOOR_GML_VERSION = '1.0.3'
 
-        def initialize(dictionary_name: ATTRIBUTE_DICTIONARY_NAME, indoor_gml_version: INDOOR_GML_VERSION)
+        def initialize(dictionary_name: ATTRIBUTE_DICTIONARY_NAME, indoor_gml_version: Definition::INDOOR_GML_VERSION)
           @dictionary_name = dictionary_name
           @indoor_gml_version = indoor_gml_version
         end
