@@ -64,7 +64,7 @@ module ULOL
 
         def self.resolve(cell_space)
           cell_type = cell_space&.cell_type
-          category_code = CellSpaceCategory.migrate_legacy_code(cell_space&.category_code)
+          category_code = cell_space&.category_code.to_s
           semantic = default_for(cell_type, category_code)
           semantic = override_from_cell_space(cell_space, semantic) if semantic
           return semantic if semantic
@@ -73,7 +73,7 @@ module ULOL
         end
 
         def self.default_for(cell_type, category_code)
-          NAVIGATION_SEMANTICS[[cell_type, CellSpaceCategory.migrate_legacy_code(category_code)]]
+          NAVIGATION_SEMANTICS[[cell_type, category_code.to_s]]
         end
 
         def self.override_from_cell_space(cell_space, default_semantic)
@@ -100,14 +100,11 @@ module ULOL
         private_class_method :override_value
 
         def self.missing_mapping_message(cell_space, cell_type, category_code)
-          category_label = cell_space&.category_label.to_s
-          category_label = category_code.to_s if category_label.empty?
           [
             'Navigation semantic mapping is missing:',
             "cell_id=#{cell_space&.id}",
             "cell_type=#{CellSpaceType.label(cell_type)}",
-            "category=#{category_code}",
-            "category_label=#{category_label}"
+            "category=#{category_code}"
           ].join("\n")
         end
         private_class_method :missing_mapping_message

@@ -89,10 +89,10 @@ module ULOL
               @indoor_model.set_selected_cell_space_storey(storey)
             end
           end
-          dialog.add_action_callback('setEditModeVisibilityFilter') do |_context, storeys_json, cell_types_json|
+          dialog.add_action_callback('setEditModeVisibilityFilter') do |_context, selected_storeys_json, cell_types_json|
             IndoorCore::Logger.puts '[IndoorGML] EditModeDialog#setEditModeVisibilityFilter'
             UI.start_timer(0, false) do
-              @indoor_model.set_edit_mode_visibility_filter(storeys_json, cell_types_json)
+              @indoor_model.set_edit_mode_visibility_filter(selected_storeys_json, cell_types_json)
             end
           end
           dialog.add_action_callback('convertSelectedSolidGroups') do |_context, selection_value|
@@ -174,11 +174,8 @@ module ULOL
             <<~JS
               updateSelectionAndFit({
                 mode: #{js_string(snapshot[:mode])},
-                feature: #{js_string(snapshot[:feature])},
                 id: #{js_string(snapshot[:id])},
                 name: #{js_string(snapshot[:name])},
-                cellType: #{js_string(snapshot[:cell_type])},
-                categoryCode: #{js_string(snapshot[:category_code])},
                 classification: #{snapshot[:classification].nil? ? 'null' : js_string(snapshot[:classification])},
                 classificationLocked: #{snapshot[:classification_locked] ? 'true' : 'false'},
                 storey: #{js_string(snapshot[:storey])},
@@ -191,8 +188,7 @@ module ULOL
                 stateCount: #{snapshot[:state_count].to_i},
                 totalTransitionCount: #{snapshot[:total_transition_count].to_i},
                 cellTypeCounts: #{cell_type_counts_script(snapshot[:cell_type_counts])},
-                visibilityFilter: #{visibility_filter_script(snapshot[:visibility_filter])},
-                cellGeometryEditing: #{snapshot[:cell_geometry_editing] ? 'true' : 'false'}
+                visibilityFilter: #{visibility_filter_script(snapshot[:visibility_filter])}
               });
             JS
           end

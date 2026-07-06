@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require 'json'
-
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -33,44 +31,6 @@ module ULOL
           feature(sketchup_group) == 'CellSpace'
         end
 
-        def default_storey_id(model)
-          attribute(model, 'default_storey_id')
-        end
-
-        def read_storeys(model)
-          raw = attribute(model, 'storeys_json')
-          rows = raw.to_s.empty? ? [] : JSON.parse(raw)
-          rows.map do |row|
-            Storey.restore(
-              id: row['id'],
-              name: row['name'],
-              elevation: row['elevation'],
-              height: row['height']
-            )
-          end
-        rescue StandardError => e
-          IndoorCore::Logger.puts "[IndoorGML] Storey read failed: #{e.class}: #{e.message}"
-          []
-        end
-
-        def write_storeys(model, storeys, default_storey_id)
-          return false unless valid_entity?(model)
-
-          payload = storeys.map do |storey|
-            {
-              id: storey.id,
-              name: storey.name,
-              elevation: storey.elevation,
-              height: storey.height
-            }
-          end
-          write_attributes(model) do
-            model.set_attribute(@dictionary_name, 'storeys_json', JSON.generate(payload))
-            model.set_attribute(@dictionary_name, 'default_storey_id', default_storey_id)
-            model.set_attribute(@dictionary_name, 'indoor_gml_version', @indoor_gml_version)
-          end
-        end
-
         def write_space_features(group, feature)
           return false unless valid_entity?(group)
 
@@ -90,8 +50,6 @@ module ULOL
           return false unless group
 
           write_attributes(group) do
-            remove_state_position_attributes(group)
-            remove_cell_space_legacy_attributes(group)
             group.set_attribute(@dictionary_name, 'feature', 'CellSpace')
             group.set_attribute(@dictionary_name, 'id', cell_space.id)
             group.set_attribute(@dictionary_name, 'cell_type', CellSpaceType.label(cell_space.cell_type))
@@ -152,26 +110,6 @@ module ULOL
           false
         end
 
-        def remove_state_position_attributes(entity)
-          %w[state_position_x state_position_y state_position_z].each do |key|
-            entity.delete_attribute(@dictionary_name, key) if entity.respond_to?(:delete_attribute)
-          end
-        end
-
-        def remove_cell_space_legacy_attributes(entity)
-          %w[
-            name
-            category_label
-            category_code_space
-            category_standard
-            state_transition_ids
-            indoor_gml_version
-            storey_id
-          ].each do |key|
-            entity.delete_attribute(@dictionary_name, key) if entity.respond_to?(:delete_attribute)
-          end
-        end
-
         def write_navigation_attributes(group, cell_space)
           if cell_space.navigable?
             semantic = NavigationSemanticResolver.resolve(cell_space)
@@ -181,7 +119,6 @@ module ULOL
             group.set_attribute(@dictionary_name, 'navigation_function_code_space', semantic.function_code_space)
             group.set_attribute(@dictionary_name, 'navigation_usage', semantic.usage_value)
             group.set_attribute(@dictionary_name, 'navigation_usage_code_space', semantic.usage_code_space)
-            group.delete_attribute(@dictionary_name, 'navigation_code_space') if group.respond_to?(:delete_attribute)
             return
           end
 
@@ -192,7 +129,6 @@ module ULOL
             navigation_function_code_space
             navigation_usage
             navigation_usage_code_space
-            navigation_code_space
           ].each do |key|
             group.delete_attribute(@dictionary_name, key) if group.respond_to?(:delete_attribute)
           end

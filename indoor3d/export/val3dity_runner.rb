@@ -126,10 +126,6 @@ module ULOL
             @owner_key = owner_key || self.class.owner_key_for_model(indoor_model&.model) || self.class.default_owner_key
           end
 
-          def validate(progress: nil)
-            raise 'Val3dityRunner#validate is deprecated. Use #start with a completion callback.'
-          end
-
           def start(progress: nil, progress_step: :val3dity, recheck_step: :extension_recheck, report_step: :report, report_view_step: nil, active: nil, &callback)
             raise ArgumentError, 'callback is required' unless callback
 

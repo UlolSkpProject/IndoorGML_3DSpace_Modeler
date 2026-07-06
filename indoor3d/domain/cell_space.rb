@@ -9,21 +9,17 @@ module ULOL
         attr_reader :sketchup_group_id
         attr_accessor :cell_type
         attr_accessor :category_code
-        attr_accessor :category_label
-        attr_accessor :category_code_space
-        attr_accessor :category_standard
         attr_accessor :navigation_class
         attr_accessor :navigation_class_code_space
         attr_accessor :navigation_function
         attr_accessor :navigation_function_code_space
         attr_accessor :navigation_usage
         attr_accessor :navigation_usage_code_space
-        attr_accessor :navigation_code_space
         attr_accessor :storey
         attr_accessor :editable
         attr_reader :duality_state
 
-        DEFAULT_STOREY = Storey::DEFAULT_NAME
+        DEFAULT_STOREY = 'F01'
 
         def initialize(sketchup_group, cell_type = CellSpaceType::GENERAL, category_code = nil)
           self.class.validate_sketchup_group!(sketchup_group)
@@ -39,18 +35,12 @@ module ULOL
           @duality_state = nil
         end
 
-        def set_category(category_code = nil, category_label = nil, category_code_space = nil, category_standard = nil)
+        def set_category(category_code = nil)
           category = CellSpaceCategory.normalize(
             @cell_type,
-            category_code,
-            category_label,
-            category_code_space,
-            category_standard
+            category_code
           )
           @category_code = category[:code]
-          @category_label = category[:label]
-          @category_code_space = category[:code_space]
-          @category_standard = category[:standard]
           apply_default_navigation_semantics
         end
 
@@ -98,11 +88,11 @@ module ULOL
           @storey = normalize_storey(value)
         end
 
-        def self.restore(sketchup_group, cell_type, id: nil, name: nil, category_code: nil, category_label: nil, category_code_space: nil, category_standard: nil, navigation_class: nil, navigation_class_code_space: nil, navigation_function: nil, navigation_function_code_space: nil, navigation_usage: nil, navigation_usage_code_space: nil, navigation_code_space: nil, storey: nil, storey_id: nil)
+        def self.restore(sketchup_group, cell_type, id: nil, name: nil, category_code: nil, navigation_class: nil, navigation_class_code_space: nil, navigation_function: nil, navigation_function_code_space: nil, navigation_usage: nil, navigation_usage_code_space: nil, storey: nil)
           validate_sketchup_group!(sketchup_group)
 
           cell_space = allocate
-          cell_space.send(:initialize_restored, sketchup_group, cell_type, id, name, category_code, category_label, category_code_space, category_standard, navigation_class, navigation_class_code_space, navigation_function, navigation_function_code_space, navigation_usage, navigation_usage_code_space, navigation_code_space, storey, storey_id)
+          cell_space.send(:initialize_restored, sketchup_group, cell_type, id, name, category_code, navigation_class, navigation_class_code_space, navigation_function, navigation_function_code_space, navigation_usage, navigation_usage_code_space, storey)
           cell_space
         end
 
@@ -122,20 +112,20 @@ module ULOL
 
         private
 
-        def initialize_restored(sketchup_group, cell_type, id, name, category_code, category_label, category_code_space, category_standard, navigation_class, navigation_class_code_space, navigation_function, navigation_function_code_space, navigation_usage, navigation_usage_code_space, navigation_code_space, storey, storey_id)
+        def initialize_restored(sketchup_group, cell_type, id, name, category_code, navigation_class, navigation_class_code_space, navigation_function, navigation_function_code_space, navigation_usage, navigation_usage_code_space, storey)
           @sketchup_group = sketchup_group
           @sketchup_group_id = sketchup_group.persistent_id
           @cell_type = cell_type
-          set_category(category_code, category_label, category_code_space, category_standard)
+          set_category(category_code)
           restore_navigation_semantics(
             navigation_class,
-            navigation_class_code_space || navigation_code_space,
+            navigation_class_code_space,
             navigation_function,
-            navigation_function_code_space || navigation_code_space,
+            navigation_function_code_space,
             navigation_usage,
-            navigation_usage_code_space || navigation_code_space
+            navigation_usage_code_space
           )
-          @storey = normalize_storey(blank_to_nil(storey) || legacy_storey_value(storey_id))
+          @storey = normalize_storey(storey)
           @editable = false
           @duality_state = nil
           @id = id unless id.to_s.empty?
@@ -149,7 +139,6 @@ module ULOL
           @navigation_function_code_space = nil
           @navigation_usage = nil
           @navigation_usage_code_space = nil
-          @navigation_code_space = nil
         end
 
         def apply_default_navigation_semantics
@@ -164,7 +153,6 @@ module ULOL
           @navigation_function_code_space = semantic.function_code_space
           @navigation_usage = semantic.usage_value
           @navigation_usage_code_space = semantic.usage_code_space
-          @navigation_code_space = nil
         end
 
         def restore_navigation_semantics(navigation_class, class_code_space, navigation_function, function_code_space, navigation_usage, usage_code_space)
@@ -186,11 +174,7 @@ module ULOL
 
         def normalize_navigation_semantic(value)
           normalized = value.to_s.strip
-          normalized.empty? || legacy_navigation_semantic?(normalized) ? nil : normalized
-        end
-
-        def legacy_navigation_semantic?(value)
-          %w[Stair Elevator Door Escalator Room].include?(value.to_s)
+          normalized.empty? ? nil : normalized
         end
 
         def normalize_storey(value)
@@ -201,10 +185,6 @@ module ULOL
           normalized = normalized.gsub(/\A([FB])(\d{1})\z/) { "#{$1}0#{$2}" }
           normalized = normalized.gsub(/~([FB])(\d{1})\z/) { "~#{$1}0#{$2}" }
           normalized.match?(/\A[FB](0[1-9]|[1-9][0-9])(?:~[FB](0[1-9]|[1-9][0-9]))?\z/) ? normalized : DEFAULT_STOREY
-        end
-
-        def legacy_storey_value(value)
-          value.to_s.match?(/\A[FB]\d{1,2}(?:~[FB]\d{1,2})?\z/i) ? value : DEFAULT_STOREY
         end
 
         def blank_to_nil(value)

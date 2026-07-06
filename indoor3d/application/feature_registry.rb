@@ -6,7 +6,6 @@ module ULOL
 
       class FeatureRegistry
         attr_reader :cell_spaces
-        attr_reader :storeys
         attr_reader :states
         attr_reader :transitions
         attr_reader :transitions_by_cell_pair
@@ -17,7 +16,6 @@ module ULOL
 
         def reset!
           @cell_spaces = []
-          @storeys = []
           @states = []
           @transitions = []
           @cell_spaces_by_entity_object = {}
@@ -30,7 +28,6 @@ module ULOL
         def snapshot
           {
             cell_spaces: @cell_spaces.dup,
-            storeys: @storeys.dup,
             states: @states.dup,
             transitions: @transitions.dup,
             cell_spaces_by_entity_object: @cell_spaces_by_entity_object.dup,
@@ -43,7 +40,6 @@ module ULOL
 
         def restore!(snapshot)
           @cell_spaces = Array(snapshot[:cell_spaces]).dup
-          @storeys = Array(snapshot[:storeys]).dup
           @states = Array(snapshot[:states]).dup
           @transitions = Array(snapshot[:transitions]).dup
           @cell_spaces_by_entity_object = Hash(snapshot[:cell_spaces_by_entity_object]).dup
@@ -51,18 +47,6 @@ module ULOL
           @cell_spaces_by_entity_id_for_removed_callback = Hash(snapshot[:cell_spaces_by_entity_id_for_removed_callback]).dup
           @adjacent_cell_space_pairs = Hash(snapshot[:adjacent_cell_space_pairs]).dup
           @transitions_by_cell_pair = Hash(snapshot[:transitions_by_cell_pair]).dup
-        end
-
-        def add_storey(storey)
-          @storeys << storey unless @storeys.include?(storey)
-        end
-
-        def remove_storey(storey)
-          @storeys.delete(storey)
-        end
-
-        def find_storey_by_id(id)
-          @storeys.find { |storey| storey&.id == id }
         end
 
         def add_cell_space(cell_space)
