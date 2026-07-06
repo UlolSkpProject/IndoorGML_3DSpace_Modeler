@@ -99,7 +99,134 @@ module ULOL
             assert_equal Val3dityProcessAdapter::TERMINATE_EXIT_CODE, adapter.exit_code
           end
 
+          def test_start_whitelists_only_stdout_write_handle_for_inheritance
+            adapter = Val3dityProcessAdapter.new(args: ['val3dity.exe'], current_dir: Dir.tmpdir)
+            events = []
+            attribute_list_seen = nil
+            pack_size_t = method(:pack_size_t_for_test)
+            unpack_handle_list = method(:unpack_handle_list_for_test)
+            pointer_pack = pointer_pack_for_test
+
+            adapter.define_singleton_method(:create_stdout_pipe) { [101, 202] }
+            adapter.define_singleton_method(:initialize_proc_thread_attribute_list) do
+              FakeProc.new do |attribute_list, count, flags, size_ptr|
+                events << [:initialize_attribute_list, attribute_list == 0 ? :size_query : :initialize, count, flags]
+                size_ptr[0, Fiddle::SIZEOF_SIZE_T] = pack_size_t.call(64)
+                1
+              end
+            end
+            adapter.define_singleton_method(:update_proc_thread_attribute) do
+              FakeProc.new do |attribute_list, flags, attribute, handle_list, byte_count, previous, return_size|
+                attribute_list_seen = attribute_list
+                events << [
+                  :update_attribute,
+                  flags,
+                  attribute,
+                  unpack_handle_list.call(handle_list),
+                  byte_count,
+                  previous,
+                  return_size
+                ]
+                1
+              end
+            end
+            adapter.define_singleton_method(:delete_proc_thread_attribute_list) do
+              FakeProc.new { |attribute_list| events << [:delete_attribute_list, attribute_list] }
+            end
+            adapter.define_singleton_method(:create_process_w) do
+              FakeProc.new do |_app, _command, _process_attrs, _thread_attrs, inherit_handles, flags, _env, _dir, startup_info, process_info|
+                events << [
+                  :create_process,
+                  inherit_handles,
+                  flags,
+                  startup_info.unpack1('L<'),
+                  startup_info.byteslice(Val3dityProcessAdapter::STARTUPINFO_SIZE, Fiddle::SIZEOF_VOIDP).unpack1(pointer_pack)
+                ]
+                process_info[0, process_info.bytesize] = [301, 302, 303, 304].pack('Q<Q<L<L<')
+                1
+              end
+            end
+            adapter.define_singleton_method(:close_handle) do
+              FakeProc.new { |handle| events << [:close_handle, handle] }
+            end
+            adapter.define_singleton_method(:start_reader_thread) do |total_states:, total_transitions:|
+              events << [:start_reader_thread, total_states, total_transitions]
+            end
+
+            adapter.start(total_states: 3, total_transitions: 4)
+
+            assert_includes events, [
+              :update_attribute,
+              0,
+              Val3dityProcessAdapter::PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+              [202],
+              Fiddle::SIZEOF_VOIDP,
+              0,
+              0
+            ]
+            create_event = events.find { |event| event.first == :create_process }
+            assert_equal 1, create_event[1]
+            assert_equal(
+              Val3dityProcessAdapter::CREATE_NO_WINDOW | Val3dityProcessAdapter::EXTENDED_STARTUPINFO_PRESENT,
+              create_event[2]
+            )
+            assert_equal Val3dityProcessAdapter::STARTUPINFOEX_SIZE, create_event[3]
+            assert_equal Fiddle::Pointer[attribute_list_seen].to_i, create_event[4]
+            assert_includes events, [:close_handle, 202]
+            assert_includes events, [:start_reader_thread, 3, 4]
+            assert_equal :delete_attribute_list, events.last.first
+          end
+
+          def test_start_deletes_attribute_list_when_create_process_fails
+            adapter = Val3dityProcessAdapter.new(args: ['val3dity.exe'], current_dir: Dir.tmpdir)
+            events = []
+            pack_size_t = method(:pack_size_t_for_test)
+
+            adapter.define_singleton_method(:create_stdout_pipe) { [101, 202] }
+            adapter.define_singleton_method(:initialize_proc_thread_attribute_list) do
+              FakeProc.new do |attribute_list, _count, _flags, size_ptr|
+                events << [:initialize_attribute_list, attribute_list == 0 ? :size_query : :initialize]
+                size_ptr[0, Fiddle::SIZEOF_SIZE_T] = pack_size_t.call(64)
+                1
+              end
+            end
+            adapter.define_singleton_method(:update_proc_thread_attribute) do
+              FakeProc.new { |_attribute_list, *_args| events << [:update_attribute]; 1 }
+            end
+            adapter.define_singleton_method(:delete_proc_thread_attribute_list) do
+              FakeProc.new { |_attribute_list| events << [:delete_attribute_list] }
+            end
+            adapter.define_singleton_method(:create_process_w) do
+              FakeProc.new { |_app, *_args| events << [:create_process]; 0 }
+            end
+
+            assert_raises(RuntimeError) do
+              adapter.start(total_states: 0, total_transitions: 0)
+            end
+            assert_includes events, [:create_process]
+            assert_includes events, [:delete_attribute_list]
+          end
+
           private
+
+          def pack_size_t_for_test(value)
+            if Fiddle::SIZEOF_SIZE_T == 8
+              [value].pack('Q<')
+            else
+              [value].pack('L<')
+            end
+          end
+
+          def pointer_pack_for_test
+            Fiddle::SIZEOF_VOIDP == 8 ? 'Q<' : 'L<'
+          end
+
+          def unpack_handle_list_for_test(handle_list)
+            format = pointer_pack_for_test
+            handle_list.bytes.each_slice(Fiddle::SIZEOF_VOIDP).map do |bytes|
+              bytes.pack('C*').unpack1(format)
+            end
+          end
 
           def build_adapter(wait_result:, exit_code:, terminate_result: 1)
             adapter = Val3dityProcessAdapter.new(args: [], current_dir: Dir.tmpdir)
@@ -143,6 +270,16 @@ module ULOL
 
             def call(*_args)
               @results.length > 1 ? @results.shift : @results.first
+            end
+          end
+
+          class FakeProc
+            def initialize(&block)
+              @block = block
+            end
+
+            def call(*args)
+              @block.call(*args)
             end
           end
         end
