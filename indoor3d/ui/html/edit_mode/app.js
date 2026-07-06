@@ -25,6 +25,7 @@ var selectedId = document.getElementById('selectedId');
 var selectedName = document.getElementById('selectedName');
 var transitionCount = document.getElementById('transitionCount');
 var cellSpaceCount = document.getElementById('cellSpaceCount');
+var selectedCellTypeCounts = document.getElementById('selectedCellTypeCounts');
 
 var storeyFields = document.getElementById('storeyFields');
 var storeyFromKind = document.getElementById('storeyFromKind');
@@ -389,6 +390,7 @@ function selectionKey(snapshot) {
     snapshot.storeyRangeAllowed ? 'storey-range' : 'storey-single',
     snapshot.transitionCount || 0,
     snapshot.cellSpaceCount || 0,
+    cellTypeCountKey(snapshot.selectedCellTypeCounts),
     snapshot.solidGroupCount || 0,
     snapshot.stateCount || 0,
     snapshot.totalTransitionCount || 0,
@@ -423,9 +425,16 @@ function optionKey(options) {
 }
 
 function renderEmpty(snapshot) {
-  cellTypeCounts.innerHTML = '';
+  renderCountRows(cellTypeCounts, snapshot.cellTypeCounts || []);
 
-  (snapshot.cellTypeCounts || []).forEach(function (entry) {
+  stateCount.textContent = snapshot.stateCount || 0;
+  totalTransitionCount.textContent = snapshot.totalTransitionCount || 0;
+}
+
+function renderCountRows(container, counts) {
+  container.innerHTML = '';
+
+  (counts || []).forEach(function (entry) {
     var row = document.createElement('div');
     var label = document.createElement('span');
     var count = document.createElement('strong');
@@ -436,11 +445,8 @@ function renderEmpty(snapshot) {
 
     row.appendChild(label);
     row.appendChild(count);
-    cellTypeCounts.appendChild(row);
+    container.appendChild(row);
   });
-
-  stateCount.textContent = snapshot.stateCount || 0;
-  totalTransitionCount.textContent = snapshot.totalTransitionCount || 0;
 }
 
 function renderSolidGroups(snapshot) {
@@ -461,9 +467,9 @@ function renderCellSpaces(snapshot) {
   } else {
     hide(storeyFields);
   }
-  setNavigationSemantics(null, false);
 
   cellSpaceCount.textContent = snapshot.cellSpaceCount || 0;
+  renderCountRows(selectedCellTypeCounts, snapshot.selectedCellTypeCounts || []);
   selectedClassification.value = snapshot.classification || 'GeneralSpace|Room';
 
   setControlLocked(

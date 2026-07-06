@@ -186,6 +186,7 @@ module ULOL
                 storeyRangeAllowed: #{snapshot[:storey_range_allowed] ? 'true' : 'false'},
                 transitionCount: #{snapshot[:transition_count].to_i},
                 cellSpaceCount: #{snapshot[:cell_space_count].to_i},
+                selectedCellTypeCounts: #{cell_type_counts_script(snapshot[:selected_cell_type_counts])},
                 solidGroupCount: #{snapshot[:solid_group_count].to_i},
                 stateCount: #{snapshot[:state_count].to_i},
                 totalTransitionCount: #{snapshot[:total_transition_count].to_i},
