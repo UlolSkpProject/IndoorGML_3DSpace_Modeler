@@ -6,7 +6,7 @@ module ULOL
       module Transformation
 
         def self.entity_transformation_in_active_context(entity)
-          Sketchup.active_model.edit_transform * entity.transformation
+          entity_world_transformation(entity)
         end
 
         def self.entity_transformation_for_current_context(entity)
