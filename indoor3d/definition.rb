@@ -5,7 +5,6 @@ module ULOL
     module Definition
       INDOOR_GML_VERSION = '1.0.3'
       INDOOR_GML_SCHEMA_VERSION = '1.0'
-      EXTENSION_VERSION = INDOOR_GML_VERSION
     end
   end
 end
