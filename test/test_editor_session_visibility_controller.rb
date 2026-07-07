@@ -11,7 +11,8 @@ module ULOL
         def test_filter_state_is_stored_and_reset_with_snapshots
           controller = EditorSession::VisibilityController.new
           group = fake_group(pid: 7)
-          controller.set_filter(storeys: %w[1F B1], cell_types: [:general])
+          assert controller.set_filter(storeys: %w[1F B1], cell_types: [:general])
+          refute controller.set_filter(storeys: %w[1F B1], cell_types: [:general])
           controller.remember_edit_mode_visibility(group)
 
           assert_equal %w[1F B1], controller.visible_storeys
@@ -27,7 +28,7 @@ module ULOL
           assert controller.edit_mode_visibility_snapshots_empty?
         end
 
-        def test_capture_and_restore_child_hidden_state
+        def test_capture_and_restore_group_hidden_state
           visible_child = fake_child(hidden: false)
           hidden_child = fake_child(hidden: true)
           group = fake_group(pid: 10, children: [visible_child, hidden_child])
@@ -35,35 +36,67 @@ module ULOL
           snapshot = controller.capture_cell_space_visibility(group)
 
           controller.set_cell_space_render_visible(group, false)
-          assert_equal true, visible_child.hidden?
-          assert_equal true, hidden_child.hidden?
-
-          controller.restore_cell_space_visibility(group, snapshot)
+          assert_equal true, group.hidden?
           assert_equal false, visible_child.hidden?
           assert_equal true, hidden_child.hidden?
+          assert_equal 0, visible_child.write_count
+          assert_equal 0, hidden_child.write_count
+
+          controller.restore_cell_space_visibility(group, snapshot)
+          assert_equal false, group.hidden?
+          assert_equal false, visible_child.hidden?
+          assert_equal true, hidden_child.hidden?
+          assert_equal 0, visible_child.write_count
+          assert_equal 0, hidden_child.write_count
         end
 
-        def test_set_visible_with_snapshot_restores_instead_of_forcing_all_children_visible
+        def test_set_visible_with_snapshot_shows_group_without_touching_children
           visible_child = fake_child(hidden: false)
           hidden_child = fake_child(hidden: true)
-          group = fake_group(pid: 11, children: [visible_child, hidden_child])
+          group = fake_group(pid: 11, children: [visible_child, hidden_child], hidden: true)
           controller = EditorSession::VisibilityController.new
           snapshot = controller.capture_cell_space_visibility(group)
 
           controller.set_cell_space_render_visible(group, true, snapshot)
 
+          assert_equal false, group.hidden?
           assert_equal false, visible_child.hidden?
           assert_equal true, hidden_child.hidden?
+          assert_equal 0, visible_child.write_count
+          assert_equal 0, hidden_child.write_count
+        end
+
+        def test_set_render_visibility_changes_group_only
+          hidden_child = fake_child(hidden: true)
+          visible_child = fake_child(hidden: false)
+          group = fake_group(pid: 13, children: [hidden_child, visible_child])
+          controller = EditorSession::VisibilityController.new
+
+          controller.set_cell_space_render_visible(group, false)
+
+          assert_equal true, group.hidden?
+          assert_equal 1, group.write_count
+          assert_equal 0, hidden_child.write_count
+          assert_equal 0, visible_child.write_count
+          assert_equal true, hidden_child.hidden?
+          assert_equal false, visible_child.hidden?
+        end
+
+        def test_capture_does_not_scan_child_entities
+          child = fake_child(hidden: false)
+          group = fake_group(pid: 14, children: [child], raise_on_entities: true)
+          controller = EditorSession::VisibilityController.new
+
+          snapshot = controller.capture_cell_space_visibility(group)
+
+          assert_equal({ hidden: false }, snapshot)
+          assert_equal 0, child.write_count
         end
 
         def test_remember_edit_mode_visibility_prefers_validation_snapshot
           original_child = fake_child(hidden: false)
-          validation_child = fake_child(hidden: true)
           group = fake_group(pid: 12, children: [original_child])
-          validation_snapshot = {
-            visible: true,
-            children: [[validation_child, true]]
-          }
+          validation_snapshot = { hidden: true }
           controller = EditorSession::VisibilityController.new
 
           controller.remember_edit_mode_visibility(group, snapshot: validation_snapshot)
@@ -77,7 +110,10 @@ module ULOL
           Class.new do
             def initialize(hidden)
               @hidden = hidden
+              @write_count = 0
             end
+
+            attr_reader :write_count
 
             def valid?
               true
@@ -88,18 +124,23 @@ module ULOL
             end
 
             def hidden=(value)
+              @write_count += 1
               @hidden = value == true
             end
           end.new(hidden)
         end
 
-        def fake_group(pid:, children: [fake_child(hidden: false)])
+        def fake_group(pid:, children: [fake_child(hidden: false)], hidden: false, raise_on_entities: false)
           Class.new do
-            def initialize(pid, children)
+            def initialize(pid, children, hidden, raise_on_entities)
               @pid = pid
               @children = children
-              @visible = true
+              @hidden = hidden
+              @write_count = 0
+              @raise_on_entities = raise_on_entities
             end
+
+            attr_reader :write_count
 
             def valid?
               true
@@ -110,17 +151,28 @@ module ULOL
             end
 
             def visible?
-              @visible == true
+              !hidden?
             end
 
             def visible=(value)
-              @visible = value == true
+              self.hidden = value != true
+            end
+
+            def hidden?
+              @hidden == true
+            end
+
+            def hidden=(value)
+              @write_count += 1
+              @hidden = value == true
             end
 
             def entities
+              raise 'entities should not be scanned' if @raise_on_entities
+
               @children
             end
-          end.new(pid, children)
+          end.new(pid, children, hidden, raise_on_entities)
         end
       end
     end

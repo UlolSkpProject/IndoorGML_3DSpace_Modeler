@@ -44,13 +44,21 @@ module ULOL
           service = build_service(indoor_model, visibility, callbacks)
 
           assert service.apply_edit_mode_visibility_filter
+          assert_equal false, matching_group.hidden?
+          assert_equal true, hidden_group.hidden?
           assert_equal false, matching_child.hidden?
-          assert_equal true, hidden_child.hidden?
+          assert_equal false, hidden_child.hidden?
+          assert_equal 0, matching_child.write_count
+          assert_equal 0, hidden_child.write_count
           assert_equal 1, callbacks.invalidated
 
           assert service.apply_all_edit_mode_cell_space_visibility
+          assert_equal false, matching_group.hidden?
+          assert_equal false, hidden_group.hidden?
           assert_equal false, matching_child.hidden?
           assert_equal false, hidden_child.hidden?
+          assert_equal 0, matching_child.write_count
+          assert_equal 0, hidden_child.write_count
         end
 
         def test_geometry_visibility_updates_primal_group_inside_unlock_scope
@@ -91,8 +99,76 @@ module ULOL
           )
 
           assert service.apply_validation_focus_visibility
+          assert_equal false, focused_group.hidden?
+          assert_equal true, hidden_group.hidden?
           assert_equal false, focused_child.hidden?
-          assert_equal true, hidden_child.hidden?
+          assert_equal false, hidden_child.hidden?
+          assert_equal 0, focused_child.write_count
+          assert_equal 0, hidden_child.write_count
+        end
+
+        def test_apply_all_visibility_forces_group_visible_without_edit_mode_snapshots
+          child = fake_child(hidden: true)
+          group = fake_group(pid: 20, children: [child], hidden: true)
+          indoor_model = fake_indoor_model(
+            cell_spaces: [fake_cell_space(group: group, storey: 'F01', cell_type: :general)]
+          )
+          callbacks = CallbackLog.new
+          Sketchup.test_active_model = fake_model
+          service = build_service(indoor_model, EditorSession::VisibilityController.new, callbacks)
+
+          assert service.apply_all_edit_mode_cell_space_visibility
+
+          assert_equal false, group.hidden?
+          assert_equal true, child.hidden?
+          assert_equal 0, child.write_count
+          assert_equal 1, group.write_count
+          assert_equal 1, callbacks.invalidated
+          assert_equal [group], callbacks.unlocked_entities
+        end
+
+        def test_normalize_visibility_for_non_edit_mode_forces_group_visible_without_snapshot
+          child = fake_child(hidden: true)
+          group = fake_group(pid: 21, children: [child], hidden: true)
+          primal = fake_group(pid: 22)
+          indoor_model = fake_indoor_model(
+            primal_group: primal,
+            cell_spaces: [fake_cell_space(group: group, storey: 'F01', cell_type: :general)]
+          )
+          callbacks = CallbackLog.new
+          Sketchup.test_active_model = fake_model
+          service = build_service(indoor_model, EditorSession::VisibilityController.new, callbacks)
+
+          assert service.normalize_visibility_for_non_edit_mode
+
+          assert_equal false, group.hidden?
+          assert_equal true, child.hidden?
+          assert_equal 0, child.write_count
+          assert_equal 1, group.write_count
+          assert_equal 1, callbacks.overlay_invalidated
+          assert_equal [group, primal], callbacks.unlocked_entities
+        end
+
+        def test_normalize_visibility_for_non_edit_mode_forces_group_visible_even_with_snapshot
+          child = fake_child(hidden: true)
+          group = fake_group(pid: 23, children: [child], hidden: true)
+          primal = fake_group(pid: 24)
+          indoor_model = fake_indoor_model(
+            primal_group: primal,
+            cell_spaces: [fake_cell_space(group: group, storey: 'F01', cell_type: :general)]
+          )
+          visibility = EditorSession::VisibilityController.new
+          visibility.remember_edit_mode_visibility(group, snapshot: { hidden: true })
+          callbacks = CallbackLog.new
+          Sketchup.test_active_model = fake_model
+          service = build_service(indoor_model, visibility, callbacks)
+
+          assert service.normalize_visibility_for_non_edit_mode
+
+          assert_equal false, group.hidden?
+          assert_equal true, child.hidden?
+          assert_equal 0, child.write_count
+          assert_equal 1, group.write_count
         end
 
         private
@@ -152,13 +228,16 @@ module ULOL
           end.new(id, group, storey, cell_type)
         end
 
-        def fake_group(pid:, children: [fake_child(hidden: false)])
+        def fake_group(pid:, children: [fake_child(hidden: false)], hidden: false)
           Class.new do
-            def initialize(pid, children)
+            def initialize(pid, children, hidden)
               @pid = pid
               @children = children
-              @visible = true
+              @hidden = hidden
+              @write_count = 0
             end
+
+            attr_reader :write_count
 
             def valid?
               true
@@ -169,24 +248,36 @@ module ULOL
             end
 
             def visible?
-              @visible == true
+              !hidden?
             end
 
             def visible=(value)
-              @visible = value == true
+              self.hidden = value != true
+            end
+
+            def hidden?
+              @hidden == true
+            end
+
+            def hidden=(value)
+              @write_count += 1
+              @hidden = value == true
             end
 
             def entities
               @children
             end
-          end.new(pid, children)
+          end.new(pid, children, hidden)
         end
 
         def fake_child(hidden:)
           Class.new do
             def initialize(hidden)
               @hidden = hidden
+              @write_count = 0
             end
+
+            attr_reader :write_count
 
             def valid?
               true
@@ -197,6 +288,7 @@ module ULOL
             end
 
             def hidden=(value)
+              @write_count += 1
               @hidden = value == true
             end
           end.new(hidden)
