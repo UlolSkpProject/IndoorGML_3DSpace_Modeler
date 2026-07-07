@@ -16,14 +16,10 @@ module ULOL
           end
 
           def apply_geometry_visibility
-            primal_group = @indoor_model.primal_group
-            return false unless primal_group&.valid?
-            return false unless primal_group.respond_to?(:visible=)
+            return false unless primal_group_visibility_target?
 
             with_visibility_update_operation do
-              with_unlocked(primal_group) do
-                primal_group.visible = @geometry_visible.call
-              end
+              set_primal_group_visible(@geometry_visible.call)
             end
             invalidate_view(Sketchup.active_model)
             true
@@ -36,6 +32,7 @@ module ULOL
             return false unless validation_focus_active?
 
             with_visibility_update_operation do
+              set_primal_group_visible(true)
               each_valid_cell_space_group do |cell_space, group|
                 persistent_id = group.persistent_id
                 unless @validation_focus_controller.visibility_snapshot?(persistent_id)
@@ -164,7 +161,10 @@ module ULOL
           end
 
           def edit_mode_visible_cell_space?(cell_space, include_validation: true)
-            return false if include_validation && !validation_visible_cell_space?(cell_space)
+            if include_validation && validation_focus_active?
+              return validation_visible_cell_space?(cell_space)
+            end
+
             return false unless storey_filter_visible?(cell_space)
             return false unless cell_type_filter_visible?(cell_space)
 
@@ -218,6 +218,23 @@ module ULOL
 
           def with_unlocked(group)
             @with_unlocked.call(group) { yield }
+          end
+
+          def primal_group_visibility_target?
+            primal_group = @indoor_model.primal_group
+            primal_group&.valid? && primal_group.respond_to?(:visible=)
+          rescue StandardError
+            false
+          end
+
+          def set_primal_group_visible(visible)
+            primal_group = @indoor_model.primal_group
+            return false unless primal_group_visibility_target?
+
+            with_unlocked(primal_group) do
+              primal_group.visible = visible == true
+            end
+            true
           end
 
           def invalidate_view(model)

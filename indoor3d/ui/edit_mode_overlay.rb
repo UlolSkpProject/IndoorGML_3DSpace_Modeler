@@ -218,6 +218,7 @@ module ULOL
         def draw_overlay_states(view)
           view.drawing_color = DUAL_STATE_COLOR
           right_axis, up_axis = camera_billboard_axes(view)
+          dir_axis = view.camera.direction.clone
           @render_state_triangle_points ||= []
           @render_state_triangle_points.clear
           @indoor_model.states.each do |state|
@@ -226,7 +227,7 @@ module ULOL
 
             center = overlay_state_point(state)
             radius = overlay_state_radius(view, center, state)
-            @render_state_triangle_points.concat(billboard_disk_triangle_points(center, right_axis, up_axis, radius))
+            @render_state_triangle_points.concat(billboard_disk_triangle_points(center, right_axis, up_axis, dir_axis, radius))
           end
           view.draw(GL_TRIANGLES, @render_state_triangle_points) unless @render_state_triangle_points.empty?
         end
@@ -599,12 +600,12 @@ module ULOL
           [[model_radius, screen_min_radius].max, screen_max_radius].min
         end
 
-        def billboard_disk_triangle_points(center, right_axis, up_axis, radius)
+        def billboard_disk_triangle_points(center, right_axis, up_axis, dir_axis, radius)
           points = UNIT_CIRCLE.map do |cos_a, sin_a|
             Geom::Point3d.new(
-              center.x + (right_axis.x * cos_a * radius) + (up_axis.x * sin_a * radius),
-              center.y + (right_axis.y * cos_a * radius) + (up_axis.y * sin_a * radius),
-              center.z + (right_axis.z * cos_a * radius) + (up_axis.z * sin_a * radius)
+              (center.x - radius * dir_axis.x)+ (right_axis.x * cos_a * radius) + (up_axis.x * sin_a * radius),
+              (center.y - radius * dir_axis.y)+ (right_axis.y * cos_a * radius) + (up_axis.y * sin_a * radius),
+              (center.z - radius * dir_axis.z)+ (right_axis.z * cos_a * radius) + (up_axis.z * sin_a * radius)
             )
           end
           points.each_with_index.flat_map do |point, index|

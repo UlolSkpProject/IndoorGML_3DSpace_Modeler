@@ -70,13 +70,24 @@ module ULOL
         def set_geometry_visible(visible)
           @geometry_visible = visible == true
           write_model_boolean_attribute(GEOMETRY_VISIBLE_ATTRIBUTE, @geometry_visible)
-          apply_geometry_visibility()
+          apply_current_geometry_visibility()
           @geometry_visible
         end
 
         def apply_display_state
           set_dual_overlay_visible(dual_overlay_visible?)
-          apply_geometry_visibility()
+          apply_current_geometry_visibility()
+        end
+
+        def apply_current_geometry_visibility
+          if validation_focus_active?
+            apply_validation_focus_visibility()
+          elsif @editing
+            apply_geometry_visibility()
+            apply_edit_mode_visibility_filter()
+          else
+            normalize_visibility_for_non_edit_mode()
+          end
         end
 
         def begin_editing
@@ -124,6 +135,7 @@ module ULOL
           end
 
           apply_validation_focus_visibility
+          defer_validation_focus_visibility
           invalidate_overlay_transition_points
           selection_changed
           invalidate_view(Sketchup.active_model())
@@ -420,12 +432,13 @@ module ULOL
 
         def close_dialog_only
           begin
+            restoring_edit_visibility = @editing || validation_focus_active?
             @dialog.close_without_finish()
             restore_validation_focus_visibility
+            normalize_visibility_for_non_edit_mode if restoring_edit_visibility
             @editing = false
             active_path_controller.reset
             restore_validation_focus_rendering_options
-            restore_edit_mode_visibility
             reset_edit_mode_visibility_filter
             clear_validation_focus
             @progress = nil
@@ -476,6 +489,26 @@ module ULOL
 
         def reset_edit_mode_visibility_filter
           visibility_controller.reset_filter
+        end
+
+        def defer_validation_focus_visibility
+          return false unless defined?(UI) && UI.respond_to?(:start_timer)
+
+          UI.start_timer(0, false) do
+            begin
+              if validation_focus_active?
+                apply_validation_focus_visibility
+                invalidate_overlay_transition_points
+                invalidate_view(Sketchup.active_model())
+              end
+            rescue StandardError => e
+              IndoorCore::Logger.puts "[IndoorGML] Deferred validation focus visibility failed: #{e.class}: #{e.message}"
+            end
+          end
+          true
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Deferred validation focus visibility scheduling failed: #{e.class}: #{e.message}"
+          false
         end
 
         def normalize_storey_filter(values)

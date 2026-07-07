@@ -13,6 +13,7 @@ module ULOL
           EXTENSION_VALIDITY_KEY = 'extension_policy_validity'
           VALIDATION_STATUS_KEY = 'indoorgml_modeler_validation_status'
           STRICT_ERRORS_REPORT_KEY = 'indoorgml_modeler_strict_errors'
+          OVERLAP_RECHECK_CODES = [701, 704].freeze
 
           module_function
 
@@ -37,29 +38,40 @@ module ULOL
             end
             Array(raw_report['features']).each do |feature|
               Array(feature['errors']).each do |error|
-                rows << error_row('Feature', error['id'].to_s.empty? ? feature['id'] : error['id'], error)
+                rows << error_row(
+                  'Feature',
+                  error['id'].to_s.empty? ? feature['id'] : error['id'],
+                  error,
+                  context: { feature_id: feature['id'] }
+                )
               end
               Array(feature['primitives']).each do |primitive|
                 Array(primitive['errors']).each do |error|
-                  rows << error_row('Primitive', primitive['id'], error)
+                  rows << error_row(
+                    'Primitive',
+                    primitive['id'],
+                    error,
+                    context: { feature_id: feature['id'] }
+                  )
                 end
               end
             end
             rows
           end
 
-          def error_row(scope, item, error)
+          def error_row(scope, item, error, context: nil)
             {
               scope: scope,
               item: item,
               code: error['code'],
               description: error['description'] || error['type'] || 'UNKNOWN',
-              raw: error
+              raw: error,
+              context: context
             }
           end
 
           def report_error_row_refs(row)
-            text = [row[:item], row[:description], row[:raw]].map do |value|
+            text = [row[:item], row[:description], row[:raw], row[:context]].map do |value|
               value.is_a?(Hash) ? value.to_json : value.to_s
             end.join(' ')
             {
@@ -67,6 +79,39 @@ module ULOL
               states: text.scan(/state_[A-Za-z0-9_.-]+/).uniq,
               transitions: text.scan(/transition_[A-Za-z0-9_.-]+/).uniq
             }
+          end
+
+          def final_error_refs(raw_report)
+            refs = { cells: [], states: [], transitions: [] }
+            overlap_cells_by_code = final_overlap_recheck_cells_by_code(raw_report)
+            error_item_rows(raw_report || {}).each do |row|
+              code = error_code_number(row[:code])
+              if overlap_cells_by_code.key?(code)
+                refs[:cells].concat(overlap_cells_by_code[code])
+                next
+              end
+
+              row_refs = report_error_row_refs(row)
+              refs[:cells].concat(row_refs[:cells])
+              refs[:states].concat(row_refs[:states])
+              refs[:transitions].concat(row_refs[:transitions])
+            end
+            refs.each_value(&:uniq!)
+            refs
+          end
+
+          def final_error_row_refs(row, raw_report = nil)
+            recheck_row = matching_overlap_recheck_row(row, raw_report)
+            if recheck_row
+              raw_refs = report_error_row_refs(row)
+              return {
+                cells: Array(recheck_row['cells']).map(&:to_s).reject(&:empty?).uniq,
+                states: raw_refs[:states],
+                transitions: raw_refs[:transitions]
+              }
+            end
+
+            report_error_row_refs(row)
           end
 
           def error_item_label(row)
@@ -87,6 +132,37 @@ module ULOL
 
           def invalid_count(overview)
             total_count(overview) - valid_count(overview)
+          end
+
+          def final_overlap_recheck_cells_by_code(raw_report)
+            Array(raw_report && raw_report[OVERLAP_RECHECK_REPORT_KEY]).each_with_object({}) do |row, memo|
+              next if row['tolerated'] == true
+
+              code = error_code_number(row['code'])
+              next unless OVERLAP_RECHECK_CODES.include?(code)
+
+              cells = Array(row['cells']).map(&:to_s).reject(&:empty?)
+              next if cells.empty?
+
+              memo[code] ||= []
+              memo[code].concat(cells)
+              memo[code].uniq!
+            end
+          end
+
+          def matching_overlap_recheck_row(row, raw_report)
+            code = error_code_number(row && row[:code])
+            return nil unless OVERLAP_RECHECK_CODES.include?(code)
+
+            refs = report_error_row_refs(row)
+            row_cells = refs[:cells]
+            Array(raw_report && raw_report[OVERLAP_RECHECK_REPORT_KEY]).find do |recheck_row|
+              next false if recheck_row['tolerated'] == true
+              next false unless error_code_number(recheck_row['code']) == code
+
+              cells = Array(recheck_row['cells']).map(&:to_s).reject(&:empty?)
+              cells.any? && cells.all? { |cell_id| row_cells.include?(cell_id) }
+            end
           end
         end
 
