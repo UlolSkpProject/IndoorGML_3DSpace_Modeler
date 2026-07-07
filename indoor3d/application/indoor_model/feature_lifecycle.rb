@@ -315,6 +315,7 @@ module ULOL
           def make_cell_space_copy_independent(entity)
             original_id = indoor_attribute(entity, 'id').to_s
             original_state_id = indoor_attribute(entity, 'duality_state_id').to_s
+            runtime_snapshot = cell_space_copy_independence_runtime_snapshot
             IndoorCore::Logger.puts "[IndoorGML] Duplicate CellSpace id detected: entity_id=#{entity.entityID} copied_id=#{original_id}"
 
             with_transparent_cell_space_operation('IndoorGML CellSpace Copy Independence') do
@@ -339,8 +340,70 @@ module ULOL
 
             true
           rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] CellSpace copy independence failed: #{e.class}: #{e.message}"
+            restore_cell_space_copy_independence_runtime(runtime_snapshot)
+            clear_copied_cell_space_indoor_attributes(entity)
+            log_cell_space_copy_independence_failure(e)
+            defer_cell_space_copy_independence_failure_warning
             false
+          end
+
+          def cell_space_copy_independence_runtime_snapshot
+            {
+              registry: @feature_registry.snapshot,
+              scene_group_guard: @scene_group_guard.respond_to?(:snapshot) ? @scene_group_guard.snapshot : nil,
+              cell_space_change_snapshots: Hash(@cell_space_change_snapshots).dup,
+              space_features_change_snapshots: Hash(@space_features_change_snapshots).dup,
+              dirty_cell_space_pids: Hash(@dirty_cell_space_pids).dup,
+              cell_space_sync_scheduled: @cell_space_sync_scheduled,
+              cell_space_observed_ids: Hash(@cell_space_observed_ids).dup,
+              space_features_observed_ids: Hash(@space_features_observed_ids).dup,
+              entities_observed_ids: Hash(@entities_observed_ids).dup,
+              state_instances: mutable_instance_snapshot(@states),
+              transition_instances: mutable_instance_snapshot(@transitions)
+            }
+          end
+
+          def restore_cell_space_copy_independence_runtime(snapshot)
+            return unless snapshot
+
+            restore_mutable_instances(snapshot[:state_instances])
+            restore_mutable_instances(snapshot[:transition_instances])
+            @feature_registry.restore!(snapshot[:registry])
+            bind_registry_collections
+            @scene_group_guard.restore!(snapshot[:scene_group_guard]) if snapshot[:scene_group_guard] && @scene_group_guard.respond_to?(:restore!)
+            @cell_space_change_snapshots = Hash(snapshot[:cell_space_change_snapshots]).dup
+            @space_features_change_snapshots = Hash(snapshot[:space_features_change_snapshots]).dup
+            @dirty_cell_space_pids = Hash(snapshot[:dirty_cell_space_pids]).dup
+            @cell_space_sync_scheduled = snapshot[:cell_space_sync_scheduled]
+            @cell_space_observed_ids = Hash(snapshot[:cell_space_observed_ids]).dup
+            @space_features_observed_ids = Hash(snapshot[:space_features_observed_ids]).dup
+            @entities_observed_ids = Hash(snapshot[:entities_observed_ids]).dup
+          rescue StandardError => rollback_error
+            IndoorCore::Logger.puts "[IndoorGML] CellSpace copy independence rollback failed: #{rollback_error.class}: #{rollback_error.message}"
+          end
+
+          def clear_copied_cell_space_indoor_attributes(entity)
+            @attribute_serializer.clear_indoor_gml_attributes(entity)
+          rescue StandardError => clear_error
+            IndoorCore::Logger.puts "[IndoorGML] CellSpace copy attribute cleanup failed: #{clear_error.class}: #{clear_error.message}"
+            false
+          end
+
+          def log_cell_space_copy_independence_failure(error)
+            message = "[IndoorGML] CellSpace copy independence failed: #{error.class}: #{error.message}"
+            if IndoorCore::Logger.respond_to?(:error)
+              IndoorCore::Logger.error(message)
+            else
+              IndoorCore::Logger.puts(message)
+            end
+          end
+
+          def defer_cell_space_copy_independence_failure_warning
+            defer_ui_message(
+              'CellSpace copy independence failed. The copied entity was kept as a normal SketchUp group so duplicate IndoorGML IDs were not registered.'
+            )
+          rescue StandardError => notification_error
+            IndoorCore::Logger.puts "[IndoorGML] CellSpace copy failure notification failed: #{notification_error.class}: #{notification_error.message}"
           end
 
           def make_cell_space_entity_unique(entity)

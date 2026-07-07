@@ -8,6 +8,22 @@ module ULOL
 
       class AttributeSerializer
         ATTRIBUTE_DICTIONARY_NAME = 'IndoorGml'
+        INDOOR_GML_ATTRIBUTE_KEYS = %w[
+          feature
+          name
+          indoor_gml_version
+          id
+          cell_type
+          category_code
+          storey
+          duality_state_id
+          navigation_class
+          navigation_class_code_space
+          navigation_function
+          navigation_function_code_space
+          navigation_usage
+          navigation_usage_code_space
+        ].freeze
 
         def initialize(dictionary_name: ATTRIBUTE_DICTIONARY_NAME, indoor_gml_version: Definition::INDOOR_GML_VERSION)
           @dictionary_name = dictionary_name
@@ -90,7 +106,34 @@ module ULOL
           end
         end
 
+        def clear_indoor_gml_attributes(entity)
+          return false unless valid_entity?(entity)
+          return false unless entity.respond_to?(:delete_attribute)
+
+          keys = indoor_gml_attribute_keys(entity)
+          return false if keys.empty?
+
+          keys.each { |key| entity.delete_attribute(@dictionary_name, key) }
+          true
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Attribute cleanup failed: #{e.class}: #{e.message}"
+          false
+        end
+
         private
+
+        def indoor_gml_attribute_keys(entity)
+          dictionary = entity.attribute_dictionary(@dictionary_name) if entity.respond_to?(:attribute_dictionary)
+          if dictionary&.respond_to?(:each_pair)
+            keys = []
+            dictionary.each_pair { |key, _value| keys << key.to_s }
+            return keys
+          end
+
+          INDOOR_GML_ATTRIBUTE_KEYS.select do |key|
+            !attribute(entity, key).nil?
+          end
+        end
 
         def valid_entity?(entity)
           return false if entity.nil?
