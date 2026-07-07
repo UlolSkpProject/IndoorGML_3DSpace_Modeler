@@ -23,30 +23,31 @@ module ULOL
           @level = LEVELS.key?(normalized) ? normalized : DEFAULT_LEVEL
         end
 
-        def self.debug(message)
-          log(:debug, message)
+        def self.debug(message = nil, &block)
+          log(:debug, message, &block)
         end
 
-        def self.info(message)
-          log(:info, message)
+        def self.info(message = nil, &block)
+          log(:info, message, &block)
         end
 
-        def self.warn(message)
-          log(:warn, message)
+        def self.warn(message = nil, &block)
+          log(:warn, message, &block)
         end
 
-        def self.error(message)
-          log(:error, message)
+        def self.error(message = nil, &block)
+          log(:error, message, &block)
         end
 
-        def self.puts(message)
-          info(message)
+        def self.puts(message = nil, &block)
+          info(message, &block)
         end
 
-        def self.log(level_name, message)
+        def self.log(level_name, message = nil)
           return unless enabled?(level_name)
 
-          Kernel.puts(message)
+          resolved = block_given? ? yield : message
+          Kernel.puts(resolved) unless resolved.nil?
         end
 
         def self.enabled?(level_name)
