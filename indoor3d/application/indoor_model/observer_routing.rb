@@ -40,6 +40,11 @@ module ULOL
                 return :name
               end
 
+              if scaled_transform_values?(current_snapshot[:transformation])
+                log_space_features_change(entity, :transform, [:transformation], previous_snapshot, current_snapshot)
+                return :transform
+              end
+
               remember_space_features_change_snapshot(entity, current_snapshot)
               log_space_features_change(entity, :initial_snapshot, [], previous_snapshot, current_snapshot)
               return nil

@@ -187,8 +187,8 @@ module ULOL
           def restore_runtime_from_current_model
             @model ||= Sketchup.active_model
             find_existing_space_features_groups
-            attach_existing_space_features_observers
             reset_runtime_collections
+            attach_existing_space_features_observers
             @runtime_restorer.restore(primal_group: @primal_group)
           end
 
