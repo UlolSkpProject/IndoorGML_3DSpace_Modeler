@@ -15,8 +15,12 @@ module ULOL
           attr_reader :visible_storeys, :visible_cell_types
 
           def set_filter(storeys:, cell_types:)
-            @visible_storeys = Array(storeys).dup
-            @visible_cell_types = Array(cell_types).dup
+            next_storeys = Array(storeys).dup
+            next_cell_types = Array(cell_types).dup
+            changed = @visible_storeys != next_storeys || @visible_cell_types != next_cell_types
+            @visible_storeys = next_storeys
+            @visible_cell_types = next_cell_types
+            changed
           end
 
           def filter_active?
@@ -56,57 +60,76 @@ module ULOL
 
           def remember_edit_mode_visibility(group, snapshot: nil)
             persistent_id = group.persistent_id
-            return if @edit_mode_visibility_snapshots.key?(persistent_id)
+            return false if @edit_mode_visibility_snapshots.key?(persistent_id)
 
             @edit_mode_visibility_snapshots[persistent_id] =
               snapshot || capture_cell_space_visibility(group)
+            true
           rescue StandardError
-            nil
+            false
           end
 
           def cell_space_visibility_target?(group)
-            group&.valid? && group.respond_to?(:visible=) && group.respond_to?(:entities)
+            group&.valid? && group_hidden_target?(group)
           rescue StandardError
             false
           end
 
           def capture_cell_space_visibility(group)
             {
-              visible: group.respond_to?(:visible?) ? group.visible? : true,
-              children: visibility_child_entities(group).map { |entity| [entity, entity.hidden?] }
+              hidden: group_hidden?(group)
             }
           end
 
           def restore_cell_space_visibility(group, snapshot)
             return set_cell_space_render_visible(group, snapshot == true) unless snapshot.is_a?(Hash)
 
-            Array(snapshot[:children]).each do |entity, hidden|
-              next unless entity&.valid? && entity.respond_to?(:hidden=)
-
-              entity.hidden = hidden == true
-            end
-            @cell_space_render_visibility[group.persistent_id] = true if group&.valid?
+            target_hidden = snapshot.key?(:hidden) ? snapshot[:hidden] == true : snapshot[:visible] == false
+            set_group_hidden(group, target_hidden)
+            @cell_space_render_visibility[group.persistent_id] = !target_hidden if group&.valid?
             true
           end
 
-          def set_cell_space_render_visible(group, visible, snapshot = nil)
-            return restore_cell_space_visibility(group, snapshot) if visible && snapshot
-
+          def set_cell_space_render_visible(group, visible, _snapshot = nil, **_options)
             persistent_id = group.persistent_id
             target_visible = visible == true
-            return true if @cell_space_render_visibility[persistent_id] == target_visible
 
-            visibility_child_entities(group).each { |entity| entity.hidden = visible != true }
+            target_hidden = !target_visible
+            return true if @cell_space_render_visibility[persistent_id] == target_visible &&
+                           group_hidden?(group) == target_hidden
+
+            set_group_hidden(group, target_hidden)
             @cell_space_render_visibility[persistent_id] = target_visible
             true
           end
 
-          def visibility_child_entities(group)
-            group.entities.to_a.select do |entity|
-              entity&.valid? && entity.respond_to?(:hidden?) && entity.respond_to?(:hidden=)
+          private
+
+          def group_hidden_target?(group)
+            (group.respond_to?(:hidden?) && group.respond_to?(:hidden=)) ||
+              (group.respond_to?(:visible?) && group.respond_to?(:visible=))
+          end
+
+          def group_hidden?(group)
+            return group.hidden? == true if group.respond_to?(:hidden?)
+            return group.visible? != true if group.respond_to?(:visible?)
+
+            false
+          end
+
+          def set_group_hidden(group, hidden)
+            target_hidden = hidden == true
+            current_hidden = group_hidden?(group)
+            return true if current_hidden == target_hidden
+
+            if group.respond_to?(:hidden=)
+              group.hidden = target_hidden
+            elsif group.respond_to?(:visible=)
+              group.visible = !target_hidden
             end
+            true
           rescue StandardError
-            []
+            false
           end
         end
       end

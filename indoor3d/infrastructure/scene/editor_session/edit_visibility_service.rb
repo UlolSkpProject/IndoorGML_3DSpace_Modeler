@@ -47,8 +47,7 @@ module ULOL
                 with_unlocked(group) do
                   @visibility_controller.set_cell_space_render_visible(
                     group,
-                    edit_mode_visible_cell_space?(cell_space),
-                    @validation_focus_controller.visibility_snapshot(persistent_id)
+                    edit_mode_visible_cell_space?(cell_space)
                   )
                 end
               end
@@ -102,8 +101,7 @@ module ULOL
                 with_unlocked(group) do
                   @visibility_controller.set_cell_space_render_visible(
                     group,
-                    edit_mode_visible_cell_space?(cell_space, include_validation: !ignore_validation),
-                    @visibility_controller.edit_mode_visibility_snapshot(group)
+                    edit_mode_visible_cell_space?(cell_space, include_validation: !ignore_validation)
                   )
                 end
               end
@@ -115,12 +113,12 @@ module ULOL
             false
           end
 
-          def apply_all_edit_mode_cell_space_visibility
+          def apply_all_edit_mode_cell_space_visibility(restore_snapshots: true)
             with_visibility_update_operation do
               each_valid_cell_space_group do |_cell_space, group|
                 snapshot = @visibility_controller.edit_mode_visibility_snapshot(group)
                 with_unlocked(group) do
-                  if snapshot
+                  if restore_snapshots && snapshot
                     @visibility_controller.restore_cell_space_visibility(group, snapshot)
                   else
                     @visibility_controller.set_cell_space_render_visible(group, true)
@@ -156,7 +154,7 @@ module ULOL
           end
 
           def normalize_visibility_for_non_edit_mode
-            apply_all_edit_mode_cell_space_visibility
+            apply_all_edit_mode_cell_space_visibility(restore_snapshots: false)
             apply_geometry_visibility
             @invalidate_overlay.call
             true
@@ -233,7 +231,7 @@ module ULOL
                        end
             @visibility_controller.remember_edit_mode_visibility(group, snapshot: snapshot)
           rescue StandardError
-            nil
+            false
           end
 
           def validation_focus_active?

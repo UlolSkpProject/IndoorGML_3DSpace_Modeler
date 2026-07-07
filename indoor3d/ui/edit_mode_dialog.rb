@@ -18,6 +18,7 @@ module ULOL
           @dialog = nil
           @dialog_height = INITIAL_DIALOG_HEIGHT
           @suppress_close_callback = false
+          @visibility_filter_request_id = 0
         end
 
         def show
@@ -91,7 +92,11 @@ module ULOL
           end
           dialog.add_action_callback('setEditModeVisibilityFilter') do |_context, selected_storeys_json, cell_types_json|
             IndoorCore::Logger.puts '[IndoorGML] EditModeDialog#setEditModeVisibilityFilter'
+            @visibility_filter_request_id += 1
+            request_id = @visibility_filter_request_id
             UI.start_timer(0, false) do
+              next unless request_id == @visibility_filter_request_id
+
               @indoor_model.set_edit_mode_visibility_filter(selected_storeys_json, cell_types_json)
             end
           end

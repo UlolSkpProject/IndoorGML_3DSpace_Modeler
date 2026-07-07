@@ -188,10 +188,12 @@ module ULOL
         end
 
         def set_visibility_filter(storeys:, cell_types:)
-          visibility_controller.set_filter(
+          changed = visibility_controller.set_filter(
             storeys: normalize_storey_filter(storeys),
             cell_types: normalize_cell_type_filter(cell_types)
           )
+          return true unless changed
+
           invalidate_overlay_transition_points
           apply_edit_mode_visibility_filter
           selection_changed
