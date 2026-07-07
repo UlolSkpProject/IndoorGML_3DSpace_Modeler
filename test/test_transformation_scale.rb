@@ -55,6 +55,40 @@ module ULOL
   module Indoor3DGmlModeler
     module Utils
       class TransformationScaleTest < Minitest::Test
+        def test_identity_transform_is_not_scaled
+          transformation = Geom::Transformation.new
+
+          refute Transformation.scaled?(transformation)
+        end
+
+        def test_mirror_transform_is_scaled
+          transformation = Geom::Transformation.new(
+            [
+              -1.0, 0.0, 0.0, 0.0,
+              0.0, 1.0, 0.0, 0.0,
+              0.0, 0.0, 1.0, 0.0,
+              0.0, 0.0, 0.0, 1.0
+            ]
+          )
+
+          assert Transformation.scaled?(transformation)
+        end
+
+        def test_unit_length_shear_transform_is_scaled
+          shear = 0.6
+          normalized_y = ::Math.sqrt(1.0 - (shear * shear))
+          transformation = Geom::Transformation.new(
+            [
+              1.0, 0.0, 0.0, 0.0,
+              shear, normalized_y, 0.0, 0.0,
+              0.0, 0.0, 1.0, 0.0,
+              0.0, 0.0, 0.0, 1.0
+            ]
+          )
+
+          assert Transformation.scaled?(transformation)
+        end
+
         def test_unscaled_values_preserve_origin_and_normalize_axes
           values = [
             2.0, 0.0, 0.0, 0.0,
@@ -71,6 +105,30 @@ module ULOL
             0.0, 0.0, 1.0, 0.0,
             10.0, 20.0, 30.0, 1.0
           ], normalized
+        end
+
+        def test_unscaled_values_orthogonalize_unit_length_shear
+          shear = 0.6
+          normalized_y = ::Math.sqrt(1.0 - (shear * shear))
+          values = [
+            1.0, 0.0, 0.0, 0.0,
+            shear, normalized_y, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            10.0, 20.0, 30.0, 1.0
+          ]
+
+          normalized = Transformation.unscaled_values(values)
+
+          assert_in_delta 1.0, normalized[0], 0.000001
+          assert_in_delta 0.0, normalized[1], 0.000001
+          assert_in_delta 0.0, normalized[2], 0.000001
+          assert_in_delta 0.0, normalized[4], 0.000001
+          assert_in_delta 1.0, normalized[5], 0.000001
+          assert_in_delta 0.0, normalized[6], 0.000001
+          assert_in_delta 0.0, normalized[8], 0.000001
+          assert_in_delta 0.0, normalized[9], 0.000001
+          assert_in_delta 1.0, normalized[10], 0.000001
+          assert_equal [10.0, 20.0, 30.0, 1.0], normalized[12, 4]
         end
 
         def test_scale_bake_transform_moves_scale_into_local_geometry_space

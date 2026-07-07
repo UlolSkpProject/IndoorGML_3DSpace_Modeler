@@ -2,6 +2,12 @@
 
 require 'minitest/autorun'
 
+class Numeric
+  def mm
+    self
+  end unless method_defined?(:mm)
+end
+
 module Sketchup
   def self.active_model
     nil
@@ -23,6 +29,7 @@ module ULOL
   end
 end
 
+require_relative '../indoor3d/application/indoor_model/scene_groups'
 require_relative '../indoor3d/application/indoor_model/observer_routing'
 require_relative '../indoor3d/application/indoor_model/runtime_support'
 require_relative '../indoor3d/application/indoor_model/feature_lifecycle'
@@ -121,6 +128,45 @@ module ULOL
           end
         end
 
+        def test_scaled_room_cell_space_is_recentered_after_scale_bake
+          with_transformation_scale_stubs do
+            model = FakeLifecycleModel.new(fixed_height_offset: 1000)
+            group = FakeScaledCellGroup.new(model.calls)
+            cell_space = FakeCellSpace.new(group)
+
+            assert_equal true, model.run_transform_changed(cell_space)
+
+            assert_equal [
+              [:operation, 'IndoorGML Normalize CellSpace Scale'],
+              :sync,
+              :make_unique,
+              [:set_transform, :unscaled],
+              [:transform_entities, :bake, [:face]],
+              :recenter,
+              :sync,
+              :dirty,
+              :snapshot
+            ], model.calls
+          end
+        end
+
+        def test_cell_space_scale_bake_failure_does_not_dirty_or_snapshot
+          with_transformation_scale_stubs(unscaled: nil, bake: nil) do
+            model = FakeLifecycleModel.new
+            group = FakeScaledCellGroup.new(model.calls)
+            cell_space = FakeCellSpace.new(group)
+
+            assert_equal false, model.run_transform_changed(cell_space)
+
+            assert_equal [
+              [:operation, 'IndoorGML Normalize CellSpace Scale'],
+              :sync,
+              :make_unique
+            ], model.calls
+            assert_equal :scaled, group.transformation
+          end
+        end
+
         def test_scaled_primal_transform_is_rejected_with_unscaled_fallback
           with_transformation_scale_stubs do
             model = FakeSpaceFeatureScaleModel.new
@@ -139,12 +185,33 @@ module ULOL
           end
         end
 
-        def with_transformation_scale_stubs
+        def test_attach_space_features_observer_normalizes_scaled_primal_before_snapshot
+          with_transformation_scale_stubs do
+            model = FakeSpaceFeatureAttachModel.new
+            entity = FakeObservedSpaceFeatureGroup.new(model.calls)
+
+            model.attach(entity)
+
+            assert_equal [
+              [:track, 'IndoorGML_PrimalSpaceFeatures'],
+              [:operation, 'IndoorGML Reject Primal Scale', true],
+              [:guard, :@constraining_space_features],
+              [:set_transform, :unscaled],
+              :invalidate,
+              :snapshot,
+              :snapshot,
+              :add_observer
+            ], model.calls
+            assert_equal :unscaled, entity.transformation
+          end
+        end
+
+        def with_transformation_scale_stubs(unscaled: :unscaled, bake: :bake)
           transformation = ULOL::Indoor3DGmlModeler::Utils::Transformation
           originals = capture_transformation_methods(transformation, :scaled?, :unscaled, :scale_bake_transform)
           transformation.define_singleton_method(:scaled?) { |value| value == :scaled }
-          transformation.define_singleton_method(:unscaled) { |value| value == :scaled ? :unscaled : nil }
-          transformation.define_singleton_method(:scale_bake_transform) { |value| value == :scaled ? :bake : nil }
+          transformation.define_singleton_method(:unscaled) { |value| value == :scaled ? unscaled : nil }
+          transformation.define_singleton_method(:scale_bake_transform) { |value| value == :scaled ? bake : nil }
           yield
         ensure
           restore_transformation_methods(transformation, originals)
@@ -236,10 +303,11 @@ module ULOL
 
           attr_reader :calls
 
-          def initialize(replay_pending: false)
+          def initialize(replay_pending: false, fixed_height_offset: nil)
             @transaction_replay_pending = replay_pending
             @syncing = false
             @erasing = false
+            @fixed_height_offset = fixed_height_offset
             @calls = []
           end
 
@@ -284,6 +352,14 @@ module ULOL
             @calls << [:set_transform, transformation]
             group.transformation = transformation
           end
+
+          def fixed_state_height_offset(_cell_space)
+            @fixed_height_offset
+          end
+
+          def recenter_cell_space_origin(_cell_space)
+            @calls << :recenter
+          end
         end
 
         class FakeSpaceFeatureScaleModel
@@ -308,6 +384,54 @@ module ULOL
 
           def with_transparent_space_features_operation(name)
             @calls << [:operation, name]
+            yield
+          end
+
+          def with_guard_flag(flag)
+            @calls << [:guard, flag]
+            yield
+          end
+
+          def set_group_transformation(group, transformation)
+            @calls << [:set_transform, transformation]
+            group.transformation = transformation
+          end
+
+          def invalidate_overlay_transition_points
+            @calls << :invalidate
+          end
+
+          def remember_space_features_change_snapshot(_entity)
+            @calls << :snapshot
+          end
+        end
+
+        class FakeSpaceFeatureAttachModel
+          include IndoorModel::SceneGroups
+          include IndoorModel::ObserverRouting
+
+          attr_reader :calls
+
+          def initialize
+            @calls = []
+            @scene_group_guard = FakeSceneGroupGuard.new(calls)
+            @space_features_observed_ids = {}
+            @space_features_observer = Object.new
+            @space_features_scale_revert_transforms = {}
+          end
+
+          def attach(entity)
+            send(:attach_space_features_observer, entity, 'IndoorGML_PrimalSpaceFeatures', normalize: false)
+          end
+
+          private
+
+          def entity_observer_key(entity)
+            entity.object_id
+          end
+
+          def with_indoor_model_operation(name, transparent: false)
+            @calls << [:operation, name, transparent]
             yield
           end
 
@@ -374,6 +498,40 @@ module ULOL
 
           def entityID
             51
+          end
+        end
+
+        class FakeObservedSpaceFeatureGroup
+          attr_accessor :transformation
+          attr_reader :name
+
+          def initialize(calls)
+            @calls = calls
+            @transformation = :scaled
+            @name = 'IndoorGML_PrimalSpaceFeatures'
+          end
+
+          def valid?
+            true
+          end
+
+          def entityID
+            52
+          end
+
+          def add_observer(_observer)
+            @calls << :add_observer
+            true
+          end
+        end
+
+        class FakeSceneGroupGuard
+          def initialize(calls)
+            @calls = calls
+          end
+
+          def track(_group, expected_name)
+            @calls << [:track, expected_name]
           end
         end
 

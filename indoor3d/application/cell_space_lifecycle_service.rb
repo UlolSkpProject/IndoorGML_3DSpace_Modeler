@@ -133,7 +133,8 @@ module ULOL
         end
 
         def register_created(cell_space, state, synchronize_adjacency: true, apply_lock_policy: true)
-          @register_cell_space.call(cell_space)
+          raise ArgumentError, 'CellSpace scale normalization failed' if @register_cell_space.call(cell_space) == false
+
           @register_state.call(state)
           @write_attributes.call(cell_space)
           @track_cell_space_entity.call(cell_space.sketchup_group)

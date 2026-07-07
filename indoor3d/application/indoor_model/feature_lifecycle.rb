@@ -298,10 +298,13 @@ module ULOL
           end
 
           def register_cell_space(cell_space)
+            return false unless ensure_cell_space_transform_scale_identity(cell_space)
+
             @feature_registry.add_cell_space(cell_space)
             attach_cell_space_observer(cell_space.sketchup_group)
             @scene_group_guard.track(cell_space.sketchup_group, cell_space.sketchup_group.name)
             remember_cell_space_change_snapshot(cell_space.sketchup_group)
+            true
           end
 
           def duplicate_cell_space_identity?(entity)
@@ -458,8 +461,8 @@ module ULOL
           def classify_cell_space_change(entity)
             previous_snapshot = cell_space_change_snapshot_for(entity)
             current_snapshot = build_cell_space_change_snapshot(entity)
-            remember_cell_space_change_snapshot(entity, current_snapshot)
             if previous_snapshot.nil?
+              remember_cell_space_change_snapshot(entity, current_snapshot)
               log_cell_space_change(entity, :initial_snapshot, [], previous_snapshot, current_snapshot)
               return nil
             end
@@ -480,7 +483,8 @@ module ULOL
           end
 
           def handle_cell_space_transform_changed(cell_space)
-            normalize_cell_space_transform_scale(cell_space)
+            return false unless ensure_cell_space_transform_scale_identity(cell_space)
+
             sync { mark_cell_space_dirty(cell_space) }
             remember_cell_space_change_snapshot(cell_space.sketchup_group)
             true
@@ -531,18 +535,32 @@ module ULOL
             false
           end
 
+          def ensure_cell_space_transform_scale_identity(cell_space)
+            entity = cell_space&.sketchup_group
+            return false unless entity&.valid?
+            return true unless entity.respond_to?(:transformation) && entity.respond_to?(:definition)
+            return true unless Utils::Transformation.scaled?(entity.transformation)
+
+            normalize_cell_space_transform_scale(cell_space)
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] CellSpace scale invariant check failed: #{e.class}: #{e.message}"
+            false
+          end
+
           def normalize_cell_space_transform_scale(cell_space)
             entity = cell_space&.sketchup_group
             return false unless entity&.valid?
             return false unless entity.respond_to?(:transformation) && entity.respond_to?(:definition)
             return false unless Utils::Transformation.scaled?(entity.transformation)
 
+            baked = false
             with_transparent_cell_space_operation('IndoorGML Normalize CellSpace Scale') do
               sync do
-                bake_cell_space_transform_scale(entity)
+                baked = bake_cell_space_transform_scale(entity)
+                recenter_cell_space_origin(cell_space) if baked && fixed_state_height_offset(cell_space)
               end
             end
-            true
+            baked
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] CellSpace scale normalize failed: #{e.class}: #{e.message}"
             false

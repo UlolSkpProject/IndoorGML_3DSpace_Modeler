@@ -108,6 +108,32 @@ module ULOL
           refute_includes calls, :ensure_space_features_groups
         end
 
+        def test_register_failure_aborts_before_state_persistence
+          calls = []
+          callbacks = lifecycle_callbacks(calls).merge(
+            register_cell_space: proc { |_cell_space| calls << :register_cell_space; false }
+          )
+          service = build_lifecycle_service(callbacks)
+
+          error = assert_raises(ArgumentError) { service.create_from_group(Object.new, cell_type: :input_type, category_code: 'Room') }
+
+          assert_equal 'CellSpace scale normalization failed', error.message
+          assert_equal [
+            :converted_group?,
+            :resolve_cell_space_type_and_category,
+            :prepare_cell_space_source_group!,
+            :ensure_space_features_groups,
+            :place_cell_group,
+            :default_storey_name,
+            :fixed_state_height_offset,
+            :recenter_cell_space_geometry,
+            :name_cell_space_entity,
+            :apply_cell_space_material,
+            :create_duality_state,
+            :register_cell_space
+          ], calls
+        end
+
         def test_change_type_runs_existing_update_sequence
           calls = []
           cell_space = fake_mutable_cell_space(calls: calls)

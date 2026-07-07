@@ -134,6 +134,8 @@ module ULOL
             observer_key = entity_observer_key(group)
             @scene_group_guard.track(group, expected_name)
             ensure_space_features_name(group, expected_name) if normalize
+            return unless ensure_space_features_scale_identity(group)
+
             remember_space_features_change_snapshot(group)
             return if @space_features_observed_ids[observer_key]
 
@@ -193,6 +195,17 @@ module ULOL
             true
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] SpaceFeatures name update skipped: #{e.class}: #{e.message}"
+            false
+          end
+
+          def ensure_space_features_scale_identity(group)
+            return true unless group&.valid?
+            return true unless group.respond_to?(:transformation)
+            return true unless Utils::Transformation.scaled?(group.transformation)
+
+            reject_scaled_space_features_transform(group)
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] SpaceFeatures scale invariant check failed: #{e.class}: #{e.message}"
             false
           end
 
