@@ -5,6 +5,7 @@ module ULOL
     module Definition
       INDOOR_GML_VERSION = '1.0.3'
       INDOOR_GML_SCHEMA_VERSION = '1.0'
+      LOGGING_ENABLED = true
     end
   end
 end
