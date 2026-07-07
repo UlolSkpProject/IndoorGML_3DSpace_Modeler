@@ -207,7 +207,7 @@ module ULOL
                 if duplicate_cell_space_identity?(entity)
                   next if make_cell_space_copy_independent(entity)
 
-                  IndoorCore::Logger.puts '[IndoorGML] CellSpace copy independence failed. Falling back to normal add handling.'
+                  next
                 end
 
                 cell_space = find_cell_space_for_entity(entity)
