@@ -16,14 +16,16 @@ Create CellSpace 실행 전에 선택된 solid group의 geometry를 검사하고
 4. `convert_single_group_to_cell_space`에서 CellSpace group으로 배치하고 runtime feature를 생성한다.
 5. edit mode dialog에서도 최종적으로 같은 변환 메서드를 사용한다.
 
-## 변경할 Create CellSpace 흐름
+## Bulk 변환 정책
 
-1. 선택된 group을 root context로 옮긴다.
-2. disconnected shell 여부를 검사한다.
-3. disconnected shell이 있으면 CellSpace로 변환하지 않고 실패 목록에 넣는다.
+1. 선택된 group을 변환 job 목록으로 확장한다.
+2. 각 job에 대해 disconnected shell, target CellSpace type, source validity를 사전 검사한다.
+3. 조건을 만족하지 못한 job은 변환하지 않고 실패 목록에 넣는다.
 4. 변환 가능한 single shell solid에 대해 reversed face를 검사하고 보정한다.
 5. 보정된 solid만 CellSpace로 변환한다.
-6. batch 변환이 끝나면 실패한 solid 목록을 사용자에게 보여준다.
+6. batch 변환이 끝나면 성공 개수와 실패한 solid 목록을 사용자에게 보여준다.
+
+이 정책은 partial success이다. 하나의 job이 조건을 만족하지 못해도 전체 batch를 rollback하지 않으며, 성공 가능한 job은 같은 transaction 안에서 commit한다. 단, root context 전환, operation start/commit, adjacency 동기화처럼 transaction 자체를 신뢰할 수 없게 만드는 시스템 실패는 기존처럼 abort 및 runtime restore 대상으로 본다.
 
 ## Disconnected Solid 검사
 
@@ -62,6 +64,7 @@ Create CellSpace 실행 전에 선택된 solid group의 geometry를 검사하고
 - disconnected shell group은 CellSpace 변환을 하지 않는다.
 - batch 변환 중 실패 목록에 추가한다.
 - 변환 완료 후 message box에 실패 group 이름 또는 entity id를 보여준다.
+- 실패한 job이 있어도 성공한 job은 CellSpace로 유지한다.
 
 ## 구현 후보 위치
 

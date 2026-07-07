@@ -13,7 +13,7 @@ It suppresses routing when any of these conditions is active:
 | Guard | Owner | Purpose | Restoration |
 |---|---|---|---|
 | `@syncing` | `RuntimeSupport#sync`, `with_runtime_observer_suppression` | Suppress callbacks caused by extension-owned runtime and attribute writes. | `with_guard_flag` ensure block |
-| `@bulk_cell_space_conversion` | `FeatureLifecycle#with_bulk_cell_space_conversion` | Suppress per-entity add/remove routing while bulk conversion applies its own runtime snapshot and restore flow. | `with_guard_flag` ensure block |
+| `@bulk_cell_space_conversion` | `FeatureLifecycle#with_bulk_cell_space_conversion` | Suppress per-entity add/remove routing while bulk conversion commits successful jobs, reports failed jobs, and uses runtime snapshot restore only for transaction-level failures or zero-success cleanup. | `with_guard_flag` ensure block |
 | `@transaction_reconciliation` | `RuntimeSupport#reconcile_runtime_after_transaction` | Suppress observer replay while undo/redo reconciliation rebuilds runtime from current model state. | `with_guard_flag` ensure block |
 | `transaction_replay_pending?` | `Indoor3DGmlModelObserver#handle_transaction_replayed` | Suppress callbacks between SketchUp undo/redo notification and the deferred reconciliation timer. | `finish_transaction_replay` / `clear_transaction_replay!` |
 

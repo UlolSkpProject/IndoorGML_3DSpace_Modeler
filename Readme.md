@@ -96,6 +96,7 @@ SketchUp에서 CellSpace로 변환할 공간을 solid group 또는 component ins
 ![Create CellSpace 결과](docs/images/step2_create_cellspace.png)
 
 변환된 객체는 `IndoorGML_PrimalSpaceFeatures` group 아래로 이동되며, 대응되는 `State`가 1:1로 생성됩니다. 선택 객체가 이미 CellSpace이면 재변환하지 않습니다.
+여러 group을 한 번에 선택한 경우 변환 가능한 항목만 CellSpace로 생성하고, 조건을 만족하지 못한 항목은 결과 메시지의 `Failed` 목록에 group 이름 또는 entity id와 함께 표시합니다.
 
 ### 3. Edit Mode 진입
 
@@ -303,7 +304,7 @@ GML 좌표:
 
 최근 안정화 작업:
 
-- Bulk 변환을 하나의 동기 transaction으로 처리
+- Bulk 변환을 하나의 동기 transaction으로 처리하되, 개별 항목 실패는 전체 rollback이 아니라 실패 목록으로 보고
 - Undo/Redo 이후 runtime reconciliation 수행
 - Validation 실행별 isolated workspace 사용
 - val3dity process 종료를 stdout EOF가 아닌 process handle/exit code로 판정

@@ -187,10 +187,65 @@ module ULOL
           assert_equal 1, result.metrics[:pair_comparison_count]
         end
 
-        def test_bulk_service_aborts_once_and_restores_runtime_when_apply_fails
+        def test_bulk_service_skips_jobs_without_cell_type_and_converts_remaining_jobs
           calls = []
           model = FakeOperationModel.new(calls: calls)
-          restored = []
+          missing_target = FakeGroup.new(manifold: true, name: 'Missing Target')
+          valid_target = FakeGroup.new(manifold: true, name: 'Valid Target')
+          service = bulk_service(
+            model: model,
+            fallback_target: [nil, nil],
+            jobs: [
+              job_for(missing_target),
+              job_for(valid_target, target: [:room, 'Room'])
+            ],
+            converter: proc do |source, cell_type, category_code|
+              calls << [:convert, source.name, cell_type, category_code]
+            end,
+            synchronize_all: proc { calls << :synchronize_all; {} },
+            apply_lock_policy: proc { calls << :apply_lock_policy },
+            clear_dirty_topology: proc { calls << :clear_dirty_topology },
+            restore_active_path: proc { calls << :restore_active_path }
+          )
+
+          result = service.call
+
+          assert_equal 1, result.converted_count
+          assert_equal [{ group: 'Missing Target', reason: 'CellSpace type is required' }], result.errors
+          assert_equal [[:start, 'Bulk Convert', true], [:commit]], model.operations
+          assert_equal [
+            :start_operation,
+            [:convert, 'Valid Target', :room, 'Room'],
+            :synchronize_all,
+            :apply_lock_policy,
+            :clear_dirty_topology,
+            :commit_operation,
+            :restore_active_path
+          ], calls
+        end
+
+        def test_bulk_service_reports_preflight_errors_without_starting_operation
+          calls = []
+          model = FakeOperationModel.new(calls: calls)
+          missing_target = FakeGroup.new(manifold: true, name: 'Missing Target')
+          service = bulk_service(
+            model: model,
+            fallback_target: [nil, nil],
+            jobs: [job_for(missing_target)],
+            converter: proc { |_source, _cell_type, _category_code| calls << :convert }
+          )
+
+          result = service.call
+
+          assert_equal 0, result.converted_count
+          assert_equal [{ group: 'Missing Target', reason: 'CellSpace type is required' }], result.errors
+          assert_empty model.operations
+          assert_empty calls
+        end
+
+        def test_bulk_service_converts_successful_jobs_and_reports_apply_failures
+          calls = []
+          model = FakeOperationModel.new(calls: calls)
           service = bulk_service(
             model: model,
             jobs: [job_for(FakeGroup.new(manifold: true)), job_for(FakeGroup.new(manifold: true))],
@@ -198,21 +253,26 @@ module ULOL
               calls << (calls.include?(:convert_first) ? :convert_second : :convert_first)
               raise 'creation failed' if calls.include?(:convert_second)
             end,
-            runtime_restore: proc { |snapshot| calls << :runtime_restore; restored << snapshot },
+            synchronize_all: proc { calls << :synchronize_all; { pair_comparison_count: 1, total_duration: 0.01 } },
+            apply_lock_policy: proc { calls << :apply_lock_policy },
+            clear_dirty_topology: proc { calls << :clear_dirty_topology },
+            runtime_restore: proc { |_snapshot| calls << :runtime_restore },
             restore_active_path: proc { calls << :restore_active_path }
           )
 
-          error = assert_raises(RuntimeError) { service.call }
+          result = service.call
 
-          assert_equal 'creation failed', error.message
-          assert_equal [[:start, 'Bulk Convert', true], [:abort]], model.operations
-          assert_equal [:runtime_snapshot], restored
+          assert_equal 1, result.converted_count
+          assert_equal [{ group: 'source', reason: 'creation failed' }], result.errors
+          assert_equal [[:start, 'Bulk Convert', true], [:commit]], model.operations
           assert_equal [
             :start_operation,
             :convert_first,
             :convert_second,
-            :abort_operation,
-            :runtime_restore,
+            :synchronize_all,
+            :apply_lock_policy,
+            :clear_dirty_topology,
+            :commit_operation,
             :restore_active_path
           ], calls
         end
@@ -246,7 +306,7 @@ module ULOL
           ], calls
         end
 
-        def test_bulk_service_keeps_original_error_when_active_path_restore_also_fails
+        def test_bulk_service_returns_apply_error_when_active_path_restore_also_fails
           calls = []
           model = FakeOperationModel.new(calls: calls)
           restore_calls = 0
@@ -260,16 +320,17 @@ module ULOL
             logger: logger
           )
 
-          error = assert_raises(RuntimeError) { service.call }
+          result = service.call
 
-          assert_equal 'creation failed', error.message
+          assert_equal 0, result.converted_count
+          assert_equal [{ group: 'source', reason: 'creation failed' }], result.errors
           assert_equal 1, restore_calls
           assert_equal [[:start, 'Bulk Convert', true], [:abort]], model.operations
           assert_equal [:start_operation, :abort_operation, :runtime_restore, :restore_active_path], calls
           assert_includes logger.messages.join("\n"), 'Active path restore failed during CellSpace conversion rollback'
         end
 
-        def test_bulk_service_keeps_original_error_when_abort_fails
+        def test_bulk_service_returns_apply_error_when_abort_fails
           calls = []
           model = FakeOperationModel.new(calls: calls, abort_error: RuntimeError.new('abort failed'))
           logger = FakeLogger.new
@@ -282,15 +343,16 @@ module ULOL
             logger: logger
           )
 
-          error = assert_raises(RuntimeError) { service.call }
+          result = service.call
 
-          assert_equal 'creation failed', error.message
+          assert_equal 0, result.converted_count
+          assert_equal [{ group: 'source', reason: 'creation failed' }], result.errors
           assert_equal [[:start, 'Bulk Convert', true], [:abort]], model.operations
           assert_equal [:start_operation, :abort_operation, :runtime_restore, :restore_active_path], calls
           assert_includes logger.messages.join("\n"), 'CellSpace conversion abort failed: RuntimeError: abort failed'
         end
 
-        def test_bulk_service_keeps_original_error_when_runtime_restore_fails
+        def test_bulk_service_returns_apply_error_when_runtime_restore_fails
           calls = []
           model = FakeOperationModel.new(calls: calls)
           logger = FakeLogger.new
@@ -303,9 +365,10 @@ module ULOL
             logger: logger
           )
 
-          error = assert_raises(RuntimeError) { service.call }
+          result = service.call
 
-          assert_equal 'creation failed', error.message
+          assert_equal 0, result.converted_count
+          assert_equal [{ group: 'source', reason: 'creation failed' }], result.errors
           assert_equal [[:start, 'Bulk Convert', true], [:abort]], model.operations
           assert_equal [:start_operation, :abort_operation, :runtime_restore, :restore_active_path], calls
           assert_includes logger.messages.join("\n"), 'CellSpace conversion runtime restore failed: RuntimeError: runtime restore failed'
@@ -471,11 +534,11 @@ module ULOL
           source[/def #{method_name}.*?^\s*def #{next_method_name}/m].sub(/^\s*def #{next_method_name}.*/m, '')
         end
 
-        def bulk_service(model:, jobs:, converter: proc { |_source, _cell_type, _category_code| true }, synchronize_all: proc { {} }, apply_lock_policy: proc {}, runtime_restore: proc { |_snapshot| }, restore_active_path: proc {}, activate_root_context: proc { true }, clear_dirty_topology: proc {}, logger: FakeLogger.new)
+        def bulk_service(model:, jobs:, fallback_target: [:general, nil], converter: proc { |_source, _cell_type, _category_code| true }, synchronize_all: proc { {} }, apply_lock_policy: proc {}, runtime_restore: proc { |_snapshot| }, restore_active_path: proc {}, activate_root_context: proc { true }, clear_dirty_topology: proc {}, logger: FakeLogger.new)
           BulkCellSpaceConversionService.new(
             model: model,
             jobs: jobs,
-            fallback_target: [:general, nil],
+            fallback_target: fallback_target,
             target_entities: FakeTargetEntities.new,
             converter: converter,
             synchronize_all: synchronize_all,
