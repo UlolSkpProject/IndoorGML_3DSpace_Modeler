@@ -234,55 +234,80 @@ module ULOL
         def call
           started_at = monotonic_time
           metrics = {}
-          plan = timed(metrics, :job_preparation) { prepare_plan }
-          timed(metrics, :geometry_validation) { validate_plan_geometry(plan) }
-          timed(metrics, :adjacency_candidate_generation) { validate_plan_targets(plan) }
-          converted_count, apply_metrics = timed(metrics, :cell_space_entity_apply) { apply_plan(plan) }
+          errors = []
+          plan, preparation_errors = timed(metrics, :job_preparation) { prepare_plan }
+          errors.concat(preparation_errors)
+          plan, geometry_errors = timed(metrics, :geometry_validation) { validate_plan_geometry(plan) }
+          errors.concat(geometry_errors)
+          plan, target_errors = timed(metrics, :adjacency_candidate_generation) { validate_plan_targets(plan) }
+          errors.concat(target_errors)
+          converted_count = 0
+          apply_metrics = {}
+          unless plan.empty?
+            converted_count, apply_errors, apply_metrics = timed(metrics, :cell_space_entity_apply) { apply_plan(plan) }
+            errors.concat(apply_errors)
+          end
           metrics.merge!(apply_metrics)
           metrics[:total_duration] = elapsed_since(started_at)
-          Result.new(converted_count: converted_count, errors: [], metrics: metrics)
+          Result.new(converted_count: converted_count, errors: errors, metrics: metrics)
         end
 
         private
 
         def prepare_plan
-          raise ArgumentError, 'No valid solid groups were available for conversion' if @jobs.empty?
-
-          @jobs.each_with_index.map do |job, index|
+          errors = []
+          plan = @jobs.each_with_index.filter_map do |job, index|
             source = job[:source]
             unless source&.respond_to?(:valid?) && source.valid?
-              raise ArgumentError, "Conversion source is no longer valid: #{@labeler.call(source)}"
+              errors << conversion_error(source, 'Conversion source is no longer valid')
+              next
             end
 
             job.merge(job_id: "cell_space_conversion_#{index}")
           end.freeze
+          errors << conversion_error(nil, 'No valid solid groups were available for conversion') if plan.empty? && errors.empty?
+          [plan, errors]
         end
 
         def validate_plan_geometry(plan)
-          return unless defined?(Utils::Geometry) && Utils::Geometry.respond_to?(:validate_cell_space_source_group)
+          return [plan, []] unless defined?(Utils::Geometry) && Utils::Geometry.respond_to?(:validate_cell_space_source_group)
 
-          plan.each do |job|
+          errors = []
+          valid_plan = plan.filter_map do |job|
             entities = job[:source]&.definition&.entities if job[:source]&.respond_to?(:definition)
-            next unless entities&.respond_to?(:grep)
+            next job unless entities&.respond_to?(:grep)
 
             validation = Utils::Geometry.validate_cell_space_source_group(job[:source])
-            next if validation[:valid]
+            next job if validation[:valid]
 
-            raise ArgumentError, validation[:reason] || "Invalid CellSpace source geometry: #{@labeler.call(job[:source])}"
+            errors << conversion_error(
+              job[:source],
+              validation[:reason] || 'Invalid CellSpace source geometry'
+            )
+            nil
           end
+          [valid_plan.freeze, errors]
         end
 
         def validate_plan_targets(plan)
-          plan.each do |job|
+          errors = []
+          valid_plan = plan.filter_map do |job|
             target_cell_type, = job[:target] || @fallback_target
-            raise ArgumentError, "CellSpace type is required for #{@labeler.call(job[:source])}" if target_cell_type.nil?
+            if target_cell_type.nil?
+              errors << conversion_error(job[:source], 'CellSpace type is required')
+              next
+            end
+
+            job
           end
+          [valid_plan.freeze, errors]
         end
 
         def apply_plan(plan)
           snapshot = @runtime_snapshot.call
           operation_started = false
           converted_count = 0
+          errors = []
 
           @apply_guards.call do
             begin
@@ -298,8 +323,28 @@ module ULOL
                 labeler: @labeler
               )
               plan.each do |job|
-                executor.execute!(job, fallback_target: @fallback_target)
-                converted_count += 1
+                result = executor.execute(job, fallback_target: @fallback_target)
+                if result.converted?
+                  converted_count += 1
+                else
+                  errors.concat(result.errors)
+                end
+              end
+
+              if converted_count.zero?
+                safely_abort_operation if operation_started
+                operation_started = false
+                safely_restore_runtime(snapshot)
+                safely_restore_active_path(success: false)
+                next [
+                  converted_count,
+                  errors,
+                  {
+                    pair_comparison_count: 0,
+                    adjacency_detailed_computation: 0.0,
+                    transition_apply: 0.0
+                  }
+                ]
               end
 
               adjacency_metrics = @synchronize_all.call || {}
@@ -312,6 +357,7 @@ module ULOL
               safely_restore_active_path(success: true)
               [
                 converted_count,
+                errors,
                 {
                   pair_comparison_count: adjacency_metrics[:pair_comparison_count].to_i,
                   adjacency_detailed_computation: adjacency_metrics[:adjacency_detailed_computation].to_f,
@@ -325,6 +371,19 @@ module ULOL
               raise
             end
           end
+        end
+
+        def conversion_error(source, reason)
+          {
+            group: safe_group_label(source),
+            reason: reason.to_s
+          }
+        end
+
+        def safe_group_label(source)
+          @labeler.call(source)
+        rescue StandardError
+          source.respond_to?(:to_s) ? source.to_s : 'unknown group'
         end
 
         def activate_root_context!
