@@ -480,6 +480,7 @@ module ULOL
           end
 
           def handle_cell_space_transform_changed(cell_space)
+            normalize_cell_space_transform_scale(cell_space)
             sync { mark_cell_space_dirty(cell_space) }
             remember_cell_space_change_snapshot(cell_space.sketchup_group)
             true
@@ -527,6 +528,56 @@ module ULOL
             IndoorCore::Logger.puts "[IndoorGML] CellSpace change ignored as etc: entity_id=#{cell_space.sketchup_group.entityID} name=#{cell_space.sketchup_group.name}"
             with_transparent_cell_space_operation('IndoorGML CellSpace Etc Change') {}
             remember_cell_space_change_snapshot(cell_space.sketchup_group)
+            false
+          end
+
+          def normalize_cell_space_transform_scale(cell_space)
+            entity = cell_space&.sketchup_group
+            return false unless entity&.valid?
+            return false unless entity.respond_to?(:transformation) && entity.respond_to?(:definition)
+            return false unless Utils::Transformation.scaled?(entity.transformation)
+
+            with_transparent_cell_space_operation('IndoorGML Normalize CellSpace Scale') do
+              sync do
+                bake_cell_space_transform_scale(entity)
+              end
+            end
+            true
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] CellSpace scale normalize failed: #{e.class}: #{e.message}"
+            false
+          end
+
+          def bake_cell_space_transform_scale(entity)
+            return false unless entity&.valid?
+            return false unless entity.definition&.respond_to?(:entities)
+
+            unless ensure_cell_space_entity_unique_for_scale_bake(entity)
+              IndoorCore::Logger.puts "[IndoorGML] CellSpace scale normalize skipped: make_unique failed entity_id=#{entity.entityID}"
+              return false
+            end
+
+            original_transform = entity.transformation
+            unscaled_transform = Utils::Transformation.unscaled(original_transform)
+            bake_transform = Utils::Transformation.scale_bake_transform(original_transform)
+            return false unless unscaled_transform && bake_transform
+
+            set_group_transformation(entity, unscaled_transform)
+            entity.definition.entities.transform_entities(
+              bake_transform,
+              entity.definition.entities.to_a
+            )
+            IndoorCore::Logger.puts "[IndoorGML] CellSpace scale baked into geometry: entity_id=#{entity.entityID}"
+            true
+          end
+
+          def ensure_cell_space_entity_unique_for_scale_bake(entity)
+            return true unless entity.respond_to?(:make_unique)
+
+            entity.make_unique
+            true
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] CellSpace scale bake make_unique failed: #{e.class}: #{e.message}"
             false
           end
 

@@ -148,21 +148,57 @@ module ULOL
 
         def self.scaled?(transformation)
           values = transformation.to_a
-          x_length = axis_length(values, 0)
-          y_length = axis_length(values, 4)
-          z_length = axis_length(values, 8)
+          x_length, y_length, z_length = axis_lengths(values)
 
           !same_float?(x_length, 1.0) || !same_float?(y_length, 1.0) || !same_float?(z_length, 1.0)
         end
 
+        def self.unscaled(transformation)
+          values = unscaled_values(transformation&.to_a)
+          return nil unless values
+
+          Geom::Transformation.new(values)
+        end
+
+        def self.scale_bake_transform(transformation)
+          unscaled_transformation = unscaled(transformation)
+          return nil unless unscaled_transformation
+
+          unscaled_transformation.inverse * transformation
+        end
+
+        def self.unscaled_values(values)
+          return nil unless values.is_a?(Array) && values.length == 16
+
+          normalized = values.map(&:to_f)
+          [0, 4, 8].each do |start_index|
+            length = axis_length(normalized, start_index)
+            return nil if length <= 0.000001
+
+            normalized[start_index] /= length
+            normalized[start_index + 1] /= length
+            normalized[start_index + 2] /= length
+          end
+          normalized
+        end
+
         def self.axis_length(values, start_index)
-          Math.sqrt(
+          ::Math.sqrt(
             (values[start_index]**2) +
             (values[start_index + 1]**2) +
             (values[start_index + 2]**2)
           )
         end
         private_class_method :axis_length
+
+        def self.axis_lengths(values)
+          [
+            axis_length(values, 0),
+            axis_length(values, 4),
+            axis_length(values, 8)
+          ]
+        end
+        private_class_method :axis_lengths
 
         def self.same_float?(value1, value2)
           (value1 - value2).abs <= 0.000001
