@@ -155,10 +155,15 @@ module ULOL
             { cell_space: Object.new, snapshot: snapshot_for('B', adjacent_to: ['A']) }
           ]
 
-          result = service.send(:compute_pair_results, entries, tolerance: 0.001)
+          result = service.send(:compute_pair_results, entries, tolerance: Utils::Geometry::ADJACENCY_TOLERANCE)
 
           assert_equal [[0, 1, :x]], result
           assert_equal [['A', 'B']], seen_arguments
+        end
+
+        def test_adjacency_and_validation_share_topology_tolerance
+          assert_equal Utils::Geometry::TOPOLOGY_TOLERANCE, Utils::Geometry::ADJACENCY_TOLERANCE
+          assert_equal Utils::Geometry::TOPOLOGY_TOLERANCE, Utils::Geometry::VALIDATION_TOLERANCE
         end
 
         private

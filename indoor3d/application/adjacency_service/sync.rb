@@ -46,7 +46,7 @@ module ULOL
             return @last_metrics
           end
 
-          pair_results = compute_pair_results(entries, tolerance: Utils::Geometry::DEFAULT_TOLERANCE)
+          pair_results = compute_pair_results(entries, tolerance: Utils::Geometry::ADJACENCY_TOLERANCE)
           apply_pair_results(
             entries,
             pair_results,

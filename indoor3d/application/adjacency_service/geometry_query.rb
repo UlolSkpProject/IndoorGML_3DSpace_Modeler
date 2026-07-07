@@ -7,7 +7,7 @@ module ULOL
     module IndoorCore
       class AdjacencyService
         module GeometryQuery
-          def self.common_face_waypoint_candidates(entity1, entity2, state1_point: nil, state2_point: nil, transformation1: nil, transformation2: nil, tolerance: Utils::Geometry::DEFAULT_TOLERANCE)
+          def self.common_face_waypoint_candidates(entity1, entity2, state1_point: nil, state2_point: nil, transformation1: nil, transformation2: nil, tolerance: Utils::Geometry::ADJACENCY_TOLERANCE)
             return [] unless entity1&.valid? && entity2&.valid?
 
             bounds1 = transformed_bounds(entity1, transformation1)
