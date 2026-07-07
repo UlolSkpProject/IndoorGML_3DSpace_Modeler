@@ -84,10 +84,10 @@ module ULOL
         end
 
         def log_transaction_replay_callback(model, indoor_model, source:, generation:)
-          diagnostic = indoor_model.respond_to?(:diagnostic_snapshot) ? indoor_model.diagnostic_snapshot : {}
-          IndoorCore::Logger.puts(
+          IndoorCore::Logger.debug do
+            diagnostic = indoor_model.respond_to?(:diagnostic_snapshot) ? indoor_model.diagnostic_snapshot : {}
             "[IndoorGML] transaction replay callback source=#{source} generation=#{generation} replay_pending=#{indoor_model.transaction_replay_pending?} active_path=#{active_path_key(model).inspect} dirty_queue=#{diagnostic[:dirty_topology_count].to_i}"
-          )
+          end
         rescue StandardError
           nil
         end
