@@ -33,7 +33,7 @@ module ULOL
             
             refined_ts = [base_ts.first]
             base_ts.each_cons(2).with_index do |(t_a, t_b), i|
-              bend = bend_factor(points[i-1], points[i], points[i+1]) rescue 0
+              bend = i.zero? ? 0.0 : bend_factor(points[i - 1], points[i], points[i + 1])
               extra = (bend * 3).round.clamp(0, 4)  # 꺾임 클수록 추가 분할
               extra.times do |k|
                 refined_ts << t_a + (t_b - t_a) * (k+1).to_f / (extra+1)
