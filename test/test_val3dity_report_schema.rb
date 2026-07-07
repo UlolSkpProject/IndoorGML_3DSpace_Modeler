@@ -74,6 +74,63 @@ module ULOL
             assert_equal %w[transition_A transition_B], refs[:transitions]
           end
 
+          def test_primitive_error_refs_include_parent_feature_cell
+            report = {
+              'features' => [
+                {
+                  'id' => 'cell_A',
+                  'errors' => [],
+                  'primitives' => [
+                    {
+                      'id' => 'solid_A',
+                      'errors' => [
+                        { 'code' => 203, 'description' => 'primitive shell is invalid' }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+
+            row = Schema.error_item_rows(report).first
+            refs = Schema.report_error_row_refs(row)
+
+            assert_equal ['cell_A'], refs[:cells]
+          end
+
+          def test_final_error_refs_use_kept_overlap_recheck_cells_before_broad_raw_refs
+            report = {
+              'features' => [
+                {
+                  'id' => 'cell_A',
+                  'errors' => [
+                    {
+                      'code' => 701,
+                      'description' => 'overlap cell_A cell_B cell_C cell_D state_A transition_A'
+                    }
+                  ],
+                  'primitives' => []
+                }
+              ],
+              Schema::OVERLAP_RECHECK_REPORT_KEY => [
+                {
+                  'code' => 701,
+                  'cells' => %w[cell_A cell_B],
+                  'tolerated' => false,
+                  'status' => 'kept'
+                }
+              ]
+            }
+
+            refs = Schema.final_error_refs(report)
+            row_refs = Schema.final_error_row_refs(Schema.error_item_rows(report).first, report)
+
+            assert_equal %w[cell_A cell_B], refs[:cells]
+            assert_equal %w[cell_A cell_B], row_refs[:cells]
+            assert_equal ['state_A'], row_refs[:states]
+            assert_equal ['transition_A'], row_refs[:transitions]
+          end
+
           def test_overview_counts_tolerate_nil
             assert_equal 0, Schema.total_count(nil)
             assert_equal 5, Schema.total_count([{ 'total' => 2 }, { 'total' => '3' }])

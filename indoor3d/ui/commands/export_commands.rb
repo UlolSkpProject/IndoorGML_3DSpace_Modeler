@@ -3,6 +3,7 @@
 require 'fileutils'
 require_relative '../../validity/validation_run_workspace'
 require_relative '../../validity/validation_session'
+require_relative '../../validity/val3dity_report_schema'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -287,12 +288,15 @@ module ULOL
 
             refs = { cells: cell_ids, states: state_ids, transitions: transition_ids }
             indoor_model = session.indoor_model
-            focus_cell_ids = validation_focus_cell_ids_for_refs(refs, indoor_model)
-            if focus_cell_ids.empty?
+            row_cell_ids = validation_focus_cell_ids_for_refs(refs, indoor_model)
+            if row_cell_ids.empty?
               indoor_model.set_validation_focus_highlight([], code) if indoor_model.validation_focus_active?
             else
-              indoor_model.begin_validation_focus_editing(focus_cell_ids) unless indoor_model.validation_focus_active?
-              indoor_model.set_validation_focus_highlight(focus_cell_ids, code)
+              unless indoor_model.validation_focus_active?
+                report_cell_ids = validation_report_error_focus_cell_ids(result.report, indoor_model)
+                indoor_model.begin_validation_focus_editing(report_cell_ids)
+              end
+              indoor_model.set_validation_focus_highlight(row_cell_ids, code)
             end
           end
           progress&.on_fix_validation_errors do
@@ -408,24 +412,7 @@ module ULOL
         end
 
         def validation_report_error_refs(report)
-          errors = []
-          Array(report && report['dataset_errors']).each { |error| errors << error }
-          Array(report && report['features']).each do |feature|
-            Array(feature['errors']).each { |error| errors << error }
-            Array(feature['primitives']).each do |primitive|
-              Array(primitive['errors']).each { |error| errors << error }
-            end
-          end
-
-          refs = { cells: [], states: [], transitions: [] }
-          errors.each do |error|
-            text = validation_error_text(error)
-            refs[:cells].concat(text.scan(/cell_[A-Za-z0-9_.-]+/))
-            refs[:states].concat(text.scan(/state_[A-Za-z0-9_.-]+/))
-            refs[:transitions].concat(text.scan(/transition_[A-Za-z0-9_.-]+/))
-          end
-          refs.each_value(&:uniq!)
-          refs
+          IndoorGmlConverter::Val3dityReportSchema.final_error_refs(report || {})
         end
 
         def validation_focus_cell_ids_for_refs(refs, indoor_model = IndoorModel.current)
@@ -450,17 +437,6 @@ module ULOL
           end
 
           cell_ids.compact.uniq
-        end
-
-        def validation_error_text(value)
-          case value
-          when Hash
-            value.values.map { |child| validation_error_text(child) }.join(' ')
-          when Array
-            value.map { |child| validation_error_text(child) }.join(' ')
-          else
-            value.to_s
-          end
         end
 
         def validation_cell_gml_id(cell_space)

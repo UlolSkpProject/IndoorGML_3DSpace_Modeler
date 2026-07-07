@@ -217,11 +217,31 @@ module ULOL
             dispatcher = Dispatcher.new
             Sketchup.test_active_model = model_a
 
-            dispatcher.send(:handle_validation_result, session, FakeResult.invalid, 'temp.gml')
+            dispatcher.send(:handle_validation_result, session, FakeResult.invalid_with_report('cell_A'), 'temp.gml')
             progress.validation_focus_callback.call(['cell_A'], '701', [], [])
 
             assert_equal [['cell_A']], indoor_a.begin_focus_calls
             assert_equal [[['cell_A'], '701']], indoor_a.highlight_calls
+          end
+
+          def test_report_row_focus_starts_fix_mode_with_all_error_cells_and_highlights_row_only
+            model_a = FakeModel.new('A')
+            indoor_a = FakeIndoorModel.new(model_a)
+            progress = FakeProgress.new
+            session = result_ready_session(model_a, indoor_a, progress)
+            dispatcher = Dispatcher.new
+            Sketchup.test_active_model = model_a
+
+            dispatcher.send(:handle_validation_result, session, FakeResult.invalid_with_primitive_report, 'temp.gml')
+            progress.validation_focus_callback.call(['cell_A'], '203', [], [])
+
+            assert_equal [['cell_A', 'cell_B']], indoor_a.begin_focus_calls
+            assert_equal [[['cell_A'], '203']], indoor_a.highlight_calls
+
+            progress.validation_focus_callback.call([], '', [], [])
+
+            assert_equal [['cell_A', 'cell_B']], indoor_a.begin_focus_calls
+            assert_equal [[['cell_A'], '203'], [[], '']], indoor_a.highlight_calls
           end
 
           def test_report_fix_uses_captured_indoor_model_when_model_is_current
@@ -236,6 +256,34 @@ module ULOL
             progress.fix_callback.call
 
             assert_equal [['cell_A']], indoor_a.begin_focus_calls
+          end
+
+          def test_report_fix_includes_primitive_error_parent_cells
+            model_a = FakeModel.new('A')
+            indoor_a = FakeIndoorModel.new(model_a)
+            progress = FakeProgress.new
+            session = result_ready_session(model_a, indoor_a, progress)
+            dispatcher = Dispatcher.new
+            Sketchup.test_active_model = model_a
+
+            dispatcher.send(:handle_validation_result, session, FakeResult.invalid_with_primitive_report, 'temp.gml')
+            progress.fix_callback.call
+
+            assert_equal [['cell_A', 'cell_B']], indoor_a.begin_focus_calls
+          end
+
+          def test_report_fix_uses_kept_overlap_recheck_cells_not_broad_raw_refs
+            model_a = FakeModel.new('A')
+            indoor_a = FakeIndoorModel.new(model_a)
+            progress = FakeProgress.new
+            session = result_ready_session(model_a, indoor_a, progress)
+            dispatcher = Dispatcher.new
+            Sketchup.test_active_model = model_a
+
+            dispatcher.send(:handle_validation_result, session, FakeResult.invalid_with_broad_overlap_recheck, 'temp.gml')
+            progress.fix_callback.call
+
+            assert_equal [['cell_A', 'cell_B']], indoor_a.begin_focus_calls
           end
 
           private
@@ -441,6 +489,63 @@ module ULOL
                 report: {
                   'dataset_errors' => [
                     { 'message' => "Invalid #{cell_id}" }
+                  ]
+                }
+              )
+            end
+
+            def self.invalid_with_primitive_report
+              new(
+                valid: false,
+                report: {
+                  'features' => [
+                    {
+                      'id' => 'cell_A',
+                      'errors' => [],
+                      'primitives' => [
+                        {
+                          'id' => 'solid_A',
+                          'errors' => [
+                            { 'code' => 203, 'description' => 'primitive shell is invalid' }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      'id' => 'cell_B',
+                      'errors' => [
+                        { 'code' => 302, 'description' => 'feature is invalid' }
+                      ],
+                      'primitives' => []
+                    }
+                  ]
+                }
+              )
+            end
+
+            def self.invalid_with_broad_overlap_recheck
+              new(
+                valid: false,
+                report: {
+                  'features' => [
+                    {
+                      'id' => 'cell_A',
+                      'errors' => [
+                        {
+                          'code' => 701,
+                          'description' => 'overlap cell_A cell_B cell_C cell_D'
+                        }
+                      ],
+                      'primitives' => []
+                    }
+                  ],
+                  'indoorgml_modeler_overlap_recheck' => [
+                    {
+                      'code' => 701,
+                      'cells' => %w[cell_A cell_B],
+                      'tolerated' => false,
+                      'status' => 'kept'
+                    }
                   ]
                 }
               )

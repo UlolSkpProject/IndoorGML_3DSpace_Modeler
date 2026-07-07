@@ -107,6 +107,85 @@ module ULOL
           assert_equal 0, hidden_child.write_count
         end
 
+        def test_validation_focus_forces_primal_group_visible_even_when_geometry_is_hidden
+          primal = fake_group(pid: 29, hidden: true)
+          focused_group = fake_group(pid: 30)
+          outside_group = fake_group(pid: 31)
+          focused_cell = fake_cell_space(id: 'A', group: focused_group, storey: 'F01', cell_type: :general)
+          outside_cell = fake_cell_space(id: 'B', group: outside_group, storey: 'F01', cell_type: :general)
+          indoor_model = fake_indoor_model(
+            primal_group: primal,
+            cell_spaces: [focused_cell, outside_cell]
+          )
+          validation = EditorSession::ValidationFocusController.new
+          validation.begin(['cell_A'])
+          callbacks = CallbackLog.new
+          Sketchup.test_active_model = fake_model
+
+          service = build_service(
+            indoor_model,
+            EditorSession::VisibilityController.new,
+            callbacks,
+            geometry_visible: -> { false },
+            validation: validation
+          )
+
+          assert service.apply_validation_focus_visibility
+          assert_equal true, primal.visible?
+          assert_equal false, focused_group.hidden?
+          assert_equal true, outside_group.hidden?
+          assert_includes callbacks.unlocked_entities, primal
+        end
+
+        def test_validation_focus_overrides_edit_visibility_filters
+          visible_error_group = fake_group(pid: 30)
+          filtered_error_group = fake_group(pid: 31)
+          outside_group = fake_group(pid: 32)
+          visible_error = fake_cell_space(id: 'A', group: visible_error_group, storey: 'F01', cell_type: :general)
+          filtered_error = fake_cell_space(id: 'B', group: filtered_error_group, storey: 'F02', cell_type: :general)
+          outside = fake_cell_space(id: 'C', group: outside_group, storey: 'F02', cell_type: :general)
+          indoor_model = fake_indoor_model(cell_spaces: [visible_error, filtered_error, outside])
+          visibility = EditorSession::VisibilityController.new
+          visibility.set_filter(storeys: ['F01'], cell_types: [])
+          validation = EditorSession::ValidationFocusController.new
+          validation.begin(%w[cell_A cell_B])
+
+          service = build_service(indoor_model, visibility, CallbackLog.new, validation: validation)
+
+          assert service.apply_validation_focus_visibility
+          assert_equal false, visible_error_group.hidden?
+          assert_equal false, filtered_error_group.hidden?
+          assert_equal true, outside_group.hidden?
+        end
+
+        def test_validation_focus_highlight_and_clear_ignore_edit_visibility_filters
+          visible_error_group = fake_group(pid: 33)
+          highlighted_error_group = fake_group(pid: 34)
+          outside_group = fake_group(pid: 35)
+          visible_error = fake_cell_space(id: 'A', group: visible_error_group, storey: 'F01', cell_type: :general)
+          highlighted_error = fake_cell_space(id: 'B', group: highlighted_error_group, storey: 'F02', cell_type: :general)
+          outside = fake_cell_space(id: 'C', group: outside_group, storey: 'F02', cell_type: :general)
+          indoor_model = fake_indoor_model(cell_spaces: [visible_error, highlighted_error, outside])
+          visibility = EditorSession::VisibilityController.new
+          visibility.set_filter(storeys: ['F01'], cell_types: [])
+          validation = EditorSession::ValidationFocusController.new
+          validation.begin(%w[cell_A cell_B])
+          validation.set_highlight(['cell_B'], '701')
+
+          service = build_service(indoor_model, visibility, CallbackLog.new, validation: validation)
+
+          assert service.apply_validation_focus_visibility
+          assert_equal true, visible_error_group.hidden?
+          assert_equal false, highlighted_error_group.hidden?
+          assert_equal true, outside_group.hidden?
+
+          validation.set_highlight([], '')
+          assert service.apply_validation_focus_visibility
+          assert_equal false, visible_error_group.hidden?
+          assert_equal false, highlighted_error_group.hidden?
+          assert_equal true, outside_group.hidden?
+        end
+
         def test_apply_all_visibility_forces_group_visible_without_edit_mode_snapshots
           child = fake_child(hidden: true)
           group = fake_group(pid: 20, children: [child], hidden: true)
