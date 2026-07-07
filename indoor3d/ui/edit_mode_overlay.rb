@@ -84,7 +84,7 @@ module ULOL
           return false unless renderable_active_context?
           return false if @indoor_model.respond_to?(:cell_space_geometry_editing?) && @indoor_model.cell_space_geometry_editing?()
 
-          @indoor_model.editing?() || @indoor_model.dual_overlay_visible?()
+          @indoor_model.dual_overlay_visible?()
         end
 
         def add_dual_overlay_bounds(bounds)
