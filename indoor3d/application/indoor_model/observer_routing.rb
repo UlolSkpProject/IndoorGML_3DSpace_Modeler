@@ -32,14 +32,15 @@ module ULOL
           def classify_space_features_change(entity)
             previous_snapshot = space_features_change_snapshot_for(entity)
             current_snapshot = build_space_features_change_snapshot(entity)
-            remember_space_features_change_snapshot(entity, current_snapshot)
             if previous_snapshot.nil?
               expected_name = expected_space_features_name_for(entity)
               if expected_name && current_snapshot[:name] != expected_name
+                remember_space_features_change_snapshot(entity, current_snapshot)
                 log_space_features_change(entity, :name, [:name], { name: expected_name }, current_snapshot)
                 return :name
               end
 
+              remember_space_features_change_snapshot(entity, current_snapshot)
               log_space_features_change(entity, :initial_snapshot, [], previous_snapshot, current_snapshot)
               return nil
             end

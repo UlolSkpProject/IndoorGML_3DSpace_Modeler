@@ -24,7 +24,10 @@ module ULOL
 
           indoor_children(primal_group.entities, 'CellSpace').each do |entity|
             cell_space = restore_cell_space(entity)
-            @cell_space_registrar.call(cell_space) if cell_space
+            next unless cell_space
+
+            registered = @cell_space_registrar.call(cell_space)
+            IndoorCore::Logger.puts "[IndoorGML] CellSpace restore skipped: scale normalization failed cell=#{cell_space.id}" if registered == false
           end
         end
 
