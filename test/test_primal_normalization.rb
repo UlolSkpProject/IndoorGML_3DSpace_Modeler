@@ -34,7 +34,7 @@ module ULOL
 
       module Logger
         def self.puts(_message); end
-      end
+      end unless const_defined?(:Logger)
     end
   end
 end

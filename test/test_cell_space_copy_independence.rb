@@ -17,7 +17,43 @@ module Geom
       @y = y.to_f
       @z = z.to_f
     end
+
+    def distance(other)
+      Math.sqrt((x - other.x)**2 + (y - other.y)**2 + (z - other.z)**2)
+    end
+
+    def -(other)
+      Vector3d.new(x - other.x, y - other.y, z - other.z)
+    end
   end unless const_defined?(:Point3d, false)
+
+  class Vector3d
+    attr_reader :x, :y, :z
+
+    def initialize(x = 0.0, y = 0.0, z = 0.0)
+      @x = x.to_f
+      @y = y.to_f
+      @z = z.to_f
+    end
+
+    def length
+      Math.sqrt((x * x) + (y * y) + (z * z))
+    end
+
+    def normalize!
+      len = length
+      return self if len <= 0.0
+
+      @x /= len
+      @y /= len
+      @z /= len
+      self
+    end
+
+    def dot(other)
+      (x * other.x) + (y * other.y) + (z * other.z)
+    end
+  end unless const_defined?(:Vector3d, false)
 end
 
 module Sketchup

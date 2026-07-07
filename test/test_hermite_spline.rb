@@ -17,6 +17,16 @@ module Geom
     end
   end unless const_defined?(:Point3d, false)
 
+  class Point3d
+    def distance(other)
+      Math.sqrt((x - other.x)**2 + (y - other.y)**2 + (z - other.z)**2)
+    end unless method_defined?(:distance)
+
+    def -(other)
+      Vector3d.new(x - other.x, y - other.y, z - other.z)
+    end unless method_defined?(:-)
+  end
+
   class Vector3d
     attr_reader :x, :y, :z
 
@@ -40,6 +50,26 @@ module Geom
       (x * other.x) + (y * other.y) + (z * other.z)
     end
   end unless const_defined?(:Vector3d, false)
+
+  class Vector3d
+    def length
+      Math.sqrt((x * x) + (y * y) + (z * z))
+    end unless method_defined?(:length)
+
+    def normalize!
+      length = self.length
+      return self if length <= 0.0
+
+      @x /= length
+      @y /= length
+      @z /= length
+      self
+    end unless method_defined?(:normalize!)
+
+    def dot(other)
+      (x * other.x) + (y * other.y) + (z * other.z)
+    end unless method_defined?(:dot)
+  end
 end
 
 require_relative '../indoor3d/utils/hermite_spline'
