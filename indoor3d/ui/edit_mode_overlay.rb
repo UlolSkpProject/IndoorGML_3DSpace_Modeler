@@ -29,11 +29,17 @@ module ULOL
           [Math.cos(angle), Math.sin(angle)]
         end.freeze
         OVERLAY_RADIUS_SCALE = 1.0
-        OVERLAY_MIN_RADIUS_PIXELS = 1.0
-        OVERLAY_MAX_RADIUS_PIXELS = 7.0
+
+        STATE_MIN_RADIUS_PIXELS = 7.0
+        STATE_MAX_RADIUS_PIXELS = 15.0
+
+        TRANSITION_MIN_LINE_WIDTH_PIXELS = 2
+        TRANSITION_LINE_WIDTH_PIXELS = 3
+        TRANSITION_MAX_LINE_WIDTH_PIXELS = 4
         TRANSITION_MIN_CURVE_SEGMENTS = 3
         TRANSITION_RIGHT_ANGLE_CURVE_SEGMENTS = 6
         TRANSITION_CURVE_SEGMENTS = 9
+        
         MIN_TRANSITION_CURVE_CACHE_LIMIT = 2048
 
         def initialize(indoor_model)
@@ -333,7 +339,7 @@ module ULOL
         def overlay_state_radius(view, center, state)
           degree_scale = overlay_state_degree_scale(state)
           model_radius = (state.radius || State.display_radius) * OVERLAY_RADIUS_SCALE * degree_scale
-          clamp_overlay_radius(view, center, model_radius, pixel_scale: degree_scale)
+          clamp_overlay_radius(view, center, model_radius)
         end
 
         def overlay_state_degree_scale(state)
@@ -343,7 +349,10 @@ module ULOL
         end
 
         def overlay_transition_line_width
-          [(OVERLAY_MIN_RADIUS_PIXELS * 1.25).round, 2].max
+          [
+            [TRANSITION_LINE_WIDTH_PIXELS, TRANSITION_MIN_LINE_WIDTH_PIXELS].max,
+            TRANSITION_MAX_LINE_WIDTH_PIXELS
+          ].min
         end
 
         def transition_curve_segments(transition)
@@ -584,9 +593,9 @@ module ULOL
           transformation.to_a.map { |value| value.to_f.round(6) }
         end
 
-        def clamp_overlay_radius(view, center, model_radius, pixel_scale: 1.0)
-          screen_min_radius = view.pixels_to_model(OVERLAY_MIN_RADIUS_PIXELS * pixel_scale, center)
-          screen_max_radius = view.pixels_to_model(OVERLAY_MAX_RADIUS_PIXELS * pixel_scale, center)
+        def clamp_overlay_radius(view, center, model_radius)
+          screen_min_radius = view.pixels_to_model(STATE_MIN_RADIUS_PIXELS, center)
+          screen_max_radius = view.pixels_to_model(STATE_MAX_RADIUS_PIXELS, center)
           [[model_radius, screen_min_radius].max, screen_max_radius].min
         end
 
