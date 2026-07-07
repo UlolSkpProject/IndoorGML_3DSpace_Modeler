@@ -12,6 +12,7 @@ module ULOL
     require_relative 'utils/transformation'
     require_relative 'utils/materials'
     require_relative 'utils/hermite_spline'
+
     require_relative 'domain/abstract_feature'
     require_relative 'domain/cell_space_type'
     require_relative 'domain/cell_space_category'
@@ -19,7 +20,9 @@ module ULOL
     require_relative 'domain/cell_space'
     require_relative 'domain/state'
     require_relative 'domain/transition'
+
     require_relative 'integration/tag_cell_space_adapter'
+
     require_relative 'infrastructure/observers/observer_helpers'
     require_relative 'infrastructure/observers/cell_space_observer'
     require_relative 'infrastructure/observers/space_features_observer'
@@ -30,11 +33,14 @@ module ULOL
     require_relative 'infrastructure/observers/app_observer'
     require_relative 'infrastructure/persistence/attribute_serializer'
     require_relative 'infrastructure/persistence/runtime_restorer'
+
     require_relative 'application/storey_filter'
+
     require_relative 'infrastructure/scene/scene_group_guard'
     require_relative 'infrastructure/scene/entity_copy_helper'
     require_relative 'infrastructure/scene/active_path_controller'
     require_relative 'infrastructure/scene/editor_session'
+
     require_relative 'application/feature_registry'
     require_relative 'application/adjacency_service/geometry_query'
     require_relative 'application/adjacency_service/sync'
@@ -48,10 +54,13 @@ module ULOL
     require_relative 'application/indoor_model/edit_mode_selection_projection'
     require_relative 'application/indoor_model/editor_control'
     require_relative 'application/indoor_model'
+
     require_relative 'export/gml_exporter'
+
     require_relative 'validity/validation_run_workspace'
     require_relative 'validity/val3dity_runner'
     require_relative 'validity/validation_session'
+
     require_relative 'ui/commands/conversion_message_formatter'
     require_relative 'ui/edit_mode_overlay'
     require_relative 'ui/edit_mode_dialog'
@@ -77,7 +86,18 @@ module ULOL
         @app_observer ||= IndoorCore::Indoor3DGmlAppObserver.new
         Sketchup.add_observer(@app_observer)
         @app_observer.register_model(Sketchup.active_model())
-        IndoorCore::IndoorModel.current.refresh_runtime_data()
+
+        # Deferred runtime refresh to avoid SketchUp crash on model load.
+        UI.start_timer(0.5, false) do
+          begin
+            IndoorCore::IndoorModel.current.refresh_runtime_data()
+          rescue StandardError => e
+            IndoorCore::Logger.error(
+              "[IndoorGML] Deferred runtime refresh failed: #{e.class}: #{e.message}\n#{e.backtrace&.join("\n")}"
+            )
+          end
+        end
+
       rescue StandardError => e
         IndoorCore::Logger.puts "[IndoorGML] Model observer setup failed: #{e.class}: #{e.message}"
       end
@@ -217,7 +237,6 @@ module ULOL
       end
 
       toolbar = UI::Toolbar.new('Indoor3DGML Modeler')
-      toolbar.add_separator
       toolbar.add_item(create_cell_space_command)
       toolbar.add_item(@edit_property_command)
       toolbar.add_item(change_type_command)
@@ -227,7 +246,6 @@ module ULOL
       toolbar.add_separator
       toolbar.add_item(export_command)
       toolbar.add_item(check_validity_command)
-      toolbar.add_separator
       toolbar.show()
       file_loaded(__FILE__)
     end
