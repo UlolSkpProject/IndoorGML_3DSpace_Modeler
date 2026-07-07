@@ -218,6 +218,18 @@ module ULOL
           assert_equal 0, indoor.recenter_count
         end
 
+        def test_refresh_keeps_primal_space_features_snapshot_after_reset
+          indoor = FakeIndoorModel.new(@model)
+          primal = @model.create_primal_group
+
+          indoor.refresh_runtime_data
+
+          snapshot = indoor.space_feature_snapshot(primal)
+          refute_nil snapshot
+          assert_equal IndoorModel::PRIMAL_GROUP_NAME, snapshot[:name]
+          assert_equal FakeTransformation::IDENTITY, snapshot[:transformation]
+        end
+
         private
 
         def write_cell_attributes(group, id:, state_id:)
@@ -281,6 +293,10 @@ module ULOL
             @cell_space_observed_ids.keys
           end
 
+          def space_feature_snapshot(entity)
+            @space_features_change_snapshots[entity_observer_key(entity)]
+          end
+
           private
 
           def find_existing_space_features_groups
@@ -293,6 +309,7 @@ module ULOL
 
             @scene_group_guard.track(@primal_group, IndoorModel::PRIMAL_GROUP_NAME)
             attach_entity_observer(@primal_group, Object.new, @space_features_observed_ids)
+            remember_space_features_change_snapshot(@primal_group)
             attach_entities_observer(:primal, @primal_group.entities, Object.new)
           end
 
@@ -326,6 +343,13 @@ module ULOL
             @cell_space_change_snapshots[entity_observer_key(entity)] = snapshot || {}
           end
 
+          def remember_space_features_change_snapshot(entity, snapshot = nil)
+            @space_features_change_snapshots[entity_observer_key(entity)] = snapshot || {
+              name: entity.name.to_s,
+              transformation: entity.transformation.to_a
+            }
+          end
+
           def update_transition(_transition)
             true
           end
@@ -350,6 +374,10 @@ module ULOL
           def recenter_runtime_cell_spaces
             @recenter_count += 1
           end
+
+          def invalidate_overlay_transition_points; end
+
+          def apply_indoor_lock_policy; end
         end
 
         class FakeAdjacencyService
@@ -425,6 +453,8 @@ module ULOL
           def reconcile_after_transaction(_model, source: nil)
             @reconciliations << [source]
           end
+
+          def apply_display_state; end
         end
 
         class FakeSketchupModel
@@ -501,6 +531,10 @@ module ULOL
             true
           end
 
+          def transformation
+            FakeTransformation.new
+          end
+
           def get_attribute(dictionary, key)
             @attributes.dig(dictionary, key)
           end
@@ -521,6 +555,19 @@ module ULOL
 
           def observer_count
             @observers.length
+          end
+        end
+
+        class FakeTransformation
+          IDENTITY = [
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            0.0, 0.0, 0.0, 1.0
+          ].freeze
+
+          def to_a
+            IDENTITY
           end
         end
       end

@@ -185,6 +185,24 @@ module ULOL
           end
         end
 
+        def test_first_scaled_primal_change_without_snapshot_is_rejected
+          with_transformation_scale_stubs do
+            model = FakeInitialScaledSpaceFeatureModel.new
+            entity = FakeInitialScaledSpaceFeatureGroup.new
+
+            assert_equal true, model.space_features_changed(entity)
+
+            assert_equal [
+              [:operation, 'IndoorGML Reject Primal Scale'],
+              [:guard, :@constraining_space_features],
+              [:set_transform, :unscaled],
+              :invalidate,
+              :snapshot
+            ], model.calls
+            assert_equal :unscaled, entity.transformation
+          end
+        end
+
         def test_attach_space_features_observer_normalizes_scaled_primal_before_snapshot
           with_transformation_scale_stubs do
             model = FakeSpaceFeatureAttachModel.new
@@ -406,6 +424,78 @@ module ULOL
           end
         end
 
+        class FakeInitialScaledSpaceFeatureModel
+          include IndoorModel::ObserverRouting
+
+          attr_reader :calls
+
+          def initialize
+            @calls = []
+            @erasing = false
+            @constraining_space_features = false
+            @finishing_editing = false
+            @space_features_scale_revert_transforms = {}
+          end
+
+          private
+
+          def observer_routing_suppressed?
+            false
+          end
+
+          def guard_active?(flag)
+            instance_variable_get(flag)
+          end
+
+          def space_features_change_snapshot_for(_entity)
+            nil
+          end
+
+          def build_space_features_change_snapshot(_entity)
+            {
+              name: 'IndoorGML_PrimalSpaceFeatures',
+              transformation: :scaled_snapshot
+            }
+          end
+
+          def expected_space_features_name_for(_entity)
+            'IndoorGML_PrimalSpaceFeatures'
+          end
+
+          def scaled_transform_values?(values)
+            values == :scaled_snapshot
+          end
+
+          def entity_observer_key(entity)
+            entity.object_id
+          end
+
+          def log_space_features_change(*); end
+
+          def with_transparent_space_features_operation(name)
+            @calls << [:operation, name]
+            yield
+          end
+
+          def with_guard_flag(flag)
+            @calls << [:guard, flag]
+            yield
+          end
+
+          def set_group_transformation(group, transformation)
+            @calls << [:set_transform, transformation]
+            group.transformation = transformation
+          end
+
+          def invalidate_overlay_transition_points
+            @calls << :invalidate
+          end
+
+          def remember_space_features_change_snapshot(_entity)
+            @calls << :snapshot
+          end
+        end
+
         class FakeSpaceFeatureAttachModel
           include IndoorModel::SceneGroups
           include IndoorModel::ObserverRouting
@@ -498,6 +588,26 @@ module ULOL
 
           def entityID
             51
+          end
+        end
+
+        class FakeInitialScaledSpaceFeatureGroup
+          attr_accessor :transformation
+
+          def initialize
+            @transformation = :scaled
+          end
+
+          def valid?
+            true
+          end
+
+          def entityID
+            53
+          end
+
+          def name
+            'IndoorGML_PrimalSpaceFeatures'
           end
         end
 
