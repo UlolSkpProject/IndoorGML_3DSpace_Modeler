@@ -2,12 +2,23 @@
 
 require 'minitest/autorun'
 
+module Sketchup
+  def self.active_model
+    nil
+  end
+end
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       module Logger
         def self.puts(_message); end
       end unless const_defined?(:Logger)
+    end
+
+    module Utils
+      module Transformation
+      end
     end
   end
 end
@@ -86,6 +97,74 @@ module ULOL
           assert_equal true, model.run_transform_changed(cell_space)
 
           assert_equal [:sync, :dirty, :snapshot], model.calls
+        end
+
+        def test_scaled_cell_space_transform_is_baked_before_dirty_sync
+          with_transformation_scale_stubs do
+            model = FakeLifecycleModel.new
+            group = FakeScaledCellGroup.new(model.calls)
+            cell_space = FakeCellSpace.new(group)
+
+            assert_equal true, model.run_transform_changed(cell_space)
+
+            assert_equal [
+              [:operation, 'IndoorGML Normalize CellSpace Scale'],
+              :sync,
+              :make_unique,
+              [:set_transform, :unscaled],
+              [:transform_entities, :bake, [:face]],
+              :sync,
+              :dirty,
+              :snapshot
+            ], model.calls
+            assert_equal :unscaled, group.transformation
+          end
+        end
+
+        def test_scaled_primal_transform_is_rejected_with_unscaled_fallback
+          with_transformation_scale_stubs do
+            model = FakeSpaceFeatureScaleModel.new
+            entity = FakeScaledSpaceFeatureGroup.new
+
+            assert_equal true, model.reject_scale(entity)
+
+            assert_equal [
+              [:operation, 'IndoorGML Reject Primal Scale'],
+              [:guard, :@constraining_space_features],
+              [:set_transform, :unscaled],
+              :invalidate,
+              :snapshot
+            ], model.calls
+            assert_equal :unscaled, entity.transformation
+          end
+        end
+
+        def with_transformation_scale_stubs
+          transformation = ULOL::Indoor3DGmlModeler::Utils::Transformation
+          originals = capture_transformation_methods(transformation, :scaled?, :unscaled, :scale_bake_transform)
+          transformation.define_singleton_method(:scaled?) { |value| value == :scaled }
+          transformation.define_singleton_method(:unscaled) { |value| value == :scaled ? :unscaled : nil }
+          transformation.define_singleton_method(:scale_bake_transform) { |value| value == :scaled ? :bake : nil }
+          yield
+        ensure
+          restore_transformation_methods(transformation, originals)
+        end
+
+        def capture_transformation_methods(transformation, *names)
+          names.each_with_object({}) do |name, memo|
+            memo[name] = transformation.respond_to?(name) ? transformation.method(name) : nil
+          end
+        end
+
+        def restore_transformation_methods(transformation, originals)
+          singleton_class = class << transformation; self; end
+          originals.each do |name, original|
+            if original
+              transformation.define_singleton_method(name) { |*args| original.call(*args) }
+            else
+              singleton_class.remove_method(name) if singleton_class.method_defined?(name)
+            end
+          end
         end
 
         class FakeIndoorModel
@@ -184,7 +263,7 @@ module ULOL
           end
 
           def with_transparent_cell_space_operation(_name)
-            @calls << :operation
+            @calls << [:operation, _name]
             yield
           end
 
@@ -200,6 +279,55 @@ module ULOL
           def remember_cell_space_change_snapshot(_entity)
             @calls << :snapshot
           end
+
+          def set_group_transformation(group, transformation)
+            @calls << [:set_transform, transformation]
+            group.transformation = transformation
+          end
+        end
+
+        class FakeSpaceFeatureScaleModel
+          include IndoorModel::ObserverRouting
+
+          attr_reader :calls
+
+          def initialize
+            @calls = []
+            @space_features_scale_revert_transforms = {}
+          end
+
+          def reject_scale(entity)
+            send(:reject_scaled_space_features_transform, entity)
+          end
+
+          private
+
+          def entity_observer_key(entity)
+            entity.object_id
+          end
+
+          def with_transparent_space_features_operation(name)
+            @calls << [:operation, name]
+            yield
+          end
+
+          def with_guard_flag(flag)
+            @calls << [:guard, flag]
+            yield
+          end
+
+          def set_group_transformation(group, transformation)
+            @calls << [:set_transform, transformation]
+            group.transformation = transformation
+          end
+
+          def invalidate_overlay_transition_points
+            @calls << :invalidate
+          end
+
+          def remember_space_features_change_snapshot(_entity)
+            @calls << :snapshot
+          end
         end
 
         class FakeCellSpace
@@ -207,6 +335,67 @@ module ULOL
 
           def initialize(group)
             @sketchup_group = group
+          end
+        end
+
+        class FakeScaledCellGroup
+          attr_accessor :transformation
+          attr_reader :definition
+
+          def initialize(calls)
+            @transformation = :scaled
+            @calls = calls
+            @definition = FakeDefinition.new(calls)
+          end
+
+          def valid?
+            true
+          end
+
+          def entityID
+            42
+          end
+
+          def make_unique
+            @calls << :make_unique
+          end
+        end
+
+        class FakeScaledSpaceFeatureGroup
+          attr_accessor :transformation
+
+          def initialize
+            @transformation = :scaled
+          end
+
+          def valid?
+            true
+          end
+
+          def entityID
+            51
+          end
+        end
+
+        class FakeDefinition
+          attr_reader :entities
+
+          def initialize(calls)
+            @entities = FakeEntities.new(calls)
+          end
+        end
+
+        class FakeEntities
+          def initialize(calls)
+            @calls = calls
+          end
+
+          def to_a
+            [:face]
+          end
+
+          def transform_entities(transform, entities)
+            @calls << [:transform_entities, transform, entities]
           end
         end
 

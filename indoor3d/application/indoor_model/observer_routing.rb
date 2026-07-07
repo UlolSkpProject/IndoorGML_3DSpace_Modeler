@@ -123,12 +123,16 @@ module ULOL
             return false unless Utils::Transformation.scaled?(entity.transformation)
 
             revert_values = scale_revert_transforms.delete(entity_observer_key(entity))
-            unless revert_values.is_a?(Array) && revert_values.length == 16
-              IndoorCore::Logger.puts "[IndoorGML] Primal scale rejected but no previous unscaled transform is available: entity_id=#{entity.entityID}"
+            revert_transform = if revert_values.is_a?(Array) && revert_values.length == 16
+                                 Geom::Transformation.new(revert_values)
+                               else
+                                 Utils::Transformation.unscaled(entity.transformation)
+                               end
+            unless revert_transform
+              IndoorCore::Logger.puts "[IndoorGML] Primal scale rejected but no unscaled transform is available: entity_id=#{entity.entityID}"
               return false
             end
 
-            revert_transform = Geom::Transformation.new(revert_values)
             with_transparent_space_features_operation('IndoorGML Reject Primal Scale') do
               with_guard_flag(:@constraining_space_features) do
                 set_group_transformation(entity, revert_transform)

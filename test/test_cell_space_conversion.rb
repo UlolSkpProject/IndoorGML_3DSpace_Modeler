@@ -52,6 +52,30 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class CellSpaceConversionTest < Minitest::Test
+        def setup
+          transformation = ULOL::Indoor3DGmlModeler::Utils::Transformation
+          @original_entity_transformation_in_active_context =
+            if transformation.respond_to?(:entity_transformation_in_active_context)
+              transformation.method(:entity_transformation_in_active_context)
+            end
+          transformation.define_singleton_method(:entity_transformation_in_active_context) do |entity|
+            entity.context_transformation
+          end
+        end
+
+        def teardown
+          transformation = ULOL::Indoor3DGmlModeler::Utils::Transformation
+          if @original_entity_transformation_in_active_context
+            original = @original_entity_transformation_in_active_context
+            transformation.define_singleton_method(:entity_transformation_in_active_context) do |*args|
+              original.call(*args)
+            end
+          else
+            singleton_class = class << transformation; self; end
+            singleton_class.remove_method(:entity_transformation_in_active_context) if singleton_class.method_defined?(:entity_transformation_in_active_context)
+          end
+        end
+
         def test_job_builder_collects_nested_solid_with_parent_target_and_cleanup_ancestor
           parent_target = [:room, 'Room']
           parent_transform = FakeTransformation.new(['parent'])
