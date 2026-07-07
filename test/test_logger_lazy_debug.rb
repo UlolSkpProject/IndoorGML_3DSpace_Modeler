@@ -16,10 +16,12 @@ module ULOL
       class LoggerLazyDebugTest < Minitest::Test
         def setup
           @original_level = Logger.level
+          @original_logging_enabled = Definition::LOGGING_ENABLED
         end
 
         def teardown
           Logger.level = @original_level
+          set_logging_enabled(@original_logging_enabled)
         end
 
         def test_debug_block_is_not_evaluated_when_debug_is_disabled
@@ -72,6 +74,37 @@ module ULOL
           )
         end
 
+        def test_release_logging_flag_suppresses_debug_info_and_puts
+          Logger.level = :debug
+          set_logging_enabled(false)
+          calls = 0
+
+          out, = capture_io do
+            Logger.debug('debug message')
+            Logger.info('info message')
+            Logger.puts('puts message')
+            Logger.debug do
+              calls += 1
+              'expensive diagnostic'
+            end
+          end
+
+          assert_empty out
+          assert_equal 0, calls
+        end
+
+        def test_release_logging_flag_keeps_warn_and_error
+          Logger.level = :silent
+          set_logging_enabled(false)
+
+          out, = capture_io do
+            Logger.warn('warn message')
+            Logger.error('error message')
+          end
+
+          assert_equal "warn message\nerror message\n", out
+        end
+
         def test_observer_replay_context_is_not_computed_when_debug_is_disabled
           Logger.level = :info
           indoor_model = FakeIndoorModel.new
@@ -115,6 +148,11 @@ module ULOL
         end
 
         private
+
+        def set_logging_enabled(value)
+          Definition.send(:remove_const, :LOGGING_ENABLED) if Definition.const_defined?(:LOGGING_ENABLED, false)
+          Definition.const_set(:LOGGING_ENABLED, value == true)
+        end
 
         class FakeObserver
           include ObserverHelpers
