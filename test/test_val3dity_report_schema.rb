@@ -60,16 +60,16 @@ module ULOL
             ], rows
           end
 
-          def test_refs_are_extracted_only_from_canonical_row_item
+          def test_canonical_refs_are_extracted_only_from_row_item
             row = {
               item: 'cell_A and cell_B',
               description: 'state_A transition_A',
               raw: { 'details' => 'cell_C state_B transition_B' }
             }
 
-            refs = Schema.report_error_row_refs(row)
+            refs = Schema.canonical_error_row_refs(row)
 
-            assert_equal %w[cell_A cell_B], refs[:cells]
+            assert_equal %w[A B], refs[:cells]
             assert_equal [], refs[:states]
             assert_equal [], refs[:transitions]
           end
@@ -93,9 +93,9 @@ module ULOL
             }
 
             row = Schema.error_item_rows(report).first
-            refs = Schema.report_error_row_refs(row)
+            refs = Schema.canonical_error_row_refs(row)
 
-            assert_equal ['cell_A'], refs[:cells]
+            assert_equal ['A'], refs[:cells]
             assert_equal [], refs[:states]
             assert_equal [], refs[:transitions]
           end
@@ -119,9 +119,9 @@ module ULOL
             }
 
             row = Schema.error_item_rows(report).first
-            refs = Schema.report_error_row_refs(row)
+            refs = Schema.canonical_error_row_refs(row)
 
-            assert_equal ['cell_A'], refs[:cells]
+            assert_equal ['A'], refs[:cells]
           end
 
           def test_primitive_error_refs_do_not_use_solid_item_without_parent_feature
@@ -143,7 +143,7 @@ module ULOL
             }
 
             row = Schema.error_item_rows(report).first
-            refs = Schema.report_error_row_refs(row)
+            refs = Schema.canonical_error_row_refs(row)
 
             assert_equal [], refs[:cells]
             assert_equal [], refs[:states]
@@ -184,9 +184,9 @@ module ULOL
               }
             )
 
-            refs = Schema.report_error_row_refs(row)
+            refs = Schema.canonical_error_row_refs(row)
 
-            assert_equal ['cell_A'], refs[:cells]
+            assert_equal ['A'], refs[:cells]
             assert_equal ['state_A'], refs[:states]
             assert_equal ['transition_A'], refs[:transitions]
           end
@@ -218,8 +218,8 @@ module ULOL
             refs = Schema.final_error_refs(report)
             row_refs = Schema.final_error_row_refs(Schema.error_item_rows(report).first, report)
 
-            assert_equal %w[cell_A cell_B], refs[:cells]
-            assert_equal %w[cell_A cell_B], row_refs[:cells]
+            assert_equal %w[A B], refs[:cells]
+            assert_equal %w[A B], row_refs[:cells]
             assert_equal [], row_refs[:states]
             assert_equal [], row_refs[:transitions]
           end
@@ -254,7 +254,53 @@ module ULOL
 
             row_refs = Schema.final_error_row_refs(Schema.error_item_rows(report).first, report)
 
-            assert_equal %w[cell_A cell_B], row_refs[:cells]
+            assert_equal %w[A B], row_refs[:cells]
+          end
+
+          def test_overlap_recheck_row_prefers_exact_pair_from_error_item_over_feature_context
+            report = {
+              'features' => [
+                {
+                  'id' => 'IF_001',
+                  'errors' => [
+                    {
+                      'id' => 'cell_igg7up1f and cell_ryok9vdg',
+                      'code' => 701,
+                      'description' => 'CELLS_OVERLAP'
+                    },
+                    {
+                      'id' => 'cell_ps7jkkje and cell_ryok9vdg',
+                      'code' => 701,
+                      'description' => 'CELLS_OVERLAP'
+                    }
+                  ],
+                  'primitives' => []
+                }
+              ],
+              Schema::OVERLAP_RECHECK_REPORT_KEY => [
+                {
+                  'code' => 701,
+                  'cells' => %w[cell_igg7up1f cell_ryok9vdg],
+                  'tolerated' => false
+                },
+                {
+                  'code' => 701,
+                  'cells' => %w[cell_ps7jkkje cell_ryok9vdg],
+                  'tolerated' => false
+                }
+              ]
+            }
+
+            rows = Schema.error_item_rows(report)
+            first_refs = Schema.final_error_row_refs(rows.first, report)
+            second_refs = Schema.final_error_row_refs(rows.last, report)
+            final_refs = Schema.final_error_refs(report)
+
+            assert_equal %w[igg7up1f ryok9vdg], first_refs[:cells]
+            assert_equal %w[ps7jkkje ryok9vdg], second_refs[:cells]
+            assert_equal %w[igg7up1f ryok9vdg ps7jkkje], final_refs[:cells]
+            refute_includes first_refs[:cells], 'IF_001'
+            refute_includes final_refs[:cells], 'IF_001'
           end
 
           def test_overview_counts_tolerate_nil
