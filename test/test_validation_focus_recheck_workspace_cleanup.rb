@@ -68,7 +68,45 @@ module ULOL
           assert state[:workspace_cleanup_pending]
         end
 
+        def test_recheck_clears_validation_focus_highlight
+          with_recheck_dependencies do |progress_class|
+            harness = Harness.new
+            editor_session = FakeEditorSession.new(cell_spaces: [Object.new])
+            harness.instance_variable_set(:@editor_session, editor_session)
+
+            result = harness.recheck_validation_focus_errors
+
+            assert_equal [[], ''], editor_session.highlight_calls.first
+            assert_equal 1, progress_class.last.show_count
+            assert_equal 1, result[:cell_spaces].length
+          end
+        end
+
         private
+
+        def with_recheck_dependencies
+          converter = IndoorGmlConverter
+          replacements = {
+            ExportProgressDialog: FakeExportProgressDialog,
+            ValidationRunWorkspace: FakeValidationRunWorkspace,
+            GmlExporter: FakeGmlExporter
+          }
+          originals = replacements.each_with_object({}) do |(name, value), memo|
+            existed = converter.const_defined?(name, false)
+            original = existed ? converter.const_get(name, false) : nil
+            memo[name] = [existed, original]
+            converter.send(:remove_const, name) if existed
+            converter.const_set(name, value)
+          end
+          FakeExportProgressDialog.reset
+          yield FakeExportProgressDialog
+        ensure
+          replacements&.each_key do |name|
+            converter.send(:remove_const, name) if converter.const_defined?(name, false)
+            existed, original = originals[name]
+            converter.const_set(name, original) if existed
+          end
+        end
 
         def fake_ui
           Class.new do
@@ -85,6 +123,73 @@ module ULOL
 
         class Harness
           include IndoorModel::EditorControl
+        end
+
+        class FakeEditorSession
+          attr_reader :highlight_calls
+
+          def initialize(cell_spaces:)
+            @focus = { cell_spaces: cell_spaces, states: [], transitions: [] }
+            @highlight_calls = []
+          end
+
+          def validation_focus_elements
+            @focus
+          end
+
+          def set_validation_focus_highlight(ids, code)
+            @highlight_calls << [ids, code]
+            true
+          end
+        end
+
+        class FakeExportProgressDialog
+          class << self
+            attr_reader :last
+
+            def active
+              nil
+            end
+
+            def reset
+              @last = nil
+            end
+
+            def last=(value)
+              @last = value
+            end
+          end
+
+          attr_reader :show_count
+
+          def initialize
+            self.class.last = self
+            @show_count = 0
+          end
+
+          def on_create_gml; end
+
+          def on_cancel; end
+
+          def on_request_close; end
+
+          def on_ready; end
+
+          def show
+            @show_count += 1
+          end
+        end
+
+        class FakeValidationRunWorkspace
+          def self.create(base_dir:)
+            FakeWorkspace.new
+          end
+        end
+
+        class FakeGmlExporter
+          def self.output_root
+            'tmp'
+          end
         end
 
         class FakeWorkspace

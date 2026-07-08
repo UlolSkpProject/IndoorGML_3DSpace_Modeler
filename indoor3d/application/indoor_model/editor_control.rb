@@ -26,6 +26,7 @@ module ULOL
               return nil
             end
 
+            @editor_session.set_validation_focus_highlight([], '')
             progress = IndoorGmlConverter::ExportProgressDialog.active || IndoorGmlConverter::ExportProgressDialog.new
             state = {
               session: nil,
