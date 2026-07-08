@@ -212,7 +212,8 @@ module ULOL
       end
       @dual_overlay_scale_command = create_command(
         'State/Link Overlay Scale',
-        'Adjust State/Link overlay state radius scale'
+        'Adjust State/Link overlay state radius scale',
+        icon: 'dual_overlay_scale.svg'
       ) do
         dispatcher.open_dual_overlay_scale_dialog()
       end

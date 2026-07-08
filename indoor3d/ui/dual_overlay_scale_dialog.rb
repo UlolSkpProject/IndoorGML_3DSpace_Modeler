@@ -80,39 +80,76 @@ module ULOL
             <head>
               <meta charset="utf-8">
               <style>
+                :root {
+                  --bg: #1c1c1b;
+                  --panel: #242422;
+                  --border: #373633;
+                  --field-border: #4a4945;
+                  --track: #33322f;
+                  --text: #d8d6d0;
+                  --text-strong: #e8e6e0;
+                  --text-muted: #85827b;
+                  --focus: #8ab4f8;
+                  --accent: #3ebc71;
+                  --accent-bg: #12261a;
+                  --accent-border: #327a4f;
+                  --radius: 8px;
+                }
+                * {
+                  box-sizing: border-box;
+                }
+                html {
+                  overflow: hidden;
+                  user-select: none;
+                  -webkit-user-select: none;
+                }
                 body {
                   margin: 0;
                   padding: 16px;
-                  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-                  color: #111827;
-                  background: #f9fafb;
-                  box-sizing: border-box;
+                  overflow: hidden;
+                  font-family: Arial, sans-serif;
+                  color: var(--text);
+                  background: var(--bg);
+                  font-size: 12px;
                 }
                 .header {
                   display: flex;
                   align-items: baseline;
                   justify-content: space-between;
                   gap: 12px;
-                  margin-bottom: 14px;
+                  padding-bottom: 12px;
+                  border-bottom: 1px solid var(--border);
+                  margin-bottom: 12px;
                 }
                 .label {
-                  font-size: 13px;
-                  font-weight: 600;
+                  color: var(--text-muted);
+                  font-size: 11px;
+                  font-weight: 700;
+                  letter-spacing: 0.08em;
+                  text-transform: uppercase;
                 }
                 .value {
-                  font-size: 20px;
+                  color: var(--text-strong);
+                  font-size: 18px;
                   font-weight: 700;
                   font-variant-numeric: tabular-nums;
                 }
+                .scale-panel {
+                  padding: 12px;
+                  border: 1px solid var(--border);
+                  border-radius: var(--radius);
+                  background: var(--panel);
+                }
                 input[type="range"] {
                   width: 100%;
+                  accent-color: var(--focus);
                 }
                 .range-labels {
                   display: flex;
                   justify-content: space-between;
                   margin-top: 4px;
                   font-size: 11px;
-                  color: #4b5563;
+                  color: var(--text-muted);
                 }
                 .actions {
                   display: flex;
@@ -123,16 +160,26 @@ module ULOL
                 button {
                   min-width: 72px;
                   height: 30px;
-                  border: 1px solid #d1d5db;
-                  border-radius: 6px;
-                  background: #ffffff;
-                  color: #111827;
+                  border: 1px solid var(--field-border);
+                  border-radius: 7px;
+                  background: transparent;
+                  color: var(--text);
+                  cursor: pointer;
+                  font-family: Arial, sans-serif;
                   font-size: 12px;
+                  font-weight: 700;
+                }
+                button:hover {
+                  border-color: #6a6760;
                 }
                 button.primary {
-                  background: #2563eb;
-                  border-color: #2563eb;
-                  color: #ffffff;
+                  background: var(--accent-bg);
+                  border-color: var(--accent-border);
+                  color: var(--accent);
+                }
+                button.primary:hover {
+                  border-color: #3a9060;
+                  background: #152e1e;
                 }
               </style>
             </head>
@@ -141,10 +188,12 @@ module ULOL
                 <div class="label">State radius scale</div>
                 <div id="scaleValue" class="value"></div>
               </div>
-              <input id="scaleSlider" type="range" min="0" max="1000" step="1">
-              <div class="range-labels">
-                <span>#{format('%.1f', min_scale)}x</span>
-                <span>#{format('%.1f', max_scale)}x</span>
+              <div class="scale-panel">
+                <input id="scaleSlider" type="range" min="0" max="1000" step="1">
+                <div class="range-labels">
+                  <span>#{format('%.1f', min_scale)}x</span>
+                  <span>#{format('%.1f', max_scale)}x</span>
+                </div>
               </div>
               <div class="actions">
                 <button id="resetButton" type="button">Reset</button>
