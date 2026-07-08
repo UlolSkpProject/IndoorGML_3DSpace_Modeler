@@ -28,6 +28,16 @@ end
 
 module Geom
   class BoundingBox; end unless const_defined?(:BoundingBox, false)
+
+  class Point3d
+    attr_reader :x, :y, :z
+
+    def initialize(x, y, z)
+      @x = x
+      @y = y
+      @z = z
+    end
+  end unless const_defined?(:Point3d, false)
 end
 
 module ULOL
@@ -40,12 +50,16 @@ module ULOL
   end
 end
 
-require_relative '../indoor3d/ui/edit_mode_overlay'
+require_relative '../indoor3d/ui/overlays/space_overlay'
+require_relative '../indoor3d/ui/overlays/builders/transition_curve_builder'
+require_relative '../indoor3d/ui/overlays/renderers/state_overlay_renderer'
+require_relative '../indoor3d/ui/overlays/renderers/transition_overlay_renderer'
+require_relative '../indoor3d/ui/overlays/dual_graph_space_overlay'
 
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
-      class EditModeOverlayVisibilityTest < Minitest::Test
+      class DualGraphSpaceOverlayVisibilityTest < Minitest::Test
         def teardown
           Sketchup.test_active_model = nil
         end
@@ -53,7 +67,7 @@ module ULOL
         def test_edit_mode_does_not_force_dual_overlay_visible
           indoor_model = fake_indoor_model(editing: true, dual_overlay_visible: false)
           Sketchup.test_active_model = fake_model(active_path: [indoor_model.primal_group])
-          overlay = EditModeOverlay.new(indoor_model)
+          overlay = DualGraphSpaceOverlay.new(indoor_model)
 
           assert_equal false, overlay.send(:draw_dual_overlay?)
         end
@@ -61,7 +75,7 @@ module ULOL
         def test_dual_overlay_visible_still_draws_in_edit_mode
           indoor_model = fake_indoor_model(editing: true, dual_overlay_visible: true)
           Sketchup.test_active_model = fake_model(active_path: [indoor_model.primal_group])
-          overlay = EditModeOverlay.new(indoor_model)
+          overlay = DualGraphSpaceOverlay.new(indoor_model)
 
           assert_equal true, overlay.send(:draw_dual_overlay?)
         end
