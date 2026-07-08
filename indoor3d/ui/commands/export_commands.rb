@@ -283,7 +283,7 @@ module ULOL
               progress&.set_result_message("Opening report failed:\n#{e.message}")
             end
           end
-          progress&.on_validation_focus_cells do |cell_ids, code, state_ids, transition_ids|
+          progress&.on_validation_focus_cells do |cell_ids, code, state_ids, transition_ids, row_id|
             next unless session.guard_report_action
 
             refs = { cells: cell_ids, states: state_ids, transitions: transition_ids }
@@ -296,9 +296,19 @@ module ULOL
                 report_cell_ids = validation_report_error_focus_cell_ids(result.report, indoor_model)
                 next if report_cell_ids.empty?
 
-                next unless indoor_model.begin_validation_focus_editing(report_cell_ids)
+                next unless indoor_model.begin_validation_focus_editing(
+                  report_cell_ids,
+                  row_states: validation_report_focus_row_states(result.report, indoor_model)
+                )
               end
-              indoor_model.set_validation_focus_highlight(row_cell_ids, code)
+              indoor_model.set_validation_focus_highlight(
+                row_cell_ids,
+                code,
+                row_id: row_id,
+                row_cells: cell_ids,
+                states: state_ids,
+                transitions: transition_ids
+              )
             end
           end
           progress&.on_fix_validation_errors do
@@ -402,7 +412,10 @@ module ULOL
           cell_ids = validation_report_error_focus_cell_ids(report, indoor_model)
           return false if cell_ids.empty?
 
-          indoor_model.begin_validation_focus_editing(cell_ids)
+          indoor_model.begin_validation_focus_editing(
+            cell_ids,
+            row_states: validation_report_focus_row_states(report, indoor_model)
+          )
         rescue StandardError => e
           Logger.puts "[IndoorGML] Validation report edit mode failed: #{e.class}: #{e.message}"
           false
@@ -415,6 +428,21 @@ module ULOL
 
         def validation_report_error_refs(report)
           IndoorGmlConverter::Val3dityReportSchema.final_error_refs(report || {})
+        end
+
+        def validation_report_focus_row_states(report, indoor_model = IndoorModel.current)
+          schema = IndoorGmlConverter::Val3dityReportSchema
+          schema.sorted_error_item_rows(report || {}).each_with_index.map do |row, index|
+            refs = schema.final_error_row_refs(row, report || {})
+            {
+              id: schema.error_item_row_id(index),
+              code: row[:code].to_s,
+              cells: Array(refs[:cells]).map(&:to_s),
+              states: Array(refs[:states]).map(&:to_s),
+              transitions: Array(refs[:transitions]).map(&:to_s),
+              focus_ids: validation_focus_cell_ids_for_refs(refs, indoor_model)
+            }
+          end
         end
 
         def validation_focus_cell_ids_for_refs(refs, indoor_model = IndoorModel.current)

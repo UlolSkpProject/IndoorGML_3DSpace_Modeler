@@ -304,6 +304,7 @@ module ULOL
             attach_cell_space_observer(cell_space.sketchup_group)
             @scene_group_guard.track(cell_space.sketchup_group, cell_space.sketchup_group.name)
             remember_cell_space_change_snapshot(cell_space.sketchup_group)
+            add_validation_focus_highlight_cell(cell_space) if validation_focus_highlight_tracking_active?
             true
           end
 
@@ -711,12 +712,23 @@ module ULOL
 
             @feature_registry.remove_cell_space(cell_space)
             delete_entity_observer_key(@cell_space_observed_ids, cell_space.sketchup_group)
+            remove_validation_focus_highlight_cell(cell_space) if validation_focus_highlight_tracking_active?
           end
 
           def unregister_state(state)
             return if state.nil?
 
             @feature_registry.remove_state(state)
+          end
+
+          def validation_focus_highlight_tracking_active?
+            respond_to?(:validation_focus_highlight_active?) &&
+              respond_to?(:add_validation_focus_highlight_cell) &&
+              respond_to?(:remove_validation_focus_highlight_cell) &&
+              validation_focus_highlight_active? &&
+              !guard_active?(:@refreshing_runtime)
+          rescue StandardError
+            false
           end
 
           def attach_cell_space_observer(entity)

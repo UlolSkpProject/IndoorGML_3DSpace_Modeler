@@ -16,18 +16,40 @@ module ULOL
 
           def initialize
             @cell_ids = nil
+            @focus_rows = {}
             @highlight_cell_ids = nil
             @highlight_code = nil
+            @highlight_row_id = nil
             @rendering_option_snapshots = {}
           end
 
           attr_reader :highlight_code
+          attr_reader :highlight_row_id
 
           def begin(cell_gml_ids)
             ids = normalize_ids(cell_gml_ids)
             return false if ids.empty?
 
             @cell_ids = id_hash(ids)
+            true
+          end
+
+          def set_focus_rows(rows)
+            @focus_rows = Array(rows).each_with_object({}) do |row, memo|
+              row_id = row[:id].to_s
+              next if row_id.empty?
+
+              cells = normalize_cell_refs(row[:cells])
+              focus_ids = normalize_ids(row[:focus_ids] || cells)
+              memo[row_id] = {
+                cells: cells,
+                states: Array(row[:states]).map(&:to_s),
+                transitions: Array(row[:transitions]).map(&:to_s),
+                focus_ids: focus_ids,
+                code: row[:code].to_s
+              }
+            end
+            rebuild_focus_ids_from_rows if active? && !@focus_rows.empty?
             true
           end
 
@@ -58,11 +80,50 @@ module ULOL
             []
           end
 
-          def set_highlight(cell_gml_ids, code = nil)
+          def set_highlight(cell_gml_ids, code = nil, row_id: nil, row_cells: nil, states: nil, transitions: nil)
             ids = normalize_ids(cell_gml_ids)
             @highlight_cell_ids = ids.empty? ? nil : id_hash(ids)
             @highlight_code = code.to_s
+            @highlight_row_id = row_id.to_s.empty? ? nil : row_id.to_s
+            upsert_focus_row(
+              @highlight_row_id,
+              cells: row_cells,
+              states: states,
+              transitions: transitions,
+              focus_ids: ids,
+              code: code
+            ) if @highlight_row_id
             true
+          end
+
+          def highlight_active?
+            @highlight_cell_ids.is_a?(Hash) && !@highlight_cell_ids.empty?
+          end
+
+          def add_highlight_cell(cell_id)
+            update_highlight_row_cells(add: cell_id)
+          end
+
+          def remove_highlight_cell(cell_id)
+            remove_cell(cell_id).find { |payload| payload[:row_id] == @highlight_row_id }
+          end
+
+          def remove_cell(cell_id)
+            remove_id = normalize_cell_ref(cell_id)
+            return [] if remove_id.empty? || @focus_rows.nil? || @focus_rows.empty?
+
+            payloads = []
+            @focus_rows.each do |row_id, row|
+              cells = Array(row[:cells])
+              next unless cells.include?(remove_id)
+
+              row[:cells] = cells.reject { |cell| cell == remove_id }
+              row[:focus_ids] = normalize_ids(row[:cells])
+              payloads << focus_row_payload(row_id, row)
+            end
+            sync_highlight_ids_from_row
+            rebuild_focus_ids_from_rows
+            payloads
           end
 
           def highlight_cell_spaces(cell_spaces)
@@ -110,8 +171,10 @@ module ULOL
 
           def clear
             @cell_ids = nil
+            @focus_rows = {}
             @highlight_cell_ids = nil
             @highlight_code = nil
+            @highlight_row_id = nil
           end
 
           def capture_and_apply_rendering_options(model, _focus_cell_count)
@@ -183,6 +246,98 @@ module ULOL
               aliases << "cell_#{safe_id}"
             end
             aliases.uniq
+          end
+
+          def normalize_cell_refs(values)
+            Array(values).map { |value| normalize_cell_ref(value) }.reject(&:empty?).uniq
+          end
+
+          def normalize_cell_ref(value)
+            safe_id = value.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')
+            return '' if safe_id.empty?
+
+            safe_id.start_with?('cell_') ? safe_id.sub(/\Acell_/, '') : safe_id
+          end
+
+          def upsert_focus_row(row_id, cells: nil, states: nil, transitions: nil, focus_ids: nil, code: nil)
+            return false if row_id.to_s.empty?
+
+            row = (@focus_rows ||= {})[row_id] ||= {
+              cells: [],
+              states: [],
+              transitions: [],
+              focus_ids: [],
+              code: ''
+            }
+            row[:cells] = normalize_cell_refs(cells) unless cells.nil?
+            row[:states] = Array(states).map(&:to_s) unless states.nil?
+            row[:transitions] = Array(transitions).map(&:to_s) unless transitions.nil?
+            row[:focus_ids] = normalize_ids(focus_ids || row[:cells])
+            row[:code] = code.to_s unless code.nil?
+            rebuild_focus_ids_from_rows
+            true
+          end
+
+          def update_highlight_row_cells(add: nil, remove: nil)
+            return nil unless active? && @highlight_row_id
+
+            row = @focus_rows && @focus_rows[@highlight_row_id]
+            return nil unless row
+
+            cells = Array(row[:cells]).dup
+            add_id = normalize_cell_ref(add)
+            remove_id = normalize_cell_ref(remove)
+            cells << add_id unless add_id.empty? || cells.include?(add_id)
+            cells.delete(remove_id) unless remove_id.empty?
+            row[:cells] = cells
+            row[:focus_ids] = normalize_ids(cells)
+            sync_highlight_ids_from_row(row)
+            rebuild_focus_ids_from_rows
+            focus_row_payload(@highlight_row_id, row)
+          end
+
+          def sync_highlight_ids_from_row(row = nil)
+            return false unless @highlight_row_id
+
+            row ||= @focus_rows && @focus_rows[@highlight_row_id]
+            return false unless row
+
+            focus_ids = Array(row[:focus_ids])
+            @highlight_cell_ids = focus_ids.empty? ? nil : id_hash(focus_ids)
+            true
+          end
+
+          def rebuild_focus_ids_from_rows
+            return false if @focus_rows.nil? || @focus_rows.empty?
+
+            ids = @focus_rows.values.flat_map { |row| Array(row[:focus_ids]) }.uniq
+            @cell_ids = id_hash(ids)
+            true
+          end
+
+          def focus_row_payload(row_id, row)
+            cells = Array(row[:cells]).dup
+            {
+              row_id: row_id,
+              cells: cells,
+              states: Array(row[:states]).dup,
+              transitions: Array(row[:transitions]).dup,
+              focus_ids: Array(row[:focus_ids]).dup,
+              code: row[:code].to_s,
+              label: focus_row_label(cells)
+            }
+          end
+
+          def focus_row_label(cells)
+            labels = Array(cells).map do |cell_id|
+              safe_id = cell_id.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')
+              next if safe_id.empty?
+
+              safe_id.start_with?('cell_') ? safe_id : "cell_#{safe_id}"
+            end.compact
+            return 'No CellSpace' if labels.empty?
+
+            labels.join(' and ')
           end
 
           def cell_gml_ids(cell_space)

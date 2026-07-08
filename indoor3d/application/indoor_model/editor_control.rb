@@ -11,12 +11,19 @@ module ULOL
             @editor_session.begin_editing()
           end
 
-          def begin_validation_focus_editing(cell_gml_ids)
-            @editor_session.begin_validation_focus_editing(cell_gml_ids)
+          def begin_validation_focus_editing(cell_gml_ids, row_states: nil)
+            @editor_session.begin_validation_focus_editing(cell_gml_ids, row_states: row_states)
           end
 
-          def set_validation_focus_highlight(cell_gml_ids, code = nil)
-            @editor_session.set_validation_focus_highlight(cell_gml_ids, code)
+          def set_validation_focus_highlight(cell_gml_ids, code = nil, row_id: nil, row_cells: nil, states: nil, transitions: nil)
+            @editor_session.set_validation_focus_highlight(
+              cell_gml_ids,
+              code,
+              row_id: row_id,
+              row_cells: row_cells,
+              states: states,
+              transitions: transitions
+            )
           end
 
           def recheck_validation_focus_errors
@@ -159,6 +166,20 @@ module ULOL
             @editor_session.validation_focus_highlight_code
           end
 
+          def validation_focus_highlight_active?
+            @editor_session.validation_focus_highlight_active?
+          end
+
+          def add_validation_focus_highlight_cell(cell_space)
+            update_validation_focus_report_row(@editor_session.add_validation_focus_highlight_cell(cell_space))
+          end
+
+          def remove_validation_focus_highlight_cell(cell_space)
+            Array(@editor_session.remove_validation_focus_highlight_cell(cell_space)).each do |payload|
+              update_validation_focus_report_row(payload)
+            end
+          end
+
           def invalidate_overlay_transition_points
             @editor_session.invalidate_overlay_transition_points
           end
@@ -259,6 +280,23 @@ module ULOL
               IndoorCore::Logger.puts "[IndoorGML] Edit mode selection snapshot failed: #{e.class}: #{e.message}"
               nil
             end
+          end
+
+          def update_validation_focus_report_row(payload)
+            return nil unless payload
+
+            dialog = IndoorGmlConverter::ExportProgressDialog.active
+            dialog&.update_validation_focus_row(
+              row_id: payload[:row_id],
+              cells: payload[:cells],
+              states: payload[:states],
+              transitions: payload[:transitions],
+              label: payload[:label]
+            )
+            payload
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Validation focus report row update failed: #{e.class}: #{e.message}"
+            nil
           end
 
           def convert_selected_solid_groups_to_cell_spaces(selection_value)

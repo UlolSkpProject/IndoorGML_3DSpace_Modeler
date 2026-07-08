@@ -379,6 +379,7 @@ module ULOL
                 document.querySelectorAll('.validation-error-row').forEach(function(row) {
                   row.addEventListener('click', function(event) {
                     event.stopPropagation();
+                    var rowId = row.getAttribute('data-row-id') || '';
                     var cells = (row.getAttribute('data-cells') || '').split(',').filter(Boolean);
                     var states = (row.getAttribute('data-states') || '').split(',').filter(Boolean);
                     var transitions = (row.getAttribute('data-transitions') || '').split(',').filter(Boolean);
@@ -388,7 +389,7 @@ module ULOL
                     });
                     row.classList.add('focused');
                     if ((cells.length > 0 || states.length > 0 || transitions.length > 0) && typeof sketchup !== 'undefined' && sketchup.focusValidationCells) {
-                      sketchup.focusValidationCells(cells, code, states, transitions);
+                      sketchup.focusValidationCells(cells, code, states, transitions, rowId);
                     }
                   });
                 });
@@ -401,6 +402,23 @@ module ULOL
                     sketchup.focusValidationCells([], '', [], []);
                   }
                 });
+                window.updateValidationFocusRow = function(payload) {
+                  if (!payload || !payload.rowId) return;
+                  var row = document.querySelector('[data-row-id="' + String(payload.rowId).replace(/"/g, '\\"') + '"]');
+                  if (!row) return;
+                  var cells = Array.isArray(payload.cells) ? payload.cells : [];
+                  var states = Array.isArray(payload.states) ? payload.states : [];
+                  var transitions = Array.isArray(payload.transitions) ? payload.transitions : [];
+                  var label = payload.label || '';
+                  row.setAttribute('data-cells', cells.join(','));
+                  row.setAttribute('data-states', states.join(','));
+                  row.setAttribute('data-transitions', transitions.join(','));
+                  var cellName = row.querySelector('.cell-name');
+                  if (cellName) {
+                    cellName.textContent = label;
+                    cellName.setAttribute('title', label);
+                  }
+                };
                 document.querySelectorAll('.section .filter-btn').forEach(function(button) {
                   button.addEventListener('click', function() {
                     var section = button.closest('.section');
@@ -475,17 +493,18 @@ module ULOL
           end
 
           def error_item_rows_html(rows, raw_report = nil)
-            sorted = rows.sort_by { |row| [row[:code].to_s, row[:description].to_s, error_item_label(row).to_s] }
-            sorted.map { |row| error_item_card_html(row, raw_report) }.join
+            sorted = Val3dityReportSchema.sort_error_item_rows(rows)
+            sorted.each_with_index.map { |row, index| error_item_card_html(row, raw_report, Val3dityReportSchema.error_item_row_id(index)) }.join
           end
 
-          def error_item_card_html(row, raw_report = nil)
+          def error_item_card_html(row, raw_report = nil, row_id = nil)
             code = row[:code].to_s
             recheck_row = matching_error_recheck_row(row, raw_report)
             distance = recheck_row ? format_report_recheck_measure(recheck_row) : ''
             refs = Val3dityReportSchema.final_error_row_refs(row, raw_report)
+            row_id ||= Val3dityReportSchema.error_item_row_id(0)
             <<~HTML
-              <details class="recheck-row validation-error-row #{error_code_color_class(code)}" data-code="#{html_escape(code)}" data-cells="#{html_escape(refs[:cells].join(','))}" data-states="#{html_escape(refs[:states].join(','))}" data-transitions="#{html_escape(refs[:transitions].join(','))}">
+              <details class="recheck-row validation-error-row #{error_code_color_class(code)}" data-row-id="#{html_escape(row_id)}" data-code="#{html_escape(code)}" data-cells="#{html_escape(refs[:cells].join(','))}" data-states="#{html_escape(refs[:states].join(','))}" data-transitions="#{html_escape(refs[:transitions].join(','))}">
                 <summary>
                   <span class="code-badge #{error_code_color_class(code)}">#{html_escape(code)}</span>
                   <span class="recheck-summary-main">

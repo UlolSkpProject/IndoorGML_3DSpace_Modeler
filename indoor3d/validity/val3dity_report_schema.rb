@@ -59,6 +59,18 @@ module ULOL
             rows
           end
 
+          def sorted_error_item_rows(raw_report)
+            sort_error_item_rows(error_item_rows(raw_report))
+          end
+
+          def sort_error_item_rows(rows)
+            Array(rows).sort_by { |row| [row[:code].to_s, row[:description].to_s, error_item_label(row).to_s] }
+          end
+
+          def error_item_row_id(index)
+            "validation-error-row-#{index.to_i}"
+          end
+
           def error_row(scope, item, error, context: nil)
             {
               scope: scope,
