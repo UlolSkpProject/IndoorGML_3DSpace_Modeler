@@ -6,7 +6,7 @@ module ULOL
       class DualOverlayScaleDialog
         DIALOG_WIDTH = 360
         CONTENT_HEIGHT = 190
-        DIALOG_WINDOW_CHROME_HEIGHT = 44
+        DIALOG_WINDOW_CHROME_HEIGHT = HtmlDialogMetrics::WINDOW_CHROME_HEIGHT
         DIALOG_HEIGHT = CONTENT_HEIGHT + DIALOG_WINDOW_CHROME_HEIGHT
 
         def initialize

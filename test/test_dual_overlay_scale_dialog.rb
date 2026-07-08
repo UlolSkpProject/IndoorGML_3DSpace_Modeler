@@ -32,6 +32,7 @@ end
 
 require_relative '../indoor3d/infrastructure/preferences/user_preferences'
 require_relative '../indoor3d/infrastructure/preferences/dual_overlay_preferences'
+require_relative '../indoor3d/ui/html_dialog_metrics'
 require_relative '../indoor3d/ui/dual_overlay_scale_dialog'
 
 module ULOL
