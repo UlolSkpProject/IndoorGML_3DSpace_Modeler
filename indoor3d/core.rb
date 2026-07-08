@@ -71,6 +71,7 @@ module ULOL
     require_relative 'ui/overlays/renderers/state_overlay_renderer'
     require_relative 'ui/overlays/renderers/transition_overlay_renderer'
     require_relative 'ui/overlays/dual_graph_space_overlay'
+    require_relative 'ui/html_dialog_metrics'
     require_relative 'ui/dual_overlay_scale_dialog'
     require_relative 'ui/edit_mode_dialog'
     require_relative 'ui/export_progress_dialog'

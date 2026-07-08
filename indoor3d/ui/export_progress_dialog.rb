@@ -21,7 +21,7 @@ module ULOL
           MAX_DIALOG_HEIGHT = 760
           REPORT_SCROLLBAR_WIDTH = 18
           CONTENT_PADDING_HEIGHT = 8
-          DIALOG_WINDOW_CHROME_HEIGHT = 44
+          DIALOG_WINDOW_CHROME_HEIGHT = HtmlDialogMetrics::WINDOW_CHROME_HEIGHT
 
           def self.active
             dialog = @active_dialog

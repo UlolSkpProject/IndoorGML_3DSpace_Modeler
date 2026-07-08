@@ -12,7 +12,7 @@ module ULOL
         MIN_DIALOG_HEIGHT = 260
         MAX_DIALOG_HEIGHT = 760
         CONTENT_PADDING_HEIGHT = 8
-        DIALOG_WINDOW_CHROME_HEIGHT = 44
+        DIALOG_WINDOW_CHROME_HEIGHT = HtmlDialogMetrics::WINDOW_CHROME_HEIGHT
         def initialize(indoor_model)
           @indoor_model = indoor_model
           @dialog = nil
