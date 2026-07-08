@@ -83,6 +83,14 @@ module ULOL
           UI.messagebox("State/Link overlay toggle failed:\n#{e.message}")
         end
 
+        def open_dual_overlay_scale_dialog
+          @dual_overlay_scale_dialog ||= DualOverlayScaleDialog.new
+          @dual_overlay_scale_dialog.show
+        rescue StandardError => e
+          Logger.puts "[IndoorGML] Dual overlay scale dialog failed: #{e.class}: #{e.message}"
+          UI.messagebox("State/Link overlay scale dialog failed:\n#{e.message}")
+        end
+
         def toggle_geometry
           IndoorModel.current.toggle_geometry_visible()
           update_geometry_command()

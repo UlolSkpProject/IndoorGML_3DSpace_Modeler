@@ -71,6 +71,7 @@ module ULOL
     require_relative 'ui/overlays/renderers/state_overlay_renderer'
     require_relative 'ui/overlays/renderers/transition_overlay_renderer'
     require_relative 'ui/overlays/dual_graph_space_overlay'
+    require_relative 'ui/dual_overlay_scale_dialog'
     require_relative 'ui/edit_mode_dialog'
     require_relative 'ui/export_progress_dialog'
     require_relative 'ui/command_dispatcher'
@@ -209,6 +210,15 @@ module ULOL
         dispatcher.update_dual_overlay_command()
         IndoorCore::IndoorModel.current.dual_overlay_visible? ? MF_CHECKED : MF_UNCHECKED
       end
+      @dual_overlay_scale_command = create_command(
+        'State/Link Overlay Scale',
+        'Adjust State/Link overlay state radius scale'
+      ) do
+        dispatcher.open_dual_overlay_scale_dialog()
+      end
+      @dual_overlay_scale_command.set_validation_proc do
+        dispatcher.validation_operation_running? ? MF_GRAYED : MF_ENABLED
+      end
       export_command = create_command(
         'Export GML',
         'Export GML without validity check',
@@ -237,6 +247,7 @@ module ULOL
       menu.add_item(change_type_command)
       menu.add_item(@geometry_command)
       menu.add_item(@dual_overlay_command)
+      menu.add_item(@dual_overlay_scale_command)
       menu.add_item(export_command)
       menu.add_item(check_validity_command)
 
@@ -251,6 +262,7 @@ module ULOL
       toolbar.add_separator
       toolbar.add_item(@geometry_command)
       toolbar.add_item(@dual_overlay_command)
+      toolbar.add_item(@dual_overlay_scale_command)
       toolbar.add_separator
       toolbar.add_item(export_command)
       toolbar.add_item(check_validity_command)
