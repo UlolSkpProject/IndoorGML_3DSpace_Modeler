@@ -20,7 +20,7 @@ module ULOL
           @render_state_triangle_points = []
         end
 
-        def draw(view)
+        def draw(view, state_radius_scale: 1.0)
           view.drawing_color = DUAL_STATE_COLOR
           right_axis, up_axis = @transform_context.camera_billboard_axes(view)
           dir_axis = view.camera.direction.clone
@@ -31,7 +31,7 @@ module ULOL
             next unless @transform_context.overlay_state_visible?(state)
 
             center = overlay_state_point(state)
-            radius = overlay_state_radius(view, center, state)
+            radius = overlay_state_radius(view, center, state, state_radius_scale)
             @render_state_triangle_points.concat(
               billboard_disk_triangle_points(center, right_axis, up_axis, dir_axis, radius)
             )
@@ -49,10 +49,16 @@ module ULOL
           state.position
         end
 
-        def overlay_state_radius(view, center, state)
-          degree_scale = overlay_state_degree_scale(state)
-          model_radius = (state.radius || State.display_radius) * OVERLAY_RADIUS_SCALE * degree_scale
-          clamp_overlay_radius(view, center, model_radius)
+        def overlay_state_radius(view, center, state, state_radius_scale = 1.0)
+          model_radius = overlay_state_bounds_radius(state, state_radius_scale: state_radius_scale)
+          clamp_overlay_radius(view, center, model_radius, pixel_scale: state_radius_scale)
+        end
+
+        def overlay_state_bounds_radius(state, state_radius_scale:)
+          (state.radius || State.display_radius) *
+            OVERLAY_RADIUS_SCALE *
+            overlay_state_degree_scale(state) *
+            state_radius_scale
         end
 
         def overlay_state_degree_scale(state)
@@ -76,9 +82,9 @@ module ULOL
 
         private
 
-        def clamp_overlay_radius(view, center, model_radius)
-          screen_min_radius = view.pixels_to_model(STATE_MIN_RADIUS_PIXELS, center) * 0.3
-          screen_max_radius = view.pixels_to_model(STATE_MAX_RADIUS_PIXELS, center) * 0.3
+        def clamp_overlay_radius(view, center, model_radius, pixel_scale: 1.0)
+          screen_min_radius = view.pixels_to_model(STATE_MIN_RADIUS_PIXELS * pixel_scale, center)
+          screen_max_radius = view.pixels_to_model(STATE_MAX_RADIUS_PIXELS * pixel_scale, center)
           [[model_radius, screen_min_radius].max, screen_max_radius].min
         end
       end

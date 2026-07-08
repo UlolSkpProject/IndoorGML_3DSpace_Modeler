@@ -23,8 +23,9 @@ module ULOL
         def draw(view)
           return unless draw_dual_overlay?
 
+          state_radius_scale = DualOverlayPreferences.state_radius_scale
           @transition_renderer.draw(view) unless validation_focus_active?
-          @state_renderer.draw(view)
+          @state_renderer.draw(view, state_radius_scale: state_radius_scale)
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Dual graph overlay draw failed: #{e.class}: #{e.message}"
         ensure
@@ -73,12 +74,16 @@ module ULOL
         end
 
         def add_dual_overlay_bounds(bounds)
+          state_radius_scale = DualOverlayPreferences.state_radius_scale
           @indoor_model.states.each do |state|
             next unless state&.valid?()
             next unless overlay_state_visible?(state)
 
             point = @state_renderer.overlay_state_point(state)
-            radius = (state.radius || State.display_radius) * StateOverlayRenderer::OVERLAY_RADIUS_SCALE
+            radius = @state_renderer.overlay_state_bounds_radius(
+              state,
+              state_radius_scale: state_radius_scale
+            )
             bounds.add(
               Geom::Point3d.new(point.x - radius, point.y - radius, point.z - radius),
               Geom::Point3d.new(point.x + radius, point.y + radius, point.z + radius)

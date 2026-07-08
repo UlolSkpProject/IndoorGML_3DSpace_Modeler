@@ -33,6 +33,8 @@ module ULOL
     require_relative 'infrastructure/observers/app_observer'
     require_relative 'infrastructure/persistence/attribute_serializer'
     require_relative 'infrastructure/persistence/runtime_restorer'
+    require_relative 'infrastructure/preferences/user_preferences'
+    require_relative 'infrastructure/preferences/dual_overlay_preferences'
 
     require_relative 'application/storey_filter'
 
