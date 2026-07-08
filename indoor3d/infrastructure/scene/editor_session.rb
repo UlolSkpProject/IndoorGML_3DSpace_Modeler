@@ -126,11 +126,12 @@ module ULOL
           true
         end
 
-        def begin_validation_focus_editing(cell_gml_ids)
+        def begin_validation_focus_editing(cell_gml_ids, row_states: nil)
           ids = Array(cell_gml_ids).map(&:to_s).reject(&:empty?)
           return false if ids.empty?
 
           validation_focus_controller.begin(ids)
+          validation_focus_controller.set_focus_rows(row_states) if row_states
           capture_and_apply_validation_focus_rendering_options(ids.length)
           started = @editing ? true : begin_editing
           unless started
@@ -272,8 +273,17 @@ module ULOL
           false
         end
 
-        def set_validation_focus_highlight(cell_gml_ids, code = nil)
-          validation_focus_controller.set_highlight(cell_gml_ids, code)
+        def set_validation_focus_highlight(cell_gml_ids, code = nil, row_id: nil, row_cells: nil, states: nil, transitions: nil)
+          highlight_options = {}
+          highlight_options[:row_id] = row_id unless row_id.nil?
+          highlight_options[:row_cells] = row_cells unless row_cells.nil?
+          highlight_options[:states] = states unless states.nil?
+          highlight_options[:transitions] = transitions unless transitions.nil?
+          if highlight_options.empty?
+            validation_focus_controller.set_highlight(cell_gml_ids, code)
+          else
+            validation_focus_controller.set_highlight(cell_gml_ids, code, **highlight_options)
+          end
           unless apply_validation_focus_visibility
             if defined?(IndoorCore::Logger)
               IndoorCore::Logger.puts '[IndoorGML] Validation focus highlight failed: visibility apply returned false'
@@ -295,6 +305,34 @@ module ULOL
 
         def validation_focus_highlight_code
           validation_focus_controller.highlight_code
+        end
+
+        def validation_focus_highlight_active?
+          validation_focus_controller.highlight_active?
+        end
+
+        def add_validation_focus_highlight_cell(cell_space)
+          payload = validation_focus_controller.add_highlight_cell(cell_space&.id)
+          return nil unless payload
+
+          apply_validation_focus_visibility
+          invalidate_view(Sketchup.active_model())
+          payload
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight add failed: #{e.class}: #{e.message}"
+          nil
+        end
+
+        def remove_validation_focus_highlight_cell(cell_space)
+          payloads = validation_focus_controller.remove_cell(cell_space&.id)
+          return [] if payloads.empty?
+
+          apply_validation_focus_visibility
+          invalidate_view(Sketchup.active_model())
+          payloads
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight remove failed: #{e.class}: #{e.message}"
+          []
         end
 
         def validation_focus_elements

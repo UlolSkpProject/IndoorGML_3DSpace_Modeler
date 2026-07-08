@@ -233,10 +233,13 @@ module ULOL
             Sketchup.test_active_model = model_a
 
             dispatcher.send(:handle_validation_result, session, FakeResult.invalid_with_primitive_report, 'temp.gml')
-            progress.validation_focus_callback.call(['cell_A'], '203', [], [])
+            progress.validation_focus_callback.call(['A'], '203', [], [], 'validation-error-row-0')
 
             assert_equal [['cell_A', 'cell_B']], indoor_a.begin_focus_calls
+            assert_equal %w[A B], indoor_a.begin_focus_row_states.first.flat_map { |row| row[:cells] }
             assert_equal [[['cell_A'], '203']], indoor_a.highlight_calls
+            assert_equal 'validation-error-row-0', indoor_a.highlight_details.first[:row_id]
+            assert_equal ['A'], indoor_a.highlight_details.first[:row_cells]
 
             progress.validation_focus_callback.call([], '', [], [])
 
@@ -478,14 +481,18 @@ module ULOL
           class FakeIndoorModel
             attr_reader :model
             attr_reader :begin_focus_calls
+            attr_reader :begin_focus_row_states
             attr_reader :highlight_calls
+            attr_reader :highlight_details
             attr_reader :states
             attr_reader :transitions
 
             def initialize(model, begin_focus_result: true)
               @model = model
               @begin_focus_calls = []
+              @begin_focus_row_states = []
               @highlight_calls = []
+              @highlight_details = []
               @states = []
               @transitions = []
               @validation_focus_active = false
@@ -496,14 +503,21 @@ module ULOL
               @validation_focus_active
             end
 
-            def begin_validation_focus_editing(cell_ids)
+            def begin_validation_focus_editing(cell_ids, row_states: nil)
               @begin_focus_calls << cell_ids
+              @begin_focus_row_states << Array(row_states)
               @validation_focus_active = true if @begin_focus_result
               @begin_focus_result
             end
 
-            def set_validation_focus_highlight(cell_ids, code)
+            def set_validation_focus_highlight(cell_ids, code, row_id: nil, row_cells: nil, states: nil, transitions: nil)
               @highlight_calls << [cell_ids, code]
+              @highlight_details << {
+                row_id: row_id,
+                row_cells: row_cells,
+                states: states,
+                transitions: transitions
+              }
               true
             end
           end

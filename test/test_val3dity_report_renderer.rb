@@ -47,11 +47,13 @@ module ULOL
             assert_includes html, 'sketchup.createGml'
             assert_includes html, 'sketchup.focusValidationCells'
             assert_includes html, 'class="recheck-row validation-error-row c700"'
+            assert_includes html, 'data-row-id="validation-error-row-0"'
             assert_includes html, 'data-code="701"'
             assert_includes html, 'data-cells="A,B"'
             assert_includes html, 'data-states=""'
             assert_includes html, 'data-transitions=""'
             assert_includes html, '701 (1)'
+            assert_includes html, 'updateValidationFocusRow'
           end
 
           def test_render_hides_fix_action_for_valid_report

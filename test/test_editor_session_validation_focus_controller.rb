@@ -81,6 +81,46 @@ module ULOL
           assert_equal [transition_inside], elements[:transitions]
         end
 
+        def test_highlight_row_cell_updates_rebuild_highlight_and_base_focus
+          controller = EditorSession::ValidationFocusController.new
+          cell_a = fake_cell_space(id: 'A')
+          cell_b = fake_cell_space(id: 'B')
+          cell_c = fake_cell_space(id: 'C')
+          controller.begin(%w[cell_A cell_B])
+          controller.set_focus_rows([
+                                      { id: 'row-1', cells: %w[A B], focus_ids: %w[cell_A cell_B], code: '701' },
+                                      { id: 'row-2', cells: %w[C], focus_ids: %w[cell_C], code: '701' }
+                                    ])
+          controller.set_highlight(%w[cell_A cell_B], '701', row_id: 'row-1', row_cells: %w[A B])
+
+          removed = controller.remove_highlight_cell('A')
+
+          assert_equal 'row-1', removed[:row_id]
+          assert_equal ['B'], removed[:cells]
+          assert_equal 'cell_B', removed[:label]
+          assert_equal false, controller.visible_cell_space?(cell_a)
+          assert_equal true, controller.visible_cell_space?(cell_b)
+
+          added = controller.add_highlight_cell('C')
+
+          assert_equal %w[B C], added[:cells]
+          assert_equal 'cell_B and cell_C', added[:label]
+          assert_equal true, controller.visible_cell_space?(cell_c)
+
+          removed_from_rows = controller.remove_cell('C')
+
+          assert_equal %w[row-1 row-2], removed_from_rows.map { |payload| payload[:row_id] }
+          assert_equal ['B'], removed_from_rows.first[:cells]
+          assert_equal [], removed_from_rows.last[:cells]
+          assert_equal false, controller.visible_cell_space?(cell_c)
+
+          controller.set_highlight([], '')
+
+          assert_equal false, controller.visible_cell_space?(cell_a)
+          assert_equal true, controller.visible_cell_space?(cell_b)
+          assert_equal false, controller.visible_cell_space?(cell_c)
+        end
+
         def test_rendering_options_are_captured_and_restored_for_multi_cell_focus
           options = {
             'HideRestOfModel' => true,

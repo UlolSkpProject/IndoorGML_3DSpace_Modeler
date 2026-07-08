@@ -132,6 +132,22 @@ module ULOL
             IndoorCore::Logger.puts "[IndoorGML] Export progress result message update failed: #{e.class}: #{e.message}"
           end
 
+          def update_validation_focus_row(row_id:, cells:, states: [], transitions: [], label: '')
+            payload = {
+              rowId: row_id.to_s,
+              cells: Array(cells).map(&:to_s),
+              states: Array(states).map(&:to_s),
+              transitions: Array(transitions).map(&:to_s),
+              label: label.to_s
+            }
+            execute_or_queue(
+              "if (typeof updateValidationFocusRow === 'function') " \
+              "updateValidationFocusRow(#{JSON.generate(payload)});"
+            )
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Validation focus row update failed: #{e.class}: #{e.message}"
+          end
+
           def on_create_gml(&block)
             @create_gml_callback = block
           end
@@ -228,8 +244,8 @@ module ULOL
             dialog.add_action_callback('openReport') do |_context|
               @open_report_callback&.call
             end
-            dialog.add_action_callback('focusValidationCells') do |_context, cell_ids, code, state_ids, transition_ids|
-              @validation_focus_callback&.call(Array(cell_ids), code.to_s, Array(state_ids), Array(transition_ids))
+            dialog.add_action_callback('focusValidationCells') do |_context, cell_ids, code, state_ids, transition_ids, row_id|
+              @validation_focus_callback&.call(Array(cell_ids), code.to_s, Array(state_ids), Array(transition_ids), row_id.to_s)
             end
             dialog.add_action_callback('fixValidationErrors') do |_context|
               @fix_validation_callback&.call
