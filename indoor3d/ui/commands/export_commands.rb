@@ -294,7 +294,7 @@ module ULOL
             else
               unless indoor_model.validation_focus_active?
                 report_cell_ids = validation_report_error_focus_cell_ids(result.report, indoor_model)
-                indoor_model.begin_validation_focus_editing(report_cell_ids)
+                next unless indoor_model.begin_validation_focus_editing(report_cell_ids)
               end
               indoor_model.set_validation_focus_highlight(row_cell_ids, code)
             end
@@ -417,40 +417,72 @@ module ULOL
 
         def validation_focus_cell_ids_for_refs(refs, indoor_model = IndoorModel.current)
           model = indoor_model
-          cell_ids = Array(refs[:cells]).dup
+          cell_ids = Array(refs[:cells]).flat_map { |cell_id| validation_cell_ref_ids(cell_id) }
 
           model.states.each do |state|
             next unless state&.valid?
-            next unless Array(refs[:states]).include?(validation_state_gml_id(state))
+            next unless validation_state_gml_ids(state).any? { |id| Array(refs[:states]).include?(id) }
 
             cell = state.duality_cell
-            cell_ids << validation_cell_gml_id(cell) if cell&.valid?
+            cell_ids.concat(validation_cell_gml_ids(cell)) if cell&.valid?
           end
 
           model.transitions.each do |transition|
             next unless transition&.valid?
-            next unless Array(refs[:transitions]).include?(validation_transition_gml_id(transition))
+            next unless validation_transition_gml_ids(transition).any? { |id| Array(refs[:transitions]).include?(id) }
 
             [transition.state1&.duality_cell, transition.state2&.duality_cell].each do |cell|
-              cell_ids << validation_cell_gml_id(cell) if cell&.valid?
+              cell_ids.concat(validation_cell_gml_ids(cell)) if cell&.valid?
             end
           end
 
           cell_ids.compact.uniq
         end
 
-        def validation_cell_gml_id(cell_space)
-          return nil unless cell_space
+        def validation_cell_ref_ids(value)
+          safe = validation_safe_id(value)
+          return [] if safe.empty?
 
-          "cell_#{validation_safe_id(cell_space.id)}"
+          if safe.start_with?('solid_cell_')
+            [safe.sub(/\Asolid_/, '')]
+          elsif safe.start_with?('cell_')
+            [safe]
+          else
+            ["cell_#{safe}"]
+          end
+        end
+
+        def validation_cell_gml_id(cell_space)
+          validation_cell_gml_ids(cell_space).first
+        end
+
+        def validation_cell_gml_ids(cell_space)
+          validation_prefixed_gml_ids('cell', cell_space&.id)
         end
 
         def validation_state_gml_id(state)
-          "state_#{validation_safe_id(state.id)}"
+          validation_state_gml_ids(state).first
+        end
+
+        def validation_state_gml_ids(state)
+          validation_prefixed_gml_ids('state', state&.id)
         end
 
         def validation_transition_gml_id(transition)
-          "transition_#{validation_safe_id(transition.id)}"
+          validation_transition_gml_ids(transition).first
+        end
+
+        def validation_transition_gml_ids(transition)
+          validation_prefixed_gml_ids('transition', transition&.id)
+        end
+
+        def validation_prefixed_gml_ids(prefix, value)
+          safe = validation_safe_id(value)
+          return [] if safe.empty?
+
+          ids = ["#{prefix}_#{safe}"]
+          ids << safe if safe.start_with?("#{prefix}_")
+          ids.uniq
         end
 
         def validation_safe_id(value)

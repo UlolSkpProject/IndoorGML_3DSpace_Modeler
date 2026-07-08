@@ -31,9 +31,25 @@ module ULOL
           def apply_validation_focus_visibility
             return false unless validation_focus_active?
 
+            runtime_count = 0
+            visible_count = 0
+            hidden_count = 0
+            skipped_count = 0
             with_visibility_update_operation do
               set_primal_group_visible(true)
-              each_valid_cell_space_group do |cell_space, group|
+              Array(@indoor_model.cell_spaces).each do |cell_space|
+                runtime_count += 1
+                unless cell_space&.valid?
+                  skipped_count += 1
+                  next
+                end
+
+                group = cell_space.sketchup_group
+                unless @visibility_controller.cell_space_visibility_target?(group)
+                  skipped_count += 1
+                  next
+                end
+
                 persistent_id = group.persistent_id
                 unless @validation_focus_controller.visibility_snapshot?(persistent_id)
                   @validation_focus_controller.remember_visibility_snapshot(
@@ -41,14 +57,21 @@ module ULOL
                     @visibility_controller.capture_cell_space_visibility(group)
                   )
                 end
+                visible = edit_mode_visible_cell_space?(cell_space)
+                visible ? visible_count += 1 : hidden_count += 1
                 with_unlocked(group) do
                   @visibility_controller.set_cell_space_render_visible(
                     group,
-                    edit_mode_visible_cell_space?(cell_space)
+                    visible
                   )
                 end
               end
             end
+            log(
+              "Validation focus visibility: runtime=#{runtime_count} " \
+              "focus=#{@validation_focus_controller.focus_id_count} " \
+              "visible=#{visible_count} hidden=#{hidden_count} skipped=#{skipped_count}"
+            )
             invalidate_view(Sketchup.active_model)
             true
           rescue StandardError => e

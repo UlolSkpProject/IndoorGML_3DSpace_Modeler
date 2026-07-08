@@ -71,14 +71,7 @@ module ULOL
           end
 
           def report_error_row_refs(row)
-            text = [row[:item], row[:description], row[:raw], row[:context]].map do |value|
-              value.is_a?(Hash) ? value.to_json : value.to_s
-            end.join(' ')
-            {
-              cells: text.scan(/cell_[A-Za-z0-9_.-]+/).uniq,
-              states: text.scan(/state_[A-Za-z0-9_.-]+/).uniq,
-              transitions: text.scan(/transition_[A-Za-z0-9_.-]+/).uniq
-            }
+            canonical_error_row_refs(row)
           end
 
           def final_error_refs(raw_report)
@@ -102,16 +95,16 @@ module ULOL
 
           def final_error_row_refs(row, raw_report = nil)
             recheck_row = matching_overlap_recheck_row(row, raw_report)
+            canonical_refs = canonical_error_row_refs(row)
             if recheck_row
-              raw_refs = report_error_row_refs(row)
               return {
                 cells: Array(recheck_row['cells']).map(&:to_s).reject(&:empty?).uniq,
-                states: raw_refs[:states],
-                transitions: raw_refs[:transitions]
+                states: canonical_refs[:states],
+                transitions: canonical_refs[:transitions]
               }
             end
 
-            report_error_row_refs(row)
+            canonical_refs
           end
 
           def error_item_label(row)
@@ -154,15 +147,96 @@ module ULOL
             code = error_code_number(row && row[:code])
             return nil unless OVERLAP_RECHECK_CODES.include?(code)
 
-            refs = report_error_row_refs(row)
-            row_cells = refs[:cells]
-            Array(raw_report && raw_report[OVERLAP_RECHECK_REPORT_KEY]).find do |recheck_row|
+            raw_cells = raw_error_row_refs(row)[:cells]
+            canonical_cells = canonical_error_row_refs(row)[:cells]
+            candidates = Array(raw_report && raw_report[OVERLAP_RECHECK_REPORT_KEY]).select do |recheck_row|
               next false if recheck_row['tolerated'] == true
               next false unless error_code_number(recheck_row['code']) == code
 
-              cells = Array(recheck_row['cells']).map(&:to_s).reject(&:empty?)
-              cells.any? && cells.all? { |cell_id| row_cells.include?(cell_id) }
+              Array(recheck_row['cells']).map(&:to_s).reject(&:empty?).any?
             end
+            candidates.find do |recheck_row|
+              cells = Array(recheck_row['cells']).map(&:to_s).reject(&:empty?)
+              canonical_cells.any? { |cell_id| cells.include?(cell_id) }
+            end || candidates.find do |recheck_row|
+              cells = Array(recheck_row['cells']).map(&:to_s).reject(&:empty?)
+              cells.all? { |cell_id| raw_cells.include?(cell_id) }
+            end
+          end
+
+          def canonical_error_row_refs(row)
+            refs = empty_refs
+            case row && row[:scope].to_s
+            when 'Feature', 'Primitive'
+              add_feature_ref(refs, row.dig(:context, :feature_id))
+              add_solid_cell_refs(refs, row[:item]) if row[:scope].to_s == 'Primitive'
+            when 'Dataset'
+              add_explicit_refs(refs, row[:item])
+            else
+              add_feature_ref(refs, row && row[:item])
+            end
+            refs
+          end
+
+          def raw_error_row_refs(row)
+            text = [row && row[:item], row && row[:description], row && row[:raw], row && row[:context]].map do |value|
+              value.is_a?(Hash) ? value.to_json : value.to_s
+            end.join(' ')
+            refs = empty_refs
+            refs[:cells].concat(text.scan(/cell_[A-Za-z0-9_.-]+/))
+            refs[:states].concat(text.scan(/state_[A-Za-z0-9_.-]+/))
+            refs[:transitions].concat(text.scan(/transition_[A-Za-z0-9_.-]+/))
+            refs.each_value(&:uniq!)
+            refs
+          end
+
+          def add_explicit_refs(refs, value)
+            text = value.to_s
+            return if text.empty?
+
+            refs[:cells].concat(text.scan(/cell_[A-Za-z0-9_.-]+/))
+            refs[:states].concat(text.scan(/state_[A-Za-z0-9_.-]+/))
+            refs[:transitions].concat(text.scan(/transition_[A-Za-z0-9_.-]+/))
+            refs.each_value(&:uniq!)
+          end
+
+          def add_feature_ref(refs, value)
+            text = value.to_s
+            return if text.empty?
+
+            if text.match?(/(?:cell|state|transition)_[A-Za-z0-9_.-]+/)
+              add_explicit_refs(refs, text)
+              return
+            end
+
+            id = safe_id(text)
+            return if id.empty?
+
+            if id.start_with?('state_')
+              refs[:states] << id
+            elsif id.start_with?('transition_')
+              refs[:transitions] << id
+            elsif id.start_with?('cell_')
+              refs[:cells] << id
+            else
+              refs[:cells] << "cell_#{id}"
+            end
+            refs.each_value(&:uniq!)
+          end
+
+          def add_solid_cell_refs(refs, value)
+            value.to_s.scan(/solid_(cell_[A-Za-z0-9_.-]+)/).flatten.each do |cell_id|
+              refs[:cells] << cell_id
+            end
+            refs.each_value(&:uniq!)
+          end
+
+          def safe_id(value)
+            value.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')
+          end
+
+          def empty_refs
+            { cells: [], states: [], transitions: [] }
           end
         end
 
