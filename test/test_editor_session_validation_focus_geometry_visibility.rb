@@ -12,7 +12,12 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class EditModeDialog; end unless const_defined?(:EditModeDialog)
-      class EditModeOverlay; end unless const_defined?(:EditModeOverlay)
+      class IndoorModeScreenOverlay
+        OVERLAY_ID = 'ulol.indoor3dgml_modeler.indoor_mode_screen_overlay'
+      end unless const_defined?(:IndoorModeScreenOverlay)
+      class DualGraphSpaceOverlay
+        OVERLAY_ID = 'ulol.indoor3dgml_modeler.dual_graph_space_overlay'
+      end unless const_defined?(:DualGraphSpaceOverlay)
       module CellSpaceType
         LABELS = {} unless const_defined?(:LABELS)
       end unless const_defined?(:CellSpaceType)
