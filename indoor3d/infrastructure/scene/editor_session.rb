@@ -104,6 +104,7 @@ module ULOL
           reset_edit_mode_visibility_filter
           capture_and_apply_edit_mode_rendering_options
           @editing = true
+          update_overlay_enabled()
           @indoor_model.attach_edit_selection_observer(model)
           activated = false
           @indoor_model.with_space_feature_constraint do

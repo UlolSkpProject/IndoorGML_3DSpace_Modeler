@@ -163,7 +163,7 @@ module ULOL
         end
 
         def overlay_colors_script
-          state_color = EditModeOverlay::DUAL_STATE_COLOR
+          state_color = StateOverlayRenderer::DUAL_STATE_COLOR
           "{state: #{js_string(css_rgba(state_color))}, stateSoft: #{js_string(css_rgba(state_color, alpha: 0.36))}}"
         end
 
