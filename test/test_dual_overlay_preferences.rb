@@ -43,17 +43,17 @@ module ULOL
           key = [UserPreferences::SECTION, DualOverlayPreferences::STATE_RADIUS_SCALE_KEY]
 
           Sketchup.test_defaults[key] = 0.1
-          assert_equal 0.5, DualOverlayPreferences.state_radius_scale
+          assert_equal 0.3, DualOverlayPreferences.state_radius_scale
 
           Sketchup.test_defaults[key] = 9.0
-          assert_equal 2.0, DualOverlayPreferences.state_radius_scale
+          assert_equal 3.0, DualOverlayPreferences.state_radius_scale
         end
 
         def test_state_radius_scale_writer_stores_clamped_value
-          DualOverlayPreferences.state_radius_scale = 3.0
+          DualOverlayPreferences.state_radius_scale = 4.0
 
           assert_equal(
-            2.0,
+            3.0,
             Sketchup.test_defaults[[UserPreferences::SECTION, DualOverlayPreferences::STATE_RADIUS_SCALE_KEY]]
           )
         end

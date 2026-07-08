@@ -6,8 +6,8 @@ module ULOL
       module DualOverlayPreferences
         STATE_RADIUS_SCALE_KEY = 'dual_overlay_state_radius_scale'
         STATE_RADIUS_SCALE_DEFAULT = 1.0
-        STATE_RADIUS_SCALE_MIN = 0.5
-        STATE_RADIUS_SCALE_MAX = 2.0
+        STATE_RADIUS_SCALE_MIN = 0.3
+        STATE_RADIUS_SCALE_MAX = 3.0
 
         class << self
           def state_radius_scale
