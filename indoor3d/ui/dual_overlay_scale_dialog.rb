@@ -91,10 +91,10 @@ module ULOL
                   --text: #d8d6d0;
                   --text-strong: #e8e6e0;
                   --text-muted: #85827b;
-                  --focus: #8ab4f8;
-                  --accent: #3ebc71;
-                  --accent-bg: #12261a;
-                  --accent-border: #327a4f;
+                  --focus: #60a5fa;
+                  --state: #2378ff;
+                  --state-soft: rgba(35, 120, 255, 0.20);
+                  --state-border: #3b82f6;
                   --radius: 8px;
                 }
                 * {
@@ -131,7 +131,7 @@ module ULOL
                   text-transform: uppercase;
                 }
                 .value {
-                  color: var(--text-strong);
+                  color: #93c5fd;
                   font-size: 18px;
                   font-weight: 700;
                   font-variant-numeric: tabular-nums;
@@ -175,13 +175,13 @@ module ULOL
                   border-color: #6a6760;
                 }
                 button.primary {
-                  background: var(--accent-bg);
-                  border-color: var(--accent-border);
-                  color: var(--accent);
+                  background: var(--state-soft);
+                  border-color: var(--state-border);
+                  color: #93c5fd;
                 }
                 button.primary:hover {
-                  border-color: #3a9060;
-                  background: #152e1e;
+                  border-color: #60a5fa;
+                  background: rgba(35, 120, 255, 0.28);
                 }
               </style>
             </head>
