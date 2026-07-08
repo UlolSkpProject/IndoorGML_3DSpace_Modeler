@@ -124,7 +124,7 @@ module ULOL
             assert_equal ['cell_A'], refs[:cells]
           end
 
-          def test_primitive_error_refs_map_solid_cell_item_to_cell_space
+          def test_primitive_error_refs_do_not_use_solid_item_without_parent_feature
             report = {
               'features' => [
                 {
@@ -145,7 +145,9 @@ module ULOL
             row = Schema.error_item_rows(report).first
             refs = Schema.report_error_row_refs(row)
 
-            assert_equal ['cell_b67d90rs'], refs[:cells]
+            assert_equal [], refs[:cells]
+            assert_equal [], refs[:states]
+            assert_equal [], refs[:transitions]
           end
 
           def test_state_and_transition_feature_refs_are_kept_for_runtime_expansion

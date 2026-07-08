@@ -294,6 +294,8 @@ module ULOL
             else
               unless indoor_model.validation_focus_active?
                 report_cell_ids = validation_report_error_focus_cell_ids(result.report, indoor_model)
+                next if report_cell_ids.empty?
+
                 next unless indoor_model.begin_validation_focus_editing(report_cell_ids)
               end
               indoor_model.set_validation_focus_highlight(row_cell_ids, code)

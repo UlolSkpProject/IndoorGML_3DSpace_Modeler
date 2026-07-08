@@ -102,6 +102,7 @@ module ULOL
           ensure_overlay_registered(model)
           active_path_controller.remember_current_path(model)
           reset_edit_mode_visibility_filter
+          capture_and_apply_edit_mode_rendering_options
           @editing = true
           @indoor_model.attach_edit_selection_observer(model)
           activated = false
@@ -113,9 +114,12 @@ module ULOL
             @editing = false
             active_path_controller.reset_target
             @indoor_model.detach_edit_selection_observer(model)
+            restore_validation_focus_rendering_options
             apply_lock_policy()
             return false
           end
+          apply_all_edit_mode_cell_space_visibility
+          apply_geometry_visibility unless validation_focus_active?
           @dialog.show()
           selection_changed()
           invalidate_view(model)
@@ -211,6 +215,8 @@ module ULOL
         end
 
         def set_visibility_filter(storeys:, cell_types:)
+          return true if validation_focus_active?
+
           changed = visibility_controller.set_filter(
             storeys: normalize_storey_filter(storeys),
             cell_types: normalize_cell_type_filter(cell_types)
@@ -228,7 +234,7 @@ module ULOL
 
         def refresh_visibility_filter
           invalidate_overlay_transition_points
-          apply_edit_mode_visibility_filter
+          validation_focus_active? ? apply_validation_focus_visibility : apply_edit_mode_visibility_filter
         end
 
         def dual_overlay_state_visible?(state)
@@ -380,10 +386,6 @@ module ULOL
           edit_visibility_service.apply_all_edit_mode_cell_space_visibility
         end
 
-        def restore_edit_mode_visibility
-          edit_visibility_service.restore_edit_mode_visibility
-        end
-
         def normalize_visibility_for_non_edit_mode
           edit_visibility_service.normalize_visibility_for_non_edit_mode
         end
@@ -392,6 +394,12 @@ module ULOL
           validation_focus_controller.capture_and_apply_rendering_options(Sketchup.active_model, focus_cell_count)
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Validation focus rendering option update failed: #{e.class}: #{e.message}"
+        end
+
+        def capture_and_apply_edit_mode_rendering_options
+          validation_focus_controller.capture_and_apply_hidden_rendering_options(Sketchup.active_model)
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Edit mode rendering option update failed: #{e.class}: #{e.message}"
         end
 
         def restore_validation_focus_rendering_options

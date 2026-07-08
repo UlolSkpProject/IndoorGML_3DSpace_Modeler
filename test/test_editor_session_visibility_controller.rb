@@ -8,32 +8,29 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class EditorSessionVisibilityControllerTest < Minitest::Test
-        def test_filter_state_is_stored_and_reset_with_snapshots
+        def test_filter_state_is_stored_and_reset_without_hidden_snapshots
           controller = EditorSession::VisibilityController.new
-          group = fake_group(pid: 7)
           assert controller.set_filter(storeys: %w[1F B1], cell_types: [:general])
           refute controller.set_filter(storeys: %w[1F B1], cell_types: [:general])
-          controller.remember_edit_mode_visibility(group)
 
           assert_equal %w[1F B1], controller.visible_storeys
           assert_equal [:general], controller.visible_cell_types
           assert controller.filter_active?
-          refute controller.edit_mode_visibility_snapshots_empty?
+          refute_respond_to controller, :remember_edit_mode_visibility
+          refute_respond_to controller, :edit_mode_visibility_snapshot
 
           controller.reset_filter
 
           assert_empty controller.visible_storeys
           assert_empty controller.visible_cell_types
           refute controller.filter_active?
-          assert controller.edit_mode_visibility_snapshots_empty?
         end
 
-        def test_capture_and_restore_group_hidden_state
+        def test_set_hidden_and_visible_changes_group_only
           visible_child = fake_child(hidden: false)
           hidden_child = fake_child(hidden: true)
           group = fake_group(pid: 10, children: [visible_child, hidden_child])
           controller = EditorSession::VisibilityController.new
-          snapshot = controller.capture_cell_space_visibility(group)
 
           controller.set_cell_space_render_visible(group, false)
           assert_equal true, group.hidden?
@@ -42,7 +39,7 @@ module ULOL
           assert_equal 0, visible_child.write_count
           assert_equal 0, hidden_child.write_count
 
-          controller.restore_cell_space_visibility(group, snapshot)
+          controller.set_cell_space_render_visible(group, true)
           assert_equal false, group.hidden?
           assert_equal false, visible_child.hidden?
           assert_equal true, hidden_child.hidden?
@@ -50,14 +47,13 @@ module ULOL
           assert_equal 0, hidden_child.write_count
         end
 
-        def test_set_visible_with_snapshot_shows_group_without_touching_children
+        def test_set_visible_shows_group_without_touching_children
           visible_child = fake_child(hidden: false)
           hidden_child = fake_child(hidden: true)
           group = fake_group(pid: 11, children: [visible_child, hidden_child], hidden: true)
           controller = EditorSession::VisibilityController.new
-          snapshot = controller.capture_cell_space_visibility(group)
 
-          controller.set_cell_space_render_visible(group, true, snapshot)
+          controller.set_cell_space_render_visible(group, true)
 
           assert_equal false, group.hidden?
           assert_equal false, visible_child.hidden?
@@ -82,26 +78,24 @@ module ULOL
           assert_equal false, visible_child.hidden?
         end
 
-        def test_capture_does_not_scan_child_entities
+        def test_visibility_target_check_does_not_scan_child_entities
           child = fake_child(hidden: false)
           group = fake_group(pid: 14, children: [child], raise_on_entities: true)
           controller = EditorSession::VisibilityController.new
 
-          snapshot = controller.capture_cell_space_visibility(group)
+          assert_equal true, controller.cell_space_visibility_target?(group)
 
-          assert_equal({ hidden: false }, snapshot)
           assert_equal 0, child.write_count
         end
 
-        def test_remember_edit_mode_visibility_prefers_validation_snapshot
-          original_child = fake_child(hidden: false)
-          group = fake_group(pid: 12, children: [original_child])
-          validation_snapshot = { hidden: true }
+        def test_set_render_visibility_returns_false_for_invalid_target
+          group = fake_group(pid: 12, hidden: false)
           controller = EditorSession::VisibilityController.new
 
-          controller.remember_edit_mode_visibility(group, snapshot: validation_snapshot)
+          group.define_singleton_method(:valid?) { false }
 
-          assert_same validation_snapshot, controller.edit_mode_visibility_snapshot(group)
+          assert_equal false, controller.set_cell_space_render_visible(group, false)
+          assert_equal false, group.hidden?
         end
 
         private

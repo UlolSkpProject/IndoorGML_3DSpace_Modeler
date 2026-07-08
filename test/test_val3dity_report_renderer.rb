@@ -67,7 +67,7 @@ module ULOL
             assert_includes html, 'VALID'
           end
 
-          def test_render_maps_primitive_solid_id_to_cell_focus_data
+          def test_render_does_not_map_primitive_solid_id_without_parent_feature
             html = Val3dityReportRenderer.new.render(
               'validity' => false,
               'features_overview' => [{ 'total' => 1, 'valid' => 0 }],
@@ -90,7 +90,7 @@ module ULOL
             )
 
             assert_includes html, 'Primitive solid_cell_b67d90rs'
-            assert_includes html, 'data-cells="cell_b67d90rs"'
+            assert_includes html, 'data-cells=""'
           end
         end
       end

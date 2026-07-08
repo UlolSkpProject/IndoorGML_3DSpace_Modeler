@@ -203,6 +203,35 @@ module ULOL
           ], calls
         end
 
+        def test_set_visibility_filter_is_ignored_in_fix_mode
+          session = EditorSession.allocate
+          calls = []
+          session.define_singleton_method(:validation_focus_active?) { true }
+          session.define_singleton_method(:visibility_controller) { raise 'filter state should not change in fix mode' }
+          session.define_singleton_method(:apply_edit_mode_visibility_filter) { raise 'edit filter should not run in fix mode' }
+          session.define_singleton_method(:apply_validation_focus_visibility) { calls << :apply_validation_focus_visibility }
+
+          assert_equal true, session.set_visibility_filter(storeys: ['F01'], cell_types: ['Room'])
+
+          assert_equal [], calls
+        end
+
+        def test_refresh_visibility_filter_reapplies_fix_visibility_in_fix_mode
+          session = EditorSession.allocate
+          calls = []
+          session.define_singleton_method(:validation_focus_active?) { true }
+          session.define_singleton_method(:invalidate_overlay_transition_points) { calls << :invalidate_overlay_transition_points }
+          session.define_singleton_method(:apply_validation_focus_visibility) { calls << :apply_validation_focus_visibility }
+          session.define_singleton_method(:apply_edit_mode_visibility_filter) { raise 'edit filter should not run in fix mode' }
+
+          session.refresh_visibility_filter
+
+          assert_equal [
+            :invalidate_overlay_transition_points,
+            :apply_validation_focus_visibility
+          ], calls
+        end
+
         def test_close_dialog_only_uses_non_edit_visibility_normalization
           session = EditorSession.allocate
           calls = []
@@ -213,7 +242,6 @@ module ULOL
           session.define_singleton_method(:restore_validation_focus_visibility) { calls << :restore_validation_focus_visibility }
           session.define_singleton_method(:normalize_visibility_for_non_edit_mode) { calls << :normalize_visibility_for_non_edit_mode }
           session.define_singleton_method(:restore_validation_focus_rendering_options) { calls << :restore_validation_focus_rendering_options }
-          session.define_singleton_method(:restore_edit_mode_visibility) { raise 'edit filter snapshots should not be restored on fix-mode close' }
           session.define_singleton_method(:reset_edit_mode_visibility_filter) { calls << :reset_edit_mode_visibility_filter }
           session.define_singleton_method(:clear_validation_focus) { calls << :clear_validation_focus }
           session.define_singleton_method(:set_overlay_enabled) { |enabled| calls << [:set_overlay_enabled, enabled] }

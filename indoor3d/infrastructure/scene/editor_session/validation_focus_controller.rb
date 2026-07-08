@@ -18,7 +18,6 @@ module ULOL
             @cell_ids = nil
             @highlight_cell_ids = nil
             @highlight_code = nil
-            @visibility_snapshots = {}
             @rendering_option_snapshots = {}
           end
 
@@ -109,39 +108,26 @@ module ULOL
             { cell_spaces: [], states: [], transitions: [] }
           end
 
-          def visibility_snapshots
-            @visibility_snapshots ||= {}
-          end
-
-          def visibility_snapshot(persistent_id)
-            visibility_snapshots[persistent_id]
-          end
-
-          def visibility_snapshot?(persistent_id)
-            visibility_snapshots.key?(persistent_id)
-          end
-
-          def remember_visibility_snapshot(persistent_id, snapshot)
-            visibility_snapshots[persistent_id] = snapshot unless visibility_snapshots.key?(persistent_id)
-          end
-
-          def clear_visibility_snapshots
-            @visibility_snapshots = {}
-          end
-
           def clear
             @cell_ids = nil
             @highlight_cell_ids = nil
             @highlight_code = nil
-            @visibility_snapshots = {}
           end
 
-          def capture_and_apply_rendering_options(model, focus_cell_count)
+          def capture_and_apply_rendering_options(model, _focus_cell_count)
+            capture_and_apply_rendering_option_keys(model, validation_focus_rendering_option_keys)
+          end
+
+          def capture_and_apply_hidden_rendering_options(model)
+            capture_and_apply_rendering_option_keys(model, HIDDEN_RENDERING_OPTION_KEYS)
+          end
+
+          def capture_and_apply_rendering_option_keys(model, keys)
             options = model&.rendering_options
             return unless options
 
             changed = false
-            validation_focus_rendering_option_keys(focus_cell_count).each do |key|
+            Array(keys).each do |key|
               next unless rendering_option_key?(options, key)
 
               @rendering_option_snapshots[key] = options[key] unless @rendering_option_snapshots.key?(key)
@@ -208,9 +194,9 @@ module ULOL
             ids.uniq
           end
 
-          def validation_focus_rendering_option_keys(focus_cell_count)
+          def validation_focus_rendering_option_keys
             keys = HIDDEN_RENDERING_OPTION_KEYS.dup
-            keys.concat(MULTI_FOCUS_RENDERING_OPTION_KEYS) if focus_cell_count.to_i >= 2
+            keys.concat(MULTI_FOCUS_RENDERING_OPTION_KEYS)
             keys
           end
 

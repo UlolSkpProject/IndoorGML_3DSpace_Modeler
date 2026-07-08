@@ -154,6 +154,7 @@ function renderVisibilityFilter(filter) {
     'type'
   );
   suppressFilterEvents = false;
+  applyFilterDisabled();
 }
 
 function renderFilterGroup(container, options, selectedValues, name) {
@@ -246,6 +247,7 @@ function appendFilterOption(container, option, name, checked) {
   input.name = name + 'Filter';
   input.value = option.value;
   input.checked = checked;
+  input.disabled = fixMode;
   input.addEventListener('change', onFilterOptionChanged);
   text.textContent = option.label || option.value;
 
@@ -276,6 +278,7 @@ function checkAllFilterOptions(container) {
 
 function commitVisibilityFilter() {
   if (suppressFilterEvents) return;
+  if (fixMode) return;
 
   var selectedStoreys = filterValuesForCommit(storeyFilterOptions);
   var selectedTypes = filterValuesForCommit(typeFilterOptions);
@@ -288,6 +291,7 @@ function commitVisibilityFilter() {
 
 function onFilterOptionChanged(event) {
   if (suppressFilterEvents) return;
+  if (fixMode) return;
 
   var input = event.currentTarget;
   var isStorey = input.name === 'storeyFilter';
@@ -307,7 +311,21 @@ function setFilterCollapsed(collapsed) {
 }
 
 function toggleFilterPanel() {
+  if (fixMode) return;
+
   setFilterCollapsed(!filterPanel.classList.contains('is-collapsed'));
+}
+
+function applyFilterDisabled() {
+  filterPanel.classList.toggle('is-disabled', fixMode);
+  filterToggle.disabled = fixMode;
+
+  Array.prototype.forEach.call(
+    filterPanel.querySelectorAll('input[type="checkbox"]'),
+    function (input) {
+      input.disabled = fixMode;
+    }
+  );
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -394,6 +412,7 @@ function init(config) {
   setIcon('changeTypeIcon', config.assetRoot, 'change_cellspace_type.svg');
   applyOverlayColors(config.overlayColors);
   renderVisibilityFilter(config.visibilityFilter);
+  applyFilterDisabled();
 
   setVisible(recheckErrorsButton, fixMode);
   updateSelection(null);

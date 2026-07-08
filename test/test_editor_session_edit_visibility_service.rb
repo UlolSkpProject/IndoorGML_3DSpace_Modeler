@@ -25,7 +25,7 @@ module ULOL
           Sketchup.test_active_model = nil
         end
 
-        def test_visibility_filter_hides_nonmatching_cell_spaces_and_restores_snapshot
+        def test_visibility_filter_hides_nonmatching_cell_spaces_and_clear_shows_all
           matching_child = fake_child(hidden: false)
           hidden_child = fake_child(hidden: false)
           matching_group = fake_group(pid: 1, children: [matching_child])
@@ -266,16 +266,46 @@ module ULOL
           assert_equal [group, primal], callbacks.unlocked_entities
         end
 
-        def test_normalize_visibility_for_non_edit_mode_forces_group_visible_even_with_snapshot
+        def test_restore_validation_focus_visibility_normalizes_without_hidden_snapshot
+          focused_group = fake_group(pid: 23)
+          outside_group = fake_group(pid: 24, hidden: true)
+          primal = fake_group(pid: 25, hidden: false)
+          indoor_model = fake_indoor_model(
+            primal_group: primal,
+            cell_spaces: [
+              fake_cell_space(id: 'A', group: focused_group, storey: 'F01', cell_type: :general),
+              fake_cell_space(id: 'B', group: outside_group, storey: 'F01', cell_type: :general)
+            ]
+          )
+          callbacks = CallbackLog.new
+          Sketchup.test_active_model = fake_model
+          service = build_service(
+            indoor_model,
+            EditorSession::VisibilityController.new,
+            callbacks,
+            geometry_visible: -> { false }
+          )
+
+          assert service.restore_validation_focus_visibility
+
+          assert_equal false, focused_group.hidden?
+          assert_equal false, outside_group.hidden?
+          assert_equal false, primal.visible?
+          assert_includes callbacks.unlocked_entities, focused_group
+          assert_includes callbacks.unlocked_entities, outside_group
+          assert_includes callbacks.unlocked_entities, primal
+        end
+
+        def test_normalize_visibility_for_non_edit_mode_forces_group_visible_even_when_cached_hidden
           child = fake_child(hidden: true)
-          group = fake_group(pid: 23, children: [child], hidden: true)
-          primal = fake_group(pid: 24)
+          group = fake_group(pid: 26, children: [child])
+          primal = fake_group(pid: 27)
           indoor_model = fake_indoor_model(
             primal_group: primal,
             cell_spaces: [fake_cell_space(group: group, storey: 'F01', cell_type: :general)]
           )
           visibility = EditorSession::VisibilityController.new
-          visibility.remember_edit_mode_visibility(group, snapshot: { hidden: true })
+          visibility.set_cell_space_render_visible(group, false)
           callbacks = CallbackLog.new
           Sketchup.test_active_model = fake_model
           service = build_service(indoor_model, visibility, callbacks)
@@ -285,7 +315,7 @@ module ULOL
           assert_equal false, group.hidden?
           assert_equal true, child.hidden?
           assert_equal 0, child.write_count
-          assert_equal 1, group.write_count
+          assert_equal 2, group.write_count
         end
 
         private

@@ -147,7 +147,6 @@ module ULOL
             code = error_code_number(row && row[:code])
             return nil unless OVERLAP_RECHECK_CODES.include?(code)
 
-            raw_cells = raw_error_row_refs(row)[:cells]
             canonical_cells = canonical_error_row_refs(row)[:cells]
             candidates = Array(raw_report && raw_report[OVERLAP_RECHECK_REPORT_KEY]).select do |recheck_row|
               next false if recheck_row['tolerated'] == true
@@ -158,35 +157,21 @@ module ULOL
             candidates.find do |recheck_row|
               cells = Array(recheck_row['cells']).map(&:to_s).reject(&:empty?)
               canonical_cells.any? { |cell_id| cells.include?(cell_id) }
-            end || candidates.find do |recheck_row|
-              cells = Array(recheck_row['cells']).map(&:to_s).reject(&:empty?)
-              cells.all? { |cell_id| raw_cells.include?(cell_id) }
             end
           end
 
           def canonical_error_row_refs(row)
             refs = empty_refs
             case row && row[:scope].to_s
-            when 'Feature', 'Primitive'
+            when 'Feature'
               add_feature_ref(refs, row.dig(:context, :feature_id))
-              add_solid_cell_refs(refs, row[:item]) if row[:scope].to_s == 'Primitive'
+            when 'Primitive'
+              add_feature_ref(refs, row.dig(:context, :feature_id))
             when 'Dataset'
               add_explicit_refs(refs, row[:item])
             else
               add_feature_ref(refs, row && row[:item])
             end
-            refs
-          end
-
-          def raw_error_row_refs(row)
-            text = [row && row[:item], row && row[:description], row && row[:raw], row && row[:context]].map do |value|
-              value.is_a?(Hash) ? value.to_json : value.to_s
-            end.join(' ')
-            refs = empty_refs
-            refs[:cells].concat(text.scan(/cell_[A-Za-z0-9_.-]+/))
-            refs[:states].concat(text.scan(/state_[A-Za-z0-9_.-]+/))
-            refs[:transitions].concat(text.scan(/transition_[A-Za-z0-9_.-]+/))
-            refs.each_value(&:uniq!)
             refs
           end
 
@@ -220,13 +205,6 @@ module ULOL
               refs[:cells] << id
             else
               refs[:cells] << "cell_#{id}"
-            end
-            refs.each_value(&:uniq!)
-          end
-
-          def add_solid_cell_refs(refs, value)
-            value.to_s.scan(/solid_(cell_[A-Za-z0-9_.-]+)/).flatten.each do |cell_id|
-              refs[:cells] << cell_id
             end
             refs.each_value(&:uniq!)
           end

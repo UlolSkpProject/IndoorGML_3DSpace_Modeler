@@ -328,7 +328,7 @@ module ULOL
             assert_equal [[['cell_cell_A', 'cell_A'], '901']], indoor_a.highlight_calls
           end
 
-          def test_report_focus_normalizes_solid_cell_refs_from_row_callback
+          def test_report_focus_does_not_start_from_solid_cell_callback_without_canonical_report_focus
             model_a = FakeModel.new('A')
             indoor_a = FakeIndoorModel.new(model_a)
             progress = FakeProgress.new
@@ -339,8 +339,8 @@ module ULOL
             dispatcher.send(:handle_validation_result, session, FakeResult.invalid_with_solid_primitive_report, 'temp.gml')
             progress.validation_focus_callback.call(['solid_cell_b67d90rs'], '203', [], [])
 
-            assert_equal [['cell_b67d90rs']], indoor_a.begin_focus_calls
-            assert_equal [[['cell_b67d90rs'], '203']], indoor_a.highlight_calls
+            assert_empty indoor_a.begin_focus_calls
+            assert_empty indoor_a.highlight_calls
           end
 
           def test_report_row_focus_does_not_highlight_when_fix_mode_start_fails

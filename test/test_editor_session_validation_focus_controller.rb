@@ -81,19 +81,6 @@ module ULOL
           assert_equal [transition_inside], elements[:transitions]
         end
 
-        def test_visibility_snapshots_are_remembered_and_cleared
-          controller = EditorSession::ValidationFocusController.new
-
-          controller.remember_visibility_snapshot(10, :first)
-          controller.remember_visibility_snapshot(10, :second)
-
-          assert_equal true, controller.visibility_snapshot?(10)
-          assert_equal :first, controller.visibility_snapshot(10)
-
-          controller.clear_visibility_snapshots
-          assert_equal false, controller.visibility_snapshot?(10)
-        end
-
         def test_rendering_options_are_captured_and_restored_for_multi_cell_focus
           options = {
             'HideRestOfModel' => true,
@@ -121,7 +108,7 @@ module ULOL
           assert_equal true, view.invalidated
         end
 
-        def test_hidden_rendering_options_are_disabled_for_single_cell_focus
+        def test_validation_focus_disables_hidden_and_hide_rest_options_for_single_cell_focus
           options = {
             'HideRestOfModel' => true,
             'ROPDrawHiddenObjects' => true,
@@ -132,6 +119,29 @@ module ULOL
           controller = EditorSession::ValidationFocusController.new
 
           controller.capture_and_apply_rendering_options(model, 1)
+
+          assert_equal false, options['HideRestOfModel']
+          assert_equal false, options['ROPDrawHiddenObjects']
+          assert_equal false, options['ROPDrawHiddenGeometry']
+          assert_equal true, view.invalidated
+
+          controller.restore_rendering_options(model)
+          assert_equal true, options['HideRestOfModel']
+          assert_equal true, options['ROPDrawHiddenObjects']
+          assert_equal true, options['ROPDrawHiddenGeometry']
+        end
+
+        def test_edit_mode_rendering_options_disable_hidden_options_only
+          options = {
+            'HideRestOfModel' => true,
+            'ROPDrawHiddenObjects' => true,
+            'ROPDrawHiddenGeometry' => true
+          }
+          view = fake_view
+          model = Struct.new(:rendering_options, :active_view).new(options, view)
+          controller = EditorSession::ValidationFocusController.new
+
+          controller.capture_and_apply_hidden_rendering_options(model)
 
           assert_equal true, options['HideRestOfModel']
           assert_equal false, options['ROPDrawHiddenObjects']
@@ -151,10 +161,12 @@ module ULOL
           controller = EditorSession::ValidationFocusController.new
 
           controller.capture_and_apply_rendering_options(model, 1)
+          assert_equal false, options['HideRestOfModel']
+          assert_equal true, view.invalidated
+
           controller.restore_rendering_options(model)
 
           assert_equal true, options['HideRestOfModel']
-          assert_equal false, view.invalidated
         end
 
         private
