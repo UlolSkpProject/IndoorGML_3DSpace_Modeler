@@ -8,7 +8,6 @@ module ULOL
           def initialize
             @visible_storeys = []
             @visible_cell_types = []
-            @edit_mode_visibility_snapshots = {}
             @cell_space_render_visibility = {}
           end
 
@@ -30,43 +29,7 @@ module ULOL
           def reset_filter
             @visible_storeys = []
             @visible_cell_types = []
-            @edit_mode_visibility_snapshots = {}
             @cell_space_render_visibility = {}
-          end
-
-          def clear_edit_mode_snapshots
-            @edit_mode_visibility_snapshots = {}
-          end
-
-          def edit_mode_visibility_snapshots_empty?
-            @edit_mode_visibility_snapshots.empty?
-          end
-
-          def edit_mode_visibility_snapshot(group)
-            return nil unless group&.valid?
-
-            @edit_mode_visibility_snapshots[group.persistent_id]
-          rescue StandardError
-            nil
-          end
-
-          def edit_mode_visibility_snapshot?(group)
-            return false unless group&.valid?
-
-            @edit_mode_visibility_snapshots.key?(group.persistent_id)
-          rescue StandardError
-            false
-          end
-
-          def remember_edit_mode_visibility(group, snapshot: nil)
-            persistent_id = group.persistent_id
-            return false if @edit_mode_visibility_snapshots.key?(persistent_id)
-
-            @edit_mode_visibility_snapshots[persistent_id] =
-              snapshot || capture_cell_space_visibility(group)
-            true
-          rescue StandardError
-            false
           end
 
           def cell_space_visibility_target?(group)
@@ -75,22 +38,9 @@ module ULOL
             false
           end
 
-          def capture_cell_space_visibility(group)
-            {
-              hidden: group_hidden?(group)
-            }
-          end
-
-          def restore_cell_space_visibility(group, snapshot)
-            return set_cell_space_render_visible(group, snapshot == true) unless snapshot.is_a?(Hash)
-
-            target_hidden = snapshot.key?(:hidden) ? snapshot[:hidden] == true : snapshot[:visible] == false
-            set_group_hidden(group, target_hidden)
-            @cell_space_render_visibility[group.persistent_id] = !target_hidden if group&.valid?
-            true
-          end
-
           def set_cell_space_render_visible(group, visible, _snapshot = nil, **_options)
+            return false unless cell_space_visibility_target?(group)
+
             persistent_id = group.persistent_id
             target_visible = visible == true
 
@@ -98,7 +48,8 @@ module ULOL
             return true if @cell_space_render_visibility[persistent_id] == target_visible &&
                            group_hidden?(group) == target_hidden
 
-            set_group_hidden(group, target_hidden)
+            return false unless set_group_hidden(group, target_hidden)
+
             @cell_space_render_visibility[persistent_id] = target_visible
             true
           end

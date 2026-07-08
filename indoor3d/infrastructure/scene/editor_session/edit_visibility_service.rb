@@ -18,11 +18,11 @@ module ULOL
           def apply_geometry_visibility
             return false unless primal_group_visibility_target?
 
-            with_visibility_update_operation do
+            applied = with_visibility_update_operation do
               set_primal_group_visible(@geometry_visible.call)
             end
             invalidate_view(Sketchup.active_model)
-            true
+            applied
           rescue StandardError => e
             log("Geometry visibility update failed: #{e.class}: #{e.message}")
             false
@@ -35,8 +35,9 @@ module ULOL
             visible_count = 0
             hidden_count = 0
             skipped_count = 0
+            applied = true
             with_visibility_update_operation do
-              set_primal_group_visible(true)
+              applied = false unless set_primal_group_visible(true)
               Array(@indoor_model.cell_spaces).each do |cell_space|
                 runtime_count += 1
                 unless cell_space&.valid?
@@ -50,17 +51,10 @@ module ULOL
                   next
                 end
 
-                persistent_id = group.persistent_id
-                unless @validation_focus_controller.visibility_snapshot?(persistent_id)
-                  @validation_focus_controller.remember_visibility_snapshot(
-                    persistent_id,
-                    @visibility_controller.capture_cell_space_visibility(group)
-                  )
-                end
-                visible = edit_mode_visible_cell_space?(cell_space)
+                visible = validation_visible_cell_space?(cell_space)
                 visible ? visible_count += 1 : hidden_count += 1
                 with_unlocked(group) do
-                  @visibility_controller.set_cell_space_render_visible(
+                  applied = false unless @visibility_controller.set_cell_space_render_visible(
                     group,
                     visible
                   )
@@ -73,7 +67,7 @@ module ULOL
               "visible=#{visible_count} hidden=#{hidden_count} skipped=#{skipped_count}"
             )
             invalidate_view(Sketchup.active_model)
-            true
+            applied
           rescue StandardError => e
             log("Validation focus visibility failed: #{e.class}: #{e.message}")
             false
@@ -89,95 +83,57 @@ module ULOL
           end
 
           def restore_validation_focus_visibility
-            snapshots = @validation_focus_controller.visibility_snapshots
-            return true if snapshots.empty?
-
-            with_visibility_update_operation do
-              each_valid_cell_space_group do |_cell_space, group|
-                next unless snapshots.key?(group.persistent_id)
-
-                with_unlocked(group) do
-                  @visibility_controller.restore_cell_space_visibility(group, snapshots[group.persistent_id])
-                end
-              end
-            end
-            @validation_focus_controller.clear_visibility_snapshots
-            apply_edit_mode_visibility_filter(ignore_validation: true) if @visibility_controller.filter_active?
-            invalidate_view(Sketchup.active_model)
-            true
+            normalize_cell_space_visibility_for_normal_mode
           rescue StandardError => e
             log("Validation focus visibility restore failed: #{e.class}: #{e.message}")
             false
           end
 
           def apply_edit_mode_visibility_filter(ignore_validation: false)
-            unless @visibility_controller.filter_active? || (!ignore_validation && validation_focus_active?)
+            return apply_validation_focus_visibility if !ignore_validation && validation_focus_active?
+
+            unless @visibility_controller.filter_active?
               return apply_all_edit_mode_cell_space_visibility
             end
 
+            applied = true
             with_visibility_update_operation do
               each_valid_cell_space_group do |cell_space, group|
-                remember_edit_mode_visibility(group) if @visibility_controller.filter_active?
                 with_unlocked(group) do
-                  @visibility_controller.set_cell_space_render_visible(
+                  applied = false unless @visibility_controller.set_cell_space_render_visible(
                     group,
-                    edit_mode_visible_cell_space?(cell_space, include_validation: !ignore_validation)
+                    edit_mode_visible_cell_space?(cell_space, include_validation: false)
                   )
                 end
               end
             end
             invalidate_view(Sketchup.active_model)
-            true
+            applied
           rescue StandardError => e
             log("Edit visibility filter apply failed: #{e.class}: #{e.message}")
             false
           end
 
-          def apply_all_edit_mode_cell_space_visibility(restore_snapshots: true)
+          def apply_all_edit_mode_cell_space_visibility(restore_snapshots: nil)
+            applied = true
             with_visibility_update_operation do
               each_valid_cell_space_group do |_cell_space, group|
-                snapshot = @visibility_controller.edit_mode_visibility_snapshot(group)
                 with_unlocked(group) do
-                  if restore_snapshots && snapshot
-                    @visibility_controller.restore_cell_space_visibility(group, snapshot)
-                  else
-                    @visibility_controller.set_cell_space_render_visible(group, true)
-                  end
+                  applied = false unless @visibility_controller.set_cell_space_render_visible(group, true)
                 end
               end
             end
-            @visibility_controller.clear_edit_mode_snapshots
             invalidate_view(Sketchup.active_model)
-            true
+            applied
           rescue StandardError => e
             log("Edit visibility filter clear failed: #{e.class}: #{e.message}")
             false
           end
 
-          def restore_edit_mode_visibility
-            return true if @visibility_controller.edit_mode_visibility_snapshots_empty?
-
-            with_visibility_update_operation do
-              each_valid_cell_space_group do |_cell_space, group|
-                next unless @visibility_controller.edit_mode_visibility_snapshot?(group)
-
-                snapshot = @visibility_controller.edit_mode_visibility_snapshot(group)
-                with_unlocked(group) { @visibility_controller.restore_cell_space_visibility(group, snapshot) }
-              end
-            end
-            @visibility_controller.clear_edit_mode_snapshots
-            invalidate_view(Sketchup.active_model)
-            true
-          rescue StandardError => e
-            log("Edit visibility filter restore failed: #{e.class}: #{e.message}")
-            false
-          end
-
           def normalize_visibility_for_non_edit_mode
-            apply_all_edit_mode_cell_space_visibility(restore_snapshots: false)
-            apply_geometry_visibility
+            applied = normalize_cell_space_visibility_for_normal_mode
             @invalidate_overlay.call
-            true
+            applied
           rescue StandardError => e
             log("Edit visibility normalize failed: #{e.class}: #{e.message}")
             false
@@ -192,6 +148,20 @@ module ULOL
             return false unless cell_type_filter_visible?(cell_space)
 
             true
+          end
+
+          def normalize_cell_space_visibility_for_normal_mode
+            applied = true
+            with_visibility_update_operation do
+              each_valid_cell_space_group do |_cell_space, group|
+                with_unlocked(group) do
+                  applied = false unless @visibility_controller.set_cell_space_render_visible(group, true)
+                end
+              end
+              applied = false unless set_primal_group_visible(@geometry_visible.call)
+            end
+            invalidate_view(Sketchup.active_model)
+            applied
           end
 
           private
@@ -262,16 +232,6 @@ module ULOL
 
           def invalidate_view(model)
             @invalidate_view.call(model)
-          end
-
-          def remember_edit_mode_visibility(group)
-            persistent_id = group.persistent_id
-            snapshot = if @validation_focus_controller.visibility_snapshot?(persistent_id)
-                         @validation_focus_controller.visibility_snapshot(persistent_id)
-                       end
-            @visibility_controller.remember_edit_mode_visibility(group, snapshot: snapshot)
-          rescue StandardError
-            false
           end
 
           def validation_focus_active?
