@@ -16,6 +16,7 @@ module ULOL
 
         GRAPH_VISIBLE_ATTRIBUTE = 'graph_visible'
         GEOMETRY_VISIBLE_ATTRIBUTE = 'geometry_visible'
+        VALIDATION_FOCUS_VISIBILITY_REAPPLY_DELAYS = [0, 0.05, 0.15, 0.35].freeze
 
         def initialize(indoor_model)
           @indoor_model = indoor_model
@@ -407,6 +408,7 @@ module ULOL
             editing: @editing,
             reenter: -> { reenter_editing_from_primal_path }
           )
+          defer_validation_focus_visibility if validation_focus_active?
         end
 
         def reconcile_after_transaction(model, source: nil)
@@ -507,18 +509,23 @@ module ULOL
         def defer_validation_focus_visibility
           return false unless defined?(UI) && UI.respond_to?(:start_timer)
 
-          UI.start_timer(0, false) do
-            begin
-              if validation_focus_active?
-                apply_validation_focus_visibility
-                invalidate_overlay_transition_points
-                invalidate_view(Sketchup.active_model())
+          scheduled = false
+          VALIDATION_FOCUS_VISIBILITY_REAPPLY_DELAYS.each do |delay|
+            UI.start_timer(delay, false) do
+              begin
+                if validation_focus_active?
+                  apply_validation_focus_visibility
+                  invalidate_overlay_transition_points
+                  selection_changed
+                  invalidate_view(Sketchup.active_model())
+                end
+              rescue StandardError => e
+                IndoorCore::Logger.puts "[IndoorGML] Deferred validation focus visibility failed: #{e.class}: #{e.message}"
               end
-            rescue StandardError => e
-              IndoorCore::Logger.puts "[IndoorGML] Deferred validation focus visibility failed: #{e.class}: #{e.message}"
             end
+            scheduled = true
           end
-          true
+          scheduled
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Deferred validation focus visibility scheduling failed: #{e.class}: #{e.message}"
           false

@@ -134,6 +134,54 @@ module ULOL
           ], calls
         end
 
+        def test_deferred_validation_focus_visibility_reapplies_across_startup_timers
+          session = EditorSession.allocate
+          calls = []
+          session.instance_variable_set(:@editing, true)
+          session.define_singleton_method(:validation_focus_active?) { true }
+          session.define_singleton_method(:apply_validation_focus_visibility) { calls << :apply_validation_focus_visibility; true }
+          session.define_singleton_method(:invalidate_overlay_transition_points) { calls << :invalidate_overlay_transition_points }
+          session.define_singleton_method(:selection_changed) { calls << :selection_changed }
+          session.define_singleton_method(:invalidate_view) { |model| calls << [:invalidate_view, model] }
+
+          timers = with_fake_ui_timers do |scheduled_timers|
+            assert_equal true, session.send(:defer_validation_focus_visibility)
+            scheduled_timers
+          end
+
+          assert_equal EditorSession::VALIDATION_FOCUS_VISIBILITY_REAPPLY_DELAYS, timers.map(&:first)
+          assert_equal [false] * timers.length, timers.map { |timer| timer[1] }
+
+          timers.each { |timer| timer[2].call }
+
+          expected_calls = EditorSession::VALIDATION_FOCUS_VISIBILITY_REAPPLY_DELAYS.flat_map do
+            [
+              :apply_validation_focus_visibility,
+              :invalidate_overlay_transition_points,
+              :selection_changed,
+              [:invalidate_view, nil]
+            ]
+          end
+          assert_equal expected_calls, calls
+        end
+
+        def test_active_path_changed_schedules_fix_mode_visibility_reapply
+          session = EditorSession.allocate
+          calls = []
+          session.instance_variable_set(:@editing, true)
+          session.instance_variable_set(:@indoor_model, fake_indoor_model(calls))
+          session.instance_variable_set(:@active_path_controller, fake_active_path_controller_for_change(calls))
+          session.define_singleton_method(:validation_focus_active?) { true }
+          session.define_singleton_method(:defer_validation_focus_visibility) { calls << :defer_validation_focus_visibility; true }
+
+          session.active_path_changed(:model)
+
+          assert_equal [
+            [:active_path_changed, :model, true],
+            :defer_validation_focus_visibility
+          ], calls
+        end
+
         def test_set_validation_focus_highlight_returns_false_when_visibility_apply_fails
           session = EditorSession.allocate
           calls = []
@@ -209,6 +257,42 @@ module ULOL
               calls << :active_path_reset
             end
           end.new(calls)
+        end
+
+        def fake_indoor_model(_calls)
+          Struct.new(:calls) do
+            def transaction_replay_pending?
+              false
+            end
+          end.new(_calls)
+        end
+
+        def fake_active_path_controller_for_change(calls)
+          Struct.new(:calls) do
+            def active_path_changed(model, editing:, reenter:)
+              calls << [:active_path_changed, model, editing]
+              reenter
+            end
+          end.new(calls)
+        end
+
+        def with_fake_ui_timers
+          previous_defined = Object.const_defined?(:UI, false)
+          previous_ui = Object.const_get(:UI) if previous_defined
+          Object.send(:remove_const, :UI) if previous_defined
+
+          scheduled_timers = []
+          fake_ui = Module.new
+          fake_ui.define_singleton_method(:start_timer) do |interval, repeat, &block|
+            scheduled_timers << [interval, repeat, block]
+            true
+          end
+          Object.const_set(:UI, fake_ui)
+
+          yield scheduled_timers
+        ensure
+          Object.send(:remove_const, :UI) if Object.const_defined?(:UI, false)
+          Object.const_set(:UI, previous_ui) if previous_defined
         end
       end
     end
