@@ -12,7 +12,7 @@ module ULOL
         MIN_DIALOG_HEIGHT = 260
         MAX_DIALOG_HEIGHT = 760
         CONTENT_PADDING_HEIGHT = 8
-        DIALOG_WINDOW_CHROME_HEIGHT = 44
+        DIALOG_WINDOW_CHROME_HEIGHT = HtmlDialogMetrics::WINDOW_CHROME_HEIGHT
         def initialize(indoor_model)
           @indoor_model = indoor_model
           @dialog = nil
@@ -163,7 +163,7 @@ module ULOL
         end
 
         def overlay_colors_script
-          state_color = EditModeOverlay::DUAL_STATE_COLOR
+          state_color = StateOverlayRenderer::DUAL_STATE_COLOR
           "{state: #{js_string(css_rgba(state_color))}, stateSoft: #{js_string(css_rgba(state_color, alpha: 0.36))}}"
         end
 

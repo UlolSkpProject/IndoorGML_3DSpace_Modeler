@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+width="32"
+height="32"
+viewBox="0 0 32 32"
+fill="none">
+
+  <!-- Radius scale ring --><circle cx="16" cy="13" r="8.4"
+stroke="#60A5FA"
+stroke-width="2.8"
+opacity="0.9"/>
+
+  <!-- State node --><circle cx="16" cy="13" r="4.4"
+fill="#228BE6"
+stroke="#F8FAFC"
+stroke-width="1.3"/>
+
+  <!-- Slider contrast stroke --><path d="M7 25H25"
+stroke="#111827"
+stroke-width="4.0"
+stroke-linecap="round"
+opacity="0.95"/>
+
+  <!-- Slider track --><path d="M7 25H25"
+stroke="#E5E7EB"
+stroke-width="2.4"
+stroke-linecap="round"/>
+
+  <!-- Slider active range --><path d="M7 25H17"
+stroke="#60A5FA"
+stroke-width="2.7"
+stroke-linecap="round"/>
+
+  <!-- Slider knob halo --><circle cx="17" cy="25" r="4.0"
+fill="#F8FAFC"/>
+
+  <!-- Slider knob --><circle cx="17" cy="25" r="3.0"
+fill="#FAB005"
+stroke="#111827"
+stroke-width="1.0"/> </svg>
