@@ -49,8 +49,8 @@ module ULOL
             assert_includes html, 'class="recheck-row validation-error-row c700"'
             assert_includes html, 'data-code="701"'
             assert_includes html, 'data-cells="cell_A,cell_B"'
-            assert_includes html, 'data-states="state_A"'
-            assert_includes html, 'data-transitions="transition_A"'
+            assert_includes html, 'data-states=""'
+            assert_includes html, 'data-transitions=""'
             assert_includes html, '701 (1)'
           end
 
@@ -65,6 +65,32 @@ module ULOL
 
             refute_includes html, 'sketchup.fixValidationErrors'
             assert_includes html, 'VALID'
+          end
+
+          def test_render_maps_primitive_solid_id_to_cell_focus_data
+            html = Val3dityReportRenderer.new.render(
+              'validity' => false,
+              'features_overview' => [{ 'total' => 1, 'valid' => 0 }],
+              'primitives_overview' => [{ 'total' => 1, 'valid' => 0 }],
+              'parameters' => {},
+              'features' => [
+                {
+                  'id' => nil,
+                  'errors' => [],
+                  'primitives' => [
+                    {
+                      'id' => 'solid_cell_b67d90rs',
+                      'errors' => [
+                        { 'code' => 203, 'description' => 'primitive shell is invalid' }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            )
+
+            assert_includes html, 'Primitive solid_cell_b67d90rs'
+            assert_includes html, 'data-cells="cell_b67d90rs"'
           end
         end
       end

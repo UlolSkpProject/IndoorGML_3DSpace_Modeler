@@ -60,7 +60,7 @@ module ULOL
             ], rows
           end
 
-          def test_refs_are_extracted_from_item_description_and_raw_payload
+          def test_refs_are_extracted_only_from_canonical_row_item
             row = {
               item: 'cell_A and cell_B',
               description: 'state_A transition_A',
@@ -69,9 +69,35 @@ module ULOL
 
             refs = Schema.report_error_row_refs(row)
 
-            assert_equal %w[cell_A cell_B cell_C], refs[:cells]
-            assert_equal %w[state_A state_B], refs[:states]
-            assert_equal %w[transition_A transition_B], refs[:transitions]
+            assert_equal %w[cell_A cell_B], refs[:cells]
+            assert_equal [], refs[:states]
+            assert_equal [], refs[:transitions]
+          end
+
+          def test_feature_error_refs_use_feature_id_only
+            report = {
+              'features' => [
+                {
+                  'id' => 'A',
+                  'errors' => [
+                    {
+                      'id' => 'cell_B',
+                      'code' => 302,
+                      'description' => 'feature mentions cell_C state_A transition_A',
+                      'details' => 'cell_D'
+                    }
+                  ],
+                  'primitives' => []
+                }
+              ]
+            }
+
+            row = Schema.error_item_rows(report).first
+            refs = Schema.report_error_row_refs(row)
+
+            assert_equal ['cell_A'], refs[:cells]
+            assert_equal [], refs[:states]
+            assert_equal [], refs[:transitions]
           end
 
           def test_primitive_error_refs_include_parent_feature_cell
@@ -96,6 +122,71 @@ module ULOL
             refs = Schema.report_error_row_refs(row)
 
             assert_equal ['cell_A'], refs[:cells]
+          end
+
+          def test_primitive_error_refs_map_solid_cell_item_to_cell_space
+            report = {
+              'features' => [
+                {
+                  'id' => nil,
+                  'errors' => [],
+                  'primitives' => [
+                    {
+                      'id' => 'solid_cell_b67d90rs',
+                      'errors' => [
+                        { 'code' => 203, 'description' => 'primitive shell is invalid' }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+
+            row = Schema.error_item_rows(report).first
+            refs = Schema.report_error_row_refs(row)
+
+            assert_equal ['cell_b67d90rs'], refs[:cells]
+          end
+
+          def test_state_and_transition_feature_refs_are_kept_for_runtime_expansion
+            report = {
+              'features' => [
+                {
+                  'id' => 'state_A',
+                  'errors' => [{ 'code' => 901, 'description' => 'mentions cell_A' }],
+                  'primitives' => []
+                },
+                {
+                  'id' => 'transition_B',
+                  'errors' => [{ 'code' => 902, 'description' => 'mentions cell_B' }],
+                  'primitives' => []
+                }
+              ]
+            }
+
+            refs = Schema.final_error_refs(report)
+
+            assert_equal [], refs[:cells]
+            assert_equal ['state_A'], refs[:states]
+            assert_equal ['transition_B'], refs[:transitions]
+          end
+
+          def test_dataset_error_refs_use_explicit_row_item_only
+            row = Schema.error_row(
+              'Dataset',
+              'cell_A state_A transition_A',
+              {
+                'code' => 203,
+                'description' => 'mentions cell_B state_B transition_B',
+                'details' => 'cell_C'
+              }
+            )
+
+            refs = Schema.report_error_row_refs(row)
+
+            assert_equal ['cell_A'], refs[:cells]
+            assert_equal ['state_A'], refs[:states]
+            assert_equal ['transition_A'], refs[:transitions]
           end
 
           def test_final_error_refs_use_kept_overlap_recheck_cells_before_broad_raw_refs
@@ -127,8 +218,41 @@ module ULOL
 
             assert_equal %w[cell_A cell_B], refs[:cells]
             assert_equal %w[cell_A cell_B], row_refs[:cells]
-            assert_equal ['state_A'], row_refs[:states]
-            assert_equal ['transition_A'], row_refs[:transitions]
+            assert_equal [], row_refs[:states]
+            assert_equal [], row_refs[:transitions]
+          end
+
+          def test_overlap_recheck_row_prefers_pair_containing_canonical_feature_id
+            report = {
+              'features' => [
+                {
+                  'id' => 'cell_A',
+                  'errors' => [
+                    {
+                      'code' => 701,
+                      'description' => 'overlap cell_A cell_B cell_C cell_D'
+                    }
+                  ],
+                  'primitives' => []
+                }
+              ],
+              Schema::OVERLAP_RECHECK_REPORT_KEY => [
+                {
+                  'code' => 701,
+                  'cells' => %w[cell_C cell_D],
+                  'tolerated' => false
+                },
+                {
+                  'code' => 701,
+                  'cells' => %w[cell_A cell_B],
+                  'tolerated' => false
+                }
+              ]
+            }
+
+            row_refs = Schema.final_error_row_refs(Schema.error_item_rows(report).first, report)
+
+            assert_equal %w[cell_A cell_B], row_refs[:cells]
           end
 
           def test_overview_counts_tolerate_nil

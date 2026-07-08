@@ -107,6 +107,27 @@ module ULOL
           assert_equal 0, hidden_child.write_count
         end
 
+        def test_validation_focus_matches_cell_space_id_that_already_has_cell_prefix
+          focused_group = fake_group(pid: 12)
+          hidden_group = fake_group(pid: 13)
+          focused_cell = fake_cell_space(id: 'cell_A', group: focused_group, storey: 'F01', cell_type: :general)
+          hidden_cell = fake_cell_space(id: 'cell_B', group: hidden_group, storey: 'F01', cell_type: :general)
+          indoor_model = fake_indoor_model(cell_spaces: [focused_cell, hidden_cell])
+          validation = EditorSession::ValidationFocusController.new
+          validation.begin(['cell_A'])
+
+          service = build_service(
+            indoor_model,
+            EditorSession::VisibilityController.new,
+            CallbackLog.new,
+            validation: validation
+          )
+
+          assert service.apply_validation_focus_visibility
+          assert_equal false, focused_group.hidden?
+          assert_equal true, hidden_group.hidden?
+        end
+
         def test_validation_focus_forces_primal_group_visible_even_when_geometry_is_hidden
           primal = fake_group(pid: 29, hidden: true)
           focused_group = fake_group(pid: 30)
@@ -183,6 +204,23 @@ module ULOL
           assert service.apply_validation_focus_visibility
           assert_equal false, visible_error_group.hidden?
           assert_equal false, highlighted_error_group.hidden?
+          assert_equal true, outside_group.hidden?
+        end
+
+        def test_validation_focus_highlight_solid_cell_ref_unhides_target_cell_space
+          target_group = fake_group(pid: 36, hidden: true)
+          outside_group = fake_group(pid: 37)
+          target = fake_cell_space(id: 'b67d90rs', group: target_group, storey: 'F01', cell_type: :general)
+          outside = fake_cell_space(id: 'outside', group: outside_group, storey: 'F01', cell_type: :general)
+          indoor_model = fake_indoor_model(cell_spaces: [target, outside])
+          validation = EditorSession::ValidationFocusController.new
+          validation.begin(%w[cell_b67d90rs cell_outside])
+          validation.set_highlight(['solid_cell_b67d90rs'], '203')
+
+          service = build_service(indoor_model, EditorSession::VisibilityController.new, CallbackLog.new, validation: validation)
+
+          assert service.apply_validation_focus_visibility
+          assert_equal false, target_group.hidden?
           assert_equal true, outside_group.hidden?
         end
 

@@ -134,7 +134,15 @@ module ULOL
             return false
           end
 
-          apply_validation_focus_visibility
+          unless apply_validation_focus_visibility
+            if defined?(IndoorCore::Logger)
+              IndoorCore::Logger.puts '[IndoorGML] Validation focus edit mode failed: visibility apply returned false'
+            end
+            restore_validation_focus_visibility
+            restore_validation_focus_rendering_options
+            clear_validation_focus
+            return false
+          end
           defer_validation_focus_visibility
           invalidate_overlay_transition_points
           selection_changed
@@ -142,6 +150,8 @@ module ULOL
           true
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Validation focus edit mode failed: #{e.class}: #{e.message}"
+          restore_validation_focus_rendering_options
+          restore_validation_focus_visibility
           clear_validation_focus
           false
         end
@@ -257,7 +267,12 @@ module ULOL
 
         def set_validation_focus_highlight(cell_gml_ids, code = nil)
           validation_focus_controller.set_highlight(cell_gml_ids, code)
-          apply_validation_focus_visibility
+          unless apply_validation_focus_visibility
+            if defined?(IndoorCore::Logger)
+              IndoorCore::Logger.puts '[IndoorGML] Validation focus highlight failed: visibility apply returned false'
+            end
+            return false
+          end
           invalidate_view(Sketchup.active_model())
           true
         rescue StandardError => e
@@ -373,8 +388,6 @@ module ULOL
         end
 
         def capture_and_apply_validation_focus_rendering_options(focus_cell_count)
-          return unless focus_cell_count.to_i >= 2
-
           validation_focus_controller.capture_and_apply_rendering_options(Sketchup.active_model, focus_cell_count)
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Validation focus rendering option update failed: #{e.class}: #{e.message}"

@@ -105,6 +105,56 @@ module ULOL
           ], calls
         end
 
+        def test_begin_validation_focus_editing_rolls_back_when_visibility_apply_fails
+          session = EditorSession.allocate
+          calls = []
+          session.instance_variable_set(:@editing, false)
+          session.instance_variable_set(:@validation_focus_controller, fake_validation_focus_controller(calls))
+          session.define_singleton_method(:capture_and_apply_validation_focus_rendering_options) { |count| calls << [:rendering, count] }
+          session.define_singleton_method(:begin_editing) { calls << :begin_editing; true }
+          session.define_singleton_method(:apply_validation_focus_visibility) { calls << :apply_validation_focus_visibility; false }
+          session.define_singleton_method(:restore_validation_focus_visibility) { calls << :restore_validation_focus_visibility }
+          session.define_singleton_method(:restore_validation_focus_rendering_options) { calls << :restore_validation_focus_rendering_options }
+          session.define_singleton_method(:clear_validation_focus) { calls << :clear_validation_focus }
+          session.define_singleton_method(:defer_validation_focus_visibility) { raise 'defer should not run after failed visibility' }
+          session.define_singleton_method(:invalidate_overlay_transition_points) { raise 'overlay should not update after failed visibility' }
+          session.define_singleton_method(:selection_changed) { raise 'selection should not update after failed visibility' }
+          session.define_singleton_method(:invalidate_view) { |_model| raise 'view should not invalidate after failed visibility' }
+
+          assert_equal false, session.begin_validation_focus_editing(%w[cell_A cell_B])
+
+          assert_equal [
+            [:begin, %w[cell_A cell_B]],
+            [:rendering, 2],
+            :begin_editing,
+            :apply_validation_focus_visibility,
+            :restore_validation_focus_visibility,
+            :restore_validation_focus_rendering_options,
+            :clear_validation_focus
+          ], calls
+        end
+
+        def test_set_validation_focus_highlight_returns_false_when_visibility_apply_fails
+          session = EditorSession.allocate
+          calls = []
+          controller = Struct.new(:calls) do
+            def set_highlight(ids, code)
+              calls << [:set_highlight, ids, code]
+              true
+            end
+          end.new(calls)
+          session.instance_variable_set(:@validation_focus_controller, controller)
+          session.define_singleton_method(:apply_validation_focus_visibility) { calls << :apply_validation_focus_visibility; false }
+          session.define_singleton_method(:invalidate_view) { |_model| raise 'view should not invalidate after failed visibility' }
+
+          assert_equal false, session.set_validation_focus_highlight(['cell_A'], '701')
+
+          assert_equal [
+            [:set_highlight, ['cell_A'], '701'],
+            :apply_validation_focus_visibility
+          ], calls
+        end
+
         def test_close_dialog_only_uses_non_edit_visibility_normalization
           session = EditorSession.allocate
           calls = []

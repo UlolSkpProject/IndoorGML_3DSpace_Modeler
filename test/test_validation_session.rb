@@ -286,6 +286,78 @@ module ULOL
             assert_equal [['cell_A', 'cell_B']], indoor_a.begin_focus_calls
           end
 
+          def test_report_focus_expands_state_and_transition_refs_to_runtime_cells
+            model_a = FakeModel.new('A')
+            indoor_a = FakeIndoorModel.new(model_a)
+            cell_a = FakeCell.new('A')
+            cell_b = FakeCell.new('B')
+            cell_c = FakeCell.new('C')
+            state_a = FakeState.new('A', cell_a)
+            state_b = FakeState.new('B', cell_b)
+            state_c = FakeState.new('C', cell_c)
+            transition_t = FakeTransition.new('T', state_b, state_c)
+            indoor_a.states.concat([state_a, state_b, state_c])
+            indoor_a.transitions << transition_t
+            progress = FakeProgress.new
+            session = result_ready_session(model_a, indoor_a, progress)
+            dispatcher = Dispatcher.new
+            Sketchup.test_active_model = model_a
+
+            dispatcher.send(:handle_validation_result, session, FakeResult.invalid_with_state_transition_report, 'temp.gml')
+            progress.validation_focus_callback.call([], '901', ['state_A'], [])
+
+            assert_equal [['cell_A', 'cell_B', 'cell_C']], indoor_a.begin_focus_calls
+            assert_equal [[['cell_A'], '901']], indoor_a.highlight_calls
+          end
+
+          def test_report_focus_expands_prefixed_runtime_ids
+            model_a = FakeModel.new('A')
+            indoor_a = FakeIndoorModel.new(model_a)
+            cell_a = FakeCell.new('cell_A')
+            state_a = FakeState.new('state_A', cell_a)
+            indoor_a.states << state_a
+            progress = FakeProgress.new
+            session = result_ready_session(model_a, indoor_a, progress)
+            dispatcher = Dispatcher.new
+            Sketchup.test_active_model = model_a
+
+            dispatcher.send(:handle_validation_result, session, FakeResult.invalid_with_state_transition_report, 'temp.gml')
+            progress.validation_focus_callback.call([], '901', ['state_A'], [])
+
+            assert_equal [['cell_cell_A', 'cell_A']], indoor_a.begin_focus_calls
+            assert_equal [[['cell_cell_A', 'cell_A'], '901']], indoor_a.highlight_calls
+          end
+
+          def test_report_focus_normalizes_solid_cell_refs_from_row_callback
+            model_a = FakeModel.new('A')
+            indoor_a = FakeIndoorModel.new(model_a)
+            progress = FakeProgress.new
+            session = result_ready_session(model_a, indoor_a, progress)
+            dispatcher = Dispatcher.new
+            Sketchup.test_active_model = model_a
+
+            dispatcher.send(:handle_validation_result, session, FakeResult.invalid_with_solid_primitive_report, 'temp.gml')
+            progress.validation_focus_callback.call(['solid_cell_b67d90rs'], '203', [], [])
+
+            assert_equal [['cell_b67d90rs']], indoor_a.begin_focus_calls
+            assert_equal [[['cell_b67d90rs'], '203']], indoor_a.highlight_calls
+          end
+
+          def test_report_row_focus_does_not_highlight_when_fix_mode_start_fails
+            model_a = FakeModel.new('A')
+            indoor_a = FakeIndoorModel.new(model_a, begin_focus_result: false)
+            progress = FakeProgress.new
+            session = result_ready_session(model_a, indoor_a, progress)
+            dispatcher = Dispatcher.new
+            Sketchup.test_active_model = model_a
+
+            dispatcher.send(:handle_validation_result, session, FakeResult.invalid_with_report('cell_A'), 'temp.gml')
+            progress.validation_focus_callback.call(['cell_A'], '302', [], [])
+
+            assert_equal [['cell_A']], indoor_a.begin_focus_calls
+            assert_empty indoor_a.highlight_calls
+          end
+
           private
 
           def result_ready_session(model, indoor_model, progress)
@@ -410,13 +482,14 @@ module ULOL
             attr_reader :states
             attr_reader :transitions
 
-            def initialize(model)
+            def initialize(model, begin_focus_result: true)
               @model = model
               @begin_focus_calls = []
               @highlight_calls = []
               @states = []
               @transitions = []
               @validation_focus_active = false
+              @begin_focus_result = begin_focus_result
             end
 
             def validation_focus_active?
@@ -425,8 +498,8 @@ module ULOL
 
             def begin_validation_focus_editing(cell_ids)
               @begin_focus_calls << cell_ids
-              @validation_focus_active = true
-              true
+              @validation_focus_active = true if @begin_focus_result
+              @begin_focus_result
             end
 
             def set_validation_focus_highlight(cell_ids, code)
@@ -487,8 +560,14 @@ module ULOL
               new(
                 valid: false,
                 report: {
-                  'dataset_errors' => [
-                    { 'message' => "Invalid #{cell_id}" }
+                  'features' => [
+                    {
+                      'id' => cell_id,
+                      'errors' => [
+                        { 'code' => 302, 'description' => "Invalid #{cell_id}" }
+                      ],
+                      'primitives' => []
+                    }
                   ]
                 }
               )
@@ -551,6 +630,52 @@ module ULOL
               )
             end
 
+            def self.invalid_with_state_transition_report
+              new(
+                valid: false,
+                report: {
+                  'features' => [
+                    {
+                      'id' => 'state_A',
+                      'errors' => [
+                        { 'code' => 901, 'description' => 'state issue mentions cell_Z' }
+                      ],
+                      'primitives' => []
+                    },
+                    {
+                      'id' => 'transition_T',
+                      'errors' => [
+                        { 'code' => 902, 'description' => 'transition issue mentions cell_Y' }
+                      ],
+                      'primitives' => []
+                    }
+                  ]
+                }
+              )
+            end
+
+            def self.invalid_with_solid_primitive_report
+              new(
+                valid: false,
+                report: {
+                  'features' => [
+                    {
+                      'id' => nil,
+                      'errors' => [],
+                      'primitives' => [
+                        {
+                          'id' => 'solid_cell_b67d90rs',
+                          'errors' => [
+                            { 'code' => 203, 'description' => 'primitive shell is invalid' }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              )
+            end
+
             def initialize(valid:, report:)
               @valid = valid
               @report = report
@@ -566,6 +691,24 @@ module ULOL
 
             def report_html_path
               'report.html'
+            end
+          end
+
+          FakeCell = Struct.new(:id) do
+            def valid?
+              true
+            end
+          end
+
+          FakeState = Struct.new(:id, :duality_cell) do
+            def valid?
+              true
+            end
+          end
+
+          FakeTransition = Struct.new(:id, :state1, :state2) do
+            def valid?
+              true
             end
           end
         end

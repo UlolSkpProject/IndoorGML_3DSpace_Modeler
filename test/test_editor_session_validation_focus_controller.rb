@@ -20,6 +20,30 @@ module ULOL
           assert_equal false, controller.focus_cell_space?(other)
         end
 
+        def test_focus_cell_space_matches_runtime_id_that_already_has_cell_prefix
+          controller = EditorSession::ValidationFocusController.new
+          focused = fake_cell_space(id: 'cell_A')
+
+          assert_equal true, controller.begin(['cell_A'])
+
+          assert_equal true, controller.focus_cell_space?(focused)
+          assert_equal true, controller.begin(['cell_cell_A'])
+          assert_equal true, controller.focus_cell_space?(focused)
+        end
+
+        def test_highlight_accepts_solid_cell_ref_alias
+          controller = EditorSession::ValidationFocusController.new
+          focused = fake_cell_space(id: 'b67d90rs')
+          other = fake_cell_space(id: 'other')
+          controller.begin(['cell_b67d90rs', 'cell_other'])
+
+          controller.set_highlight(['solid_cell_b67d90rs'], '203')
+
+          assert_equal true, controller.visible_cell_space?(focused)
+          assert_equal false, controller.visible_cell_space?(other)
+          assert_equal [focused], controller.highlight_cell_spaces([focused, other])
+        end
+
         def test_highlight_limits_visible_cell_space_when_present
           controller = EditorSession::ValidationFocusController.new
           focused = fake_cell_space(id: 'A')
@@ -71,19 +95,66 @@ module ULOL
         end
 
         def test_rendering_options_are_captured_and_restored_for_multi_cell_focus
-          options = { 'HideRestOfModel' => true }
+          options = {
+            'HideRestOfModel' => true,
+            'ROPDrawHiddenObjects' => true,
+            'ROPDrawHiddenGeometry' => true,
+            'DrawHidden' => true
+          }
           view = fake_view
           model = Struct.new(:rendering_options, :active_view).new(options, view)
           controller = EditorSession::ValidationFocusController.new
 
           controller.capture_and_apply_rendering_options(model, 2)
           assert_equal false, options['HideRestOfModel']
+          assert_equal false, options['ROPDrawHiddenObjects']
+          assert_equal false, options['ROPDrawHiddenGeometry']
+          assert_equal false, options['DrawHidden']
           assert_equal true, view.invalidated
 
           view.invalidated = false
           controller.restore_rendering_options(model)
           assert_equal true, options['HideRestOfModel']
+          assert_equal true, options['ROPDrawHiddenObjects']
+          assert_equal true, options['ROPDrawHiddenGeometry']
+          assert_equal true, options['DrawHidden']
           assert_equal true, view.invalidated
+        end
+
+        def test_hidden_rendering_options_are_disabled_for_single_cell_focus
+          options = {
+            'HideRestOfModel' => true,
+            'ROPDrawHiddenObjects' => true,
+            'ROPDrawHiddenGeometry' => true
+          }
+          view = fake_view
+          model = Struct.new(:rendering_options, :active_view).new(options, view)
+          controller = EditorSession::ValidationFocusController.new
+
+          controller.capture_and_apply_rendering_options(model, 1)
+
+          assert_equal true, options['HideRestOfModel']
+          assert_equal false, options['ROPDrawHiddenObjects']
+          assert_equal false, options['ROPDrawHiddenGeometry']
+          assert_equal true, view.invalidated
+
+          controller.restore_rendering_options(model)
+          assert_equal true, options['HideRestOfModel']
+          assert_equal true, options['ROPDrawHiddenObjects']
+          assert_equal true, options['ROPDrawHiddenGeometry']
+        end
+
+        def test_missing_rendering_option_keys_are_ignored
+          options = { 'HideRestOfModel' => true }
+          view = fake_view
+          model = Struct.new(:rendering_options, :active_view).new(options, view)
+          controller = EditorSession::ValidationFocusController.new
+
+          controller.capture_and_apply_rendering_options(model, 1)
+          controller.restore_rendering_options(model)
+
+          assert_equal true, options['HideRestOfModel']
+          assert_equal false, view.invalidated
         end
 
         private
