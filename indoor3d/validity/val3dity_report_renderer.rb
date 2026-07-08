@@ -483,7 +483,7 @@ module ULOL
             code = row[:code].to_s
             recheck_row = matching_error_recheck_row(row, raw_report)
             distance = recheck_row ? format_report_recheck_measure(recheck_row) : ''
-            refs = report_error_row_refs(row, raw_report)
+            refs = Val3dityReportSchema.final_error_row_refs(row, raw_report)
             <<~HTML
               <details class="recheck-row validation-error-row #{error_code_color_class(code)}" data-code="#{html_escape(code)}" data-cells="#{html_escape(refs[:cells].join(','))}" data-states="#{html_escape(refs[:states].join(','))}" data-transitions="#{html_escape(refs[:transitions].join(','))}">
                 <summary>
@@ -506,14 +506,14 @@ module ULOL
             return nil unless [701, 704].include?(code)
             return nil unless raw_report
 
-            cells = report_error_row_refs(row, raw_report)[:cells]
+            cells = Val3dityReportSchema.final_error_row_refs(row, raw_report)[:cells]
             return nil if cells.length < 2
 
             overlap_recheck_rows(raw_report).find do |recheck_row|
               next false unless error_code_number(recheck_row['code']) == code
               next false if recheck_row['tolerated'] == true
 
-              Array(recheck_row['cells']).map(&:to_s).sort == cells.sort
+              Val3dityReportSchema.normalize_cell_refs(recheck_row['cells']).sort == cells.sort
             end
           end
 
@@ -543,10 +543,6 @@ module ULOL
 
           def error_item_rows(raw_report)
             Val3dityReportSchema.error_item_rows(raw_report)
-          end
-
-          def report_error_row_refs(row, raw_report = nil)
-            Val3dityReportSchema.final_error_row_refs(row, raw_report)
           end
 
           def error_item_label(row)

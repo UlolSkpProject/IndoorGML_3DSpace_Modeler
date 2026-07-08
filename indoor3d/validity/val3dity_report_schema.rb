@@ -70,10 +70,6 @@ module ULOL
             }
           end
 
-          def report_error_row_refs(row)
-            canonical_error_row_refs(row)
-          end
-
           def final_error_refs(raw_report)
             refs = { cells: [], states: [], transitions: [] }
             overlap_cells_by_code = final_overlap_recheck_cells_by_code(raw_report)
@@ -84,7 +80,7 @@ module ULOL
                 next
               end
 
-              row_refs = report_error_row_refs(row)
+              row_refs = canonical_error_row_refs(row)
               refs[:cells].concat(row_refs[:cells])
               refs[:states].concat(row_refs[:states])
               refs[:transitions].concat(row_refs[:transitions])
@@ -98,11 +94,14 @@ module ULOL
             canonical_refs = canonical_error_row_refs(row)
             if recheck_row
               return {
-                cells: Array(recheck_row['cells']).map(&:to_s).reject(&:empty?).uniq,
+                cells: normalize_cell_refs(recheck_row['cells']),
                 states: canonical_refs[:states],
                 transitions: canonical_refs[:transitions]
               }
             end
+
+            overlap_cells = overlap_error_row_cells(row)
+            return canonical_refs.merge(cells: overlap_cells) unless overlap_cells.empty?
 
             canonical_refs
           end
@@ -134,7 +133,7 @@ module ULOL
               code = error_code_number(row['code'])
               next unless OVERLAP_RECHECK_CODES.include?(code)
 
-              cells = Array(row['cells']).map(&:to_s).reject(&:empty?)
+              cells = normalize_cell_refs(row['cells'])
               next if cells.empty?
 
               memo[code] ||= []
@@ -147,16 +146,23 @@ module ULOL
             code = error_code_number(row && row[:code])
             return nil unless OVERLAP_RECHECK_CODES.include?(code)
 
-            canonical_cells = canonical_error_row_refs(row)[:cells]
+            row_cells = overlap_error_row_cells(row)
+            row_cells = canonical_error_row_refs(row)[:cells] if row_cells.empty?
             candidates = Array(raw_report && raw_report[OVERLAP_RECHECK_REPORT_KEY]).select do |recheck_row|
               next false if recheck_row['tolerated'] == true
               next false unless error_code_number(recheck_row['code']) == code
 
-              Array(recheck_row['cells']).map(&:to_s).reject(&:empty?).any?
+              normalize_cell_refs(recheck_row['cells']).any?
             end
+            exact_match = candidates.find do |recheck_row|
+              cells = normalize_cell_refs(recheck_row['cells'])
+              cells.sort == row_cells.sort
+            end
+            return exact_match if exact_match
+
             candidates.find do |recheck_row|
-              cells = Array(recheck_row['cells']).map(&:to_s).reject(&:empty?)
-              canonical_cells.any? { |cell_id| cells.include?(cell_id) }
+              cells = normalize_cell_refs(recheck_row['cells'])
+              row_cells.any? { |cell_id| cells.include?(cell_id) }
             end
           end
 
@@ -179,7 +185,7 @@ module ULOL
             text = value.to_s
             return if text.empty?
 
-            refs[:cells].concat(text.scan(/cell_[A-Za-z0-9_.-]+/))
+            refs[:cells].concat(cell_refs_from_text(text))
             refs[:states].concat(text.scan(/state_[A-Za-z0-9_.-]+/))
             refs[:transitions].concat(text.scan(/transition_[A-Za-z0-9_.-]+/))
             refs.each_value(&:uniq!)
@@ -202,11 +208,44 @@ module ULOL
             elsif id.start_with?('transition_')
               refs[:transitions] << id
             elsif id.start_with?('cell_')
-              refs[:cells] << id
+              refs[:cells] << normalize_cell_ref(id)
             else
-              refs[:cells] << "cell_#{id}"
+              refs[:cells] << id
             end
             refs.each_value(&:uniq!)
+          end
+
+          def overlap_error_row_cells(row)
+            return [] unless OVERLAP_RECHECK_CODES.include?(error_code_number(row && row[:code]))
+
+            values = [
+              row && row[:item],
+              row && row.dig(:raw, 'id'),
+              row && row.dig(:raw, :id)
+            ]
+            values.flat_map { |value| cell_refs_from_text(value) }.uniq
+          end
+
+          def cell_refs_from_text(value)
+            text = value.to_s
+            return [] if text.empty?
+
+            text.scan(/(?:^|[^A-Za-z0-9_.-])(cell_[A-Za-z0-9_.-]+)/)
+                .flatten
+                .map { |cell_id| normalize_cell_ref(cell_id) }
+                .reject(&:empty?)
+                .uniq
+          end
+
+          def normalize_cell_refs(values)
+            Array(values).map { |value| normalize_cell_ref(value) }.reject(&:empty?).uniq
+          end
+
+          def normalize_cell_ref(value)
+            id = safe_id(value)
+            return '' if id.empty?
+
+            id.start_with?('cell_') ? id.sub(/\Acell_/, '') : id
           end
 
           def safe_id(value)
