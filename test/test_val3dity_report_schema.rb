@@ -124,7 +124,7 @@ module ULOL
             assert_equal ['A'], refs[:cells]
           end
 
-          def test_primitive_error_refs_do_not_use_solid_item_without_parent_feature
+          def test_primitive_error_refs_use_solid_cell_item_without_parent_feature
             report = {
               'features' => [
                 {
@@ -145,9 +145,37 @@ module ULOL
             row = Schema.error_item_rows(report).first
             refs = Schema.canonical_error_row_refs(row)
 
-            assert_equal [], refs[:cells]
+            assert_equal ['b67d90rs'], refs[:cells]
             assert_equal [], refs[:states]
             assert_equal [], refs[:transitions]
+          end
+
+          def test_primitive_error_refs_use_polygon_cell_error_id
+            report = {
+              'features' => [
+                {
+                  'id' => nil,
+                  'errors' => [],
+                  'primitives' => [
+                    {
+                      'id' => 'solid_without_cell_ref',
+                      'errors' => [
+                        {
+                          'code' => 203,
+                          'id' => 'polygon_3_cell_rw9n589w',
+                          'description' => 'NON_PLANAR_POLYGON_DISTANCE_PLANE'
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+
+            row = Schema.error_item_rows(report).first
+            refs = Schema.canonical_error_row_refs(row)
+
+            assert_equal ['rw9n589w'], refs[:cells]
           end
 
           def test_state_and_transition_feature_refs_are_kept_for_runtime_expansion

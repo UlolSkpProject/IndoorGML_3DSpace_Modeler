@@ -82,6 +82,22 @@ module ULOL
           end
         end
 
+        def test_recheck_report_create_gml_exports_full_model
+          with_recheck_dependencies do |progress_class|
+            harness = Harness.new
+            editor_session = FakeEditorSession.new(cell_spaces: [Object.new])
+            harness.instance_variable_set(:@editor_session, editor_session)
+            UI.savepanel_path = File.join(Dir.pwd, 'tmp', 'focus_recheck_full_export')
+
+            harness.recheck_validation_focus_errors
+            progress_class.last.create_gml_callback.call
+
+            assert_equal harness, FakeGmlExporter.last_indoor_model
+            assert_equal "#{UI.savepanel_path}.gml", FakeGmlExporter.last_output_path
+            assert_equal "GML exported:\n#{UI.savepanel_path}.gml", progress_class.last.result_message
+          end
+        end
+
         private
 
         def with_recheck_dependencies
@@ -99,6 +115,7 @@ module ULOL
             converter.const_set(name, value)
           end
           FakeExportProgressDialog.reset
+          FakeGmlExporter.reset
           yield FakeExportProgressDialog
         ensure
           replacements&.each_key do |name|
@@ -111,11 +128,23 @@ module ULOL
         def fake_ui
           Class.new do
             @timers = []
+            @messages = []
+            @savepanel_path = nil
             class << self
               attr_reader :timers
+              attr_reader :messages
+              attr_accessor :savepanel_path
 
               def start_timer(_interval, _repeat, &block)
                 @timers << block
+              end
+
+              def savepanel(_title, _directory, _filter)
+                @savepanel_path
+              end
+
+              def messagebox(message)
+                @messages << message
               end
             end
           end
@@ -161,13 +190,17 @@ module ULOL
           end
 
           attr_reader :show_count
+          attr_reader :create_gml_callback
+          attr_reader :result_message
 
           def initialize
             self.class.last = self
             @show_count = 0
           end
 
-          def on_create_gml; end
+          def on_create_gml(&block)
+            @create_gml_callback = block
+          end
 
           def on_cancel; end
 
@@ -178,6 +211,10 @@ module ULOL
           def show
             @show_count += 1
           end
+
+          def set_result_message(message)
+            @result_message = message
+          end
         end
 
         class FakeValidationRunWorkspace
@@ -187,8 +224,32 @@ module ULOL
         end
 
         class FakeGmlExporter
+          class << self
+            attr_reader :last_indoor_model
+            attr_reader :last_output_path
+
+            def new(indoor_model)
+              @last_indoor_model = indoor_model
+              allocate
+            end
+
+            def reset
+              @last_indoor_model = nil
+              @last_output_path = nil
+            end
+
+            def record_output_path(path)
+              @last_output_path = path
+            end
+          end
+
           def self.output_root
             'tmp'
+          end
+
+          def export(output_path:)
+            self.class.record_output_path(output_path)
+            output_path
           end
         end
 

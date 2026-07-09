@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'fileutils'
 require 'json'
 
 module ULOL
@@ -44,7 +45,7 @@ module ULOL
               workspace_cleaned: false
             }
             progress.on_create_gml do
-              UI.messagebox('오류 요소 재검사 report에서는 GML export를 사용할 수 없습니다.')
+              export_full_gml_from_validation_focus_recheck_report(progress)
             end
             progress.on_cancel do
               terminate_validation_focus_recheck(state)
@@ -452,6 +453,23 @@ module ULOL
               message: e.message,
               actions: [:close]
             )
+          end
+
+          def export_full_gml_from_validation_focus_recheck_report(progress)
+            path = UI.savepanel('Export GML', '~', 'IndoorGML Files|*.gml;||')
+            if path.to_s.empty?
+              progress&.set_result_message('GML export canceled.')
+              return nil
+            end
+
+            path = "#{path}.gml" unless File.extname(path).downcase == '.gml'
+            FileUtils.mkdir_p(File.dirname(path))
+            IndoorGmlConverter::GmlExporter.new(self).export(output_path: path)
+            progress&.set_result_message("GML exported:\n#{path}")
+            path
+          rescue StandardError => e
+            progress&.set_result_message("GML export failed:\n#{e.message}")
+            nil
           end
 
           def handle_validation_focus_recheck_result(progress, state, result)
