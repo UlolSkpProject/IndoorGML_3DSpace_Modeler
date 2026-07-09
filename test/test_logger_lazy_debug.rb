@@ -17,6 +17,7 @@ module ULOL
         def setup
           @original_level = Logger.level
           @original_logging_enabled = Definition::LOGGING_ENABLED
+          skip 'Logger tests are disabled when LOGGING_ENABLED=false' unless @original_logging_enabled == true
         end
 
         def teardown
