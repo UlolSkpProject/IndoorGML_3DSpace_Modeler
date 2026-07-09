@@ -244,7 +244,6 @@ module ULOL
 
           cell_space = state.duality_cell
           return false unless cell_space&.valid?
-          return false unless cell_space.navigable?
 
           edit_visibility_service.edit_mode_visible_cell_space?(cell_space)
         rescue StandardError

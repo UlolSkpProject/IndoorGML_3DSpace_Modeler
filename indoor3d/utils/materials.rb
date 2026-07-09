@@ -11,7 +11,7 @@ module ULOL
           'TransitionSpace' => ['Indoor3DGml_TransitionSpace', Sketchup::Color.new(0, 128, 0), 0.6],
           'ConnectionSpace' => ['Indoor3DGml_ConnectionSpace', Sketchup::Color.new(145, 95, 210), 0.5],
           'AnchorSpace' => ['Indoor3DGml_AnchorSpace', Sketchup::Color.new(245, 175, 35), 0.5],
-          'CellSpace' => ['Indoor3DGml_CellSpace', Sketchup::Color.new(80, 170, 255), 0.35]
+          'CellSpace' => ['Indoor3DGml_CellSpace', Sketchup::Color.new(25, 25, 25), 0.35]
         }.freeze
 
         def self.cell_space(cell_type, _category_code = nil)
