@@ -173,7 +173,12 @@ module ULOL
           @name_cell_space_entity.call(cell_space)
           @apply_cell_space_material.call(cell_space)
           @write_cell_space_attributes.call(cell_space)
-          @synchronize_adjacency_and_transitions_for_cell_space.call(cell_space)
+          if cell_space.navigable?
+            @synchronize_adjacency_and_transitions_for_cell_space.call(cell_space)
+          else
+            @erase_transitions_for_state.call(cell_space.duality_state)
+            @erase_adjacency_for_cell_space.call(cell_space)
+          end
           @apply_indoor_lock_policy.call
         end
 
