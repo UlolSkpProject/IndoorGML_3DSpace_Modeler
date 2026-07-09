@@ -270,6 +270,41 @@ module ULOL
           assert_equal [[target_entities.last_copy, :room, 'Room']], converted
         end
 
+        def test_executor_resolves_isolated_source_by_signature_when_make_unique_reorders_definition
+          shared_child = FakeGroup.new(manifold: true, name: 'Nested Source')
+          shared_definition = FakeReorderedDefinition.new([shared_child])
+          parent_a = FakeGroup.new(definition: shared_definition, name: 'Parent A')
+          parent_b = FakeGroup.new(definition: shared_definition, name: 'Parent B')
+          target_entities = FakeTargetEntities.new
+          converted = []
+          executor = CellSpaceConversionExecutor.new(
+            target_entities: target_entities,
+            converter: proc { |group, _cell_type, _category_code| converted << group },
+            logger: FakeLogger.new
+          )
+
+          result = executor.execute(
+            job_for(
+              shared_child,
+              ancestors: [parent_a],
+              source_path_indices: [0],
+              source_signature: {
+                class_name: shared_child.class.name.to_s,
+                name: shared_child.name,
+                transformation: shared_child.transformation
+              },
+              requires_instance_isolation: true
+            ),
+            fallback_target: [:general, nil]
+          )
+
+          assert result.converted?
+          assert_equal [target_entities.last_copy], converted
+          refute shared_child.erased?
+          assert parent_a.definition.entities.to_a[1].erased?
+          refute parent_b.definition.entities.to_a.first.erased?
+        end
+
         def test_bulk_service_uses_one_synchronous_operation_without_timer
           UI.timers = []
           calls = []
@@ -671,13 +706,14 @@ module ULOL
 
         private
 
-        def job_for(source, target: nil, ancestors: [], source_label: nil, source_path_indices: [], requires_instance_isolation: false)
+        def job_for(source, target: nil, ancestors: [], source_label: nil, source_path_indices: [], source_signature: nil, requires_instance_isolation: false)
           {
             source: source,
             transformation: FakeTransformation.new(['job']),
             target: target,
             ancestors: ancestors,
             source_path_indices: source_path_indices,
+            source_signature: source_signature,
             requires_instance_isolation: requires_instance_isolation
           }.tap do |job|
             job[:source_label] = source_label unless source_label.nil?
@@ -773,6 +809,18 @@ module ULOL
 
           def duplicate
             self.class.new(@entities.to_a.map { |entity| entity.duplicate_for_definition })
+          end
+        end
+
+        class FakeReorderedDefinition < FakeDefinition
+          def duplicate
+            self.class.new([FakeRawEntity.new] + entities.to_a.map { |entity| entity.duplicate_for_definition })
+          end
+        end
+
+        class FakeRawEntity
+          def valid?
+            true
           end
         end
 

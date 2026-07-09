@@ -53,6 +53,8 @@ module ULOL
               transformation: world_transformation,
               ancestors: ancestors.dup,
               source_path_indices: source_path_indices.dup,
+              source_signature: entity_signature(entity),
+              ancestor_signatures: ancestors.map { |ancestor| entity_signature(ancestor) },
               requires_instance_isolation: requires_instance_isolation?(ancestors),
               target: target_for_entity(entity, parent_target)
             }
@@ -144,6 +146,27 @@ module ULOL
           entity.definition.instances.count { |instance| instance&.valid? } > 1
         rescue StandardError
           false
+        end
+
+        def entity_signature(entity)
+          {
+            class_name: entity.class.name.to_s,
+            name: entity.respond_to?(:name) ? entity.name.to_s : '',
+            transformation: transformation_signature(entity)
+          }
+        rescue StandardError
+          {}
+        end
+
+        def transformation_signature(entity)
+          transformation = entity.respond_to?(:transformation) ? entity.transformation : nil
+          if transformation.respond_to?(:to_a)
+            return transformation.to_a.map { |value| value.to_f.round(6) }
+          end
+
+          transformation
+        rescue StandardError
+          nil
         end
 
         def target_for_entity(entity, parent_target)
@@ -256,14 +279,14 @@ module ULOL
           isolated_ancestors << container
 
           (1...ancestors.length).each do |depth|
-            container = child_at(container, path_indices[depth - 1])
+            container = resolve_isolated_child(container, path_indices[depth - 1], job.dig(:ancestor_signatures, depth))
             raise ArgumentError, 'Shared definition ancestor could not be resolved after isolation' unless convertible_container?(container)
 
             isolate_instance!(container)
             isolated_ancestors << container
           end
 
-          source = child_at(container, path_indices[ancestors.length - 1])
+          source = resolve_isolated_child(container, path_indices[ancestors.length - 1], job[:source_signature])
           raise ArgumentError, 'Shared definition source could not be resolved after isolation' unless convertible_container?(source)
           raise ArgumentError, 'Shared definition isolated source is no longer valid' unless source&.valid?
 
@@ -277,6 +300,53 @@ module ULOL
           entity
         rescue StandardError => e
           raise ArgumentError, "Shared definition ancestor isolation failed: #{e.message}"
+        end
+
+        def resolve_isolated_child(container, index, signature)
+          indexed = child_at(container, index)
+          return indexed if convertible_container?(indexed) && signature_matches?(indexed, signature)
+
+          matching_children(container, signature).first || indexed
+        end
+
+        def matching_children(container, signature)
+          return [] unless container&.valid?
+          return [] unless container.respond_to?(:definition) && container.definition&.valid?
+
+          container.definition.entities.to_a.select do |child|
+            convertible_container?(child) && signature_matches?(child, signature)
+          end
+        rescue StandardError
+          []
+        end
+
+        def signature_matches?(entity, signature)
+          return true if signature.nil? || signature.empty?
+          return false unless entity&.valid?
+
+          class_name = signature[:class_name].to_s
+          return false unless class_name.empty? || entity.class.name.to_s == class_name
+
+          name = signature[:name].to_s
+          return false unless name.empty? || (entity.respond_to?(:name) && entity.name.to_s == name)
+
+          expected_transform = signature[:transformation]
+          return true if expected_transform.nil?
+
+          transformation_signature(entity) == expected_transform
+        rescue StandardError
+          false
+        end
+
+        def transformation_signature(entity)
+          transformation = entity.respond_to?(:transformation) ? entity.transformation : nil
+          if transformation.respond_to?(:to_a)
+            return transformation.to_a.map { |value| value.to_f.round(6) }
+          end
+
+          transformation
+        rescue StandardError
+          nil
         end
 
         def child_at(container, index)
