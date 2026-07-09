@@ -18,7 +18,7 @@ module ULOL
             source_path_indices = initial_source_path_indices(entity)
             collect(
               entity,
-              Utils::Transformation.entity_transformation_in_active_context(entity),
+              initial_world_transformation(entity, source_path_indices),
               @parent_target,
               @ancestors,
               jobs,
@@ -88,6 +88,24 @@ module ULOL
           @ancestor_path_indices + [child_index]
         end
 
+        def initial_world_transformation(entity, source_path_indices)
+          return Utils::Transformation.entity_transformation_in_active_context(entity) if @ancestors.empty?
+          return Utils::Transformation.entity_transformation_in_active_context(entity) if Array(source_path_indices).empty?
+
+          container = @ancestors.first
+          transformation = Utils::Transformation.entity_transformation_in_active_context(container)
+          Array(source_path_indices).each do |index|
+            child = child_at(container, index)
+            return Utils::Transformation.entity_transformation_in_active_context(entity) unless child&.valid?
+
+            transformation *= child.transformation
+            container = child
+          end
+          transformation
+        rescue StandardError
+          Utils::Transformation.entity_transformation_in_active_context(entity)
+        end
+
         def ancestor_path_indices(ancestors)
           Array(ancestors).each_cons(2).filter_map do |parent, child|
             child_index(parent, child)
@@ -101,6 +119,15 @@ module ULOL
           return nil unless parent.respond_to?(:definition) && parent.definition&.valid?
 
           parent.definition.entities.to_a.index(child)
+        rescue StandardError
+          nil
+        end
+
+        def child_at(container, index)
+          return nil unless container&.valid?
+          return nil unless container.respond_to?(:definition) && container.definition&.valid?
+
+          container.definition.entities.to_a[index]
         rescue StandardError
           nil
         end
