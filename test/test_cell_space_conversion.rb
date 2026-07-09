@@ -38,6 +38,10 @@ module ULOL
         entity.respond_to?(:tag_target) ? entity.tag_target : nil
       end
 
+      def self.tag_cell_space_storey(entity)
+        entity.respond_to?(:tag_storey) ? entity.tag_storey : nil
+      end
+
       def self.tag_assigned?(entity)
         entity.respond_to?(:tag_assigned?) && entity.tag_assigned?
       end
@@ -95,6 +99,46 @@ module ULOL
           assert_equal parent_transform * child_transform, jobs.first[:transformation]
           assert_equal [parent], jobs.first[:ancestors]
           assert_equal parent_target, jobs.first[:target]
+        end
+
+        def test_job_builder_propagates_parent_storey_to_nested_solid
+          parent_transform = FakeTransformation.new(['parent'])
+          child_transform = FakeTransformation.new(['child'])
+          child = FakeGroup.new(manifold: true, transformation: child_transform)
+          parent = FakeGroup.new(
+            children: [child],
+            tag_storey: 'F01~F03',
+            context_transformation: parent_transform
+          )
+
+          jobs = CellSpaceConversionJobBuilder.new(entities: [parent]).build
+
+          assert_equal 1, jobs.length
+          assert_same child, jobs.first[:source]
+          assert_equal 'F01~F03', jobs.first[:storey]
+        end
+
+        def test_job_builder_keeps_storey_through_untagged_intermediate_container
+          child = FakeGroup.new(manifold: true)
+          intermediate = FakeGroup.new(children: [child])
+          parent = FakeGroup.new(children: [intermediate], tag_storey: 'B02~F01')
+
+          jobs = CellSpaceConversionJobBuilder.new(entities: [parent]).build
+
+          assert_equal 1, jobs.length
+          assert_same child, jobs.first[:source]
+          assert_equal 'B02~F01', jobs.first[:storey]
+        end
+
+        def test_job_builder_stops_storey_propagation_at_assigned_non_storey_tag
+          child = FakeGroup.new(manifold: true)
+          intermediate = FakeGroup.new(children: [child], tag_assigned: true)
+          parent = FakeGroup.new(children: [intermediate], tag_storey: 'F01~F03')
+
+          jobs = CellSpaceConversionJobBuilder.new(entities: [parent]).build
+
+          assert_equal 1, jobs.length
+          assert_nil jobs.first[:storey]
         end
 
         def test_job_builder_preserves_world_transform_for_active_context_nested_selection
@@ -220,6 +264,25 @@ module ULOL
           assert source.erased?
           refute target_entities.last_copy.erased?
           assert_equal [[target_entities.last_copy, :room, 'Room']], converted
+        end
+
+        def test_executor_passes_propagated_storey_to_converter
+          source = FakeGroup.new(manifold: true)
+          target_entities = FakeTargetEntities.new
+          converted = []
+          executor = CellSpaceConversionExecutor.new(
+            target_entities: target_entities,
+            converter: proc { |group, cell_type, category_code, storey| converted << [group, cell_type, category_code, storey] },
+            logger: FakeLogger.new
+          )
+
+          result = executor.execute(
+            job_for(source, target: [:transition, 'Stair'], storey: 'F01~F03'),
+            fallback_target: [:general, nil]
+          )
+
+          assert result.converted?
+          assert_equal [[target_entities.last_copy, :transition, 'Stair', 'F01~F03']], converted
         end
 
         def test_executor_keeps_preserved_source_after_success
@@ -706,11 +769,12 @@ module ULOL
 
         private
 
-        def job_for(source, target: nil, ancestors: [], source_label: nil, source_path_indices: [], source_signature: nil, requires_instance_isolation: false)
+        def job_for(source, target: nil, storey: nil, ancestors: [], source_label: nil, source_path_indices: [], source_signature: nil, requires_instance_isolation: false)
           {
             source: source,
             transformation: FakeTransformation.new(['job']),
             target: target,
+            storey: storey,
             ancestors: ancestors,
             source_path_indices: source_path_indices,
             source_signature: source_signature,
@@ -826,15 +890,16 @@ module ULOL
 
         class FakeGroup < Sketchup::Group
           attr_accessor :name, :material, :layer
-          attr_reader :definition, :transformation, :context_transformation, :tag_target, :entityID
+          attr_reader :definition, :transformation, :context_transformation, :tag_target, :tag_storey, :entityID
 
-          def initialize(manifold: false, children: [], definition: nil, feature: nil, tag_target: nil, tag_assigned: false, transformation: FakeTransformation.new(['entity']), context_transformation: nil, name: 'source', entity_id: 1)
+          def initialize(manifold: false, children: [], definition: nil, feature: nil, tag_target: nil, tag_storey: nil, tag_assigned: false, transformation: FakeTransformation.new(['entity']), context_transformation: nil, name: 'source', entity_id: 1)
             @definition = definition || FakeDefinition.new(children)
             @definition.instances << self if @definition.respond_to?(:instances)
             @manifold = manifold
             @attributes = {}
             @attributes['feature'] = feature unless feature.nil?
             @tag_target = tag_target
+            @tag_storey = tag_storey
             @tag_assigned = tag_assigned
             @transformation = transformation
             @context_transformation = context_transformation || transformation
@@ -897,6 +962,7 @@ module ULOL
               children: @definition.entities.to_a.map { |entity| entity.duplicate_for_definition },
               feature: @attributes['feature'],
               tag_target: @tag_target,
+              tag_storey: @tag_storey,
               tag_assigned: @tag_assigned,
               transformation: @transformation,
               context_transformation: @context_transformation,

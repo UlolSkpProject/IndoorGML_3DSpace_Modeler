@@ -4,9 +4,10 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class CellSpaceConversionJobBuilder
-        def initialize(entities:, parent_target: active_context_parent_target, ancestors: active_context_ancestors)
+        def initialize(entities:, parent_target: active_context_parent_target, parent_storey: active_context_parent_storey, ancestors: active_context_ancestors)
           @entities = Array(entities)
           @parent_target = parent_target
+          @parent_storey = parent_storey
           @ancestors = Array(ancestors)
           @ancestor_path_indices = ancestor_path_indices(@ancestors)
         end
@@ -20,6 +21,7 @@ module ULOL
               entity,
               initial_world_transformation(entity, source_path_indices),
               @parent_target,
+              @parent_storey,
               @ancestors,
               jobs,
               source_path_indices
@@ -36,13 +38,20 @@ module ULOL
           nil
         end
 
+        def active_context_parent_storey
+          parent = Sketchup.active_model&.active_path&.last
+          parent ? IndoorCore.tag_cell_space_storey(parent) : nil
+        rescue StandardError
+          nil
+        end
+
         def active_context_ancestors
           (Sketchup.active_model&.active_path || []).select { |entity| cleanup_candidate_container?(entity) }
         rescue StandardError
           []
         end
 
-        def collect(entity, world_transformation, parent_target, ancestors, jobs, source_path_indices)
+        def collect(entity, world_transformation, parent_target, parent_storey, ancestors, jobs, source_path_indices)
           return unless entity&.valid?
           return unless convertible_container?(entity)
           return if indoor_feature(entity) == 'CellSpace'
@@ -56,12 +65,14 @@ module ULOL
               source_signature: entity_signature(entity),
               ancestor_signatures: ancestors.map { |ancestor| entity_signature(ancestor) },
               requires_instance_isolation: requires_instance_isolation?(ancestors),
-              target: target_for_entity(entity, parent_target)
+              target: target_for_entity(entity, parent_target),
+              storey: storey_for_entity(entity, parent_storey)
             }
             return
           end
 
-          entity_target = IndoorCore.tag_cell_space_type_and_category(entity)
+          entity_target = target_for_entity(entity, parent_target)
+          entity_storey = storey_for_entity(entity, parent_storey)
           return unless entity.respond_to?(:definition) && entity.definition&.valid?
 
           child_ancestors = cleanup_candidate_container?(entity) ? ancestors + [entity] : ancestors
@@ -73,6 +84,7 @@ module ULOL
               child,
               world_transformation * child.transformation,
               entity_target,
+              entity_storey,
               child_ancestors,
               jobs,
               source_path_indices + [index]
@@ -177,6 +189,14 @@ module ULOL
           nil
         end
 
+        def storey_for_entity(entity, parent_storey)
+          entity_storey = IndoorCore.tag_cell_space_storey(entity)
+          return entity_storey unless entity_storey.to_s.empty?
+          return parent_storey unless IndoorCore.tag_assigned?(entity)
+
+          nil
+        end
+
         def cleanup_candidate_container?(entity)
           entity&.valid? &&
             convertible_container?(entity) &&
@@ -239,13 +259,19 @@ module ULOL
           source, erase_original_after_success, cleanup_source_on_failure = prepare_source(job)
           @prepared_source = source
           @cleanup_source_on_failure = cleanup_source_on_failure
-          @converter.call(source, target_cell_type, target_category_code)
+          call_converter(source, target_cell_type, target_category_code, job[:storey])
           job[:source].erase! if erase_original_after_success && job[:source]&.valid?
           cleanup_empty_ancestors(job)
           Result.new(converted: true, errors: [])
         end
 
         private
+
+        def call_converter(source, cell_type, category_code, storey)
+          return @converter.call(source, cell_type, category_code) if @converter.respond_to?(:arity) && @converter.arity == 3
+
+          @converter.call(source, cell_type, category_code, storey)
+        end
 
         def prepare_source(job)
           source = job[:source]

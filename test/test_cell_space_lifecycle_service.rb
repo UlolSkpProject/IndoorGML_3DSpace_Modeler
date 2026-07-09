@@ -2,16 +2,8 @@
 
 require 'minitest/autorun'
 
-module ULOL
-  module Indoor3DGmlModeler
-    module IndoorCore
-      module CellSpaceType
-        GENERAL = :general
-      end unless const_defined?(:CellSpaceType)
-    end
-  end
-end
-
+require_relative '../indoor3d/domain/cell_space_type'
+require_relative '../indoor3d/integration/tag_cell_space_adapter'
 require_relative '../indoor3d/application/cell_space_lifecycle_service'
 
 module ULOL
@@ -40,6 +32,7 @@ module ULOL
             :ensure_space_features_groups,
             :place_cell_group,
             :default_storey_name,
+            :resolve_cell_space_storey,
             :fixed_state_height_offset,
             :recenter_cell_space_geometry,
             :name_cell_space_entity,
@@ -72,6 +65,7 @@ module ULOL
             :ensure_space_features_groups,
             :place_cell_group,
             :default_storey_name,
+            :resolve_cell_space_storey,
             :fixed_state_height_offset,
             :recenter_cell_space_geometry,
             :name_cell_space_entity,
@@ -82,6 +76,87 @@ module ULOL
             :write_attributes,
             :track_cell_space_entity
           ], calls
+        end
+
+        def test_create_from_group_uses_resolved_storey_from_source
+          calls = []
+          source_group = Object.new
+          callbacks = lifecycle_callbacks(calls).merge(
+            resolve_cell_space_storey: proc do |group, cell_type, category_code, default_storey|
+              calls << :resolve_cell_space_storey
+              assert_equal :resolved_type, cell_type
+              assert_equal 'resolved_category', category_code
+              assert_equal 'F01', default_storey
+              assert_same source_group, group
+              'B02~F01'
+            end
+          )
+          service = build_lifecycle_service(callbacks)
+
+          cell_space = service.create_from_group(source_group, cell_type: :input_type, category_code: 'Room')
+
+          assert_equal 'B02~F01', cell_space.storey
+        end
+
+        def test_create_from_group_uses_tag_range_for_stair
+          calls = []
+          source_group = fake_tagged_group('F01F03_MV_RM_02')
+          callbacks = lifecycle_callbacks(calls).merge(tag_resolver_callbacks(calls))
+          service = build_lifecycle_service(callbacks)
+
+          cell_space = service.create_from_group(source_group, cell_type: CellSpaceType::GENERAL, category_code: 'Room')
+
+          assert_equal CellSpaceType::TRANSITION, cell_space.cell_type
+          assert_equal 'Stair', cell_space.category_code
+          assert_equal 'F01~F03', cell_space.storey
+        end
+
+        def test_create_from_group_deferred_uses_propagated_storey_override
+          calls = []
+          source_group = fake_tagged_group('Untagged')
+          callbacks = lifecycle_callbacks(calls).merge(tag_resolver_callbacks(calls))
+          service = build_lifecycle_service(callbacks)
+
+          cell_space = service.create_from_group_deferred(
+            source_group,
+            cell_type: CellSpaceType::TRANSITION,
+            category_code: 'Elevator',
+            storey: 'B02~F01'
+          )
+
+          assert_equal CellSpaceType::TRANSITION, cell_space.cell_type
+          assert_equal 'Elevator', cell_space.category_code
+          assert_equal 'B02~F01', cell_space.storey
+          refute_includes calls, :resolve_cell_space_storey
+        end
+
+        def test_create_from_group_deferred_trims_propagated_room_range_to_start_floor
+          calls = []
+          source_group = fake_tagged_group('Untagged')
+          callbacks = lifecycle_callbacks(calls).merge(tag_resolver_callbacks(calls))
+          service = build_lifecycle_service(callbacks)
+
+          cell_space = service.create_from_group_deferred(
+            source_group,
+            cell_type: CellSpaceType::GENERAL,
+            category_code: 'Room',
+            storey: 'F01~F03'
+          )
+
+          assert_equal 'F01', cell_space.storey
+        end
+
+        def test_create_from_group_uses_start_floor_for_tagged_room_range
+          calls = []
+          source_group = fake_tagged_group('F01F03_IP_RM_23')
+          callbacks = lifecycle_callbacks(calls).merge(tag_resolver_callbacks(calls))
+          service = build_lifecycle_service(callbacks)
+
+          cell_space = service.create_from_group(source_group, cell_type: CellSpaceType::TRANSITION, category_code: 'Stair')
+
+          assert_equal CellSpaceType::GENERAL, cell_space.cell_type
+          assert_equal 'Room', cell_space.category_code
+          assert_equal 'F01', cell_space.storey
         end
 
         def test_duplicate_source_raises_before_geometry_validation
@@ -125,6 +200,7 @@ module ULOL
             :ensure_space_features_groups,
             :place_cell_group,
             :default_storey_name,
+            :resolve_cell_space_storey,
             :fixed_state_height_offset,
             :recenter_cell_space_geometry,
             :name_cell_space_entity,
@@ -207,7 +283,9 @@ module ULOL
             source_preparer: CellSpaceLifecycleSourcePreparer.new(
               converted_group: callbacks.fetch(:converted_group?),
               type_resolver: callbacks.fetch(:resolve_cell_space_type_and_category),
-              geometry_preparer: callbacks.fetch(:prepare_cell_space_source_group!)
+              geometry_preparer: callbacks.fetch(:prepare_cell_space_source_group!),
+              storey_resolver: callbacks.fetch(:resolve_cell_space_storey),
+              storey_value_resolver: callbacks.fetch(:resolve_cell_space_storey_value)
             ),
             context: CellSpaceLifecycleContext.new(
               ensure_space_features_groups: callbacks.fetch(:ensure_space_features_groups),
@@ -247,6 +325,13 @@ module ULOL
             ensure_space_features_groups: proc { calls << :ensure_space_features_groups },
             place_cell_group: proc { |_group| calls << :place_cell_group; placed_group },
             default_storey_name: proc { calls << :default_storey_name; 'F01' },
+            resolve_cell_space_storey: proc do |_group, _cell_type, _category_code, default_storey|
+              calls << :resolve_cell_space_storey
+              default_storey
+            end,
+            resolve_cell_space_storey_value: proc do |storey, _cell_type, _category_code, _default_storey|
+              storey
+            end,
             fixed_state_height_offset: proc { |_cell_space| calls << :fixed_state_height_offset; 1.25 },
             recenter_cell_space_geometry: proc do |_group, fixed_z_offset_from_bottom: nil|
               calls << :recenter_cell_space_geometry
@@ -266,6 +351,26 @@ module ULOL
             unregister_cell_space: proc { |_cell_space| calls << :unregister_cell_space },
             erase_adjacency_for_cell_space: proc { |_cell_space| calls << :erase_adjacency_for_cell_space }
           }
+        end
+
+        def tag_resolver_callbacks(calls)
+          {
+            resolve_cell_space_type_and_category: proc do |group, cell_type, category_code|
+              calls << :resolve_cell_space_type_and_category
+              TagCellSpaceAdapter.resolve_cell_space_type_and_category(group, cell_type, category_code)
+            end,
+            resolve_cell_space_storey: proc do |group, cell_type, category_code, default_storey|
+              calls << :resolve_cell_space_storey
+              TagCellSpaceAdapter.resolve_cell_space_storey(group, cell_type, category_code, default_storey)
+            end,
+            resolve_cell_space_storey_value: proc do |storey, cell_type, category_code, default_storey|
+              TagCellSpaceAdapter.resolve_cell_space_storey_value(storey, cell_type, category_code, default_storey)
+            end
+          }
+        end
+
+        def fake_tagged_group(tag_name)
+          Struct.new(:layer).new(Struct.new(:name).new(tag_name))
         end
 
         def fake_cell_space_class(calls, state)
