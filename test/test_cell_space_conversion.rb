@@ -47,6 +47,7 @@ end
 
 require_relative '../indoor3d/infrastructure/scene/entity_copy_helper'
 require_relative '../indoor3d/application/cell_space_conversion'
+require_relative '../indoor3d/ui/commands/conversion_message_formatter'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -96,6 +97,20 @@ module ULOL
           assert_equal parent_target, jobs.first[:target]
         end
 
+        def test_job_builder_marks_shared_definition_nested_sources_for_instance_isolation
+          child = FakeGroup.new(manifold: true)
+          shared_definition = FakeDefinition.new([child])
+          parent_a = FakeGroup.new(definition: shared_definition, context_transformation: FakeTransformation.new(['parent_a']))
+          parent_b = FakeGroup.new(definition: shared_definition, context_transformation: FakeTransformation.new(['parent_b']))
+
+          jobs = CellSpaceConversionJobBuilder.new(entities: [parent_a, parent_b]).build
+
+          assert_equal 2, jobs.length
+          assert_equal [child, child], jobs.map { |job| job[:source] }
+          assert_equal [[0], [0]], jobs.map { |job| job[:source_path_indices] }
+          assert_equal [true, true], jobs.map { |job| job[:requires_instance_isolation] }
+        end
+
         def test_job_builder_skips_existing_cell_spaces_and_prefers_entity_target
           existing = FakeGroup.new(manifold: true, feature: 'CellSpace')
           door_target = [:transition, 'Door']
@@ -126,6 +141,32 @@ module ULOL
           refute result.converted?
           refute source.erased?
           assert_equal [{ group: 'EditMode Solid', reason: 'not solid' }], result.errors
+        end
+
+        def test_executor_uses_prepared_label_when_source_is_deleted_before_error_reporting
+          source = FakeGroup.new(manifold: true, name: 'Deleted Source', entity_id: 77)
+          executor = CellSpaceConversionExecutor.new(
+            target_entities: FakeTargetEntities.new,
+            converter: proc do |group, _cell_type, _category_code|
+              group.erase!
+              raise 'failed after erase'
+            end,
+            preserve_source: proc { |_group| true },
+            logger: FakeLogger.new,
+            labeler: proc do |entity|
+              raise 'label touched deleted source' unless entity.valid?
+
+              entity.name
+            end
+          )
+
+          result = executor.execute(
+            job_for(source, source_label: 'Deleted Source (entity 77)'),
+            fallback_target: [:general, nil]
+          )
+
+          refute result.converted?
+          assert_equal [{ group: 'Deleted Source (entity 77)', reason: 'failed after erase' }], result.errors
         end
 
         def test_executor_removes_copy_but_keeps_original_when_conversion_fails
@@ -175,6 +216,39 @@ module ULOL
 
           assert result.converted?
           refute source.erased?
+        end
+
+        def test_executor_isolates_shared_definition_nested_source_before_erasing_original
+          shared_child = FakeGroup.new(manifold: true, name: 'Nested Source')
+          shared_definition = FakeDefinition.new([shared_child])
+          parent_a = FakeGroup.new(definition: shared_definition, name: 'Parent A')
+          parent_b = FakeGroup.new(definition: shared_definition, name: 'Parent B')
+          converted = []
+          target_entities = FakeTargetEntities.new
+          executor = CellSpaceConversionExecutor.new(
+            target_entities: target_entities,
+            converter: proc { |group, cell_type, category_code| converted << [group, cell_type, category_code] },
+            logger: FakeLogger.new
+          )
+
+          result = executor.execute(
+            job_for(
+              shared_child,
+              ancestors: [parent_a],
+              source_path_indices: [0],
+              requires_instance_isolation: true,
+              target: [:room, 'Room']
+            ),
+            fallback_target: [:general, nil]
+          )
+
+          assert result.converted?
+          refute shared_child.erased?
+          refute_same shared_definition, parent_a.definition
+          assert_same shared_definition, parent_b.definition
+          assert parent_a.definition.entities.to_a.first.erased?
+          refute parent_b.definition.entities.to_a.first.erased?
+          assert_equal [[target_entities.last_copy, :room, 'Room']], converted
         end
 
         def test_bulk_service_uses_one_synchronous_operation_without_timer
@@ -265,6 +339,26 @@ module ULOL
           assert_equal [{ group: 'Missing Target', reason: 'CellSpace type is required' }], result.errors
           assert_empty model.operations
           assert_empty calls
+        end
+
+        def test_bulk_service_reports_prepared_label_when_source_is_deleted_before_apply
+          calls = []
+          model = FakeOperationModel.new(calls: calls)
+          source = FakeGroup.new(manifold: true, name: 'Transient Source', entity_id: 42)
+          service = bulk_service(
+            model: model,
+            jobs: [job_for(source)],
+            converter: proc { |_source, _cell_type, _category_code| calls << :convert },
+            activate_root_context: proc { calls << :activate_root_context; source.erase!; true },
+            restore_active_path: proc { calls << :restore_active_path }
+          )
+
+          result = service.call
+
+          assert_equal 0, result.converted_count
+          assert_equal [{ group: 'Transient Source', reason: 'Conversion source is no longer valid' }], result.errors
+          assert_equal [[:start, 'Bulk Convert', true], [:abort]], model.operations
+          assert_equal [:activate_root_context, :start_operation, :abort_operation, :restore_active_path], calls
         end
 
         def test_bulk_service_converts_successful_jobs_and_reports_apply_failures
@@ -538,15 +632,37 @@ module ULOL
           refute_includes edit_mode_method, 'start_operation'
         end
 
+        def test_conversion_message_formatter_does_not_read_name_from_deleted_group
+          group = Class.new do
+            def valid?
+              false
+            end
+
+            def name
+              raise 'name should not be read for a deleted group'
+            end
+
+            def entityID
+              314
+            end
+          end.new
+
+          assert_equal 'deleted group (entity 314)', ConversionMessageFormatter.group_label(group)
+        end
+
         private
 
-        def job_for(source, target: nil, ancestors: [])
+        def job_for(source, target: nil, ancestors: [], source_label: nil, source_path_indices: [], requires_instance_isolation: false)
           {
             source: source,
             transformation: FakeTransformation.new(['job']),
             target: target,
-            ancestors: ancestors
-          }
+            ancestors: ancestors,
+            source_path_indices: source_path_indices,
+            requires_instance_isolation: requires_instance_isolation
+          }.tap do |job|
+            job[:source_label] = source_label unless source_label.nil?
+          end
         end
 
         def failing_converter
@@ -609,33 +725,45 @@ module ULOL
         end
 
         class FakeEntityCollection
+          attr_reader :items
+
           def initialize(entities)
-            @entities = entities
+            @items = entities
           end
 
           def to_a
-            @entities
+            @items
+          end
+
+          def empty?
+            @items.empty?
           end
         end
 
         class FakeDefinition
-          attr_reader :entities
+          attr_reader :entities, :instances
 
           def initialize(children)
             @entities = FakeEntityCollection.new(children)
+            @instances = []
           end
 
           def valid?
             true
           end
+
+          def duplicate
+            self.class.new(@entities.to_a.map { |entity| entity.duplicate_for_definition })
+          end
         end
 
         class FakeGroup < Sketchup::Group
           attr_accessor :name, :material, :layer
-          attr_reader :definition, :transformation, :context_transformation, :tag_target
+          attr_reader :definition, :transformation, :context_transformation, :tag_target, :entityID
 
-          def initialize(manifold: false, children: [], feature: nil, tag_target: nil, tag_assigned: false, transformation: FakeTransformation.new(['entity']), context_transformation: nil, name: 'source')
-            @definition = FakeDefinition.new(children)
+          def initialize(manifold: false, children: [], definition: nil, feature: nil, tag_target: nil, tag_assigned: false, transformation: FakeTransformation.new(['entity']), context_transformation: nil, name: 'source', entity_id: 1)
+            @definition = definition || FakeDefinition.new(children)
+            @definition.instances << self if @definition.respond_to?(:instances)
             @manifold = manifold
             @attributes = {}
             @attributes['feature'] = feature unless feature.nil?
@@ -644,6 +772,7 @@ module ULOL
             @transformation = transformation
             @context_transformation = context_transformation || transformation
             @name = name
+            @entityID = entity_id
             @visible = true
             @valid = true
             @erased = false
@@ -686,7 +815,28 @@ module ULOL
             self
           end
 
-          def make_unique; end
+          def make_unique
+            return self unless @definition.respond_to?(:duplicate)
+
+            @definition.instances.delete(self) if @definition.respond_to?(:instances)
+            @definition = @definition.duplicate
+            @definition.instances << self if @definition.respond_to?(:instances)
+            self
+          end
+
+          def duplicate_for_definition
+            self.class.new(
+              manifold: @manifold,
+              children: @definition.entities.to_a.map { |entity| entity.duplicate_for_definition },
+              feature: @attributes['feature'],
+              tag_target: @tag_target,
+              tag_assigned: @tag_assigned,
+              transformation: @transformation,
+              context_transformation: @context_transformation,
+              name: @name,
+              entity_id: @entityID
+            )
+          end
         end
 
         class FakeTargetEntities

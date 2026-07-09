@@ -8,18 +8,21 @@ module ULOL
           @entities = Array(entities)
           @parent_target = parent_target
           @ancestors = Array(ancestors)
+          @ancestor_path_indices = ancestor_path_indices(@ancestors)
         end
 
         def build
           @entities.each_with_object([]) do |entity, jobs|
             next unless convertible_container?(entity)
 
+            source_path_indices = initial_source_path_indices(entity)
             collect(
               entity,
               Utils::Transformation.entity_transformation_in_active_context(entity),
               @parent_target,
               @ancestors,
-              jobs
+              jobs,
+              source_path_indices
             )
           end
         end
@@ -39,7 +42,7 @@ module ULOL
           []
         end
 
-        def collect(entity, world_transformation, parent_target, ancestors, jobs)
+        def collect(entity, world_transformation, parent_target, ancestors, jobs, source_path_indices)
           return unless entity&.valid?
           return unless convertible_container?(entity)
           return if indoor_feature(entity) == 'CellSpace'
@@ -49,6 +52,8 @@ module ULOL
               source: entity,
               transformation: world_transformation,
               ancestors: ancestors.dup,
+              source_path_indices: source_path_indices.dup,
+              requires_instance_isolation: requires_instance_isolation?(ancestors),
               target: target_for_entity(entity, parent_target)
             }
             return
@@ -58,7 +63,7 @@ module ULOL
           return unless entity.respond_to?(:definition) && entity.definition&.valid?
 
           child_ancestors = cleanup_candidate_container?(entity) ? ancestors + [entity] : ancestors
-          entity.definition.entities.to_a.each do |child|
+          entity.definition.entities.to_a.each_with_index do |child, index|
             next unless child&.valid?
             next unless convertible_container?(child)
 
@@ -67,9 +72,51 @@ module ULOL
               world_transformation * child.transformation,
               entity_target,
               child_ancestors,
-              jobs
+              jobs,
+              source_path_indices + [index]
             )
           end
+        end
+
+        def initial_source_path_indices(entity)
+          return [] if @ancestors.empty?
+
+          parent = @ancestors.last
+          child_index = child_index(parent, entity)
+          return [] if child_index.nil?
+
+          @ancestor_path_indices + [child_index]
+        end
+
+        def ancestor_path_indices(ancestors)
+          Array(ancestors).each_cons(2).filter_map do |parent, child|
+            child_index(parent, child)
+          end
+        rescue StandardError
+          []
+        end
+
+        def child_index(parent, child)
+          return nil unless parent&.valid?
+          return nil unless parent.respond_to?(:definition) && parent.definition&.valid?
+
+          parent.definition.entities.to_a.index(child)
+        rescue StandardError
+          nil
+        end
+
+        def requires_instance_isolation?(ancestors)
+          Array(ancestors).any? { |ancestor| shared_definition?(ancestor) }
+        end
+
+        def shared_definition?(entity)
+          return false unless entity&.valid?
+          return false unless entity.respond_to?(:definition) && entity.definition&.valid?
+          return false unless entity.definition.respond_to?(:instances)
+
+          entity.definition.instances.count { |instance| instance&.valid? } > 1
+        rescue StandardError
+          false
         end
 
         def target_for_entity(entity, parent_target)
@@ -129,7 +176,7 @@ module ULOL
           cleanup_failed_source(@prepared_source) if @cleanup_source_on_failure
           Result.new(
             converted: false,
-            errors: [{ group: @labeler.call(job[:source]), reason: e.message }]
+            errors: [{ group: source_label(job), reason: e.message }]
           )
         ensure
           @prepared_source = nil
@@ -138,6 +185,7 @@ module ULOL
 
         def execute!(job, fallback_target:)
           target_cell_type, target_category_code = job[:target] || fallback_target
+          job = isolate_instance_source(job)
           source, erase_original_after_success, cleanup_source_on_failure = prepare_source(job)
           @prepared_source = source
           @cleanup_source_on_failure = cleanup_source_on_failure
@@ -165,6 +213,56 @@ module ULOL
             true,
             true
           ]
+        end
+
+        def isolate_instance_source(job)
+          return job unless job[:requires_instance_isolation]
+
+          ancestors = Array(job[:ancestors])
+          path_indices = Array(job[:source_path_indices])
+          raise ArgumentError, 'Shared definition source could not be isolated for conversion' if ancestors.empty?
+          raise ArgumentError, 'Shared definition source path is missing' if path_indices.length < ancestors.length
+
+          isolated_ancestors = []
+          container = ancestors.first
+          isolate_instance!(container)
+          isolated_ancestors << container
+
+          (1...ancestors.length).each do |depth|
+            container = child_at(container, path_indices[depth - 1])
+            raise ArgumentError, 'Shared definition ancestor could not be resolved after isolation' unless convertible_container?(container)
+
+            isolate_instance!(container)
+            isolated_ancestors << container
+          end
+
+          source = child_at(container, path_indices[ancestors.length - 1])
+          raise ArgumentError, 'Shared definition source could not be resolved after isolation' unless convertible_container?(source)
+          raise ArgumentError, 'Shared definition isolated source is no longer valid' unless source&.valid?
+
+          job.merge(source: source, ancestors: isolated_ancestors)
+        end
+
+        def isolate_instance!(entity)
+          raise ArgumentError, 'Shared definition ancestor is no longer valid' unless entity&.valid?
+
+          entity.make_unique if entity.respond_to?(:make_unique)
+          entity
+        rescue StandardError => e
+          raise ArgumentError, "Shared definition ancestor isolation failed: #{e.message}"
+        end
+
+        def child_at(container, index)
+          return nil unless container&.valid?
+          return nil unless container.respond_to?(:definition) && container.definition&.valid?
+
+          container.definition.entities.to_a[index]
+        rescue StandardError
+          nil
+        end
+
+        def convertible_container?(entity)
+          entity.is_a?(Sketchup::Group) || entity.is_a?(Sketchup::ComponentInstance)
         end
 
         def cleanup_failed_source(source)
@@ -201,6 +299,26 @@ module ULOL
           entity.get_attribute(IndoorModel::ATTRIBUTE_DICTIONARY_NAME, 'feature')
         rescue StandardError
           nil
+        end
+
+        def source_label(job)
+          label = job[:source_label].to_s
+          return label unless label.empty?
+
+          @labeler.call(job[:source])
+        rescue StandardError
+          deleted_or_unknown_label(job[:source])
+        end
+
+        def deleted_or_unknown_label(entity)
+          entity_id = begin
+            entity.entityID if entity.respond_to?(:entityID)
+          rescue StandardError
+            nil
+          end
+          return "entity #{entity_id}" unless entity_id.nil?
+
+          'deleted or unknown group'
         end
 
         def default_label(entity)
@@ -264,6 +382,7 @@ module ULOL
             end
 
             job.merge(job_id: "cell_space_conversion_#{index}")
+               .merge(source_label: safe_group_label(source))
           end.freeze
           errors << conversion_error(nil, 'No valid solid groups were available for conversion') if plan.empty? && errors.empty?
           [plan, errors]
@@ -323,6 +442,11 @@ module ULOL
                 labeler: @labeler
               )
               plan.each do |job|
+                unless source_valid?(job[:source])
+                  errors << conversion_error(job, 'Conversion source is no longer valid')
+                  next
+                end
+
                 result = executor.execute(job, fallback_target: @fallback_target)
                 if result.converted?
                   converted_count += 1
@@ -380,10 +504,37 @@ module ULOL
           }
         end
 
-        def safe_group_label(source)
+        def safe_group_label(source_or_job)
+          if source_or_job.is_a?(Hash)
+            label = source_or_job[:source_label].to_s
+            return label unless label.empty?
+
+            source = source_or_job[:source]
+          else
+            source = source_or_job
+          end
+          return 'unknown group' if source.nil?
+
           @labeler.call(source)
         rescue StandardError
-          source.respond_to?(:to_s) ? source.to_s : 'unknown group'
+          fallback_group_label(source)
+        end
+
+        def fallback_group_label(source)
+          entity_id = begin
+            source.entityID if source.respond_to?(:entityID)
+          rescue StandardError
+            nil
+          end
+          return "entity #{entity_id}" unless entity_id.nil?
+
+          'deleted or unknown group'
+        end
+
+        def source_valid?(source)
+          source&.respond_to?(:valid?) && source.valid?
+        rescue StandardError
+          false
         end
 
         def activate_root_context!
