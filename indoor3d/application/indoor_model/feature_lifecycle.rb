@@ -23,11 +23,12 @@ module ULOL
               jobs: jobs,
               fallback_target: fallback_target,
               target_entities: model.entities,
-              converter: proc do |source, cell_type, category_code|
+              converter: proc do |source, cell_type, category_code, storey|
                 cell_space_lifecycle_service.create_from_group_deferred(
                   source,
                   cell_type: cell_type,
-                  category_code: category_code
+                  category_code: category_code,
+                  storey: storey
                 )
               end,
               synchronize_all: proc { @adjacency_service.synchronize_all },
@@ -143,7 +144,9 @@ module ULOL
               source_preparer: CellSpaceLifecycleSourcePreparer.new(
                 converted_group: method(:converted_group?),
                 type_resolver: IndoorCore.method(:resolve_cell_space_type_and_category),
-                geometry_preparer: Utils::Geometry.method(:prepare_cell_space_source_group!)
+                geometry_preparer: Utils::Geometry.method(:prepare_cell_space_source_group!),
+                storey_resolver: IndoorCore.method(:resolve_cell_space_storey),
+                storey_value_resolver: IndoorCore.method(:resolve_cell_space_storey_value)
               ),
               context: CellSpaceLifecycleContext.new(
                 ensure_space_features_groups: method(:ensure_space_features_groups),

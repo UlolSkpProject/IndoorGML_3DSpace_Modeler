@@ -10,27 +10,29 @@ module ULOL
           @cell_space_class = cell_space_class
         end
 
-        def create_from_group(sketchup_group, cell_type: CellSpaceType::GENERAL, category_code: nil)
+        def create_from_group(sketchup_group, cell_type: CellSpaceType::GENERAL, category_code: nil, storey: nil)
           create_from_group_internal(
             sketchup_group,
             cell_type: cell_type,
             category_code: category_code,
+            storey: storey,
             synchronize_adjacency: true,
             apply_lock_policy: true
           )
         end
 
-        def create_from_group_deferred(sketchup_group, cell_type: CellSpaceType::GENERAL, category_code: nil)
+        def create_from_group_deferred(sketchup_group, cell_type: CellSpaceType::GENERAL, category_code: nil, storey: nil)
           create_from_group_internal(
             sketchup_group,
             cell_type: cell_type,
             category_code: category_code,
+            storey: storey,
             synchronize_adjacency: false,
             apply_lock_policy: false
           )
         end
 
-        def create_from_group_internal(sketchup_group, cell_type:, category_code:, synchronize_adjacency:, apply_lock_policy:)
+        def create_from_group_internal(sketchup_group, cell_type:, category_code:, storey:, synchronize_adjacency:, apply_lock_policy:)
           raise ArgumentError, 'Group is already converted to CellSpace' if @source_preparer.converted?(sketchup_group)
 
           resolved_cell_type, resolved_category_code = @source_preparer.resolve_type_and_category(
@@ -45,7 +47,14 @@ module ULOL
 
           cell_group = @context.prepare_cell_group(sketchup_group)
           cell_space = @cell_space_class.new(cell_group, resolved_cell_type, resolved_category_code)
-          @context.initialize_scene(cell_space)
+          storey = @source_preparer.resolve_storey(
+            sketchup_group,
+            resolved_cell_type,
+            resolved_category_code,
+            @context.default_storey_name,
+            storey
+          )
+          @context.initialize_scene(cell_space, storey: storey)
           state = cell_space.create_duality_state(nil)
           @context.register_created(
             cell_space,
@@ -76,10 +85,12 @@ module ULOL
       end
 
       class CellSpaceLifecycleSourcePreparer
-        def initialize(converted_group:, type_resolver:, geometry_preparer:)
+        def initialize(converted_group:, type_resolver:, geometry_preparer:, storey_resolver: nil, storey_value_resolver: nil)
           @converted_group = converted_group
           @type_resolver = type_resolver
           @geometry_preparer = geometry_preparer
+          @storey_resolver = storey_resolver
+          @storey_value_resolver = storey_value_resolver
         end
 
         def converted?(sketchup_group)
@@ -92,6 +103,18 @@ module ULOL
 
         def prepare!(sketchup_group)
           @geometry_preparer.call(sketchup_group)
+        end
+
+        def resolve_storey(sketchup_group, cell_type, category_code, default_storey, storey_override = nil)
+          unless storey_override.to_s.empty?
+            return @storey_value_resolver.call(storey_override, cell_type, category_code, default_storey) if @storey_value_resolver
+
+            return storey_override
+          end
+
+          return default_storey unless @storey_resolver
+
+          @storey_resolver.call(sketchup_group, cell_type, category_code, default_storey)
         end
       end
 
@@ -122,8 +145,12 @@ module ULOL
           @place_cell_group.call(sketchup_group)
         end
 
-        def initialize_scene(cell_space)
-          cell_space.set_storey(@default_storey_name.call)
+        def default_storey_name
+          @default_storey_name.call
+        end
+
+        def initialize_scene(cell_space, storey: default_storey_name)
+          cell_space.set_storey(storey)
           @recenter_cell_space_geometry.call(
             cell_space.sketchup_group,
             fixed_z_offset_from_bottom: @fixed_state_height_offset.call(cell_space)

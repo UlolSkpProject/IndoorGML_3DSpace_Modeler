@@ -86,6 +86,18 @@ module ULOL
         TagCellSpaceAdapter.resolve_cell_space_type_and_category(entity, cell_type, category_code)
       end
 
+      def self.resolve_cell_space_storey(entity, cell_type, category_code, default_storey)
+        TagCellSpaceAdapter.resolve_cell_space_storey(entity, cell_type, category_code, default_storey)
+      end
+
+      def self.resolve_cell_space_storey_value(storey, cell_type, category_code, default_storey)
+        TagCellSpaceAdapter.resolve_cell_space_storey_value(storey, cell_type, category_code, default_storey)
+      end
+
+      def self.tag_cell_space_storey(entity)
+        TagCellSpaceAdapter.storey_from_tag(entity)
+      end
+
       def self.tag_assigned?(entity)
         TagCellSpaceAdapter.tag_assigned?(entity)
       end
