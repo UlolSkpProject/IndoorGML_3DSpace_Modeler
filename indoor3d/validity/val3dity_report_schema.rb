@@ -184,7 +184,10 @@ module ULOL
             when 'Feature'
               add_feature_ref(refs, row.dig(:context, :feature_id))
             when 'Primitive'
-              add_feature_ref(refs, row.dig(:context, :feature_id))
+              add_explicit_refs(refs, row[:item])
+              add_explicit_refs(refs, row.dig(:raw, 'id'))
+              add_explicit_refs(refs, row.dig(:raw, :id))
+              add_feature_ref(refs, row.dig(:context, :feature_id)) if refs.values.all?(&:empty?)
             when 'Dataset'
               add_explicit_refs(refs, row[:item])
             else
@@ -242,9 +245,13 @@ module ULOL
             text = value.to_s
             return [] if text.empty?
 
-            text.scan(/(?:^|[^A-Za-z0-9_.-])(cell_[A-Za-z0-9_.-]+)/)
-                .flatten
-                .map { |cell_id| normalize_cell_ref(cell_id) }
+            refs = text.scan(/(?:^|[^A-Za-z0-9_.-])((?:solid_)?cell_[A-Za-z0-9_.-]+)/).flatten
+            refs.concat(
+              text.scan(/(?:^|[^A-Za-z0-9_.-])polygon_[A-Za-z0-9_.-]*_cell_([A-Za-z0-9_.-]+)/)
+                  .flatten
+                  .map { |cell_id| "cell_#{cell_id}" }
+            )
+            refs.map { |cell_id| normalize_cell_ref(cell_id) }
                 .reject(&:empty?)
                 .uniq
           end
@@ -256,6 +263,8 @@ module ULOL
           def normalize_cell_ref(value)
             id = safe_id(value)
             return '' if id.empty?
+
+            return id.sub(/\Asolid_cell_/, '') if id.start_with?('solid_cell_')
 
             id.start_with?('cell_') ? id.sub(/\Acell_/, '') : id
           end
