@@ -72,6 +72,10 @@ module ULOL
           CellSpaceType.navigable?(@cell_type)
         end
 
+        def geometry_only?
+          CellSpaceType.geometry_only?(@cell_type)
+        end
+
         def set_navigation_semantics(navigation_class:, navigation_function:, navigation_usage:)
           return false unless navigable?
 

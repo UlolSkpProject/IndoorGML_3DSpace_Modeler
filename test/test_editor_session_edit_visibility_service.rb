@@ -3,6 +3,7 @@
 require 'minitest/autorun'
 
 require_relative '../indoor3d/application/storey_filter'
+require_relative '../indoor3d/domain/cell_space_type'
 require_relative '../indoor3d/infrastructure/scene/editor_session/visibility_controller'
 require_relative '../indoor3d/infrastructure/scene/editor_session/validation_focus_controller'
 require_relative '../indoor3d/infrastructure/scene/editor_session/edit_visibility_service'
@@ -59,6 +60,33 @@ module ULOL
           assert_equal false, hidden_child.hidden?
           assert_equal 0, matching_child.write_count
           assert_equal 0, hidden_child.write_count
+        end
+
+        def test_edit_mode_visibility_filter_can_show_geometry_only_cell_spaces
+          window_group = fake_group(pid: 101)
+          room_group = fake_group(pid: 102)
+          window_cell = fake_cell_space(
+            group: window_group,
+            storey: 'F01',
+            cell_type: CellSpaceType::GEOMETRY_ONLY
+          )
+          room_cell = fake_cell_space(
+            group: room_group,
+            storey: 'F01',
+            cell_type: CellSpaceType::GENERAL
+          )
+          indoor_model = fake_indoor_model(cell_spaces: [window_cell, room_cell])
+          visibility = EditorSession::VisibilityController.new
+          visibility.set_filter(storeys: [], cell_types: [CellSpaceType::GEOMETRY_ONLY])
+          Sketchup.test_active_model = fake_model
+
+          service = build_service(indoor_model, visibility, CallbackLog.new)
+
+          assert service.edit_mode_visible_cell_space?(window_cell)
+          refute service.edit_mode_visible_cell_space?(room_cell)
+          assert service.apply_edit_mode_visibility_filter
+          assert_equal false, window_group.hidden?
+          assert_equal true, room_group.hidden?
         end
 
         def test_geometry_visibility_updates_primal_group_inside_unlock_scope

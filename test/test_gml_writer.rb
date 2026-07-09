@@ -3,6 +3,10 @@
 require 'minitest/autorun'
 require 'rexml/document'
 
+require_relative '../indoor3d/domain/cell_space_type'
+require_relative '../indoor3d/domain/cell_space_category'
+require_relative '../indoor3d/domain/navigation_semantic'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -86,10 +90,37 @@ module ULOL
             assert_includes xml, "xlink:href='#transition_T_1'"
           end
 
+          def test_writer_exports_geometry_only_cell_space_as_core_cell_space_without_navi_codes
+            state = fake_state('Window State')
+            cell = fake_cell_space('Window', CellSpaceType::GEOMETRY_ONLY, 'F01', state, surfaces: [fake_surface], category_code: 'Window')
+            state.duality_cell = cell
+            snapshot = ExportSnapshot.new(cell_spaces: [cell], transitions: [])
+            writer = GmlWriter.new(
+              snapshot: snapshot,
+              coordinate_unit: { unit: 'in', factor: 1.0, srs_name: 'urn:test:in' }
+            )
+
+            xml = writer.to_xml
+            doc = REXML::Document.new(xml)
+
+            assert_xpath(doc, '//core:CellSpace[@gml:id="cell_Window"]')
+            refute_xpath(doc, '//navi:GeneralSpace[@gml:id="cell_Window"]')
+            refute_xpath(doc, '//navi:class')
+            refute_xpath(doc, '//navi:function')
+            refute_xpath(doc, '//navi:usage')
+            assert_xpath(doc, '//core:CellSpace[@gml:id="cell_Window"]/core:duality')
+            assert_xpath(doc, '//core:State[@gml:id="state_Window_State"]')
+            refute_includes GmlWriter::CELL_SPACE_TAGS.keys, CellSpaceType::GEOMETRY_ONLY
+          end
+
           private
 
           def assert_xpath(doc, xpath)
             refute_nil REXML::XPath.first(doc, xpath, namespaces)
+          end
+
+          def refute_xpath(doc, xpath)
+            assert_nil REXML::XPath.first(doc, xpath, namespaces)
           end
 
           def namespaces
@@ -100,14 +131,14 @@ module ULOL
             }
           end
 
-          def fake_cell_space(id, cell_type, storey, state, surfaces: [])
+          def fake_cell_space(id, cell_type, storey, state, surfaces: [], category_code: 'Room')
             ExportSnapshot::CellSpaceSnapshot.new(
               id: id,
               cell_type: cell_type,
               storey: storey,
               duality_state: state,
               surfaces: surfaces,
-              category_code: 'Room'
+              category_code: category_code
             )
           end
 

@@ -9,12 +9,14 @@ module ULOL
         TRANSITION = 1 unless const_defined?(:TRANSITION, false)
         CONNECTION = 2 unless const_defined?(:CONNECTION, false)
         ANCHOR     = 3 unless const_defined?(:ANCHOR, false)
+        GEOMETRY_ONLY = 4 unless const_defined?(:GEOMETRY_ONLY, false)
 
         LABELS = {
           GENERAL => 'GeneralSpace',
           TRANSITION => 'TransitionSpace',
           CONNECTION => 'ConnectionSpace',
-          ANCHOR => 'AnchorSpace'
+          ANCHOR => 'AnchorSpace',
+          GEOMETRY_ONLY => 'CellSpace'
         }.freeze unless const_defined?(:LABELS, false)
 
         remove_const(:SELECTABLE_TYPES) if const_defined?(:SELECTABLE_TYPES, false)
@@ -22,7 +24,8 @@ module ULOL
           GENERAL,
           TRANSITION,
           CONNECTION,
-          ANCHOR
+          ANCHOR,
+          GEOMETRY_ONLY
         ].freeze
 
         remove_const(:NAVIGABLE_TYPES) if const_defined?(:NAVIGABLE_TYPES, false)
@@ -43,6 +46,10 @@ module ULOL
 
         def self.navigable?(value)
           NAVIGABLE_TYPES.include?(value)
+        end
+
+        def self.geometry_only?(value)
+          value == GEOMETRY_ONLY
         end
 
       end

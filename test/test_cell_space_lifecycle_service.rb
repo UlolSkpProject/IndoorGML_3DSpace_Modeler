@@ -111,6 +111,26 @@ module ULOL
           assert_equal 'F01~F03', cell_space.storey
         end
 
+        def test_create_from_group_keeps_state_creation_for_geometry_only_cell_space
+          calls = []
+          state = Object.new
+          callbacks = lifecycle_callbacks(calls, state: state).merge(
+            resolve_cell_space_type_and_category: proc do |_group, _cell_type, _category_code|
+              calls << :resolve_cell_space_type_and_category
+              [CellSpaceType::GEOMETRY_ONLY, 'Window']
+            end
+          )
+          service = build_lifecycle_service(callbacks)
+
+          cell_space = service.create_from_group(Object.new, cell_type: CellSpaceType::GEOMETRY_ONLY, category_code: 'Window')
+
+          assert_equal CellSpaceType::GEOMETRY_ONLY, cell_space.cell_type
+          assert_equal 'Window', cell_space.category_code
+          assert_equal state, cell_space.state
+          assert_includes calls, :create_duality_state
+          assert_includes calls, :synchronize_adjacency_and_transitions_for_cell_space
+        end
+
         def test_create_from_group_deferred_uses_propagated_storey_override
           calls = []
           source_group = fake_tagged_group('Untagged')
