@@ -97,6 +97,25 @@ module ULOL
           assert_equal parent_target, jobs.first[:target]
         end
 
+        def test_job_builder_preserves_world_transform_for_active_context_nested_selection
+          parent_transform = FakeTransformation.new(['parent_world'])
+          child_transform = FakeTransformation.new(['child_local'])
+          child = FakeGroup.new(manifold: true, transformation: child_transform)
+          parent = FakeGroup.new(
+            children: [child],
+            context_transformation: parent_transform
+          )
+
+          jobs = CellSpaceConversionJobBuilder.new(
+            entities: [child],
+            ancestors: [parent]
+          ).build
+
+          assert_equal 1, jobs.length
+          assert_equal parent_transform * child_transform, jobs.first[:transformation]
+          assert_equal [0], jobs.first[:source_path_indices]
+        end
+
         def test_job_builder_marks_shared_definition_nested_sources_for_instance_isolation
           child = FakeGroup.new(manifold: true)
           shared_definition = FakeDefinition.new([child])
