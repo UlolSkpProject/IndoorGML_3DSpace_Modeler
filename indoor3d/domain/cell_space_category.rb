@@ -20,6 +20,9 @@ module ULOL
           ],
           CellSpaceType::ANCHOR => [
             { code: 'ExteriorDoor', label: 'Exterior Door', code_space: DEFAULT_CODE_SPACE, standard: true }
+          ],
+          CellSpaceType::GEOMETRY_ONLY => [
+            { code: 'Window', label: 'Window', code_space: nil, standard: false }
           ]
         }.freeze unless const_defined?(:DEFAULTS, false)
 

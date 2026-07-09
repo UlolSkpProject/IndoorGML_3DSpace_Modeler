@@ -103,6 +103,7 @@ module ULOL
             return nil if cell1.nil? || cell2.nil?
             return nil if cell1 == cell2
             return nil unless cell1.valid? && cell2.valid?
+            return nil unless cell1.navigable? && cell2.navigable?
             return nil unless cell1.duality_state&.valid? && cell2.duality_state&.valid?
 
             pair_key = cell_pair_key(cell1, cell2)
@@ -295,6 +296,7 @@ module ULOL
             return nil if cell1.nil? || cell2.nil?
             return nil if cell1 == cell2
             return nil unless cell1.valid? && cell2.valid?
+            return nil unless cell1.navigable? && cell2.navigable?
             return nil unless cell1.duality_state&.valid? && cell2.duality_state&.valid?
 
             pair_key = cell_pair_key(cell1, cell2)
