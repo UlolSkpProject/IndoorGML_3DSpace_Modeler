@@ -104,10 +104,7 @@ module ULOL
             return nil if cell1 == cell2
             return nil unless cell1.valid? && cell2.valid?
 
-            unless cell1.navigable? && cell2.navigable?
-              erase_transition_for_pair_key(cell_pair_key(cell1, cell2))
-              return nil
-            end
+            return nil unless cell1.navigable? && cell2.navigable?
 
             return nil unless cell1.duality_state&.valid? && cell2.duality_state&.valid?
 
@@ -302,10 +299,7 @@ module ULOL
             return nil if cell1 == cell2
             return nil unless cell1.valid? && cell2.valid?
 
-            unless cell1.navigable? && cell2.navigable?
-              erase_runtime_transition_for_pair_key(cell_pair_key(cell1, cell2))
-              return nil
-            end
+            return nil unless cell1.navigable? && cell2.navigable?
 
             return nil unless cell1.duality_state&.valid? && cell2.duality_state&.valid?
 
