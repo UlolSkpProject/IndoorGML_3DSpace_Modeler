@@ -388,5 +388,4 @@ ruby -Itest test\run_all.rb
 - IndoorGML: https://www.ogc.org/standards/indoorgml
 - IndoorGML schemas: http://schemas.opengis.net/indoorgml/1.0/
 - val3dity: https://github.com/tudelft3d/val3dity
-- Legacy reference: https://github.com/une-young/indoorgml-modeler
 - Project notes: https://u-lo-l.notion.site/IndoorGML-3DSpace-Modeler-395be883973b805dba28c890c9c7e225
