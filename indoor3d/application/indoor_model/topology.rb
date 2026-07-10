@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../topology_coordinator'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -8,7 +10,7 @@ module ULOL
           private
 
           def synchronize_adjacency_and_transitions_for_cell_space(cell_space)
-            @adjacency_service.synchronize_for(cell_space)
+            topology_coordinator.synchronize_for(cell_space)
           end
 
           def mark_cell_space_dirty(cell_space)
@@ -17,22 +19,22 @@ module ULOL
             entity = cell_space.valid_sketchup_group
             return unless entity
 
-            @dirty_cell_space_pids[entity.persistent_id] = true
+            dirty_topology_queue.mark(entity.persistent_id)
             schedule_dirty_cell_space_sync
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] CellSpace dirty mark failed: #{e.class}: #{e.message}"
           end
 
           def schedule_dirty_cell_space_sync
-            return if @cell_space_sync_scheduled
+            return if dirty_topology_queue.scheduled?
 
-            @cell_space_sync_scheduled = true
+            dirty_topology_queue.schedule!
             generation = current_dirty_cell_space_sync_generation
             UI.start_timer(0, false) do
               next unless generation == current_dirty_cell_space_sync_generation
               if dirty_sync_replay_pending?
-                @dirty_cell_space_pids.clear
-                @cell_space_sync_scheduled = false
+                dirty_topology_queue.clear
+                dirty_topology_queue.unschedule!
                 next
               end
 
@@ -43,9 +45,9 @@ module ULOL
           def flush_dirty_cell_space_sync
             return if dirty_sync_replay_pending?
 
-            pids = @dirty_cell_space_pids.keys
-            @dirty_cell_space_pids.clear
-            @cell_space_sync_scheduled = false
+            pids = dirty_topology_queue.persistent_ids
+            dirty_topology_queue.clear
+            dirty_topology_queue.unschedule!
             return if pids.empty?
 
             processing_index = nil
@@ -66,27 +68,23 @@ module ULOL
             invalidate_overlay_transition_points
           rescue StandardError => e
             requeue_dirty_cell_space_pids(pids, processing_index)
-            @cell_space_sync_scheduled = false
-            schedule_dirty_cell_space_sync unless @dirty_cell_space_pids.empty?
+            dirty_topology_queue.unschedule!
+            schedule_dirty_cell_space_sync unless dirty_topology_queue.empty?
             IndoorCore::Logger.puts "[IndoorGML] Dirty CellSpace sync failed: #{e.class}: #{e.message}"
           end
 
           def requeue_dirty_cell_space_pids(pids, failed_index)
-            remaining = failed_index ? pids[failed_index..] : pids
-            Array(remaining).each { |persistent_id| @dirty_cell_space_pids[persistent_id] = true }
+            dirty_topology_queue.requeue_from(pids, failed_index)
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Dirty CellSpace requeue failed: #{e.class}: #{e.message}"
           end
 
           def invalidate_dirty_cell_space_sync!
-            @dirty_cell_space_sync_generation = current_dirty_cell_space_sync_generation + 1
-            @dirty_cell_space_pids.clear
-            @cell_space_sync_scheduled = false
-            true
+            dirty_topology_queue.invalidate!
           end
 
           def current_dirty_cell_space_sync_generation
-            @dirty_cell_space_sync_generation ||= 0
+            dirty_topology_queue.generation
           end
 
           def dirty_sync_replay_pending?
@@ -96,7 +94,7 @@ module ULOL
           end
 
           def erase_adjacency_for_cell_space(cell_space)
-            @adjacency_service.erase_for(cell_space)
+            topology_coordinator.erase_for(cell_space)
           end
 
           def create_or_update_transition_for_pair(cell1, cell2)
@@ -147,7 +145,7 @@ module ULOL
           end
 
           def cell_pair_key(cell1, cell2)
-            @adjacency_service.cell_pair_key(cell1, cell2)
+            topology_coordinator.cell_pair_key(cell1, cell2)
           end
 
           def transition_cell_pair_key(transition)
@@ -284,11 +282,11 @@ module ULOL
           end
 
           def rebuild_runtime_transitions_from_cell_adjacency
-            @adjacency_service.synchronize_all
+            topology_coordinator.synchronize_all
           end
 
           def rebuild_runtime_transitions_from_cell_adjacency_without_persistence
-            @adjacency_service.synchronize_all(
+            topology_coordinator.synchronize_all(
               transition_builder: method(:create_or_update_runtime_transition_for_pair),
               transition_eraser: method(:erase_runtime_transition_for_pair_key)
             )
@@ -340,6 +338,31 @@ module ULOL
           def unregister_runtime_transition_from_states(transition)
             transition.state1.remove_transition(transition) if transition.state1
             transition.state2.remove_transition(transition) if transition.state2
+          end
+
+          def topology_coordinator
+            @topology_coordinator ||= TopologyCoordinator.new(
+              adjacency_service: @adjacency_service,
+              dirty_queue: legacy_dirty_topology_queue
+            )
+          end
+
+          def dirty_topology_queue
+            topology_coordinator.dirty_queue
+          end
+
+          def legacy_dirty_topology_queue
+            queue = DirtyTopologyQueue.new
+            return queue unless instance_variable_defined?(:@dirty_cell_space_pids) ||
+                                instance_variable_defined?(:@cell_space_sync_scheduled) ||
+                                instance_variable_defined?(:@dirty_cell_space_sync_generation)
+
+            queue.restore!(
+              persistent_ids: Hash(@dirty_cell_space_pids),
+              scheduled: @cell_space_sync_scheduled == true,
+              generation: @dirty_cell_space_sync_generation.to_i
+            )
+            queue
           end
         end
       end

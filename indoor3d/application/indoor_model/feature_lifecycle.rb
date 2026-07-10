@@ -31,7 +31,7 @@ module ULOL
                   storey: storey
                 )
               end,
-              synchronize_all: proc { @adjacency_service.synchronize_all },
+              synchronize_all: proc { topology_coordinator.synchronize_all },
               apply_lock_policy: proc { apply_indoor_lock_policy },
               runtime_snapshot: proc { bulk_conversion_runtime_snapshot },
               runtime_restore: proc { |snapshot| restore_bulk_conversion_runtime(snapshot) },
@@ -186,8 +186,8 @@ module ULOL
           end
 
           def clear_bulk_dirty_topology
-            @dirty_cell_space_pids.clear
-            @cell_space_sync_scheduled = false
+            dirty_topology_queue.clear
+            dirty_topology_queue.unschedule!
           end
 
           def tag_cell_space_type_change_target(cell_space, cell_type, category_code)
@@ -360,8 +360,7 @@ module ULOL
               scene_group_guard: @scene_group_guard.respond_to?(:snapshot) ? @scene_group_guard.snapshot : nil,
               cell_space_change_snapshots: Hash(@cell_space_change_snapshots).dup,
               space_features_change_snapshots: Hash(@space_features_change_snapshots).dup,
-              dirty_cell_space_pids: Hash(@dirty_cell_space_pids).dup,
-              cell_space_sync_scheduled: @cell_space_sync_scheduled,
+              topology: topology_coordinator.snapshot,
               cell_space_observed_ids: Hash(@cell_space_observed_ids).dup,
               space_features_observed_ids: Hash(@space_features_observed_ids).dup,
               entities_observed_ids: Hash(@entities_observed_ids).dup,
@@ -380,8 +379,7 @@ module ULOL
             @scene_group_guard.restore!(snapshot[:scene_group_guard]) if snapshot[:scene_group_guard] && @scene_group_guard.respond_to?(:restore!)
             @cell_space_change_snapshots = Hash(snapshot[:cell_space_change_snapshots]).dup
             @space_features_change_snapshots = Hash(snapshot[:space_features_change_snapshots]).dup
-            @dirty_cell_space_pids = Hash(snapshot[:dirty_cell_space_pids]).dup
-            @cell_space_sync_scheduled = snapshot[:cell_space_sync_scheduled]
+            restore_topology_snapshot(snapshot)
             @cell_space_observed_ids = Hash(snapshot[:cell_space_observed_ids]).dup
             @space_features_observed_ids = Hash(snapshot[:space_features_observed_ids]).dup
             @entities_observed_ids = Hash(snapshot[:entities_observed_ids]).dup
