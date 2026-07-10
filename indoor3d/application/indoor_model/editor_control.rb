@@ -303,10 +303,13 @@ module ULOL
           def convert_selected_solid_groups_to_cell_spaces(selection_value)
             begin
               cell_type, category_code = CellSpaceCategory.parse_selection_value(selection_value)
+              model = Sketchup.active_model
+              unless prepare_cell_space_creation_active_context(model)
+                raise 'Failed to prepare active context for CellSpace conversion'
+              end
               jobs = selected_cell_space_conversion_jobs
               return false if jobs.empty?
 
-              model = Sketchup.active_model
               original_active_path = ActivePathController.new(model, logger: IndoorCore::Logger).snapshot
               result = convert_cell_space_jobs_bulk(
                 jobs,
@@ -409,6 +412,14 @@ module ULOL
 
           def with_active_path_enforcement_suspended
             @editor_session.with_active_path_enforcement_suspended { yield }
+          end
+
+          def prepare_cell_space_creation_active_context(model = Sketchup.active_model)
+            edit_context = editing? || validation_focus_active?
+            ActivePathController.new(model, logger: IndoorCore::Logger).normalize_for_cell_space_creation(
+              primal_group: @primal_group,
+              edit_context: edit_context
+            )
           end
 
           private
