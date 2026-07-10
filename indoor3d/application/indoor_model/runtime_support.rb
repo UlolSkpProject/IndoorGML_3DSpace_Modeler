@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../topology_coordinator'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -43,7 +45,7 @@ module ULOL
                 cell_spaces: diagnostic_count(@cell_spaces),
                 states: diagnostic_count(@states),
                 transitions: diagnostic_count(@transitions),
-                pair_comparison_count: @adjacency_service&.last_metrics&.fetch(:pair_comparison_count, 0).to_i,
+                pair_comparison_count: topology_coordinator.last_metrics.fetch(:pair_comparison_count, 0).to_i,
                 total_duration: Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at
               }
             end
@@ -92,8 +94,8 @@ module ULOL
               editing: @editor_session&.editing? == true,
               cell_space_geometry_editing: @editor_session&.cell_space_geometry_editing? == true,
               active_path: current_active_path_kind,
-              dirty_topology_count: @dirty_cell_space_pids&.length.to_i,
-              topology_sync_scheduled: @cell_space_sync_scheduled == true,
+              dirty_topology_count: dirty_topology_queue.persistent_ids.length,
+              topology_sync_scheduled: dirty_topology_queue.scheduled?,
               guards: {
                 syncing: @syncing == true,
                 erasing: @erasing == true,
@@ -196,8 +198,8 @@ module ULOL
             @feature_registry.reset!
             @cell_space_change_snapshots.clear
             @space_features_change_snapshots.clear
-            @dirty_cell_space_pids.clear
-            @cell_space_sync_scheduled = false
+            dirty_topology_queue.clear
+            dirty_topology_queue.unschedule!
             bind_registry_collections
           end
 
@@ -242,8 +244,7 @@ module ULOL
               scene_group_guard: @scene_group_guard.snapshot,
               cell_space_change_snapshots: @cell_space_change_snapshots.dup,
               space_features_change_snapshots: @space_features_change_snapshots.dup,
-              dirty_cell_space_pids: @dirty_cell_space_pids.dup,
-              cell_space_sync_scheduled: @cell_space_sync_scheduled,
+              topology: topology_coordinator.snapshot,
               cell_space_observed_ids: @cell_space_observed_ids.dup,
               space_features_observed_ids: @space_features_observed_ids.dup,
               entities_observed_ids: @entities_observed_ids.dup,
@@ -261,8 +262,7 @@ module ULOL
             @scene_group_guard.restore!(snapshot[:scene_group_guard])
             @cell_space_change_snapshots = snapshot[:cell_space_change_snapshots].dup
             @space_features_change_snapshots = snapshot[:space_features_change_snapshots].dup
-            @dirty_cell_space_pids = snapshot[:dirty_cell_space_pids].dup
-            @cell_space_sync_scheduled = snapshot[:cell_space_sync_scheduled]
+            restore_topology_snapshot(snapshot)
             @cell_space_observed_ids = snapshot[:cell_space_observed_ids].dup
             @space_features_observed_ids = snapshot[:space_features_observed_ids].dup
             @entities_observed_ids = snapshot[:entities_observed_ids].dup
@@ -298,6 +298,43 @@ module ULOL
               value.dup
             else
               value
+            end
+          end
+
+          def topology_coordinator
+            @topology_coordinator ||= TopologyCoordinator.new(
+              adjacency_service: @adjacency_service,
+              dirty_queue: legacy_dirty_topology_queue
+            )
+          end
+
+          def dirty_topology_queue
+            topology_coordinator.dirty_queue
+          end
+
+          def legacy_dirty_topology_queue
+            queue = DirtyTopologyQueue.new
+            return queue unless instance_variable_defined?(:@dirty_cell_space_pids) ||
+                                instance_variable_defined?(:@cell_space_sync_scheduled) ||
+                                instance_variable_defined?(:@dirty_cell_space_sync_generation)
+
+            queue.restore!(
+              persistent_ids: Hash(@dirty_cell_space_pids),
+              scheduled: @cell_space_sync_scheduled == true,
+              generation: @dirty_cell_space_sync_generation.to_i
+            )
+            queue
+          end
+
+          def restore_topology_snapshot(snapshot)
+            if snapshot[:topology]
+              topology_coordinator.restore!(snapshot[:topology])
+            else
+              dirty_topology_queue.restore!(
+                persistent_ids: Hash(snapshot[:dirty_cell_space_pids]),
+                scheduled: snapshot[:cell_space_sync_scheduled] == true,
+                generation: snapshot[:dirty_cell_space_sync_generation].to_i
+              )
             end
           end
 

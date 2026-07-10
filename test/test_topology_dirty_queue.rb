@@ -134,8 +134,7 @@ module ULOL
 
           def initialize(cells:, fail_pid: nil)
             @feature_registry = FakeRegistry.new(cells)
-            @dirty_cell_space_pids = {}
-            @cell_space_sync_scheduled = false
+            @topology_coordinator = TopologyCoordinator.new(dirty_queue: DirtyTopologyQueue.new)
             @fail_pid = fail_pid
             @synchronized_pids = []
             @snapshot_pids = []
@@ -144,7 +143,7 @@ module ULOL
           end
 
           def queue(*pids)
-            pids.each { |pid| @dirty_cell_space_pids[pid] = true }
+            pids.each { |pid| dirty_topology_queue.mark(pid) }
           end
 
           def mark_dirty(cell_space)
@@ -161,11 +160,11 @@ module ULOL
           end
 
           def dirty_pids
-            @dirty_cell_space_pids.keys
+            dirty_topology_queue.persistent_ids
           end
 
           def sync_scheduled?
-            @cell_space_sync_scheduled == true
+            dirty_topology_queue.scheduled?
           end
 
           def flush_dirty

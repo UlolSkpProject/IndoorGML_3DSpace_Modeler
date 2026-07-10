@@ -252,8 +252,6 @@ module ULOL
             @feature_registry = FeatureRegistry.new
             @cell_space_change_snapshots = {}
             @space_features_change_snapshots = {}
-            @dirty_cell_space_pids = {}
-            @cell_space_sync_scheduled = false
             @cell_space_observed_ids = {}
             @space_features_observed_ids = {}
             @entities_observed_ids = {}
@@ -264,6 +262,10 @@ module ULOL
             @serializer = SpySerializer.new
             @attribute_serializer = @serializer
             @adjacency_service = FakeAdjacencyService.new(adjacent: adjacent)
+            @topology_coordinator = TopologyCoordinator.new(
+              adjacency_service: @adjacency_service,
+              dirty_queue: DirtyTopologyQueue.new
+            )
             @runtime_restorer = RuntimeRestorer.new(
               registry: @feature_registry,
               serializer: @attribute_serializer,
@@ -282,11 +284,11 @@ module ULOL
           end
 
           def queue_dirty(pid)
-            @dirty_cell_space_pids[pid] = true
+            dirty_topology_queue.mark(pid)
           end
 
           def dirty_pids
-            @dirty_cell_space_pids.keys
+            dirty_topology_queue.persistent_ids
           end
 
           def cell_observer_keys
