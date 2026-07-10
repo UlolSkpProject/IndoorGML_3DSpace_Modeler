@@ -9,6 +9,10 @@ module ULOL
 
           begin
             model = Sketchup.active_model()
+            indoor_model = IndoorModel.current
+            unless indoor_model.prepare_cell_space_creation_active_context(model)
+              raise 'Failed to prepare active context for CellSpace conversion'
+            end
             original_active_path = active_path_snapshot(model)
             groups = model.selection().to_a.select { |entity| convertible_container?(entity) }
             conversion_jobs = CellSpaceConversionJobBuilder.new(entities: groups).build
@@ -23,7 +27,6 @@ module ULOL
               return if cell_type.nil?
             end
 
-            indoor_model = IndoorModel.current
             result = indoor_model.convert_cell_space_jobs_bulk(
               conversion_jobs,
               fallback_target: [cell_type, category_code],

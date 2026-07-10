@@ -63,21 +63,85 @@ module ULOL
           refute controller.matches?([FakeEntity.new])
         end
 
+        def test_normalize_for_cell_space_creation_closes_to_model_outside_edit_context_and_preserves_selection
+          selected = FakeEntity.new
+          model = FakeModel.new([FakeEntity.new], selection: FakeSelection.new([selected]))
+
+          assert ActivePathController.new(model).normalize_for_cell_space_creation(
+            primal_group: FakeEntity.new,
+            edit_context: false
+          )
+
+          assert_nil model.active_path
+          assert_equal [selected], model.selection.to_a
+          assert_equal 1, model.selection.clear_count
+          assert_equal [selected], model.selection.added
+        end
+
+        def test_normalize_for_cell_space_creation_sets_primal_path_in_edit_context_and_preserves_selection
+          selected = FakeEntity.new
+          primal = FakeEntity.new
+          model = FakeModel.new([FakeEntity.new], selection: FakeSelection.new([selected]))
+
+          assert ActivePathController.new(model).normalize_for_cell_space_creation(
+            primal_group: primal,
+            edit_context: true
+          )
+
+          assert_equal [primal], model.active_path
+          assert_equal [selected], model.selection.to_a
+        end
+
+        def test_normalize_for_cell_space_creation_fails_in_edit_context_without_valid_primal_group
+          model = FakeModel.new([FakeEntity.new])
+
+          refute ActivePathController.new(model).normalize_for_cell_space_creation(
+            primal_group: nil,
+            edit_context: true
+          )
+        end
+
         class FakeEntity
           def valid?
             true
           end
         end
 
+        class FakeSelection
+          attr_reader :clear_count, :added
+
+          def initialize(items)
+            @items = Array(items)
+            @clear_count = 0
+            @added = []
+          end
+
+          def to_a
+            @items.dup
+          end
+
+          def clear
+            @clear_count += 1
+            @items.clear
+          end
+
+          def add(entity)
+            @added << entity
+            @items << entity
+          end
+        end
+
         class FakeModel
           attr_reader :close_count
 
-          def initialize(active_path)
+          def initialize(active_path, selection: FakeSelection.new([]))
             @active_path = active_path
             @close_count = 0
+            @selection = selection
           end
 
           attr_accessor :active_path
+          attr_reader :selection
 
           def close_active
             @close_count += 1
