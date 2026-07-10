@@ -14,7 +14,8 @@ module ULOL
           'MV_RM_02' => [CellSpaceType::TRANSITION, 'Stair'],
           'IP_RM_05' => [CellSpaceType::TRANSITION, 'Stair'],
           'IP_RM_23' => [CellSpaceType::GENERAL, 'Room'],
-          'RM_DR' => [CellSpaceType::CONNECTION, 'Door']
+          'RM_DR' => [CellSpaceType::CONNECTION, 'Door'],
+          'RM_WD' => [CellSpaceType::GEOMETRY_ONLY, 'Window']
         }.freeze
 
         def self.cell_space_type_from_tag(tag_name)
