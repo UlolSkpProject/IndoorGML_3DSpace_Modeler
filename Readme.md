@@ -6,7 +6,7 @@
 
 ![Version](https://img.shields.io/badge/version-1.0.3-blue)
 ![SketchUp](https://img.shields.io/badge/SketchUp-2026-brightgreen)
-![IndoorGML](https://img.shields.io/badge/IndoorGML-1.0-orange)
+![IndoorGML](https://img.shields.io/badge/IndoorGML-1.0.3-orange)
 ![val3dity](https://img.shields.io/badge/val3dity-2.2.0-lightgrey)
 
 ## Overview
