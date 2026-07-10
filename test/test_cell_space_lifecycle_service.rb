@@ -434,6 +434,10 @@ module ULOL
               @calls << :set_category
               @category_code = category_code
             end
+
+            def navigable?
+              true
+            end
           end.new(valid, calls).tap do |cell_space|
             cell_space.define_singleton_method(:calls) { calls }
           end
