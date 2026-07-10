@@ -28,8 +28,8 @@ IndoorGML 3D Modeler는 SketchUp 모델 안의 manifold solid group을 IndoorGML
 ### 지원
 
 - Solid 기반 3D CellSpace 생성
-- `GeneralSpace`, `TransitionSpace`, `ConnectionSpace`, `AnchorSpace`
-- `Room`, `Door`, `Stair`, `Elevator`, `ExteriorDoor` 분류
+- `GeneralSpace`, `TransitionSpace`, `ConnectionSpace`, `AnchorSpace`, `CellSpace`
+- `Room`, `Door`, `Stair`, `Elevator`, `ExteriorDoor`, `Window` 분류
 - CellSpace별 State 생성
 - 인접 CellSpace 간 Transition 자동 생성
 - `.skp` 저장 후 재오픈 시 IndoorGML 정보 복원
@@ -45,7 +45,7 @@ IndoorGML 3D Modeler는 SketchUp 모델 안의 manifold solid group을 IndoorGML
 - `Route`, `RouteNode`, `RouteSegment`
 - legacy AnchorNode 방식의 외부 지도 좌표계 연계
 - Transition 방향, 접근 조건, 사용자 지정 통행 비용
-- IndoorGML 1.0 전체 Conformance Class
+- IndoorGML 1.0.3 전체 Conformance Class
 
 ## Version Policy
 
@@ -209,6 +209,8 @@ CellSpace 인접 관계는 `AdjacencyService`가 동기화합니다.
 - CellSpace 타입 또는 `x/y/z` 방향에 따른 추가 차단 정책은 현재 없습니다.
 
 즉, 현재 정책은 `transition_allowed_for_axis?(adjacency_axis)`가 `nil`이 아닌 축을 받으면 Transition을 생성하는 구조입니다. 이 정책은 [docs/architecture_decisions.md](docs/architecture_decisions.md)에 명시되어 있습니다.
+
+Window의 경우 NavigableSpace가 아닌 CellSpace로, State는 생성되지만 Transition은 생기지 않습니다.
 
 성능 관련 구현:
 
