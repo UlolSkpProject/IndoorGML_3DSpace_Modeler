@@ -18,6 +18,10 @@ module ULOL
           dialog.show
         end
 
+        def close
+          request_close
+        end
+
         def apply_state_radius_scale(value)
           scale = value.to_f.round(2)
           DualOverlayPreferences.state_radius_scale = scale
@@ -60,9 +64,39 @@ module ULOL
             reset_state_radius_scale
           end
           dialog.add_action_callback('closeDialog') do |_context|
-            dialog.close
+            request_close
           end
+          dialog.set_on_closed do
+            handle_window_closed(dialog)
+          end if dialog.respond_to?(:set_on_closed)
           dialog
+        end
+
+        def request_close
+          current_dialog = @dialog
+          current_dialog&.close if dialog_visible_or_unknown?(current_dialog)
+          dispose_dialog(current_dialog)
+        rescue StandardError => e
+          Logger.puts "[IndoorGML] Dual overlay scale dialog close failed: #{e.class}: #{e.message}"
+          dispose_dialog(current_dialog)
+        end
+
+        def handle_window_closed(closed_dialog)
+          dispose_dialog(closed_dialog)
+        rescue StandardError => e
+          Logger.puts "[IndoorGML] Dual overlay scale dialog window close failed: #{e.class}: #{e.message}"
+          @dialog = nil
+        end
+
+        def dispose_dialog(closed_dialog)
+          @dialog = nil if closed_dialog.nil? || @dialog.equal?(closed_dialog)
+        end
+
+        def dialog_visible_or_unknown?(target_dialog)
+          return false unless target_dialog
+          return target_dialog.visible? if target_dialog.respond_to?(:visible?)
+
+          true
         end
 
         def invalidate_active_view
@@ -92,6 +126,8 @@ module ULOL
                   --text-strong: #e8e6e0;
                   --text-muted: #85827b;
                   --focus: #60a5fa;
+                  --knob: #fab005;
+                  --knob-border: #111827;
                   --state: #2378ff;
                   --state-soft: rgba(35, 120, 255, 0.20);
                   --state-border: #3b82f6;
@@ -144,7 +180,55 @@ module ULOL
                 }
                 input[type="range"] {
                   width: 100%;
-                  accent-color: var(--focus);
+                  height: 18px;
+                  margin: 2px 0;
+                  background: transparent;
+                  accent-color: var(--knob);
+                  -webkit-appearance: none;
+                  appearance: none;
+                  --range-progress: 0%;
+                }
+                input[type="range"]::-webkit-slider-thumb {
+                  width: 14px;
+                  height: 14px;
+                  margin-top: -5px;
+                  background: var(--knob);
+                  border: 1px solid var(--knob-border);
+                  border-radius: 50%;
+                  cursor: pointer;
+                  -webkit-appearance: none;
+                  appearance: none;
+                }
+                input[type="range"]::-webkit-slider-runnable-track {
+                  height: 6px;
+                  border: 1px solid #6f6f6f;
+                  border-radius: 999px;
+                  background: linear-gradient(
+                    to right,
+                    var(--focus) 0%,
+                    var(--focus) var(--range-progress),
+                    #515151 var(--range-progress),
+                    #515151 100%
+                  );
+                }
+                input[type="range"]::-moz-range-thumb {
+                  width: 14px;
+                  height: 14px;
+                  background: var(--knob);
+                  border: 1px solid var(--knob-border);
+                  border-radius: 50%;
+                  cursor: pointer;
+                }
+                input[type="range"]::-moz-range-track {
+                  height: 6px;
+                  border: 1px solid #6f6f6f;
+                  border-radius: 999px;
+                  background: #515151;
+                }
+                input[type="range"]::-moz-range-progress {
+                  height: 6px;
+                  border-radius: 999px;
+                  background: var(--focus);
                 }
                 .range-labels {
                   display: flex;
@@ -229,6 +313,14 @@ module ULOL
                   valueLabel.textContent = roundedScale(scale).toFixed(2) + 'x';
                 }
 
+                function renderSliderProgress() {
+                  const min = Number(slider.min || 0);
+                  const max = Number(slider.max || 1000);
+                  const value = Number(slider.value || 0);
+                  const progress = ((value - min) / (max - min)) * 100;
+                  slider.style.setProperty('--range-progress', progress.toFixed(2) + '%');
+                }
+
                 function save(scale) {
                   window.sketchup.setStateRadiusScale(String(roundedScale(scale)));
                 }
@@ -240,12 +332,14 @@ module ULOL
 
                 function setScale(scale, persist) {
                   slider.value = String(scaleToSlider(scale));
+                  renderSliderProgress();
                   render(scale);
                   if (persist) save(scale);
                 }
 
                 slider.addEventListener('input', () => {
                   const scale = sliderToScale(slider.value);
+                  renderSliderProgress();
                   render(scale);
                   debounceSave(scale);
                 });

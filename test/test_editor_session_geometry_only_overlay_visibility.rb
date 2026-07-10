@@ -32,7 +32,7 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class EditorSessionGeometryOnlyOverlayVisibilityTest < Minitest::Test
-        def test_dual_overlay_state_visibility_excludes_geometry_only_state
+        def test_dual_overlay_state_visibility_includes_geometry_only_state
           session = EditorSession.allocate
           visibility_service = FakeEditVisibilityService.new
           session.instance_variable_set(:@edit_visibility_service, visibility_service)
@@ -40,9 +40,9 @@ module ULOL
           geometry_only_cell = FakeCell.new(CellSpaceType::GEOMETRY_ONLY)
           general_cell = FakeCell.new(CellSpaceType::GENERAL)
 
-          refute session.dual_overlay_state_visible?(FakeState.new(geometry_only_cell))
+          assert session.dual_overlay_state_visible?(FakeState.new(geometry_only_cell))
           assert session.dual_overlay_state_visible?(FakeState.new(general_cell))
-          assert_equal [general_cell], visibility_service.checked_cells
+          assert_equal [geometry_only_cell, general_cell], visibility_service.checked_cells
         end
 
         private
