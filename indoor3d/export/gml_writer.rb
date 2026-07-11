@@ -126,9 +126,9 @@ module ULOL
               state_element.add_element('gml:name').text = state_export_name(state)
               duality = state_element.add_element('core:duality')
               duality.add_attribute('xlink:href', internal_href(cell_gml_id(cell_space)))
-              state_connected_transition_ids(state).each do |transition_id|
+              Array(state.transition_ids).each do |transition_id|
                 connects = state_element.add_element('core:connects')
-                connects.add_attribute('xlink:href', internal_href(transition_id))
+                connects.add_attribute('xlink:href', internal_href(transition_gml_id_from_raw_id(transition_id)))
               end
               geometry = state_element.add_element('core:geometry')
               point = geometry.add_element('gml:Point')
@@ -215,7 +215,11 @@ module ULOL
           end
 
           def transition_gml_id(transition)
-            "transition_#{safe_id(transition.id)}"
+            transition_gml_id_from_raw_id(transition.id)
+          end
+
+          def transition_gml_id_from_raw_id(id)
+            "transition_#{safe_id(id)}"
           end
 
           def internal_href(gml_id)
@@ -267,13 +271,6 @@ module ULOL
             element.text = value.to_s
           end
 
-          def state_connected_transition_ids(state)
-            @snapshot.transitions.filter_map do |transition|
-              next unless transition.state1 == state || transition.state2 == state
-
-              transition_gml_id(transition)
-            end
-          end
         end
       end
     end

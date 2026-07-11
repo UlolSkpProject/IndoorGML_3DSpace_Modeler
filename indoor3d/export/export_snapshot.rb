@@ -7,7 +7,12 @@ module ULOL
         class ExportSnapshot
           PointSnapshot = Struct.new(:x, :y, :z, keyword_init: true)
           SurfaceSnapshot = Struct.new(:exterior, :interiors, :id_hint, keyword_init: true)
-          StateSnapshot = Struct.new(:id, :position, :duality_cell, keyword_init: true) do
+          StateSnapshot = Struct.new(:id, :position, :duality_cell, :transition_ids, keyword_init: true) do
+            def initialize(*args, **kwargs)
+              super
+              self.transition_ids = Array(transition_ids)
+            end
+
             def valid?
               true
             end
@@ -52,8 +57,16 @@ module ULOL
               cell_snapshots = exportable_cell_spaces.map do |cell_space|
                 cell_snapshots_by_source[cell_space] = build_cell_space_snapshot(cell_space)
               end
+              transition_ids_by_state = Hash.new { |hash, state| hash[state] = [] }
               transitions = exportable_transitions(cell_snapshots_by_source).map do |transition|
-                build_transition_snapshot(transition, cell_snapshots_by_source)
+                transition_snapshot = build_transition_snapshot(transition, cell_snapshots_by_source)
+                transition_ids_by_state[transition_snapshot.state1] << transition_snapshot.id
+                transition_ids_by_state[transition_snapshot.state2] << transition_snapshot.id
+                transition_snapshot
+              end
+              cell_snapshots.each do |cell_snapshot|
+                state = cell_snapshot.duality_state
+                state.transition_ids = transition_ids_by_state[state].uniq
               end
               ExportSnapshot.new(cell_spaces: cell_snapshots, transitions: transitions)
             end

@@ -68,8 +68,8 @@ module ULOL
           end
 
           def test_writer_builds_navigable_codes_and_transition_links
-            state1 = fake_state('S1')
-            state2 = fake_state('S2')
+            state1 = fake_state('S1', transition_ids: ['T 1'])
+            state2 = fake_state('S2', transition_ids: ['T 1'])
             cell1 = fake_cell_space('A', CellSpaceType::GENERAL, nil, state1)
             cell2 = fake_cell_space('B', CellSpaceType::GENERAL, nil, state2)
             state1.duality_cell = cell1
@@ -88,6 +88,25 @@ module ULOL
             assert_xpath(doc, '//navi:class')
             assert_xpath(doc, '//core:Transition[@gml:id="transition_T_1"]')
             assert_includes xml, "xlink:href='#transition_T_1'"
+          end
+
+          def test_writer_uses_state_snapshot_transition_ids_for_state_connects
+            state1 = fake_state('S1', transition_ids: ['Raw T'])
+            state2 = fake_state('S2')
+            cell1 = fake_cell_space('A', CellSpaceType::GENERAL, nil, state1)
+            cell2 = fake_cell_space('B', CellSpaceType::GENERAL, nil, state2)
+            state1.duality_cell = cell1
+            state2.duality_cell = cell2
+            transition = fake_transition('Raw T', state1, state2, fake_point(1, 0, 0), fake_point(2, 0, 0))
+            snapshot = ExportSnapshot.new(cell_spaces: [cell1, cell2], transitions: [transition])
+            writer = GmlWriter.new(
+              snapshot: snapshot,
+              coordinate_unit: { unit: 'in', factor: 1.0, srs_name: 'urn:test:in' }
+            )
+
+            xml = writer.to_xml
+
+            assert_includes xml, "xlink:href='#transition_Raw_T'"
           end
 
           def test_writer_exports_geometry_only_cell_space_as_core_cell_space_without_navi_codes
@@ -142,8 +161,13 @@ module ULOL
             )
           end
 
-          def fake_state(id)
-            ExportSnapshot::StateSnapshot.new(id: id, duality_cell: nil, position: fake_point(1.0, 2.0, 3.0))
+          def fake_state(id, transition_ids: [])
+            ExportSnapshot::StateSnapshot.new(
+              id: id,
+              duality_cell: nil,
+              position: fake_point(1.0, 2.0, 3.0),
+              transition_ids: transition_ids
+            )
           end
 
           def fake_transition(id, state1, state2, state1_position, state2_position)
