@@ -32,7 +32,7 @@ module ULOL
           keyword_init: true
         )
 
-        LEGACY_ANNEX_D = NavigationSemanticResolver::LEGACY_ANNEX_D_CODE_SPACE
+        ANNEX_D_URI = 'urn:ogc:def:nil:OGC::IndoorGML:AnnexD'
 
         EXPECTED_DEFAULTS = [
           [CellSpaceType::GENERAL, 'Room', 'Space', 'Space', 'Space'],
@@ -117,9 +117,9 @@ module ULOL
 
         def test_new_cell_space_persists_string_semantics_and_removes_code_space_attributes
           group = FakeGroup.new(
-            'navigation_class_code_space' => LEGACY_ANNEX_D,
-            'navigation_function_code_space' => LEGACY_ANNEX_D,
-            'navigation_usage_code_space' => LEGACY_ANNEX_D
+            'navigation_class_code_space' => ANNEX_D_URI,
+            'navigation_function_code_space' => ANNEX_D_URI,
+            'navigation_usage_code_space' => ANNEX_D_URI
           )
           cell_space = CellSpace.new(group, CellSpaceType::TRANSITION, 'Elevator')
 
@@ -141,11 +141,11 @@ module ULOL
               cell_type,
               category_code,
               class_value,
-              LEGACY_ANNEX_D,
+              ANNEX_D_URI,
               function_value,
-              LEGACY_ANNEX_D,
+              ANNEX_D_URI,
               usage_value,
-              LEGACY_ANNEX_D
+              ANNEX_D_URI
             )
 
             expected = NavigationSemanticResolver.default_for(cell_type, category_code)
@@ -189,19 +189,19 @@ module ULOL
             CellSpaceType::ANCHOR,
             'ExteriorDoor',
             'Custom exterior',
-            LEGACY_ANNEX_D,
+            ANNEX_D_URI,
             '1010',
-            LEGACY_ANNEX_D,
+            ANNEX_D_URI,
             '1010',
-            LEGACY_ANNEX_D
+            ANNEX_D_URI
           )
 
           assert_equal 'Custom exterior', cell_space.navigation_class
-          assert_equal LEGACY_ANNEX_D, cell_space.navigation_class_code_space
+          assert_equal ANNEX_D_URI, cell_space.navigation_class_code_space
           assert_equal '1010', cell_space.navigation_function
-          assert_equal LEGACY_ANNEX_D, cell_space.navigation_function_code_space
+          assert_equal ANNEX_D_URI, cell_space.navigation_function_code_space
           assert_equal '1010', cell_space.navigation_usage
-          assert_equal LEGACY_ANNEX_D, cell_space.navigation_usage_code_space
+          assert_equal ANNEX_D_URI, cell_space.navigation_usage_code_space
         end
 
         def test_restore_preserves_user_semantics_when_code_space_is_custom
@@ -212,17 +212,17 @@ module ULOL
             '1010',
             'urn:custom',
             '1120',
-            LEGACY_ANNEX_D,
+            ANNEX_D_URI,
             '1120',
-            LEGACY_ANNEX_D
+            ANNEX_D_URI
           )
 
           assert_equal '1010', cell_space.navigation_class
           assert_equal 'urn:custom', cell_space.navigation_class_code_space
           assert_equal '1120', cell_space.navigation_function
-          assert_equal LEGACY_ANNEX_D, cell_space.navigation_function_code_space
+          assert_equal ANNEX_D_URI, cell_space.navigation_function_code_space
           assert_equal '1120', cell_space.navigation_usage
-          assert_equal LEGACY_ANNEX_D, cell_space.navigation_usage_code_space
+          assert_equal ANNEX_D_URI, cell_space.navigation_usage_code_space
         end
 
         def test_geometry_only_window_remains_without_navigation_semantics
