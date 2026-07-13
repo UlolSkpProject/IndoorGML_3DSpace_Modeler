@@ -56,6 +56,14 @@ module ULOL
           assert_nil cell_space.navigation_usage_code_space
         end
 
+        def test_cell_space_is_invalid_when_group_is_not_manifold
+          cell_space = CellSpace.new(FakeGroup.new(manifold: true), CellSpaceType::GENERAL)
+          cell_space.sketchup_group.manifold = false
+
+          refute cell_space.valid?
+          assert_nil cell_space.valid_sketchup_group
+        end
+
         def test_transition_creation_skips_geometry_only_cells_in_persistent_and_runtime_paths
           model = FakeTopologyModel.new
           general = FakeCell.new('room', navigable: true)
@@ -69,12 +77,18 @@ module ULOL
         private
 
         class FakeGroup < Sketchup::Group
+          attr_writer :manifold
+
+          def initialize(manifold: true)
+            @manifold = manifold
+          end
+
           def valid?
             true
           end
 
           def manifold?
-            true
+            @manifold == true
           end
 
           def persistent_id
