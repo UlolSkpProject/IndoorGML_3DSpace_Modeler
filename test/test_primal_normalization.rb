@@ -151,6 +151,50 @@ module ULOL
           assert_nil model.entities.instances.first.material
         end
 
+        def test_initial_load_normalization_keeps_solid_and_demotes_non_solid_idempotently
+          model = FakeModel.new
+          Sketchup.test_active_model = model
+          solid = FakeGroup.new
+          solid.feature = 'CellSpace'
+          non_solid = FakeGroup.new
+          non_solid.entities.items << Object.new
+          non_solid.feature = 'CellSpace'
+          non_solid.manifold = false
+          non_solid.material = 'cell-space-material'
+          primal = FakePrimalGroup.new(FakeTransformation.new(10, 0, 0), [solid, non_solid])
+          normalizer = FakeIndoorModel.new(primal)
+          normalizer.cell_space = FakeCellSpace.new(non_solid, FakeState.new)
+
+          normalizer.normalize_initial_load
+          normalizer.normalize_initial_load
+
+          assert_equal 'CellSpace', solid.feature
+          assert solid.valid?
+          assert_nil non_solid.feature
+          assert non_solid.erased?
+          assert_equal 1, model.entities.instances.length
+          assert_nil model.entities.instances.first.material
+        end
+
+        def test_initial_load_normalization_continues_after_one_child_fails
+          model = FakeModel.new
+          Sketchup.test_active_model = model
+          broken = Object.new
+          def broken.valid? = true
+          non_solid = FakeGroup.new
+          non_solid.entities.items << Object.new
+          non_solid.feature = 'CellSpace'
+          non_solid.manifold = false
+          primal = FakePrimalGroup.new(FakeTransformation.new(0, 0, 0), [broken, non_solid])
+          normalizer = FakeIndoorModel.new(primal)
+          normalizer.cell_space = FakeCellSpace.new(non_solid, FakeState.new)
+
+          normalizer.normalize_initial_load
+
+          assert non_solid.erased?
+          assert_equal 1, model.entities.instances.length
+        end
+
         private
 
         def point(x, y, z)
@@ -174,7 +218,20 @@ module ULOL
           end
 
           def normalize_child(entity)
-            normalize_primal_child_for_finish(entity, [])
+            normalize_primal_child(entity, [])
+          end
+
+          def normalize_initial_load
+            normalize_primal_children_for_initial_load
+          end
+
+          def with_indoor_model_operation(name, **_options)
+            @calls << [:operation, name]
+            yield
+          end
+
+          def with_guard_flag(_flag)
+            yield
           end
 
           def indoor_feature(entity)
@@ -234,10 +291,15 @@ module ULOL
         end
 
         class FakeModel
-          attr_reader :entities
+          attr_reader :entities, :active_view
 
           def initialize
             @entities = FakeEntities.new
+            @active_view = Struct.new(:invalidations) do
+              def invalidate
+                self.invalidations += 1
+              end
+            end.new(0)
           end
 
           def active_path
@@ -246,10 +308,12 @@ module ULOL
         end
 
         class FakePrimalGroup
-          attr_reader :transformation
+          attr_reader :transformation, :entities
 
-          def initialize(transformation)
+          def initialize(transformation, entities = [])
             @transformation = transformation
+            @entities = FakeEntities.new
+            @entities.items.concat(entities)
           end
 
           def valid?

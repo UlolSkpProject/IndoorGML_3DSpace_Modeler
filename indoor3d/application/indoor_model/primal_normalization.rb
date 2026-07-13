@@ -8,24 +8,44 @@ module ULOL
           private
 
           def normalize_primal_children_for_finish
+            normalize_primal_children(context: :finish)
+          end
+
+          def normalize_primal_children_for_initial_load
+            normalize_primal_children(context: :initial_load)
+          end
+
+          def normalize_primal_children(context:)
             return unless @primal_group&.valid?
 
-            with_indoor_model_operation('IndoorGML Normalize Primal Children On Finish', transparent: true) do
+            operation_name = if context == :initial_load
+                               'IndoorGML Normalize Primal Children On Load'
+                             else
+                               'IndoorGML Normalize Primal Children On Finish'
+                             end
+            with_indoor_model_operation(operation_name, transparent: true) do
               with_guard_flag(:@relocating_entity) do
                 raw_entities = []
                 @primal_group.entities.to_a.each do |entity|
-                  normalize_primal_child_for_finish(entity, raw_entities)
+                  normalize_primal_child_safely(entity, raw_entities, context: context)
                 end
                 move_raw_primal_entities_to_root(raw_entities)
               end
-              # refresh_runtime_data
-              Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
+              model = @model || Sketchup.active_model
+              model.active_view.invalidate if model&.active_view
             end
           rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] Primal children finish normalize failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Primal children normalize failed context=#{context}: #{e.class}: #{e.message}"
           end
 
-          def normalize_primal_child_for_finish(entity, raw_entities)
+          def normalize_primal_child_safely(entity, raw_entities, context:)
+            normalize_primal_child(entity, raw_entities)
+          rescue StandardError => e
+            entity_id = entity.entityID if entity.respond_to?(:entityID)
+            IndoorCore::Logger.puts "[IndoorGML] Primal child normalize failed context=#{context} entity_id=#{entity_id}: #{e.class}: #{e.message}"
+          end
+
+          def normalize_primal_child(entity, raw_entities)
             return unless entity&.valid?
             return if space_features_origin_point?(entity)
             if indoor_feature(entity) == 'CellSpace'
@@ -34,6 +54,8 @@ module ULOL
               demote_non_solid_cell_space_entity(entity)
               if entity.respond_to?(:definition) && entity.respond_to?(:transformation)
                 normalize_primal_container_without_operation(entity)
+              else
+                raw_entities << entity
               end
               return
             end

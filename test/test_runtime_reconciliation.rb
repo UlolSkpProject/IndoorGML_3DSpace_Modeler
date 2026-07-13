@@ -422,6 +422,8 @@ module ULOL
             @recenter_count += 1
           end
 
+          def normalize_primal_children_for_initial_load; end
+
           def apply_cell_space_material(cell_space)
             @materialized_cell_ids << cell_space.id
           end
