@@ -112,7 +112,7 @@ module ULOL
         # Deferred runtime refresh to avoid SketchUp crash on model load.
         UI.start_timer(0.5, false) do
           begin
-            IndoorCore::IndoorModel.current.refresh_runtime_data()
+            IndoorCore::IndoorModel.current.refresh_runtime_data(initial_model_load: true)
           rescue StandardError => e
             IndoorCore::Logger.error(
               "[IndoorGML] Deferred runtime refresh failed: #{e.class}: #{e.message}\n#{e.backtrace&.join("\n")}"

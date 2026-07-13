@@ -57,6 +57,7 @@ module ULOL
           assert_equal 1, progress.close_count
           assert_nil IndoorGmlConverter::ValidationSession.for_model(model)
           assert_equal 1, model.runtime.refreshes
+          assert_equal [true], model.runtime.initial_model_load_flags
         end
 
         def test_open_model_cancels_validation_session_even_when_model_object_is_reused
@@ -72,6 +73,7 @@ module ULOL
           assert_equal 1, progress.close_count
           assert_nil IndoorGmlConverter::ValidationSession.for_model(model)
           assert_equal 1, model.runtime.refreshes
+          assert_equal [true], model.runtime.initial_model_load_flags
         end
 
         private
@@ -116,13 +118,16 @@ module ULOL
 
         class FakeRuntime
           attr_reader :refreshes
+          attr_reader :initial_model_load_flags
 
           def initialize
             @refreshes = 0
+            @initial_model_load_flags = []
           end
 
-          def refresh_runtime_data
+          def refresh_runtime_data(initial_model_load: false)
             @refreshes += 1
+            @initial_model_load_flags << initial_model_load
           end
         end
 

@@ -230,6 +230,17 @@ module ULOL
           assert_equal FakeTransformation::IDENTITY, snapshot[:transformation]
         end
 
+        def test_initial_refresh_applies_cell_space_materials
+          indoor = FakeIndoorModel.new(@model)
+          primal = @model.create_primal_group
+          cell = primal.entities.add_group('Cell')
+          write_cell_attributes(cell, id: 'cell_A', state_id: 'state_A')
+
+          indoor.refresh_runtime_data(initial_model_load: true)
+
+          assert_equal ['cell_A'], indoor.materialized_cell_ids
+        end
+
         private
 
         def write_cell_attributes(group, id:, state_id:)
@@ -245,7 +256,7 @@ module ULOL
           include IndoorModel::RuntimeSupport
           include IndoorModel::Topology
 
-          attr_reader :cell_spaces, :states, :transitions, :primal_group, :serializer, :operation_count, :recenter_count
+          attr_reader :cell_spaces, :states, :transitions, :primal_group, :serializer, :operation_count, :recenter_count, :materialized_cell_ids
 
           def initialize(model, adjacent: false, editor_session: FakeEditorSession.new)
             @model = model
@@ -276,6 +287,7 @@ module ULOL
             @editor_session = editor_session
             @operation_count = 0
             @recenter_count = 0
+            @materialized_cell_ids = []
             bind_registry_collections
           end
 
@@ -375,6 +387,10 @@ module ULOL
 
           def recenter_runtime_cell_spaces
             @recenter_count += 1
+          end
+
+          def apply_cell_space_material(cell_space)
+            @materialized_cell_ids << cell_space.id
           end
 
           def invalidate_overlay_transition_points; end

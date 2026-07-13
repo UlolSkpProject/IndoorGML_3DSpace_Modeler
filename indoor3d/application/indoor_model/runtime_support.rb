@@ -7,7 +7,7 @@ module ULOL
     module IndoorCore
       class IndoorModel
         module RuntimeSupport
-          def refresh_runtime_data
+          def refresh_runtime_data(initial_model_load: false)
             with_indoor_model_operation('IndoorGML Refresh Runtime Data', transparent: true) do
               next true if guard_active?(:@refreshing_runtime)
 
@@ -15,6 +15,7 @@ module ULOL
                 sync do
                   restore_runtime_from_current_model
                   recenter_runtime_cell_spaces
+                  apply_initial_cell_space_materials if initial_model_load
                   rebuild_runtime_transitions_from_cell_adjacency
                 end
                 invalidate_overlay_transition_points
@@ -349,6 +350,16 @@ module ULOL
               write_cell_space_attributes(cell_space)
             rescue StandardError => e
               IndoorCore::Logger.puts "[IndoorGML] Runtime CellSpace recenter skipped: cell=#{cell_space&.id} #{e.class}: #{e.message}"
+            end
+          end
+
+          def apply_initial_cell_space_materials
+            @cell_spaces.each do |cell_space|
+              next unless cell_space&.valid?
+
+              apply_cell_space_material(cell_space)
+            rescue StandardError => e
+              IndoorCore::Logger.puts "[IndoorGML] Initial CellSpace material apply skipped: cell=#{cell_space&.id} #{e.class}: #{e.message}"
             end
           end
 

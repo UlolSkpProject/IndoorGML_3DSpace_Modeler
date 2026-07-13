@@ -93,7 +93,7 @@ module ULOL
 
         def refresh_runtime_data(model)
           begin
-            IndoorModel.for(model).refresh_runtime_data()
+            IndoorModel.for(model).refresh_runtime_data(initial_model_load: true)
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Runtime refresh failed: #{e.class}: #{e.message}"
           end
