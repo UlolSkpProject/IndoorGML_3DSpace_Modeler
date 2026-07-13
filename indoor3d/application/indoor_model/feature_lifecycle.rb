@@ -687,21 +687,7 @@ module ULOL
             group = cell_space.sketchup_group
             material = Utils::Materials.cell_space(cell_space.cell_type, cell_space.category_code)
 
-            group.material = nil if group.respond_to?(:material=)
-            return if material.nil?
-
-            group.entities.grep(Sketchup::Face) do |face|
-              apply_cell_space_face_material(face, material)
-            end
-          end
-
-          def apply_cell_space_face_material(face, material)
-            begin
-              face.material = material
-              face.back_material = material if face.respond_to?(:back_material=)
-            rescue StandardError => e
-              IndoorCore::Logger.puts "[IndoorGML] CellSpace face material failed: #{e.class}: #{e.message}"
-            end
+            group.material = material if group.respond_to?(:material=)
           end
 
           def register_state(state)
