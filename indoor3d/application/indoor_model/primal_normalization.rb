@@ -28,7 +28,15 @@ module ULOL
           def normalize_primal_child_for_finish(entity, raw_entities)
             return unless entity&.valid?
             return if space_features_origin_point?(entity)
-            return if indoor_feature(entity) == 'CellSpace'
+            if indoor_feature(entity) == 'CellSpace'
+              return if solid_primal_cell_space_entity?(entity)
+
+              demote_non_solid_cell_space_entity(entity)
+              if entity.respond_to?(:definition) && entity.respond_to?(:transformation)
+                normalize_primal_container_without_operation(entity)
+              end
+              return
+            end
             return if auto_convert_tagged_primal_entity(entity)
 
             if entity.respond_to?(:definition) && entity.respond_to?(:transformation)
@@ -36,6 +44,28 @@ module ULOL
             else
               raw_entities << entity
             end
+          end
+
+          def solid_primal_cell_space_entity?(entity)
+            entity.respond_to?(:manifold?) && entity.manifold? == true
+          rescue StandardError
+            false
+          end
+
+          def demote_non_solid_cell_space_entity(entity)
+            cell_space = find_cell_space_for_entity(entity) if respond_to?(:find_cell_space_for_entity, true)
+            if cell_space
+              erase_transitions_for_state(cell_space.duality_state) if respond_to?(:erase_transitions_for_state, true)
+              erase_adjacency_for_cell_space(cell_space) if respond_to?(:erase_adjacency_for_cell_space, true)
+              unregister_state(cell_space.duality_state) if respond_to?(:unregister_state, true)
+              unregister_cell_space(cell_space) if respond_to?(:unregister_cell_space, true)
+            end
+            @attribute_serializer&.clear_indoor_gml_attributes(entity)
+            IndoorCore::Logger.puts "[IndoorGML] Non-solid CellSpace demoted to normal group: entity_id=#{entity.entityID if entity.respond_to?(:entityID)}"
+            true
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Non-solid CellSpace demotion failed: #{e.class}: #{e.message}"
+            false
           end
 
           def normalize_primal_container_without_operation(container)

@@ -53,11 +53,11 @@ module ULOL
         end
 
         def valid?
-          @sketchup_group&.valid? == true
+          valid_solid_group?(@sketchup_group)
         end
 
         def valid_sketchup_group
-          return nil unless @sketchup_group&.valid?
+          return nil unless valid_solid_group?(@sketchup_group)
 
           @sketchup_group
         rescue StandardError
@@ -115,6 +115,14 @@ module ULOL
         end
 
         private
+
+        def valid_solid_group?(group)
+          group&.valid? == true &&
+            group.respond_to?(:manifold?) &&
+            group.manifold? == true
+        rescue StandardError
+          false
+        end
 
         def initialize_restored(sketchup_group, cell_type, id, name, category_code, navigation_class, navigation_class_code_space, navigation_function, navigation_function_code_space, navigation_usage, navigation_usage_code_space, storey)
           @sketchup_group = sketchup_group
