@@ -128,7 +128,7 @@ module ULOL
             copy = copy.to_group if container.is_a?(Sketchup::Group) && copy.respond_to?(:to_group)
             copy.make_unique if container.is_a?(Sketchup::Group) && copy.respond_to?(:make_unique)
             copy.name = container.name if copy.respond_to?(:name=) && container.respond_to?(:name)
-            copy.material = container.material if copy.respond_to?(:material=) && container.respond_to?(:material)
+            copy.material = nil if copy.respond_to?(:material=)
             copy.layer = container.layer if copy.respond_to?(:layer=) && container.respond_to?(:layer)
             copy.visible = container.visible? if copy.respond_to?(:visible=) && container.respond_to?(:visible?)
             container.erase! if container.valid?
