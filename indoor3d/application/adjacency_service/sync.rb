@@ -107,17 +107,41 @@ module ULOL
         end
 
         def candidate_pair_indices(snapshots, tolerance)
+          sorted_indices = (0...snapshots.length).sort_by do |index|
+            bounds = snapshots[index][:bounds]
+            [bounds[:min][2], bounds[:max][2], index]
+          end
           pairs = []
-          count = snapshots.length
-          (0...count).each do |index1|
-            ((index1 + 1)...count).each do |index2|
-              next unless candidate_bounds_touch?(
-                snapshots[index1][:bounds],
-                snapshots[index2][:bounds],
+
+          sorted_indices.each_with_index do |index1, sorted_position|
+            bounds1 = snapshots[index1][:bounds]
+            maximum_candidate_z = bounds1[:max][2] + tolerance
+            candidate_position = sorted_position + 1
+
+            while candidate_position < sorted_indices.length
+              index2 = sorted_indices[candidate_position]
+              bounds2 = snapshots[index2][:bounds]
+              break if bounds2[:min][2] > maximum_candidate_z
+
+              x_matches = candidate_axis_overlap_or_touch?(
+                bounds1[:min][0],
+                bounds1[:max][0],
+                bounds2[:min][0],
+                bounds2[:max][0],
+                tolerance
+              )
+              y_matches = candidate_axis_overlap_or_touch?(
+                bounds1[:min][1],
+                bounds1[:max][1],
+                bounds2[:min][1],
+                bounds2[:max][1],
                 tolerance
               )
 
-              pairs << [index1, index2]
+              if x_matches && y_matches
+                pairs << (index1 < index2 ? [index1, index2] : [index2, index1])
+              end
+              candidate_position += 1
             end
           end
           pairs.freeze

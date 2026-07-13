@@ -166,7 +166,114 @@ module ULOL
           assert_equal Utils::Geometry::TOPOLOGY_TOLERANCE, Utils::Geometry::VALIDATION_TOLERANCE
         end
 
+        def test_candidate_pair_indices_matches_brute_force_for_edge_cases
+          tolerance = 0.1
+          cases = {
+            empty: [[], []],
+            single: [[bounds_snapshot([0, 0, 0], [1, 1, 1])], []],
+            same_min_z_with_different_max_z: [
+              [
+                bounds_snapshot([0, 0, 0], [1, 1, 1]),
+                bounds_snapshot([0, 0, 0], [1, 1, 3]),
+                bounds_snapshot([0, 0, 1.05], [1, 1, 2])
+              ],
+              [[0, 1], [0, 2], [1, 2]]
+            ],
+            separated_floors: [
+              [bounds_snapshot([0, 0, 0], [1, 1, 1]), bounds_snapshot([0, 0, 1.1001], [1, 1, 2])],
+              []
+            ],
+            overlapping_z_separated_x: [
+              [bounds_snapshot([0, 0, 0], [1, 1, 2]), bounds_snapshot([1.1001, 0, 1], [2, 1, 3])],
+              []
+            ],
+            overlapping_z_separated_y: [
+              [bounds_snapshot([0, 0, 0], [1, 1, 2]), bounds_snapshot([0, 1.1001, 1], [1, 2, 3])],
+              []
+            ],
+            exactly_touching: [
+              [bounds_snapshot([0, 0, 0], [1, 1, 1]), bounds_snapshot([1, 1, 1], [2, 2, 2])],
+              [[0, 1]]
+            ],
+            touching_within_tolerance: [
+              [bounds_snapshot([0, 0, 0], [1, 1, 1]), bounds_snapshot([1.1, 1.1, 1.1], [2, 2, 2])],
+              [[0, 1]]
+            ],
+            separated_beyond_tolerance: [
+              [bounds_snapshot([0, 0, 0], [1, 1, 1]), bounds_snapshot([1.1001, 1.1001, 1.1001], [2, 2, 2])],
+              []
+            ],
+            negative_z_coordinates: [
+              [bounds_snapshot([0, 0, -5], [1, 1, -2]), bounds_snapshot([0, 0, -2.05], [1, 1, 0])],
+              [[0, 1]]
+            ],
+            duplicate_bounds: [
+              Array.new(3) { bounds_snapshot([-1, -1, -1], [1, 1, 1]) },
+              [[0, 1], [0, 2], [1, 2]]
+            ]
+          }
+
+          cases.each do |name, (snapshots, expected)|
+            brute_force_pairs = brute_force_candidate_pair_indices(snapshots, tolerance)
+            sweep_pairs = candidate_pair_indices(snapshots, tolerance)
+
+            assert_equal expected, brute_force_pairs, "brute-force fixture mismatch for #{name}"
+            assert_equal brute_force_pairs.sort, sweep_pairs.sort, "pair set mismatch for #{name}"
+            assert sweep_pairs.all? { |index1, index2| index1 < index2 }, "unordered pair for #{name}"
+            assert_predicate sweep_pairs, :frozen?, "result must be frozen for #{name}"
+          end
+        end
+
+        def test_candidate_pair_indices_matches_brute_force_for_generated_bounds
+          tolerance = 0.25
+          random = Random.new(12_345)
+
+          40.times do |iteration|
+            snapshots = Array.new(random.rand(0..40)) do
+              minimum = Array.new(3) { random.rand(-20.0..20.0) }
+              maximum = minimum.map { |coordinate| coordinate + random.rand(0.0..5.0) }
+              bounds_snapshot(minimum, maximum)
+            end
+
+            brute_force_pairs = brute_force_candidate_pair_indices(snapshots, tolerance)
+            sweep_pairs = candidate_pair_indices(snapshots, tolerance)
+
+            assert_equal brute_force_pairs.sort, sweep_pairs.sort, "pair set mismatch at iteration #{iteration}"
+            assert sweep_pairs.all? { |index1, index2| index1 < index2 }, "unordered pair at iteration #{iteration}"
+            assert_predicate sweep_pairs, :frozen?
+          end
+        end
+
         private
+
+        def candidate_pair_indices(snapshots, tolerance)
+          service = AdjacencyService.new(
+            FakeRegistry.new([]),
+            transition_builder: proc {},
+            transition_eraser: proc {}
+          )
+          service.send(:candidate_pair_indices, snapshots, tolerance)
+        end
+
+        def brute_force_candidate_pair_indices(snapshots, tolerance)
+          pairs = []
+          snapshots.each_index do |index1|
+            ((index1 + 1)...snapshots.length).each do |index2|
+              bounds1 = snapshots[index1][:bounds]
+              bounds2 = snapshots[index2][:bounds]
+              matches = 3.times.all? do |axis|
+                [bounds1[:min][axis], bounds2[:min][axis]].max <=
+                  [bounds1[:max][axis], bounds2[:max][axis]].min + tolerance
+              end
+              pairs << [index1, index2] if matches
+            end
+          end
+          pairs.freeze
+        end
+
+        def bounds_snapshot(minimum, maximum)
+          { bounds: { min: minimum, max: maximum } }.freeze
+        end
 
         def stub_entity_axis(axis)
           Utils::Geometry.define_singleton_method(:adjacency_axis) do |_entity1, _entity2|
