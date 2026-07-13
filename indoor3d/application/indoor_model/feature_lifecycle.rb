@@ -688,6 +688,16 @@ module ULOL
             material = Utils::Materials.cell_space(cell_space.cell_type, cell_space.category_code)
 
             group.material = material if group.respond_to?(:material=)
+            group.entities.grep(Sketchup::Face) do |face|
+              clear_cell_space_face_material(face)
+            end
+          end
+
+          def clear_cell_space_face_material(face)
+            face.material = nil if face.respond_to?(:material=)
+            face.back_material = nil if face.respond_to?(:back_material=)
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] CellSpace face material cleanup failed: #{e.class}: #{e.message}"
           end
 
           def register_state(state)
