@@ -21,8 +21,10 @@ module ULOL
 
           path = "#{path}.gml" unless File.extname(path).downcase == '.gml'
           FileUtils.mkdir_p(File.dirname(path))
+          indoor_model = IndoorModel.current
+          indoor_model.finish_editing if indoor_model.editing?
           IndoorGmlConverter::GmlExporter.new(
-            IndoorModel.current
+            indoor_model
           ).export(output_path: path)
           UI.messagebox("GML exported:\n#{path}")
         rescue StandardError => e

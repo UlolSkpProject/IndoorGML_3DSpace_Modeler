@@ -156,10 +156,13 @@ module ULOL
 
         class FakeEditorSession
           attr_reader :highlight_calls
+          attr_reader :finish_count
 
-          def initialize(cell_spaces:)
+          def initialize(cell_spaces:, editing: false)
             @focus = { cell_spaces: cell_spaces, states: [], transitions: [] }
             @highlight_calls = []
+            @editing = editing
+            @finish_count = 0
           end
 
           def validation_focus_elements
@@ -168,6 +171,16 @@ module ULOL
 
           def set_validation_focus_highlight(ids, code)
             @highlight_calls << [ids, code]
+            true
+          end
+
+          def editing?
+            @editing == true
+          end
+
+          def finish
+            @finish_count += 1
+            @editing = false
             true
           end
         end

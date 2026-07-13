@@ -173,6 +173,26 @@ module ULOL
             assert_equal session.workspace.gml_path, dispatcher.seen_output_path
           end
 
+          def test_export_gml_finishes_editing_before_export
+            model = FakeModel.new('A')
+            indoor = FakeIndoorModel.new(model)
+            indoor.editing = true
+            dispatcher = Dispatcher.new
+            UI.savepanel_path = File.join(Dir.pwd, 'tmp', 'general_export')
+
+            with_replaced_constant(IndoorCore, :IndoorModel, fake_indoor_model_class(indoor)) do
+              with_replaced_constant(IndoorGmlConverter, :GmlExporter, FakeGmlExporter) do
+                dispatcher.export_gml
+              end
+            end
+
+            assert_equal 1, indoor.finish_editing_count
+            assert_same indoor, FakeGmlExporter.last_indoor_model
+            assert_equal "#{UI.savepanel_path}.gml", FakeGmlExporter.last_output_path
+          ensure
+            FakeGmlExporter.reset
+          end
+
           def test_stale_report_focus_action_expires_without_editing_new_model
             model_a = FakeModel.new('A')
             model_b = FakeModel.new('B')
@@ -378,13 +398,19 @@ module ULOL
             Class.new do
               @messages = []
               @timers = []
+              @savepanel_path = nil
               class << self
                 attr_reader :messages
                 attr_reader :timers
+                attr_accessor :savepanel_path
 
                 def messagebox(message, *_args)
                   @messages << message
                   nil
+                end
+
+                def savepanel(_title, _directory, _filter)
+                  @savepanel_path
                 end
 
                 def start_timer(_interval, _repeat, &block)
@@ -392,6 +418,23 @@ module ULOL
                 end
               end
             end
+          end
+
+          def fake_indoor_model_class(indoor_model)
+            Class.new do
+              define_singleton_method(:current) { indoor_model }
+            end
+          end
+
+          def with_replaced_constant(namespace, name, value)
+            existed = namespace.const_defined?(name, false)
+            original = namespace.const_get(name, false) if existed
+            namespace.send(:remove_const, name) if existed
+            namespace.const_set(name, value)
+            yield
+          ensure
+            namespace.send(:remove_const, name) if namespace.const_defined?(name, false)
+            namespace.const_set(name, original) if existed
           end
 
           def fake_sketchup
@@ -479,6 +522,7 @@ module ULOL
           end
 
           class FakeIndoorModel
+            attr_accessor :editing
             attr_reader :model
             attr_reader :begin_focus_calls
             attr_reader :begin_focus_row_states
@@ -486,9 +530,12 @@ module ULOL
             attr_reader :highlight_details
             attr_reader :states
             attr_reader :transitions
+            attr_reader :finish_editing_count
 
             def initialize(model, begin_focus_result: true)
               @model = model
+              @editing = false
+              @finish_editing_count = 0
               @begin_focus_calls = []
               @begin_focus_row_states = []
               @highlight_calls = []
@@ -497,6 +544,16 @@ module ULOL
               @transitions = []
               @validation_focus_active = false
               @begin_focus_result = begin_focus_result
+            end
+
+            def editing?
+              @editing == true
+            end
+
+            def finish_editing
+              @finish_editing_count += 1
+              @editing = false
+              true
             end
 
             def validation_focus_active?
@@ -519,6 +576,32 @@ module ULOL
                 transitions: transitions
               }
               true
+            end
+          end
+
+          class FakeGmlExporter
+            class << self
+              attr_reader :last_indoor_model
+              attr_reader :last_output_path
+
+              def new(indoor_model)
+                @last_indoor_model = indoor_model
+                allocate
+              end
+
+              def reset
+                @last_indoor_model = nil
+                @last_output_path = nil
+              end
+
+              def record_output_path(path)
+                @last_output_path = path
+              end
+            end
+
+            def export(output_path:)
+              self.class.record_output_path(output_path)
+              output_path
             end
           end
 

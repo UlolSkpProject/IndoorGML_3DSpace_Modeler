@@ -133,6 +133,7 @@ module ULOL
           entity.entities.items << Object.new
           entity.feature = 'CellSpace'
           entity.manifold = false
+          entity.material = 'cell-space-material'
           entity.transformation = FakeTransformation.new(1, 2, 3)
           state = FakeState.new
           cell_space = FakeCellSpace.new(entity, state)
@@ -147,6 +148,7 @@ module ULOL
           assert_includes normalizer.calls, [:unregister_cell_space, cell_space]
           assert entity.erased?
           assert_equal 1, model.entities.instances.length
+          assert_nil model.entities.instances.first.material
         end
 
         private
@@ -439,6 +441,7 @@ module ULOL
           def add_instance(definition, transformation)
             group = FakeGroup.new
             group.instance_variable_set(:@definition, definition)
+            group.material = definition.material if definition.respond_to?(:material)
             group.transformation = transformation
             @instances << group
             group

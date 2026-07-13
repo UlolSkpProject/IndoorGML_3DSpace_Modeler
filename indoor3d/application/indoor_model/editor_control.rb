@@ -475,6 +475,7 @@ module ULOL
 
             path = "#{path}.gml" unless File.extname(path).downcase == '.gml'
             FileUtils.mkdir_p(File.dirname(path))
+            finish_editing if editing?
             IndoorGmlConverter::GmlExporter.new(self).export(output_path: path)
             progress&.set_result_message("GML exported:\n#{path}")
             path
