@@ -82,9 +82,9 @@ module ULOL
           @navigation_class = normalize_navigation_semantic(navigation_class)
           @navigation_function = normalize_navigation_semantic(navigation_function)
           @navigation_usage = normalize_navigation_semantic(navigation_usage)
-          @navigation_class_code_space = CellSpaceCategory::DEFAULT_CODE_SPACE unless @navigation_class.to_s.empty?
-          @navigation_function_code_space = CellSpaceCategory::DEFAULT_CODE_SPACE unless @navigation_function.to_s.empty?
-          @navigation_usage_code_space = CellSpaceCategory::DEFAULT_CODE_SPACE unless @navigation_usage.to_s.empty?
+          @navigation_class_code_space = nil
+          @navigation_function_code_space = nil
+          @navigation_usage_code_space = nil
           true
         end
 
@@ -175,6 +175,19 @@ module ULOL
           restored_usage = normalize_navigation_semantic(navigation_usage)
 
           return if restored_class.to_s.empty? && restored_function.to_s.empty? && restored_usage.to_s.empty?
+
+          restored_semantic = NavigationSemantic.new(
+            class_value: restored_class,
+            class_code_space: blank_to_nil(class_code_space),
+            function_value: restored_function,
+            function_code_space: blank_to_nil(function_code_space),
+            usage_value: restored_usage,
+            usage_code_space: blank_to_nil(usage_code_space)
+          )
+          if NavigationSemanticResolver.legacy_default_semantic?(@cell_type, @category_code, restored_semantic)
+            apply_default_navigation_semantics
+            return
+          end
 
           @navigation_class = restored_class
           @navigation_class_code_space = blank_to_nil(class_code_space) unless @navigation_class.to_s.empty?
