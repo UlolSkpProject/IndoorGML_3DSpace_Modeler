@@ -29,8 +29,8 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class CellSpaceMaterialApplicationTest < Minitest::Test
-        def test_applies_material_to_group_only
-          face = FakeFace.new
+        def test_applies_material_to_group_and_clears_face_materials
+          face = FakeFace.new(material: 'old-front', back_material: 'old-back')
           group = FakeGroup.new([face])
           cell_space = Struct.new(:sketchup_group, :cell_type, :category_code).new(group, :general, 'Room')
           model = FakeIndoorModel.new
@@ -65,12 +65,18 @@ module ULOL
           end
 
           def grep(_klass)
+            @faces.each { |face| yield face } if block_given?
             @faces
           end
         end
 
         class FakeFace < Sketchup::Face
           attr_accessor :material, :back_material
+
+          def initialize(material: nil, back_material: nil)
+            @material = material
+            @back_material = back_material
+          end
         end
       end
     end
