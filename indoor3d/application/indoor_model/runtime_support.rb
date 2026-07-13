@@ -149,11 +149,16 @@ module ULOL
           end
 
           def with_indoor_model_operation(name, transparent: false)
+            # 이미 with_indoor_model_operation에서 operation을 시작했다면 다음 동작으로 새 operation을 만들지 않도록 한다.
+            # 중첩 호출된 동작을 하나의 operation으로 묶기 위함이다.
             return yield if @indoor_operation_depth.to_i.positive?
+            # 동작 처리 중 observer가 들어오는 경우 불필요한 operation을 중첩하여 생성하지 않도록 하기 위함이다.
             return yield if indoor_operation_suppressed?
 
             model = @model || Sketchup.active_model
             return yield unless model
+            
+            # 이미 operation이 열려있다면 그 안에서 작업 수행
             if model.respond_to?(:active_operation_name) && model.active_operation_name.to_s.length.positive?
               return yield
             end
@@ -167,7 +172,10 @@ module ULOL
               operation_started = false
               result
             rescue StandardError
-              model.abort_operation if operation_started
+              # FIXME : 이 rescue에 도달했다면 현재 helper가 실제 operation을 시작한 owner다.
+              # transparent operation은 abort할 경우 연결된 사용자 operation까지
+              # 취소될 수 있으므로, 예외 발생 전까지의 변경을 commit하고 닫는다.
+              transparent ? model.commit_operation : model.abort_operation
               raise
             ensure
               @indoor_operation_depth = [@indoor_operation_depth.to_i - 1, 0].max
