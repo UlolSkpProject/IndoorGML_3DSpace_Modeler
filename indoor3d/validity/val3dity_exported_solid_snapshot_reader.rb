@@ -2,6 +2,8 @@
 
 require 'rexml/document'
 
+require_relative '../utils/geometry'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -63,23 +65,30 @@ module ULOL
             points = remove_closing_duplicate(points)
             return { unsupported: true } if points.length < 3
 
-            interiors = children_by_name(polygon, 'interior').filter_map do |interior|
+            interior_elements = children_by_name(polygon, 'interior')
+            interiors = interior_elements.map do |interior|
               interior_ring = first_descendant(interior, 'LinearRing')
               next unless interior_ring
 
               interior_points = remove_closing_duplicate(parse_gml_ring_points(interior_ring, polygon))
               interior_points.length >= 3 ? interior_points : nil
             end
+            return { unsupported: true } if interiors.any?(&:nil?)
 
             normal = Utils::Geometry.polygon_normal(points, epsilon: @numeric_epsilon)
             return { unsupported: true } unless normal
+
+            triangles = triangulate_ring(points, normal)
+            interior_triangles = interiors.map { |interior_points| triangulate_ring(interior_points, normal) }
+            return { unsupported: true } unless triangles && interior_triangles.all?
 
             {
               face: {
                 points: points,
                 interiors: interiors,
                 normal: normal,
-                triangles: triangulate_points(points)
+                triangles: triangles,
+                interior_triangles: interior_triangles
               },
               unsupported: false
             }
@@ -126,8 +135,74 @@ module ULOL
             end
           end
 
-          def triangulate_points(points)
-            (1...(points.length - 1)).map { |index| [points.first, points[index], points[index + 1]] }
+          def triangulate_ring(points, normal)
+            axis = Utils::Geometry.dominant_axis(normal)
+            projected = Utils::Geometry.project_points_for_axis(points, axis)
+            signed_area = Utils::Geometry.polygon_area_2d_value(projected)
+            return nil if signed_area.abs <= area_epsilon
+
+            orientation = signed_area.negative? ? -1.0 : 1.0
+            remaining = (0...points.length).to_a
+            triangles = []
+            guard = points.length * points.length
+
+            while remaining.length > 3 && guard.positive?
+              ear_position = remaining.each_index.find do |position|
+                ear?(remaining, position, projected, orientation)
+              end
+              return nil unless ear_position
+
+              previous = remaining[(ear_position - 1) % remaining.length]
+              current = remaining[ear_position]
+              following = remaining[(ear_position + 1) % remaining.length]
+              triangles << [points[previous], points[current], points[following]]
+              remaining.delete_at(ear_position)
+              guard -= 1
+            end
+
+            return nil unless remaining.length == 3
+
+            triangles << remaining.map { |index| points[index] }
+            triangulation_covers_ring?(triangles, signed_area, axis) ? triangles : nil
+          end
+
+          def ear?(remaining, position, projected, orientation)
+            previous = remaining[(position - 1) % remaining.length]
+            current = remaining[position]
+            following = remaining[(position + 1) % remaining.length]
+            triangle = [projected[previous], projected[current], projected[following]]
+            return false if orientation * cross_2d(*triangle) <= area_epsilon
+
+            remaining.none? do |index|
+              next false if index == previous || index == current || index == following
+
+              point_strictly_inside_triangle?(projected[index], triangle, orientation)
+            end
+          end
+
+          def point_strictly_inside_triangle?(point, triangle, orientation)
+            a, b, c = triangle
+            orientation * cross_2d(a, b, point) > area_epsilon &&
+              orientation * cross_2d(b, c, point) > area_epsilon &&
+              orientation * cross_2d(c, a, point) > area_epsilon
+          end
+
+          def cross_2d(point1, point2, point3)
+            ((point2[0] - point1[0]) * (point3[1] - point1[1])) -
+              ((point2[1] - point1[1]) * (point3[0] - point1[0]))
+          end
+
+          def triangulation_covers_ring?(triangles, signed_area, axis)
+            triangle_area = triangles.sum do |triangle|
+              Utils::Geometry.polygon_area_2d_value(
+                Utils::Geometry.project_points_for_axis(triangle, axis)
+              ).abs
+            end
+            (triangle_area - signed_area.abs).abs <= [area_epsilon, signed_area.abs * 1.0e-8].max
+          end
+
+          def area_epsilon
+            @numeric_epsilon * @numeric_epsilon
           end
 
           def remove_closing_duplicate(points)

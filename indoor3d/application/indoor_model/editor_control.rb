@@ -531,7 +531,10 @@ module ULOL
             return unless workspace&.respond_to?(:cleanup)
 
             cleaned = workspace.cleanup
-            state[:workspace_cleaned] = true if cleaned
+            if cleaned
+              state[:workspace_cleaned] = true
+              stop_validation_focus_recheck_cleanup_timer(state)
+            end
             cleaned
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck workspace cleanup failed: #{e.class}: #{e.message}"
@@ -567,24 +570,39 @@ module ULOL
             return unless defined?(UI) && UI.respond_to?(:start_timer)
 
             state[:workspace_cleanup_timer_scheduled] = true
-            UI.start_timer(0.2, true) do
+            state[:workspace_cleanup_timer_id] = UI.start_timer(0.2, true) do
               if state[:workspace_cleaned]
+                stop_validation_focus_recheck_cleanup_timer(state)
                 next false
               end
 
               if validation_focus_recheck_process_finished?(state)
                 state[:workspace_cleanup_timer_scheduled] = false
-                next !cleanup_validation_focus_recheck_workspace(state)
+                cleaned = cleanup_validation_focus_recheck_workspace(state)
+                stop_validation_focus_recheck_cleanup_timer(state) if cleaned
+                next !cleaned
               end
 
               true
             rescue StandardError => e
               state[:workspace_cleanup_timer_scheduled] = false
+              stop_validation_focus_recheck_cleanup_timer(state)
               IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck pending cleanup failed: #{e.class}: #{e.message}"
               false
             end
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck cleanup timer failed: #{e.class}: #{e.message}"
+          end
+
+          def stop_validation_focus_recheck_cleanup_timer(state)
+            timer_id = state.delete(:workspace_cleanup_timer_id)
+            state[:workspace_cleanup_timer_scheduled] = false
+            return if timer_id.nil?
+            return unless defined?(UI) && UI.respond_to?(:stop_timer)
+
+            UI.stop_timer(timer_id)
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck cleanup timer stop failed: #{e.class}: #{e.message}"
           end
 
           def finalize_validation_focus_recheck_session(state)

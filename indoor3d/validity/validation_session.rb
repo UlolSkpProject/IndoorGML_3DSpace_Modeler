@@ -168,7 +168,10 @@ module ULOL
             return false unless @workspace&.respond_to?(:cleanup)
 
             cleaned = @workspace.cleanup
-            @cleanup_pending = false if cleaned
+            if cleaned
+              @cleanup_pending = false
+              stop_pending_cleanup_timer
+            end
             cleaned
           rescue StandardError => e
             log("Validation workspace cleanup failed: #{e.class}: #{e.message}")
@@ -223,25 +226,41 @@ module ULOL
 
           def schedule_pending_cleanup
             return unless defined?(UI) && UI.respond_to?(:start_timer)
+            return if @cleanup_timer_id
 
             process_session = @val_session || @state&.[](:val_session)
-            UI.start_timer(0.2, true) do
+            @cleanup_timer_id = UI.start_timer(0.2, true) do
               unless cleanup_pending?
+                stop_pending_cleanup_timer
                 next false
               end
 
               if process_session.nil? || !process_session.respond_to?(:finished?) || process_session.finished?
                 finalize_process_session(process_session)
-                next !cleanup_workspace
+                cleaned = cleanup_workspace
+                stop_pending_cleanup_timer if cleaned
+                next !cleaned
               end
 
               true
             rescue StandardError => e
+              stop_pending_cleanup_timer
               log("Validation pending workspace cleanup failed: #{e.class}: #{e.message}")
               false
             end
           rescue StandardError => e
             log("Validation pending workspace cleanup timer failed: #{e.class}: #{e.message}")
+          end
+
+          def stop_pending_cleanup_timer
+            timer_id = @cleanup_timer_id
+            @cleanup_timer_id = nil
+            return if timer_id.nil?
+            return unless defined?(UI) && UI.respond_to?(:stop_timer)
+
+            UI.stop_timer(timer_id)
+          rescue StandardError => e
+            log("Validation cleanup timer stop failed: #{e.class}: #{e.message}")
           end
 
           def finalize_process_session(process_session)

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'securerandom'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -12,9 +14,12 @@ module ULOL
           @state_registrar = state_registrar
         end
 
-        def restore(primal_group:)
+        def restore(primal_group:, persist_repaired_ids: false)
+          @used_feature_ids = {}
+          @repaired_cell_spaces = {}
           restore_cell_spaces_from_primal_group(primal_group)
           restore_states_from_cell_spaces
+          persist_repaired_ids() if persist_repaired_ids
         end
 
         private
@@ -42,10 +47,12 @@ module ULOL
         end
 
         def restore_cell_space(entity)
+          original_id = @serializer.attribute(entity, 'id')
+          restored_id = unique_feature_id(original_id)
           CellSpace.restore(
             entity,
             CellSpaceType.from_label(@serializer.attribute(entity, 'cell_type')),
-            id: @serializer.attribute(entity, 'id'),
+            id: restored_id,
             category_code: @serializer.attribute(entity, 'category_code'),
             navigation_class: @serializer.attribute(entity, 'navigation_class'),
             navigation_class_code_space: @serializer.attribute(entity, 'navigation_class_code_space'),
@@ -54,19 +61,25 @@ module ULOL
             navigation_usage: @serializer.attribute(entity, 'navigation_usage'),
             navigation_usage_code_space: @serializer.attribute(entity, 'navigation_usage_code_space'),
             storey: @serializer.attribute(entity, 'storey')
-          )
+          ).tap do |cell_space|
+            @repaired_cell_spaces[cell_space] = true if restored_id != original_id.to_s
+          end
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] CellSpace restore failed: #{e.class}: #{e.message}"
           nil
         end
 
         def restore_state(cell_space)
+          original_id = @serializer.attribute(cell_space.sketchup_group, 'duality_state_id')
+          restored_id = unique_feature_id(original_id)
           State.restore(
             cell_space,
             nil,
-            id: @serializer.attribute(cell_space.sketchup_group, 'duality_state_id'),
+            id: restored_id,
             name: nil
-          )
+          ).tap do
+            @repaired_cell_spaces[cell_space] = true if restored_id != original_id.to_s
+          end
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] State restore failed: #{e.class}: #{e.message}"
           nil
@@ -76,6 +89,28 @@ module ULOL
           entities.to_a.select do |entity|
             entity&.valid? && @serializer.feature(entity) == feature
           end
+        end
+
+        def unique_feature_id(value)
+          candidate = value.to_s
+          candidate = generated_feature_id if candidate.empty? || @used_feature_ids[candidate]
+          @used_feature_ids[candidate] = true
+          candidate
+        end
+
+        def generated_feature_id
+          loop do
+            candidate = SecureRandom.hex(8)
+            return candidate unless @used_feature_ids[candidate]
+          end
+        end
+
+        def persist_repaired_ids
+          @repaired_cell_spaces.each_key do |cell_space|
+            @serializer.write_cell_space(cell_space) if @serializer.respond_to?(:write_cell_space)
+          end
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Repaired feature ID persistence failed: #{e.class}: #{e.message}"
         end
 
       end

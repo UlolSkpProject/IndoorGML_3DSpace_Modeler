@@ -6,7 +6,7 @@ module ULOL
       class Indoor3DGmlAppObserver < Sketchup::AppObserver
         def initialize
           super()
-          @model_observer = Indoor3DGmlModelObserver.new()
+          @model_observer = Indoor3DGmlModelObserver.new(on_delete_model: method(:release_model))
           @observed_model_ids = {}
         end
 
@@ -34,10 +34,6 @@ module ULOL
           cancel_all_validation_sessions
           register_model(model)
           refresh_runtime_data(model)
-        end
-
-        def onCloseModel(model)
-          release_model(model)
         end
 
         def expectsStartupModelNotifications
