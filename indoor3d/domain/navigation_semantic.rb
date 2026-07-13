@@ -17,48 +17,31 @@ module ULOL
       class NavigationSemanticError < StandardError; end
 
       module NavigationSemanticResolver
-        LEGACY_ANNEX_D_CODE_SPACE = 'urn:ogc:def:nil:OGC::IndoorGML:AnnexD'
-
         NAVIGATION_SEMANTICS = {
           [CellSpaceType::GENERAL, 'Room'] => NavigationSemantic.new(
             class_value: 'Space',
-            class_code_space: nil,
             function_value: 'Space',
-            function_code_space: nil,
-            usage_value: 'Space',
-            usage_code_space: nil
+            usage_value: 'Space'
           ),
           [CellSpaceType::TRANSITION, 'Stair'] => NavigationSemantic.new(
             class_value: 'Stair',
-            class_code_space: nil,
             function_value: 'Vertical Transition',
-            function_code_space: nil,
-            usage_value: 'Stair',
-            usage_code_space: nil
+            usage_value: 'Stair'
           ),
           [CellSpaceType::TRANSITION, 'Elevator'] => NavigationSemantic.new(
             class_value: 'Elevator',
-            class_code_space: nil,
             function_value: 'Vertical Transition',
-            function_code_space: nil,
-            usage_value: 'Elevator',
-            usage_code_space: nil
+            usage_value: 'Elevator'
           ),
           [CellSpaceType::CONNECTION, 'Door'] => NavigationSemantic.new(
             class_value: 'Door',
-            class_code_space: nil,
             function_value: 'Door',
-            function_code_space: nil,
-            usage_value: 'Door',
-            usage_code_space: nil
+            usage_value: 'Door'
           ),
           [CellSpaceType::ANCHOR, 'ExteriorDoor'] => NavigationSemantic.new(
             class_value: 'Exterior door',
-            class_code_space: nil,
             function_value: 'Gate',
-            function_code_space: nil,
-            usage_value: 'Exterior door',
-            usage_code_space: nil
+            usage_value: 'Exterior door'
           )
         }.freeze
 
@@ -87,7 +70,7 @@ module ULOL
 
         def self.legacy_code_space?(value)
           normalized = value.to_s.strip
-          normalized.empty? || normalized == LEGACY_ANNEX_D_CODE_SPACE
+          normalized.empty? || normalized == 'urn:ogc:def:nil:OGC::IndoorGML:AnnexD'
         end
 
         def self.legacy_default_values?(cell_type, category_code, semantic)
