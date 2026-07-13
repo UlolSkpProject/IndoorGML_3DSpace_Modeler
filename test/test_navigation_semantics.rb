@@ -36,10 +36,10 @@ module ULOL
 
         EXPECTED_DEFAULTS = [
           [CellSpaceType::GENERAL, 'Room', 'Space', 'Space', 'Space'],
-          [CellSpaceType::TRANSITION, 'Stair', 'Stair', 'Vertical Transition', 'Stair'],
-          [CellSpaceType::TRANSITION, 'Elevator', 'Elevator', 'Vertical Transition', 'Elevator'],
+          [CellSpaceType::TRANSITION, 'Stair', 'Vertical Transition', 'Stair', 'Stair'],
+          [CellSpaceType::TRANSITION, 'Elevator', 'Vertical Transition', 'Elevator', 'Elevator'],
           [CellSpaceType::CONNECTION, 'Door', 'Door', 'Door', 'Door'],
-          [CellSpaceType::ANCHOR, 'ExteriorDoor', 'Exterior door', 'Gate', 'Exterior door']
+          [CellSpaceType::ANCHOR, 'ExteriorDoor', 'Gate', 'Exterior door', 'Exterior door']
         ].freeze
 
         LEGACY_DEFAULTS = [
@@ -110,8 +110,8 @@ module ULOL
             fake_cell(CellSpaceType::TRANSITION, 'Stair')
           )
 
-          assert_code parent, 'navi:class', 'Stair'
-          assert_code parent, 'navi:function', 'Vertical Transition'
+          assert_code parent, 'navi:class', 'Vertical Transition'
+          assert_code parent, 'navi:function', 'Stair'
           assert_code parent, 'navi:usage', 'Stair'
         end
 
@@ -125,8 +125,8 @@ module ULOL
 
           AttributeSerializer.new.write_cell_space(cell_space)
 
-          assert_equal 'Elevator', group.attribute('navigation_class')
-          assert_equal 'Vertical Transition', group.attribute('navigation_function')
+          assert_equal 'Vertical Transition', group.attribute('navigation_class')
+          assert_equal 'Elevator', group.attribute('navigation_function')
           assert_equal 'Elevator', group.attribute('navigation_usage')
           assert_nil group.attribute('navigation_class_code_space')
           assert_nil group.attribute('navigation_function_code_space')

@@ -24,13 +24,13 @@ module ULOL
             usage_value: 'Space'
           ),
           [CellSpaceType::TRANSITION, 'Stair'] => NavigationSemantic.new(
-            class_value: 'Stair',
-            function_value: 'Vertical Transition',
+            class_value: 'Vertical Transition',
+            function_value: 'Stair',
             usage_value: 'Stair'
           ),
           [CellSpaceType::TRANSITION, 'Elevator'] => NavigationSemantic.new(
-            class_value: 'Elevator',
-            function_value: 'Vertical Transition',
+            class_value: 'Vertical Transition',
+            function_value: 'Elevator',
             usage_value: 'Elevator'
           ),
           [CellSpaceType::CONNECTION, 'Door'] => NavigationSemantic.new(
@@ -39,8 +39,8 @@ module ULOL
             usage_value: 'Door'
           ),
           [CellSpaceType::ANCHOR, 'ExteriorDoor'] => NavigationSemantic.new(
-            class_value: 'Exterior door',
-            function_value: 'Gate',
+            class_value: 'Gate',
+            function_value: 'Exterior door',
             usage_value: 'Exterior door'
           )
         }.freeze

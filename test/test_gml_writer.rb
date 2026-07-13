@@ -106,8 +106,8 @@ module ULOL
             function_element = REXML::XPath.first(doc, '//navi:function', namespaces)
             usage_element = REXML::XPath.first(doc, '//navi:usage', namespaces)
 
-            assert_equal 'Stair', class_element.text
-            assert_equal 'Vertical Transition', function_element.text
+            assert_equal 'Vertical Transition', class_element.text
+            assert_equal 'Stair', function_element.text
             assert_equal 'Stair', usage_element.text
             assert_nil class_element.attributes['codeSpace']
             assert_nil function_element.attributes['codeSpace']
