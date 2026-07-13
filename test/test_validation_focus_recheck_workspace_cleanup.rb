@@ -53,6 +53,7 @@ module ULOL
           assert_equal 1, workspace.cleanup_count
           assert state[:workspace_cleaned]
           assert_equal 1, session.close_count
+          assert_equal 1, UI.stopped_timers.length
         end
 
         def test_terminate_recheck_process_defers_cleanup_on_timeout
@@ -130,13 +131,20 @@ module ULOL
             @timers = []
             @messages = []
             @savepanel_path = nil
+            @stopped_timers = []
             class << self
               attr_reader :timers
               attr_reader :messages
               attr_accessor :savepanel_path
+              attr_reader :stopped_timers
 
               def start_timer(_interval, _repeat, &block)
                 @timers << block
+              end
+
+              def stop_timer(timer_id)
+                @stopped_timers << timer_id
+                true
               end
 
               def savepanel(_title, _directory, _filter)

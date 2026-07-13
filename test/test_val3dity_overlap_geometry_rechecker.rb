@@ -50,6 +50,24 @@ module ULOL
             assert_equal candidates.first, rechecker.best_candidate(candidates, 704)
           end
 
+          def test_boolean_nil_is_inconclusive_instead_of_not_reproduced
+            model = FakeBooleanModel.new
+            group1 = FakeBooleanGroup.new(intersection: nil)
+            group2 = FakeBooleanGroup.new(intersection: nil)
+            rechecker = BooleanNilRechecker.new(
+              snapshot_reader: FakeSnapshotReader.new({}),
+              tolerance: 0.001,
+              model: model,
+              groups: [group1, group2]
+            )
+
+            result = rechecker.send(:exported_solid_intersection, { faces: [] }, { faces: [] })
+
+            assert_equal :inconclusive, result[:status]
+            assert_equal 'BOOLEAN_OPERATION_FAILED', result[:reason]
+            assert_equal 1, model.abort_count
+          end
+
           class FakeSnapshotReader
             attr_reader :read_count
 
@@ -61,6 +79,59 @@ module ULOL
             def read
               @read_count += 1
               @snapshot
+            end
+          end
+
+
+          class BooleanNilRechecker < Val3dityOverlapGeometryRechecker
+            def initialize(groups:, **options)
+              super(**options)
+              @groups = groups
+            end
+
+            private
+
+            def build_temp_solid_group(_cell)
+              @groups.shift
+            end
+
+            def valid_manifold_group?(_group)
+              true
+            end
+          end
+
+          class FakeBooleanModel
+            attr_reader :abort_count
+
+            def initialize
+              @abort_count = 0
+            end
+
+            def start_operation(*)
+              true
+            end
+
+            def abort_operation
+              @abort_count += 1
+            end
+          end
+
+          class FakeBooleanGroup
+            def initialize(intersection:)
+              @intersection = intersection
+              @valid = true
+            end
+
+            def intersect(_other)
+              @intersection
+            end
+
+            def valid?
+              @valid
+            end
+
+            def erase!
+              @valid = false
             end
           end
         end

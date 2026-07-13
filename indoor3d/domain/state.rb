@@ -79,7 +79,7 @@ module ULOL
           @radius = self.class.display_radius
           @transitions = []
           @editable = false
-          @id = id unless id.to_s.empty?
+          @id = id.to_s.empty? ? self.class.generate_id : id.to_s
           @name = name.to_s
         end
 

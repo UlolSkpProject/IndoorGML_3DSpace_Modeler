@@ -157,6 +157,34 @@ module ULOL
             refute_includes GmlWriter::CELL_SPACE_TAGS.keys, CellSpaceType::GEOMETRY_ONLY
           end
 
+          def test_writer_allocates_unique_xml_ids_for_duplicate_missing_and_safe_id_collisions
+            states = [fake_state('same'), fake_state('same'), fake_state(nil)]
+            cells = [
+              fake_cell_space('A B', CellSpaceType::GENERAL, nil, states[0]),
+              fake_cell_space('A_B', CellSpaceType::GENERAL, nil, states[1]),
+              fake_cell_space(nil, CellSpaceType::GENERAL, nil, states[2])
+            ]
+            states.each_with_index { |state, index| state.duality_cell = cells[index] }
+            transition1 = fake_transition('T X', states[0], states[1], states[0].position, states[1].position)
+            transition2 = fake_transition('T_X', states[1], states[2], states[1].position, states[2].position)
+            snapshot = ExportSnapshot.new(cell_spaces: cells, transitions: [transition1, transition2])
+
+            doc = REXML::Document.new(GmlWriter.new(
+              snapshot: snapshot,
+              coordinate_unit: { unit: 'in', factor: 1.0, srs_name: 'urn:test:in' }
+            ).to_xml)
+            ids = REXML::XPath.match(doc, '//*[@gml:id]', namespaces).map { |element| element.attributes['gml:id'] }
+            hrefs = REXML::XPath.match(doc, '//*[@xlink:href]', namespaces.merge('xlink' => 'http://www.w3.org/1999/xlink')).map do |element|
+              element.attributes['xlink:href'].to_s.delete_prefix('#')
+            end
+
+            assert_equal ids.length, ids.uniq.length
+            assert hrefs.all? { |href| ids.include?(href) }
+            assert_includes ids, 'cell_A_B'
+            assert_includes ids, 'cell_A_B_2'
+            assert_includes ids, 'transition_T_X_2'
+          end
+
           private
 
           def assert_xpath(doc, xpath)

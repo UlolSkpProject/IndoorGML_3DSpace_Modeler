@@ -50,6 +50,7 @@ module ULOL
         end
 
         def add_cell_space(cell_space)
+          ensure_unique_feature_id!(cell_space)
           @cell_spaces << cell_space unless @cell_spaces.include?(cell_space)
           @cell_spaces_by_entity_object[cell_space.sketchup_group] = cell_space
           @cell_spaces_by_persistent_id[cell_space.sketchup_group.persistent_id] = cell_space
@@ -82,6 +83,7 @@ module ULOL
         end
 
         def add_state(state)
+          ensure_unique_feature_id!(state)
           @states << state unless @states.include?(state)
         end
 
@@ -92,6 +94,7 @@ module ULOL
         end
 
         def add_transition(transition, pair_key: nil)
+          ensure_unique_feature_id!(transition)
           @transitions << transition unless @transitions.include?(transition)
           @transitions_by_cell_pair[pair_key] = transition if pair_key
         end
@@ -125,6 +128,17 @@ module ULOL
 
         def adjacent_pair_keys
           @adjacent_cell_space_pairs.keys
+        end
+
+        private
+
+        def ensure_unique_feature_id!(feature)
+          return if feature.nil?
+          return unless (@cell_spaces + @states + @transitions).any? do |registered|
+            !registered.equal?(feature) && registered.id.to_s == feature.id.to_s
+          end
+
+          raise ArgumentError, "Duplicate IndoorGML feature id: #{feature.id}"
         end
       end
 

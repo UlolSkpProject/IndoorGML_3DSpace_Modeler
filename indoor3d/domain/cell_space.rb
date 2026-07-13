@@ -140,7 +140,7 @@ module ULOL
           @storey = normalize_storey(storey)
           @editable = false
           @duality_state = nil
-          @id = id unless id.to_s.empty?
+          @id = id.to_s.empty? ? self.class.generate_id : id.to_s
           @name = name.to_s
         end
 

@@ -77,7 +77,6 @@ module ULOL
             candidates = []
             faces1.each_with_index do |face1, index1|
               faces2.each_with_index do |face2, index2|
-                next if !face1[:interiors].to_a.empty? || !face2[:interiors].to_a.empty?
                 next unless Utils::Geometry.normals_opposite?(face1[:normal], face2[:normal])
 
                 distance = face_pair_signed_distance(face1, face2)
@@ -110,11 +109,28 @@ module ULOL
             return { area: 0.0, polygons: [] } if face1[:triangles].empty? || face2[:triangles].empty?
 
             axis = Utils::Geometry.dominant_axis(face1[:normal])
+            outer = triangle_set_overlap(face1[:triangles], face2[:triangles], axis, tolerance)
+            removed_by_face1_holes = Array(face1[:interior_triangles]).sum do |hole_triangles|
+              triangle_set_overlap(hole_triangles, face2[:triangles], axis, tolerance)[:area]
+            end
+            removed_by_face2_holes = Array(face2[:interior_triangles]).sum do |hole_triangles|
+              triangle_set_overlap(face1[:triangles], hole_triangles, axis, tolerance)[:area]
+            end
+            restored_double_subtraction = Array(face1[:interior_triangles]).sum do |hole1_triangles|
+              Array(face2[:interior_triangles]).sum do |hole2_triangles|
+                triangle_set_overlap(hole1_triangles, hole2_triangles, axis, tolerance)[:area]
+              end
+            end
+            area = outer[:area] - removed_by_face1_holes - removed_by_face2_holes + restored_double_subtraction
+            { area: [area, 0.0].max, polygons: outer[:polygons] }
+          end
+
+          def triangle_set_overlap(triangles1, triangles2, axis, tolerance)
             polygons = []
             total_area = 0.0
-            face1[:triangles].each do |triangle1|
+            Array(triangles1).each do |triangle1|
               polygon1 = Utils::Geometry.project_points_for_axis(triangle1, axis)
-              face2[:triangles].each do |triangle2|
+              Array(triangles2).each do |triangle2|
                 polygon2 = Utils::Geometry.project_points_for_axis(triangle2, axis)
                 overlap = Utils::Geometry.intersect_polygons_2d(polygon1, polygon2)
                 next if overlap.length < 3
@@ -148,7 +164,7 @@ module ULOL
             return { status: :inconclusive, reason: 'BOOLEAN_OPERATION_FAILED' } unless group1.respond_to?(:intersect)
 
             result = group1.intersect(group2)
-            return { status: :not_reproduced, reason: 'NO_VALID_INTERSECTION_GROUP_RETURNED', volume: 0.0, component_count: 0 } if result.nil?
+            return { status: :inconclusive, reason: 'BOOLEAN_OPERATION_FAILED' } if result.nil?
 
             faces = result.definition.entities.grep(Sketchup::Face).select(&:valid?)
             edges = result.definition.entities.grep(Sketchup::Edge).select(&:valid?)

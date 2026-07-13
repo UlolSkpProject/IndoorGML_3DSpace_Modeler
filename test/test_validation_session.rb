@@ -133,6 +133,27 @@ module ULOL
             assert_equal 1, workspace.cleanup_count
             refute session.cleanup_pending?
             assert_equal 1, runner_session.close_count
+            assert_equal 1, UI.stopped_timers.length
+          end
+
+          def test_repeated_pending_cleanup_stops_every_owned_timer
+            100.times do |index|
+              model = FakeModel.new("model-#{index}")
+              runner_session = FakeRunnerSession.new(finished: false)
+              session = ValidationSession.new(
+                model: model,
+                indoor_model: FakeIndoorModel.new(model),
+                progress: FakeProgress.new,
+                state: {},
+                workspace: FakeWorkspace.new
+              )
+              session.assign_val_session(runner_session)
+              session.cancel(reason: :model_closed)
+              runner_session.finished = true
+              UI.timers.last.call
+            end
+
+            assert_equal 100, UI.stopped_timers.length
           end
 
           def test_complete_cleans_workspace_once
@@ -398,10 +419,12 @@ module ULOL
             Class.new do
               @messages = []
               @timers = []
+              @stopped_timers = []
               @savepanel_path = nil
               class << self
                 attr_reader :messages
                 attr_reader :timers
+                attr_reader :stopped_timers
                 attr_accessor :savepanel_path
 
                 def messagebox(message, *_args)
@@ -415,6 +438,11 @@ module ULOL
 
                 def start_timer(_interval, _repeat, &block)
                   @timers << block
+                end
+
+                def stop_timer(timer_id)
+                  @stopped_timers << timer_id
+                  true
                 end
               end
             end

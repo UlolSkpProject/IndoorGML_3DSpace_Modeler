@@ -44,6 +44,7 @@ module Geom
 end unless defined?(Geom::Point3d)
 
 require_relative '../indoor3d/validity/val3dity_exported_solid_snapshot_reader'
+require_relative '../indoor3d/validity/val3dity_overlap_geometry_rechecker'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -108,7 +109,58 @@ module ULOL
             assert_in_delta 1.0, points[2].y, 0.000001
           end
 
+          def test_triangulates_tilted_concave_face_and_hole_without_covering_missing_surface
+            snapshot = read_snapshot(<<~XML)
+              <core:IndoorFeatures xmlns:core="urn:test:core" xmlns:gml="http://www.opengis.net/gml/3.2">
+                <core:CellSpace gml:id="cell_concave">
+                  <gml:Solid>
+                    <gml:surfaceMember>
+                      <gml:Polygon>
+                        <gml:exterior><gml:LinearRing>
+                          <gml:pos>0 0 0</gml:pos><gml:pos>4 0 2</gml:pos>
+                          <gml:pos>4 1 2</gml:pos><gml:pos>1 1 0.5</gml:pos>
+                          <gml:pos>1 4 0.5</gml:pos><gml:pos>0 4 0</gml:pos>
+                          <gml:pos>0 0 0</gml:pos>
+                        </gml:LinearRing></gml:exterior>
+                        <gml:interior><gml:LinearRing>
+                          <gml:pos>0.25 0.25 0.125</gml:pos><gml:pos>0.25 0.75 0.125</gml:pos>
+                          <gml:pos>0.75 0.75 0.375</gml:pos><gml:pos>0.75 0.25 0.375</gml:pos>
+                          <gml:pos>0.25 0.25 0.125</gml:pos>
+                        </gml:LinearRing></gml:interior>
+                      </gml:Polygon>
+                    </gml:surfaceMember>
+                  </gml:Solid>
+                </core:CellSpace>
+              </core:IndoorFeatures>
+            XML
+
+            face = snapshot.fetch('cell_concave')[:faces].first
+            assert_equal false, snapshot.fetch('cell_concave')[:unsupported]
+            assert_equal 4, face[:triangles].length
+            assert_equal 2, face[:interior_triangles].first.length
+            assert_in_delta 7.0, projected_triangle_area(face[:triangles]), 0.000001
+            assert_in_delta 0.25, projected_triangle_area(face[:interior_triangles].first), 0.000001
+
+            opposite_face = face.merge(
+              normal: Geom::Vector3d.new(-face[:normal].x, -face[:normal].y, -face[:normal].z)
+            )
+            overlap = Val3dityOverlapGeometryRechecker.new(
+              snapshot_reader: Object.new,
+              tolerance: 0.000001
+            ).send(:coplanar_overlap_polygons, face, opposite_face, 0.000001)
+            assert_in_delta 6.75, overlap[:area], 0.000001
+          end
+
           private
+
+          def projected_triangle_area(triangles)
+            triangles.sum do |triangle|
+              triangle.each_index.sum do |index|
+                following = triangle[(index + 1) % triangle.length]
+                (triangle[index].x * following.y) - (following.x * triangle[index].y)
+              end.abs / 2.0
+            end
+          end
 
           def read_snapshot(xml)
             file = Tempfile.new(['val3dity-reader', '.gml'])

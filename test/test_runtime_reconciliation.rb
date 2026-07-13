@@ -201,6 +201,39 @@ module ULOL
           assert_equal [cell_group.object_id], indoor.cell_observer_keys
         end
 
+        def test_restore_reissues_and_persists_missing_or_duplicate_feature_ids
+          indoor = FakeIndoorModel.new(@model)
+          primal = @model.create_primal_group
+          first = primal.entities.add_group('first')
+          duplicate = primal.entities.add_group('duplicate')
+          missing = primal.entities.add_group('missing')
+          write_cell_attributes(first, id: 'shared', state_id: 'state_shared')
+          write_cell_attributes(duplicate, id: 'shared', state_id: 'state_shared')
+          write_cell_attributes(missing, id: '', state_id: '')
+
+          indoor.reconcile_runtime_after_transaction(source: :redo, generation: 1)
+
+          ids = indoor.cell_spaces.map(&:id) + indoor.states.map(&:id)
+          assert_equal 6, ids.length
+          assert_equal 6, ids.uniq.length
+          assert ids.all? { |id| !id.to_s.empty? }
+          assert_equal 0, indoor.serializer.write_count
+        end
+
+        def test_normal_refresh_persists_reissued_feature_ids_inside_model_operation
+          indoor = FakeIndoorModel.new(@model)
+          primal = @model.create_primal_group
+          first = primal.entities.add_group('first')
+          duplicate = primal.entities.add_group('duplicate')
+          write_cell_attributes(first, id: 'shared', state_id: 'state_shared')
+          write_cell_attributes(duplicate, id: 'shared', state_id: 'state_shared')
+
+          indoor.refresh_runtime_data
+
+          assert_equal 1, indoor.serializer.write_count
+          assert_equal 1, indoor.operation_count
+        end
+
         def test_reconciliation_notifies_editor_session_without_refresh_writes
           editor_session = FakeEditorSession.new
           indoor = FakeIndoorModel.new(@model, editor_session: editor_session)

@@ -108,6 +108,16 @@ module ULOL
           assert_empty model.runtime.reconciliations
         end
 
+        def test_delete_model_uses_model_observer_lifecycle_callback
+          released = []
+          observer = Indoor3DGmlModelObserver.new(on_delete_model: ->(model) { released << model })
+          model = FakeModel.new
+
+          observer.onDeleteModel(model)
+
+          assert_equal [model], released
+        end
+
         def test_reconciliation_exception_still_finishes_replay
           observer = Indoor3DGmlModelObserver.new
           model = FakeModel.new

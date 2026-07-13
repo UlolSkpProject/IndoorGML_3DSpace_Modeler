@@ -13,7 +13,7 @@ module ULOL
 
               with_guard_flag(:@refreshing_runtime) do
                 sync do
-                  restore_runtime_from_current_model
+                  restore_runtime_from_current_model(persist_repaired_ids: true)
                   recenter_runtime_cell_spaces
                   apply_initial_cell_space_materials if initial_model_load
                   rebuild_runtime_transitions_from_cell_adjacency
@@ -190,12 +190,15 @@ module ULOL
             @transitions = @feature_registry.transitions
           end
 
-          def restore_runtime_from_current_model
+          def restore_runtime_from_current_model(persist_repaired_ids: false)
             @model ||= Sketchup.active_model
             find_existing_space_features_groups
             reset_runtime_collections
             attach_existing_space_features_observers
-            @runtime_restorer.restore(primal_group: @primal_group)
+            @runtime_restorer.restore(
+              primal_group: @primal_group,
+              persist_repaired_ids: persist_repaired_ids
+            )
           end
 
           def reset_runtime_collections

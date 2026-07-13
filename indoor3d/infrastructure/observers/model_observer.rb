@@ -5,8 +5,9 @@ module ULOL
     module IndoorCore
 
       class Indoor3DGmlModelObserver < Sketchup::ModelObserver
-        def initialize
+        def initialize(on_delete_model: nil)
           super()
+          @on_delete_model = on_delete_model
           @active_path_keys_by_model_id = {}
           @transaction_generations_by_model_id = {}
         end
@@ -25,6 +26,17 @@ module ULOL
 
         def onTransactionRedo(model)
           handle_transaction_replayed(model, source: :redo)
+        end
+
+        def onDeleteModel(model)
+          if @on_delete_model
+            @on_delete_model.call(model)
+          else
+            forget_model(model)
+            IndoorModel.release(model) if IndoorModel.respond_to?(:release)
+          end
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Model delete cleanup failed: #{e.class}: #{e.message}"
         end
 
         def forget_model(model)
