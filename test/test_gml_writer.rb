@@ -21,7 +21,7 @@ module ULOL
         Semantic = Struct.new(:class_value, :class_code_space, :function_value, :function_code_space, :usage_value, :usage_code_space)
 
         def self.resolve(_cell_space)
-          Semantic.new('1000', 'classSpace', 'room', 'functionSpace', 'room', 'usageSpace')
+          Semantic.new('Space', nil, 'Space', nil, 'Space', nil)
         end
       end unless const_defined?(:NavigationSemanticResolver)
     end
@@ -88,6 +88,31 @@ module ULOL
             assert_xpath(doc, '//navi:class')
             assert_xpath(doc, '//core:Transition[@gml:id="transition_T_1"]')
             assert_includes xml, "xlink:href='#transition_T_1'"
+          end
+
+          def test_writer_exports_default_navigation_semantics_as_strings_without_code_space
+            state = fake_state('Stair State')
+            cell = fake_cell_space('Stair Cell', CellSpaceType::TRANSITION, nil, state, category_code: 'Stair')
+            state.duality_cell = cell
+            snapshot = ExportSnapshot.new(cell_spaces: [cell], transitions: [])
+            writer = GmlWriter.new(
+              snapshot: snapshot,
+              coordinate_unit: { unit: 'in', factor: 1.0, srs_name: 'urn:test:in' }
+            )
+
+            xml = writer.to_xml
+            doc = REXML::Document.new(xml)
+            class_element = REXML::XPath.first(doc, '//navi:class', namespaces)
+            function_element = REXML::XPath.first(doc, '//navi:function', namespaces)
+            usage_element = REXML::XPath.first(doc, '//navi:usage', namespaces)
+
+            assert_equal 'Stair', class_element.text
+            assert_equal 'Vertical Transition', function_element.text
+            assert_equal 'Stair', usage_element.text
+            assert_nil class_element.attributes['codeSpace']
+            assert_nil function_element.attributes['codeSpace']
+            assert_nil usage_element.attributes['codeSpace']
+            refute_includes xml, 'urn:ogc:def:nil:OGC::IndoorGML:AnnexD'
           end
 
           def test_writer_uses_state_snapshot_transition_ids_for_state_connects

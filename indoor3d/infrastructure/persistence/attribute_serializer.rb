@@ -158,11 +158,11 @@ module ULOL
           if cell_space.navigable?
             semantic = NavigationSemanticResolver.resolve(cell_space)
             group.set_attribute(@dictionary_name, 'navigation_class', semantic.class_value)
-            group.set_attribute(@dictionary_name, 'navigation_class_code_space', semantic.class_code_space)
+            write_optional_attribute(group, 'navigation_class_code_space', semantic.class_code_space)
             group.set_attribute(@dictionary_name, 'navigation_function', semantic.function_value)
-            group.set_attribute(@dictionary_name, 'navigation_function_code_space', semantic.function_code_space)
+            write_optional_attribute(group, 'navigation_function_code_space', semantic.function_code_space)
             group.set_attribute(@dictionary_name, 'navigation_usage', semantic.usage_value)
-            group.set_attribute(@dictionary_name, 'navigation_usage_code_space', semantic.usage_code_space)
+            write_optional_attribute(group, 'navigation_usage_code_space', semantic.usage_code_space)
             return
           end
 
@@ -175,6 +175,14 @@ module ULOL
             navigation_usage_code_space
           ].each do |key|
             group.delete_attribute(@dictionary_name, key) if group.respond_to?(:delete_attribute)
+          end
+        end
+
+        def write_optional_attribute(group, key, value)
+          if value.to_s.empty?
+            group.delete_attribute(@dictionary_name, key) if group.respond_to?(:delete_attribute)
+          else
+            group.set_attribute(@dictionary_name, key, value)
           end
         end
       end
