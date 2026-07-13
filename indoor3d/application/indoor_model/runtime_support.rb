@@ -157,11 +157,6 @@ module ULOL
 
             model = @model || Sketchup.active_model
             return yield unless model
-            
-            # 이미 operation이 열려있다면 그 안에서 작업 수행
-            if model.respond_to?(:active_operation_name) && model.active_operation_name.to_s.length.positive?
-              return yield
-            end
 
             operation_started = false
             @indoor_operation_depth = @indoor_operation_depth.to_i + 1
