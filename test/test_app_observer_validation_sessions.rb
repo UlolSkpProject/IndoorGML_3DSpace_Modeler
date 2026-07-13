@@ -32,6 +32,7 @@ module ULOL
 end
 
 require_relative '../indoor3d/validity/validation_session'
+require_relative '../indoor3d/validity/val3dity_runner'
 require_relative '../indoor3d/infrastructure/observers/app_observer'
 
 module ULOL
@@ -40,6 +41,9 @@ module ULOL
       class AppObserverValidationSessionsTest < Minitest::Test
         def setup
           IndoorGmlConverter::ValidationSession.reset!
+          IndoorGmlConverter::Val3dityRunner.instance_variable_set(:@shutting_down, false)
+          IndoorGmlConverter::Val3dityRunner.active_sessions.clear
+          IndoorGmlConverter::Val3dityRunner.session_owner_keys.clear
           @original_for = IndoorModel.method(:for) if IndoorModel.respond_to?(:for)
           @original_release = IndoorModel.method(:release) if IndoorModel.respond_to?(:release)
           @released_models = []
@@ -98,6 +102,18 @@ module ULOL
           assert_equal models, @released_models
           assert_empty observer.instance_variable_get(:@observed_model_ids)
           assert models.all? { |model| model.observers.empty? }
+        end
+
+        def test_quit_marks_global_shutdown_and_terminates_all_runners
+          observer = Indoor3DGmlAppObserver.new
+          runner_session = FakeRunnerSession.new
+          IndoorGmlConverter::Val3dityRunner.register_session(runner_session)
+
+          observer.onQuit
+
+          assert IndoorGmlConverter::Val3dityRunner.shutting_down?
+          assert_equal [0], runner_session.terminate_waits
+          assert_empty IndoorGmlConverter::Val3dityRunner.active_sessions
         end
 
         private
@@ -168,6 +184,18 @@ module ULOL
           end
 
           def clear_callbacks; end
+        end
+
+        class FakeRunnerSession
+          attr_reader :terminate_waits
+
+          def initialize
+            @terminate_waits = []
+          end
+
+          def terminate(wait_ms:)
+            @terminate_waits << wait_ms
+          end
         end
       end
     end
