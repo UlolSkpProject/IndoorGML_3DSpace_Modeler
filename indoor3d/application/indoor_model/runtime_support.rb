@@ -13,6 +13,7 @@ module ULOL
 
               with_guard_flag(:@refreshing_runtime) do
                 sync do
+                  prepare_primal_children_for_initial_load if initial_model_load
                   restore_runtime_from_current_model(persist_repaired_ids: true)
                   recenter_runtime_cell_spaces
                   apply_initial_cell_space_materials if initial_model_load
@@ -118,6 +119,12 @@ module ULOL
           end
 
           private
+
+          def prepare_primal_children_for_initial_load
+            @model ||= Sketchup.active_model
+            find_existing_space_features_groups
+            normalize_primal_children_for_initial_load
+          end
 
           def diagnostic_count(features)
             Array(features).count do |feature|
