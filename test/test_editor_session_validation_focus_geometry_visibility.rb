@@ -208,7 +208,7 @@ module ULOL
           ], calls
         end
 
-        def test_row_selection_zooms_to_union_of_highlighted_cell_bounds_after_visibility
+        def test_row_selection_zooms_to_highlighted_cell_groups_after_visibility
           calls = []
           view = fake_zoom_view
           cell_a = fake_zoom_cell('A', :bounds_a)
@@ -224,23 +224,21 @@ module ULOL
           session.define_singleton_method(:invalidate_view) { |_model| calls << :invalidate_view }
 
           with_fake_active_model(Struct.new(:active_view).new(view)) do
-            with_fake_bounding_box do
-              with_fake_ui_timers do |timers|
-                assert session.set_validation_focus_highlight(
-                  %w[cell_A cell_B],
-                  '203',
-                  row_id: 'row-1',
-                  row_cells: %w[A B]
-                )
-                assert_equal [:visibility, :overlay, :invalidate_view], calls
-                assert_equal [[0, false]], timers.map { |delay, repeat, _block| [delay, repeat] }
+            with_fake_ui_timers do |timers|
+              assert session.set_validation_focus_highlight(
+                %w[cell_A cell_B],
+                '203',
+                row_id: 'row-1',
+                row_cells: %w[A B]
+              )
+              assert_equal [:visibility, :overlay, :invalidate_view], calls
+              assert_equal [[0, false]], timers.map { |delay, repeat, _block| [delay, repeat] }
 
-                timers.first[2].call
-              end
+              timers.first[2].call
             end
           end
 
-          assert_equal %i[bounds_a bounds_b], view.zoomed_bounds.items
+          assert_equal [cell_a.valid_sketchup_group, cell_b.valid_sketchup_group], view.zoomed_entities
           assert_equal true, view.invalidated
         end
 
@@ -257,15 +255,13 @@ module ULOL
           session.define_singleton_method(:invalidate_view) { |_model| }
 
           with_fake_active_model(Struct.new(:active_view).new(view)) do
-            with_fake_bounding_box do
-              with_fake_ui_timers do |timers|
-                session.set_validation_focus_highlight(['cell_A'], '203', row_id: 'row-1', row_cells: ['A'])
-                timers.first[2].call
-              end
+            with_fake_ui_timers do |timers|
+              session.set_validation_focus_highlight(['cell_A'], '203', row_id: 'row-1', row_cells: ['A'])
+              timers.first[2].call
             end
           end
 
-          assert_nil view.zoomed_bounds
+          assert_nil view.zoomed_entities
           assert_equal false, view.invalidated
         end
 
@@ -283,17 +279,15 @@ module ULOL
           session.define_singleton_method(:invalidate_view) { |_model| }
 
           with_fake_active_model(Struct.new(:active_view).new(view)) do
-            with_fake_bounding_box do
-              with_fake_ui_timers do |timers|
-                session.set_validation_focus_highlight(['cell_A'], '203', row_id: 'row-1', row_cells: ['A'])
-                session.set_validation_focus_highlight([], '')
-                assert_equal 1, timers.length
-                timers.first[2].call
-              end
+            with_fake_ui_timers do |timers|
+              session.set_validation_focus_highlight(['cell_A'], '203', row_id: 'row-1', row_cells: ['A'])
+              session.set_validation_focus_highlight([], '')
+              assert_equal 1, timers.length
+              timers.first[2].call
             end
           end
 
-          assert_nil view.zoomed_bounds
+          assert_nil view.zoomed_entities
         end
 
         def test_set_visibility_filter_is_ignored_in_fix_mode
@@ -413,9 +407,11 @@ module ULOL
         end
 
         def fake_zoom_view
-          Struct.new(:zoomed_bounds, :invalidated) do
-            def zoom(bounds)
-              self.zoomed_bounds = bounds
+          Struct.new(:zoomed_entities, :invalidated) do
+            def zoom(entities)
+              raise ArgumentError, 'expected an entity array' unless entities.is_a?(Array)
+
+              self.zoomed_entities = entities
             end
 
             def invalidate
@@ -430,32 +426,6 @@ module ULOL
           yield
         ensure
           Sketchup.define_singleton_method(:active_model) { |*args| original.call(*args) }
-        end
-
-        def with_fake_bounding_box
-          geom_existed = Object.const_defined?(:Geom, false)
-          geom = geom_existed ? Object.const_get(:Geom) : Module.new
-          Object.const_set(:Geom, geom) unless geom_existed
-          bounds_existed = geom.const_defined?(:BoundingBox, false)
-          previous_bounds = geom.const_get(:BoundingBox) if bounds_existed
-          geom.send(:remove_const, :BoundingBox) if bounds_existed
-          fake_bounds = Class.new do
-            attr_reader :items
-
-            def initialize
-              @items = []
-            end
-
-            def add(bounds)
-              @items << bounds
-            end
-          end
-          geom.const_set(:BoundingBox, fake_bounds)
-          yield
-        ensure
-          geom.send(:remove_const, :BoundingBox) if geom&.const_defined?(:BoundingBox, false)
-          geom.const_set(:BoundingBox, previous_bounds) if bounds_existed
-          Object.send(:remove_const, :Geom) unless geom_existed
         end
 
         def with_fake_ui_timers
