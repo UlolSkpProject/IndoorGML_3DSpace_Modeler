@@ -235,10 +235,15 @@ module ULOL
               assert_equal [[0, false]], timers.map { |delay, repeat, _block| [delay, repeat] }
 
               timers.first[2].call
+              assert_equal [[0, false], [0, false]], timers.map { |delay, repeat, _block| [delay, repeat] }
+              assert_equal [[cell_a.valid_sketchup_group, cell_b.valid_sketchup_group]], view.zoom_calls
+              assert_equal false, view.invalidated
+
+              timers.last[2].call
             end
           end
 
-          assert_equal [cell_a.valid_sketchup_group, cell_b.valid_sketchup_group], view.zoomed_entities
+          assert_equal [[cell_a.valid_sketchup_group, cell_b.valid_sketchup_group], 0.8], view.zoom_calls
           assert_equal true, view.invalidated
         end
 
@@ -261,7 +266,7 @@ module ULOL
             end
           end
 
-          assert_nil view.zoomed_entities
+          assert_empty view.zoom_calls
           assert_equal false, view.invalidated
         end
 
@@ -287,7 +292,7 @@ module ULOL
             end
           end
 
-          assert_nil view.zoomed_entities
+          assert_empty view.zoom_calls
         end
 
         def test_set_visibility_filter_is_ignored_in_fix_mode
@@ -407,17 +412,19 @@ module ULOL
         end
 
         def fake_zoom_view
-          Struct.new(:zoomed_entities, :invalidated) do
-            def zoom(entities)
-              raise ArgumentError, 'expected an entity array' unless entities.is_a?(Array)
+          Struct.new(:zoom_calls, :invalidated) do
+            def zoom(value)
+              unless value.is_a?(Array) || value.is_a?(Numeric)
+                raise ArgumentError, 'expected an entity array or numeric zoom factor'
+              end
 
-              self.zoomed_entities = entities
+              zoom_calls << value
             end
 
             def invalidate
               self.invalidated = true
             end
-          end.new(nil, false)
+          end.new([], false)
         end
 
         def with_fake_active_model(model)
