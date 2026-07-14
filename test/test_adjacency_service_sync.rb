@@ -142,6 +142,55 @@ module ULOL
           assert_equal [['A', 'B']], built
         end
 
+        def test_synchronize_within_only_checks_and_updates_pairs_inside_the_subset
+          cell_a = fake_cell('A', adjacent_to: ['B', 'C'])
+          cell_b = fake_cell('B', adjacent_to: ['A'])
+          cell_c = fake_cell('C', adjacent_to: ['A'])
+          cell_d = fake_cell('D')
+          registry = FakeRegistry.new(
+            [cell_a, cell_b, cell_c, cell_d],
+            adjacent_pair_keys: ['A:B', 'A:C', 'C:D']
+          )
+          built = []
+          erased = []
+          compared = []
+          stub_snapshot_geometry(seen_arguments: compared)
+          service = AdjacencyService.new(
+            registry,
+            transition_builder: proc { |cell1, cell2| built << [cell1.id, cell2.id] },
+            transition_eraser: proc { |pair_key| erased << pair_key; registry.delete_adjacent_pair(pair_key) }
+          )
+
+          service.synchronize_within([cell_a, cell_b])
+
+          assert_equal [['A', 'B']], compared
+          assert_equal [['A', 'B']], built
+          assert_empty erased
+          assert_equal ['A:B', 'A:C', 'C:D'], registry.adjacent_pair_keys.sort
+        end
+
+        def test_synchronize_within_erases_only_stale_pairs_inside_the_subset
+          cell_a = fake_cell('A')
+          cell_b = fake_cell('B')
+          cell_c = fake_cell('C')
+          registry = FakeRegistry.new(
+            [cell_a, cell_b, cell_c],
+            adjacent_pair_keys: ['A:B', 'A:C']
+          )
+          erased = []
+          stub_snapshot_geometry
+          service = AdjacencyService.new(
+            registry,
+            transition_builder: proc {},
+            transition_eraser: proc { |pair_key| erased << pair_key; registry.delete_adjacent_pair(pair_key) }
+          )
+
+          service.synchronize_within([cell_a, cell_b])
+
+          assert_equal ['A:B'], erased
+          assert_equal ['A:C'], registry.adjacent_pair_keys
+        end
+
         def test_pair_computation_uses_snapshot_values
           service = AdjacencyService.new(
             FakeRegistry.new([]),

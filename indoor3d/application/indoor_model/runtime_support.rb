@@ -40,6 +40,11 @@ module ULOL
                 prune_runtime_observer_tracking
                 rebuild_scene_group_guard_tracking
               end
+              if @editor_session&.respond_to?(:reconcile_validation_focus_cells)
+                Array(@editor_session.reconcile_validation_focus_cells(@cell_spaces)).each do |payload|
+                  update_validation_focus_report_row(payload) if respond_to?(:update_validation_focus_report_row)
+                end
+              end
               @editor_session.reconcile_after_transaction(@model, source: source) if @editor_session&.respond_to?(:reconcile_after_transaction)
               metrics = {
                 source: source,
@@ -214,6 +219,7 @@ module ULOL
             @space_features_change_snapshots.clear
             dirty_topology_queue.clear
             dirty_topology_queue.unschedule!
+            clear_validation_focus_topology_dirty if respond_to?(:clear_validation_focus_topology_dirty)
             bind_registry_collections
           end
 
@@ -263,7 +269,8 @@ module ULOL
               space_features_observed_ids: @space_features_observed_ids.dup,
               entities_observed_ids: @entities_observed_ids.dup,
               state_instances: mutable_instance_snapshot(@states),
-              transition_instances: mutable_instance_snapshot(@transitions)
+              transition_instances: mutable_instance_snapshot(@transitions),
+              validation_focus: @editor_session.respond_to?(:validation_focus_snapshot) ? @editor_session.validation_focus_snapshot : nil
             }
           end
 
@@ -280,6 +287,7 @@ module ULOL
             @cell_space_observed_ids = snapshot[:cell_space_observed_ids].dup
             @space_features_observed_ids = snapshot[:space_features_observed_ids].dup
             @entities_observed_ids = snapshot[:entities_observed_ids].dup
+            @editor_session.restore_validation_focus_snapshot(snapshot[:validation_focus], refresh: false) if snapshot[:validation_focus]
           end
 
           def mutable_instance_snapshot(objects)

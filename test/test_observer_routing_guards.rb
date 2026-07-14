@@ -97,6 +97,47 @@ module ULOL
           assert_empty model.calls
         end
 
+        def test_primal_group_erase_clears_runtime_dual_graph_and_focus_state
+          primal_group = FakeEntity.new
+          model = FakePrimalEraseModel.new(primal_group)
+
+          assert model.space_features_erased(primal_group)
+
+          assert_nil model.primal_group
+          assert_equal 1, model.runtime_reset_count
+          assert_empty model.cell_space_observed_ids
+          assert_empty model.cell_space_change_snapshots
+          assert_equal 1, model.primal_tracking_clear_count
+          assert_equal 1, model.root_tracking_clear_count
+          assert_equal 1, model.focus_clear_count
+          assert_equal 1, model.overlay_invalidation_count
+          assert_equal [[:untrack, primal_group], [:restore, {}]], model.scene_guard_calls
+        end
+
+        def test_non_primal_space_feature_erase_does_not_clear_runtime
+          primal_group = FakeEntity.new
+          other_group = FakeEntity.new
+          model = FakePrimalEraseModel.new(primal_group)
+
+          assert model.space_features_erased(other_group)
+
+          assert_equal primal_group, model.primal_group
+          assert_equal 0, model.runtime_reset_count
+          assert_equal [[:untrack, other_group]], model.scene_guard_calls
+        end
+
+        def test_root_entity_removal_fallback_clears_primal_runtime_once
+          primal_group = FakeEntity.new(101)
+          model = FakePrimalEraseModel.new(primal_group)
+
+          assert model.root_entity_removed(101)
+          refute model.root_entity_removed(101)
+
+          assert_nil model.primal_group
+          assert_equal 1, model.runtime_reset_count
+          assert_equal 1, model.overlay_invalidation_count
+        end
+
         def test_transform_change_marks_dirty_without_transparent_operation
           model = FakeLifecycleModel.new
           cell_space = FakeCellSpace.new(FakeEntity.new)
@@ -377,6 +418,103 @@ module ULOL
 
           def recenter_cell_space_origin(_cell_space)
             @calls << :recenter
+          end
+        end
+
+        class FakePrimalEraseModel
+          include IndoorModel::ObserverRouting
+
+          attr_reader :primal_group, :runtime_reset_count, :cell_space_observed_ids,
+                      :cell_space_change_snapshots, :primal_tracking_clear_count,
+                      :root_tracking_clear_count, :focus_clear_count,
+                      :overlay_invalidation_count, :scene_guard_calls
+
+          def initialize(primal_group)
+            @primal_group = primal_group
+            @space_features_observed_ids = { primal_group.object_id => true }
+            @cell_space_observed_ids = { 1 => true }
+            @cell_space_change_snapshots = { 1 => true }
+            @runtime_reset_count = 0
+            @overlay_invalidation_count = 0
+            @scene_guard_calls = []
+            @scene_group_guard = FakeSceneGroupGuard.new(@scene_guard_calls)
+            @primal_entities_observer = FakePrimalTrackingObserver.new(self)
+            @root_entities_observer = FakeRootTrackingObserver.new(self)
+            @editor_session = FakeValidationFocusSession.new(self)
+          end
+
+          def increment_primal_tracking_clear
+            @primal_tracking_clear_count = @primal_tracking_clear_count.to_i + 1
+          end
+
+          def increment_focus_clear
+            @focus_clear_count = @focus_clear_count.to_i + 1
+          end
+
+          def increment_root_tracking_clear
+            @root_tracking_clear_count = @root_tracking_clear_count.to_i + 1
+          end
+
+          private
+
+          def delete_entity_observer_key(values, entity)
+            values.delete(entity.object_id)
+          end
+
+          def reset_runtime_collections
+            @runtime_reset_count += 1
+          end
+
+          def invalidate_overlay_transition_points
+            @overlay_invalidation_count += 1
+          end
+        end
+
+        class FakeSceneGroupGuard
+          def initialize(calls)
+            @calls = calls
+          end
+
+          def untrack(group)
+            @calls << [:untrack, group]
+          end
+
+          def restore!(snapshot)
+            @calls << [:restore, snapshot]
+          end
+        end
+
+        class FakePrimalTrackingObserver
+          def initialize(owner)
+            @owner = owner
+          end
+
+          def clear_tracked_entities
+            @owner.increment_primal_tracking_clear
+          end
+        end
+
+        class FakeRootTrackingObserver
+          def initialize(owner)
+            @owner = owner
+          end
+
+          def clear_tracked_entities
+            @owner.increment_root_tracking_clear
+          end
+        end
+
+        class FakeValidationFocusSession
+          def initialize(owner)
+            @owner = owner
+          end
+
+          def validation_focus_active?
+            true
+          end
+
+          def clear_validation_focus
+            @owner.increment_focus_clear
           end
         end
 
@@ -693,6 +831,12 @@ module ULOL
         end
 
         class FakeEntity
+          attr_reader :entityID
+
+          def initialize(entity_id = nil)
+            @entityID = entity_id || object_id
+          end
+
           def valid?
             true
           end

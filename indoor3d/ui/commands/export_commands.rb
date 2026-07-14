@@ -34,7 +34,11 @@ module ULOL
 
           path = "#{path}.gml" unless File.extname(path).downcase == '.gml'
           FileUtils.mkdir_p(File.dirname(path))
-          indoor_model.finish_editing if indoor_model.editing?
+          if indoor_model.editing? && !indoor_model.finish_editing
+            message = 'GML export failed: topology synchronization failed.'
+            progress ? progress.set_result_message(message) : UI.messagebox(message)
+            return nil
+          end
           IndoorGmlConverter::GmlExporter.new(
             indoor_model
           ).export(output_path: path)
@@ -60,7 +64,10 @@ module ULOL
 
           captured_model = Sketchup.active_model
           captured_indoor_model = IndoorModel.for(captured_model)
-          captured_indoor_model.finish_editing if captured_indoor_model.editing?
+          if captured_indoor_model.editing? && !captured_indoor_model.finish_editing
+            UI.messagebox('Validity check failed: topology synchronization failed.')
+            return
+          end
           @validation_operation_running = true
           workspace = IndoorGmlConverter::ValidationRunWorkspace.create(
             base_dir: IndoorGmlConverter::GmlExporter.output_root

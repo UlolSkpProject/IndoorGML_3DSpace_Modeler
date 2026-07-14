@@ -21,6 +21,9 @@ module ULOL
       module CellSpaceType
         LABELS = {} unless const_defined?(:LABELS)
       end unless const_defined?(:CellSpaceType)
+      module Logger
+        def self.puts(_message); end
+      end unless const_defined?(:Logger)
     end
   end
 end
@@ -108,6 +111,61 @@ module ULOL
             :selection_changed,
             :invalidate_view
           ], calls
+        end
+
+        def test_finish_synchronizes_dirty_validation_focus_topology_before_visibility_restore
+          calls = []
+          indoor_model = Class.new do
+            define_method(:validation_focus_topology_dirty?) { true }
+            define_method(:synchronize_validation_focus_topology_if_dirty) do
+              calls << :sync_all
+              true
+            end
+            define_method(:detach_edit_selection_observer) { |_model| calls << :detach }
+          end.new
+          indoor_model.singleton_class.send(:define_method, :calls) { calls }
+          path_controller = Struct.new(:calls) do
+            def prepare_for_finish(_model); calls << :prepare; end
+            def reset_target; calls << :reset_target; end
+            def close(_model); calls << :close_path; end
+            def clear_previous_path; calls << :clear_path; end
+          end.new(calls)
+          session = EditorSession.allocate
+          session.instance_variable_set(:@editing, true)
+          session.instance_variable_set(:@indoor_model, indoor_model)
+          session.instance_variable_set(:@dialog, Struct.new(:calls) { def close; calls << :close_dialog; end }.new(calls))
+          session.define_singleton_method(:with_active_path_enforcement_suspended) { |&block| block.call }
+          session.define_singleton_method(:active_path_controller) { path_controller }
+          session.define_singleton_method(:restore_validation_focus_visibility) { calls << :restore_visibility }
+          session.define_singleton_method(:normalize_visibility_for_non_edit_mode) { calls << :normalize_visibility }
+          session.define_singleton_method(:reset_edit_mode_visibility_filter) { calls << :reset_filter }
+          session.define_singleton_method(:restore_validation_focus_rendering_options) { calls << :restore_rendering }
+          session.define_singleton_method(:clear_validation_focus) { calls << :clear_focus }
+          session.define_singleton_method(:update_overlay_enabled) { calls << :overlay }
+          session.define_singleton_method(:apply_lock_policy) { calls << :lock }
+          session.define_singleton_method(:apply_geometry_visibility) { calls << :geometry }
+          session.define_singleton_method(:invalidate_view) { |_model| calls << :invalidate }
+
+          assert session.finish
+
+          assert_equal :sync_all, calls.first
+          assert_operator calls.index(:sync_all), :<, calls.index(:restore_visibility)
+          assert_operator calls.index(:sync_all), :<, calls.index(:clear_focus)
+        end
+
+        def test_finish_keeps_edit_mode_active_when_dirty_topology_sync_fails
+          indoor_model = Object.new
+          indoor_model.define_singleton_method(:validation_focus_topology_dirty?) { true }
+          indoor_model.define_singleton_method(:synchronize_validation_focus_topology_if_dirty) { false }
+          session = EditorSession.allocate
+          session.instance_variable_set(:@editing, true)
+          session.instance_variable_set(:@indoor_model, indoor_model)
+          session.define_singleton_method(:restore_validation_focus_visibility) do
+            raise 'visibility must not be restored after failed topology sync'
+          end
+
+          refute session.finish
+          assert session.editing?
         end
 
         def test_begin_validation_focus_editing_rolls_back_when_visibility_apply_fails

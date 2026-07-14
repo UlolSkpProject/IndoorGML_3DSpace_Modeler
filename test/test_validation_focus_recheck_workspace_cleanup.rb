@@ -88,6 +88,21 @@ module ULOL
           end
         end
 
+        def test_recheck_stops_before_dialog_when_dirty_topology_sync_fails
+          with_recheck_dependencies do |progress_class|
+            harness = Harness.new
+            harness.instance_variable_set(:@editor_session, FakeEditorSession.new(cell_spaces: [Object.new]))
+            harness.define_singleton_method(:validation_focus_topology_dirty?) { true }
+            harness.define_singleton_method(:synchronize_validation_focus_topology_if_dirty) { false }
+
+            assert_nil harness.recheck_validation_focus_errors
+
+            assert_empty progress_class.instances
+            refute harness.validation_focus_recheck_running?
+            assert_match(/topology 동기화에 실패/, UI.messages.last)
+          end
+        end
+
         def test_recheck_report_create_gml_exports_full_model
           with_recheck_dependencies do |progress_class|
             harness = Harness.new

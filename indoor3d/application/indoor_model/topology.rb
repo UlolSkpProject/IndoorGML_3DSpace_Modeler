@@ -7,14 +7,99 @@ module ULOL
     module IndoorCore
       class IndoorModel
         module Topology
+          def validation_focus_topology_dirty?
+            @validation_focus_topology_dirty == true
+          end
+
+          def mark_validation_focus_topology_dirty
+            @validation_focus_topology_dirty = true
+          end
+
+          def clear_validation_focus_topology_dirty
+            @validation_focus_topology_dirty = false
+          end
+
+          def synchronize_validation_focus_row_topology
+            return nil unless validation_focus_row_local_topology_sync?
+
+            if validation_focus_mutation_batch_active?
+              @validation_focus_topology_sync_pending = true
+              mark_validation_focus_topology_dirty
+              return {}
+            end
+
+            perform_validation_focus_row_topology_sync
+          end
+
+          def flush_validation_focus_row_topology_sync
+            return nil unless @validation_focus_topology_sync_pending
+
+            @validation_focus_topology_sync_pending = false
+            perform_validation_focus_row_topology_sync
+          end
+
+          def discard_validation_focus_row_topology_sync
+            @validation_focus_topology_sync_pending = false
+          end
+
+          def validation_focus_mutation_batch_active?
+            @validation_focus_mutation_depth.to_i.positive?
+          end
+
+          private
+
+          def perform_validation_focus_row_topology_sync
+            return nil unless validation_focus_row_local_topology_sync?
+
+            cell_spaces = validation_focus_highlight_cell_spaces
+            metrics = topology_coordinator.synchronize_within(cell_spaces)
+            mark_validation_focus_topology_dirty
+            metrics
+          rescue StandardError => e
+            mark_validation_focus_topology_dirty
+            IndoorCore::Logger.puts "[IndoorGML] Validation focus row topology sync failed: #{e.class}: #{e.message}"
+            nil
+          end
+
+          public
+
+          def synchronize_validation_focus_topology_if_dirty
+            return true unless validation_focus_topology_dirty?
+
+            with_indoor_model_operation('IndoorGML Validation Focus Topology Sync') do
+              sync { topology_coordinator.synchronize_all }
+            end
+            dirty_topology_queue.clear
+            dirty_topology_queue.unschedule!
+            clear_validation_focus_topology_dirty
+            invalidate_overlay_transition_points
+            true
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Validation focus full topology sync failed: #{e.class}: #{e.message}"
+            false
+          end
+
           private
 
           def synchronize_adjacency_and_transitions_for_cell_space(cell_space)
+            if validation_focus_row_local_topology_sync?
+              mark_validation_focus_topology_dirty
+              return synchronize_validation_focus_row_topology
+            end
+
             topology_coordinator.synchronize_for(cell_space)
           end
 
           def mark_cell_space_dirty(cell_space)
             return unless cell_space&.valid?
+
+            if validation_focus_row_local_topology_sync?
+              mark_validation_focus_topology_dirty
+              if @editor_session.validation_focus_highlight_row_include_cell?(cell_space)
+                synchronize_validation_focus_row_topology
+              end
+              return
+            end
 
             entity = cell_space.valid_sketchup_group
             return unless entity
@@ -44,6 +129,14 @@ module ULOL
 
           def flush_dirty_cell_space_sync
             return if dirty_sync_replay_pending?
+
+            if validation_focus_row_local_topology_sync?
+              dirty_topology_queue.clear
+              dirty_topology_queue.unschedule!
+              mark_validation_focus_topology_dirty
+              synchronize_validation_focus_row_topology
+              return
+            end
 
             pids = dirty_topology_queue.persistent_ids
             dirty_topology_queue.clear
@@ -94,7 +187,21 @@ module ULOL
           end
 
           def erase_adjacency_for_cell_space(cell_space)
-            topology_coordinator.erase_for(cell_space)
+            result = topology_coordinator.erase_for(cell_space)
+            mark_validation_focus_topology_dirty if validation_focus_row_selected?
+            result
+          end
+
+          def validation_focus_row_local_topology_sync?
+            validation_focus_active? && validation_focus_row_selected?
+          rescue StandardError
+            false
+          end
+
+          def validation_focus_row_selected?
+            !@editor_session.validation_focus_highlight_row_id.to_s.empty?
+          rescue StandardError
+            false
           end
 
           def create_or_update_transition_for_pair(cell1, cell2)
@@ -282,14 +389,18 @@ module ULOL
           end
 
           def rebuild_runtime_transitions_from_cell_adjacency
-            topology_coordinator.synchronize_all
+            metrics = topology_coordinator.synchronize_all
+            clear_validation_focus_topology_dirty
+            metrics
           end
 
           def rebuild_runtime_transitions_from_cell_adjacency_without_persistence
-            topology_coordinator.synchronize_all(
+            metrics = topology_coordinator.synchronize_all(
               transition_builder: method(:create_or_update_runtime_transition_for_pair),
               transition_eraser: method(:erase_runtime_transition_for_pair_key)
             )
+            clear_validation_focus_topology_dirty
+            metrics
           end
 
           def create_or_update_runtime_transition_for_pair(cell1, cell2)
