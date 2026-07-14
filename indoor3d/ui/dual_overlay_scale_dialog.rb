@@ -29,16 +29,16 @@ module ULOL
           DualOverlayPreferences.state_radius_scale
         rescue StandardError => e
           Logger.puts "[IndoorGML] Dual overlay scale update failed: #{e.class}: #{e.message}"
-          DualOverlayPreferences::STATE_RADIUS_SCALE_DEFAULT
+          DualOverlayPreferences::STATE_SCALE_DEFAULT
         end
 
         def reset_state_radius_scale
-          DualOverlayPreferences.state_radius_scale = DualOverlayPreferences::STATE_RADIUS_SCALE_DEFAULT
+          DualOverlayPreferences.state_radius_scale = DualOverlayPreferences::STATE_SCALE_DEFAULT
           invalidate_active_view
           DualOverlayPreferences.state_radius_scale
         rescue StandardError => e
           Logger.puts "[IndoorGML] Dual overlay scale reset failed: #{e.class}: #{e.message}"
-          DualOverlayPreferences::STATE_RADIUS_SCALE_DEFAULT
+          DualOverlayPreferences::STATE_SCALE_DEFAULT
         end
 
         private
@@ -107,9 +107,9 @@ module ULOL
 
         def html
           scale = DualOverlayPreferences.state_radius_scale
-          min_scale = DualOverlayPreferences::STATE_RADIUS_SCALE_MIN
-          max_scale = DualOverlayPreferences::STATE_RADIUS_SCALE_MAX
-          default_scale = DualOverlayPreferences::STATE_RADIUS_SCALE_DEFAULT
+          min_scale = DualOverlayPreferences::STATE_SCALE_MIN
+          max_scale = DualOverlayPreferences::STATE_SCALE_MAX
+          default_scale = DualOverlayPreferences::STATE_SCALE_DEFAULT
           <<~HTML
             <!doctype html>
             <html>
