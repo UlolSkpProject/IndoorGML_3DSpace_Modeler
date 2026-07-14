@@ -315,6 +315,12 @@ module ULOL
           validation_focus_controller.highlight_code
         end
 
+        def validation_focus_row(row_id)
+          validation_focus_controller.focus_row(row_id)
+        rescue StandardError
+          nil
+        end
+
         def validation_focus_highlight_active?
           validation_focus_controller.highlight_active?
         end

@@ -17,7 +17,7 @@ module ULOL
           end
 
           def set_validation_focus_highlight(cell_gml_ids, code = nil, row_id: nil, row_cells: nil, states: nil, transitions: nil)
-            @editor_session.set_validation_focus_highlight(
+            result = @editor_session.set_validation_focus_highlight(
               cell_gml_ids,
               code,
               row_id: row_id,
@@ -25,6 +25,14 @@ module ULOL
               states: states,
               transitions: transitions
             )
+            if result && !row_id.to_s.empty?
+              puts "[IndoorGML] validation focus ref-cells: #{Array(row_cells).inspect}"
+            end
+            result
+          end
+
+          def validation_focus_row(row_id)
+            @editor_session.validation_focus_row(row_id)
           end
 
           def recheck_validation_focus_errors
