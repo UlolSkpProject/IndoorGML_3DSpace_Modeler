@@ -6,51 +6,45 @@ module ULOL
       class IndoorModel
         module FeatureLifecycle
           def convert_single_group_to_cell_space(sketchup_group, cell_type = CellSpaceType::GENERAL, category_code = nil)
-            with_validation_focus_row_mutation do
-              with_indoor_model_operation('IndoorGML Convert Group to CellSpace') do
-                cell_space_lifecycle_service.create_from_group(
-                  sketchup_group,
-                  cell_type: cell_type,
-                  category_code: category_code
-                )
-              end
+            with_indoor_model_operation('IndoorGML Convert Group to CellSpace') do
+              cell_space_lifecycle_service.create_from_group(
+                sketchup_group,
+                cell_type: cell_type,
+                category_code: category_code
+              )
             end
           end
 
           def convert_cell_space_jobs_bulk(jobs, fallback_target:, original_active_path:, preserve_source: nil, operation_name: 'Convert Solid Groups to CellSpace', activate_root_context: true)
-            with_validation_focus_row_mutation do
-              model = @model || Sketchup.active_model
-              active_path = ActivePathController.new(model, logger: IndoorCore::Logger)
-              service = BulkCellSpaceConversionService.new(
-                model: model,
-                jobs: jobs,
-                fallback_target: fallback_target,
-                target_entities: model.entities,
-                converter: proc do |source, cell_type, category_code, storey|
-                  cell_space_lifecycle_service.create_from_group_deferred(
-                    source,
-                    cell_type: cell_type,
-                    category_code: category_code,
-                    storey: storey
-                  )
-                end,
-                synchronize_all: proc { topology_coordinator.synchronize_all },
-                apply_lock_policy: proc { apply_indoor_lock_policy },
-                runtime_snapshot: proc { bulk_conversion_runtime_snapshot },
-                runtime_restore: proc { |snapshot| restore_bulk_conversion_runtime(snapshot) },
-                apply_guards: proc { |&block| with_bulk_cell_space_conversion(&block) },
-                restore_active_path: proc { active_path.restore(original_active_path, close_when_nil: true) },
-                activate_root_context: activate_root_context ? proc { active_path.close_to_root } : nil,
-                clear_dirty_topology: proc { clear_bulk_dirty_topology },
-                logger: IndoorCore::Logger,
-                labeler: ConversionMessageFormatter.method(:group_label),
-                preserve_source: preserve_source,
-                operation_name: operation_name
-              )
-              result = service.call
-              discard_validation_focus_row_mutation if result.converted_count.zero?
-              result
-            end
+            model = @model || Sketchup.active_model
+            active_path = ActivePathController.new(model, logger: IndoorCore::Logger)
+            service = BulkCellSpaceConversionService.new(
+              model: model,
+              jobs: jobs,
+              fallback_target: fallback_target,
+              target_entities: model.entities,
+              converter: proc do |source, cell_type, category_code, storey|
+                cell_space_lifecycle_service.create_from_group_deferred(
+                  source,
+                  cell_type: cell_type,
+                  category_code: category_code,
+                  storey: storey
+                )
+              end,
+              synchronize_all: proc { topology_coordinator.synchronize_all },
+              apply_lock_policy: proc { apply_indoor_lock_policy },
+              runtime_snapshot: proc { bulk_conversion_runtime_snapshot },
+              runtime_restore: proc { |snapshot| restore_bulk_conversion_runtime(snapshot) },
+              apply_guards: proc { |&block| with_bulk_cell_space_conversion(&block) },
+              restore_active_path: proc { active_path.restore(original_active_path, close_when_nil: true) },
+              activate_root_context: activate_root_context ? proc { active_path.close_to_root } : nil,
+              clear_dirty_topology: proc { clear_bulk_dirty_topology },
+              logger: IndoorCore::Logger,
+              labeler: ConversionMessageFormatter.method(:group_label),
+              preserve_source: preserve_source,
+              operation_name: operation_name
+            )
+            service.call
           end
 
           def change_cell_space_type(sketchup_group, cell_type, category_code = nil)
@@ -135,13 +129,11 @@ module ULOL
           def erase_cell_space(cell_space, erase_sketchup_group: true)
             return if cell_space.nil?
 
-            with_validation_focus_row_mutation do
-              erase_guard do
-                cell_space_lifecycle_service.erase(
-                  cell_space,
-                  erase_sketchup_group: erase_sketchup_group
-                )
-              end
+            erase_guard do
+              cell_space_lifecycle_service.erase(
+                cell_space,
+                erase_sketchup_group: erase_sketchup_group
+              )
             end
           end
 

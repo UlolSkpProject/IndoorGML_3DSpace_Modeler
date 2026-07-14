@@ -26,9 +26,6 @@ module ULOL
           @dual_overlay_visible = model_boolean_attribute(GRAPH_VISIBLE_ATTRIBUTE, true)
           @geometry_visible = model_boolean_attribute(GEOMETRY_VISIBLE_ATTRIBUTE, true)
           @validation_focus_controller = ValidationFocusController.new
-          @validation_focus_row_mutation_depth = 0
-          @validation_focus_row_mutation = nil
-          @validation_focus_zoom_generation = 0
           @lock_controller = LockController.new(indoor_model: @indoor_model)
           @visibility_controller = VisibilityController.new
           @overlay_controller = OverlayController.new(indoor_model: @indoor_model)
@@ -281,7 +278,6 @@ module ULOL
         end
 
         def set_validation_focus_highlight(cell_gml_ids, code = nil, row_id: nil, row_cells: nil, states: nil, transitions: nil)
-          cancel_validation_focus_zoom
           highlight_options = {}
           highlight_options[:row_id] = row_id unless row_id.nil?
           highlight_options[:row_cells] = row_cells unless row_cells.nil?
@@ -300,7 +296,6 @@ module ULOL
           end
           invalidate_overlay_transition_points
           invalidate_view(Sketchup.active_model())
-          zoom_validation_focus_highlight(row_id: row_id) unless row_id.to_s.empty?
           true
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight failed: #{e.class}: #{e.message}"
@@ -322,18 +317,12 @@ module ULOL
         end
 
         def add_validation_focus_highlight_cell(cell_space)
-          if validation_focus_row_mutation_active?
-            @validation_focus_row_mutation[:added] << cell_space
-            return nil
-          end
-
           payload = validation_focus_controller.add_highlight_cell(cell_space&.id)
           return nil unless payload
 
           apply_validation_focus_visibility
           invalidate_overlay_transition_points
           invalidate_view(Sketchup.active_model())
-          zoom_validation_focus_highlight(row_id: validation_focus_controller.highlight_row_id)
           payload
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight add failed: #{e.class}: #{e.message}"
@@ -341,95 +330,16 @@ module ULOL
         end
 
         def remove_validation_focus_highlight_cell(cell_space)
-          if validation_focus_row_mutation_active?
-            @validation_focus_row_mutation[:removed] << cell_space&.id
-            return []
-          end
-
           payloads = validation_focus_controller.remove_cell(cell_space&.id)
           return [] if payloads.empty?
 
           apply_validation_focus_visibility
           invalidate_overlay_transition_points
           invalidate_view(Sketchup.active_model())
-          zoom_validation_focus_highlight(row_id: validation_focus_controller.highlight_row_id)
           payloads
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight remove failed: #{e.class}: #{e.message}"
           []
-        end
-
-        def with_validation_focus_row_mutation
-          outermost = @validation_focus_row_mutation_depth.to_i.zero?
-          if outermost
-            @validation_focus_row_mutation = {
-              row_id: validation_focus_controller.highlight_row_id,
-              added: [],
-              removed: [],
-              discarded: false
-            }
-          end
-          @validation_focus_row_mutation_depth = @validation_focus_row_mutation_depth.to_i + 1
-          completed = false
-          result = yield
-          completed = true
-          result
-        ensure
-          @validation_focus_row_mutation_depth = [@validation_focus_row_mutation_depth.to_i - 1, 0].max
-          if outermost
-            mutation = @validation_focus_row_mutation
-            @validation_focus_row_mutation = nil
-            flush_validation_focus_row_mutation(mutation) if completed && mutation && !mutation[:discarded]
-          end
-        end
-
-        def discard_validation_focus_row_mutation
-          return false unless validation_focus_row_mutation_active?
-
-          @validation_focus_row_mutation[:discarded] = true
-          true
-        end
-
-        def reconcile_validation_focus_rows
-          return [] unless validation_focus_active?
-
-          payloads = validation_focus_controller.prune_missing_cells(@indoor_model.cell_spaces)
-          apply_validation_focus_row_payloads(payloads, zoom: false)
-          payloads
-        rescue StandardError => e
-          IndoorCore::Logger.puts "[IndoorGML] Validation focus row reconciliation failed: #{e.class}: #{e.message}"
-          []
-        end
-
-        def zoom_validation_focus_highlight(row_id: validation_focus_controller.highlight_row_id)
-          expected_row_id = row_id.to_s
-          return false if expected_row_id.empty?
-          return false unless defined?(UI) && UI.respond_to?(:start_timer)
-
-          @validation_focus_zoom_generation = @validation_focus_zoom_generation.to_i + 1
-          generation = @validation_focus_zoom_generation
-          UI.start_timer(0, false) do
-            begin
-              next unless generation == @validation_focus_zoom_generation
-              next unless validation_focus_active?
-              next unless validation_focus_controller.highlight_row_id.to_s == expected_row_id
-
-              bounds = validation_focus_highlight_bounds
-              next unless bounds
-
-              view = Sketchup.active_model()&.active_view
-              next unless view
-
-              view.zoom(bounds)
-              view.invalidate
-            rescue StandardError => e
-              IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight zoom failed: #{e.class}: #{e.message}"
-            end
-          end
-          true
-        rescue StandardError => e
-          IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight zoom scheduling failed: #{e.class}: #{e.message}"
-          false
         end
 
         def validation_focus_elements
@@ -510,7 +420,6 @@ module ULOL
         end
 
         def clear_validation_focus
-          cancel_validation_focus_zoom
           validation_focus_controller.clear
           invalidate_overlay_transition_points
         end
@@ -562,7 +471,6 @@ module ULOL
           else
             active_path_controller.reconcile_after_runtime_restore(model, editing: @editing)
           end
-          reconcile_validation_focus_rows if validation_focus_active?
           invalidate_overlay_transition_points
           selection_changed if @editing
           invalidate_view(model)
@@ -633,73 +541,6 @@ module ULOL
 
         def validation_focus_controller
           @validation_focus_controller ||= ValidationFocusController.new
-        end
-
-        def validation_focus_row_mutation_active?
-          @validation_focus_row_mutation_depth.to_i.positive? && @validation_focus_row_mutation.is_a?(Hash)
-        end
-
-        def flush_validation_focus_row_mutation(mutation)
-          return [] unless mutation && validation_focus_active?
-
-          added_ids = Array(mutation[:added]).filter_map do |cell_space|
-            next unless cell_space&.valid?
-
-            cell_space.id
-          rescue StandardError
-            nil
-          end
-          payloads = validation_focus_controller.apply_cell_mutation(
-            added: added_ids,
-            removed: mutation[:removed],
-            active_row_id: mutation[:row_id]
-          )
-          apply_validation_focus_row_payloads(payloads, zoom: true)
-          payloads
-        rescue StandardError => e
-          IndoorCore::Logger.puts "[IndoorGML] Validation focus row mutation failed: #{e.class}: #{e.message}"
-          []
-        end
-
-        def apply_validation_focus_row_payloads(payloads, zoom:)
-          payloads = Array(payloads)
-          return [] if payloads.empty?
-
-          apply_validation_focus_visibility
-          invalidate_overlay_transition_points
-          invalidate_view(Sketchup.active_model())
-          payloads.each do |payload|
-            @indoor_model.update_validation_focus_report_row(payload) if @indoor_model.respond_to?(:update_validation_focus_report_row)
-          end
-          active_row_id = validation_focus_controller.highlight_row_id.to_s
-          if zoom && !active_row_id.empty? && payloads.any? { |payload| payload[:row_id].to_s == active_row_id }
-            zoom_validation_focus_highlight(row_id: active_row_id)
-          end
-          payloads
-        end
-
-        def validation_focus_highlight_bounds
-          return nil unless defined?(Geom::BoundingBox)
-
-          combined_bounds = Geom::BoundingBox.new
-          found = false
-          validation_focus_highlight_cell_spaces.each do |cell_space|
-            group = cell_space&.valid_sketchup_group
-            next unless group&.valid?
-
-            group_bounds = group.bounds
-            next unless group_bounds
-
-            combined_bounds.add(group_bounds)
-            found = true
-          rescue StandardError
-            next
-          end
-          found ? combined_bounds : nil
-        end
-
-        def cancel_validation_focus_zoom
-          @validation_focus_zoom_generation = @validation_focus_zoom_generation.to_i + 1
         end
 
         def edit_visibility_service

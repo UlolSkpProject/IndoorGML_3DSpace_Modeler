@@ -223,7 +223,7 @@ module ULOL
       end
 
       class CellSpaceConversionExecutor
-        Result = Struct.new(:converted, :errors, :created_cell_space, keyword_init: true) do
+        Result = Struct.new(:converted, :errors, keyword_init: true) do
           def converted?
             converted == true
           end
@@ -259,10 +259,10 @@ module ULOL
           source, erase_original_after_success, cleanup_source_on_failure = prepare_source(job)
           @prepared_source = source
           @cleanup_source_on_failure = cleanup_source_on_failure
-          created_cell_space = call_converter(source, target_cell_type, target_category_code, job[:storey])
+          call_converter(source, target_cell_type, target_category_code, job[:storey])
           job[:source].erase! if erase_original_after_success && job[:source]&.valid?
           cleanup_empty_ancestors(job)
-          Result.new(converted: true, errors: [], created_cell_space: created_cell_space)
+          Result.new(converted: true, errors: [])
         end
 
         private
@@ -450,7 +450,7 @@ module ULOL
       end
 
       class BulkCellSpaceConversionService
-        Result = Struct.new(:converted_count, :errors, :metrics, :created_cell_spaces, keyword_init: true)
+        Result = Struct.new(:converted_count, :errors, :metrics, keyword_init: true)
 
         def initialize(model:, jobs:, fallback_target:, target_entities:, converter:, synchronize_all:, apply_lock_policy:, runtime_snapshot:, runtime_restore:, apply_guards:, restore_active_path:, activate_root_context:, clear_dirty_topology:, logger: Logger, labeler: nil, preserve_source: nil, operation_name: 'Convert Solid Groups to CellSpace')
           @model = model
@@ -485,10 +485,9 @@ module ULOL
           errors.concat(target_errors)
           metrics[:preflight_duration] = Time.now - preflight_started_at
           converted_count = 0
-          created_cell_spaces = []
           apply_metrics = {}
           unless plan.empty?
-            converted_count, apply_errors, apply_metrics, created_cell_spaces = timed(metrics, :cell_space_entity_apply) { apply_plan(plan) }
+            converted_count, apply_errors, apply_metrics = timed(metrics, :cell_space_entity_apply) { apply_plan(plan) }
             errors.concat(apply_errors)
           end
           metrics.merge!(apply_metrics)
@@ -496,12 +495,7 @@ module ULOL
           metrics[:adjacency_transition_duration] ||= 0.0
           metrics[:total_duration] = Time.now - benchmark_started_at
           log_benchmark(metrics)
-          Result.new(
-            converted_count: converted_count,
-            errors: errors,
-            metrics: metrics,
-            created_cell_spaces: created_cell_spaces
-          )
+          Result.new(converted_count: converted_count, errors: errors, metrics: metrics)
         end
 
         private
@@ -560,7 +554,6 @@ module ULOL
           snapshot = @runtime_snapshot.call
           operation_started = false
           converted_count = 0
-          created_cell_spaces = []
           errors = []
 
           @apply_guards.call do
@@ -586,7 +579,6 @@ module ULOL
                 result = executor.execute(job, fallback_target: @fallback_target)
                 if result.converted?
                   converted_count += 1
-                  created_cell_spaces << result.created_cell_space if result.created_cell_space
                 else
                   errors.concat(result.errors)
                 end
@@ -607,8 +599,7 @@ module ULOL
                     transition_apply: 0.0,
                     cell_space_state_duration: cell_space_state_duration,
                     adjacency_transition_duration: 0.0
-                  },
-                  []
+                  }
                 ]
               end
 
@@ -631,8 +622,7 @@ module ULOL
                   transition_apply: adjacency_metrics[:total_duration].to_f,
                   cell_space_state_duration: cell_space_state_duration,
                   adjacency_transition_duration: adjacency_transition_duration
-                },
-                created_cell_spaces
+                }
               ]
             rescue StandardError
               safely_abort_operation if operation_started

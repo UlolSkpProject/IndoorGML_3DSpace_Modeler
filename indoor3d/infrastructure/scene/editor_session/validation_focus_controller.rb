@@ -54,7 +54,7 @@ module ULOL
           end
 
           def active?
-            @cell_ids.is_a?(Hash)
+            @cell_ids.is_a?(Hash) && !@cell_ids.empty?
           end
 
           def focus_id_count
@@ -97,7 +97,7 @@ module ULOL
           end
 
           def highlight_active?
-            !@highlight_row_id.nil? || (@highlight_cell_ids.is_a?(Hash) && !@highlight_cell_ids.empty?)
+            @highlight_cell_ids.is_a?(Hash) && !@highlight_cell_ids.empty?
           end
 
           def add_highlight_cell(cell_id)
@@ -109,53 +109,21 @@ module ULOL
           end
 
           def remove_cell(cell_id)
-            apply_cell_mutation(removed: [cell_id])
-          end
+            remove_id = normalize_cell_ref(cell_id)
+            return [] if remove_id.empty? || @focus_rows.nil? || @focus_rows.empty?
 
-          def apply_cell_mutation(added: [], removed: [], active_row_id: @highlight_row_id)
-            return [] unless active? && @focus_rows && !@focus_rows.empty?
+            payloads = []
+            @focus_rows.each do |row_id, row|
+              cells = Array(row[:cells])
+              next unless cells.include?(remove_id)
 
-            added_ids = normalize_cell_refs(added)
-            removed_ids = normalize_cell_refs(removed)
-            affected_rows = {}
-
-            unless removed_ids.empty?
-              @focus_rows.each do |row_id, row|
-                cells = Array(row[:cells])
-                updated_cells = cells.reject { |cell| removed_ids.include?(cell) }
-                next if updated_cells == cells
-
-                row[:cells] = updated_cells
-                affected_rows[row_id] = true
-              end
-            end
-
-            target_row_id = active_row_id.to_s
-            target_row = @focus_rows[target_row_id] unless target_row_id.empty?
-            if target_row && !added_ids.empty?
-              cells = Array(target_row[:cells]).dup
-              added_ids.each { |cell_id| cells << cell_id unless cells.include?(cell_id) }
-              if cells != target_row[:cells]
-                target_row[:cells] = cells
-                affected_rows[target_row_id] = true
-              end
-            end
-
-            affected_rows.each_key do |row_id|
-              row = @focus_rows[row_id]
+              row[:cells] = cells.reject { |cell| cell == remove_id }
               row[:focus_ids] = normalize_ids(row[:cells])
+              payloads << focus_row_payload(row_id, row)
             end
             sync_highlight_ids_from_row
             rebuild_focus_ids_from_rows
-            affected_rows.keys.map { |row_id| focus_row_payload(row_id, @focus_rows[row_id]) }
-          end
-
-          def prune_missing_cells(cell_spaces)
-            valid_cells = normalize_cell_refs(Array(cell_spaces).select { |cell| cell&.valid? }.map(&:id))
-            stale_cells = @focus_rows.values.flat_map { |row| Array(row[:cells]) }.uniq - valid_cells
-            apply_cell_mutation(removed: stale_cells)
-          rescue StandardError
-            []
+            payloads
           end
 
           def highlight_cell_spaces(cell_spaces)
@@ -171,9 +139,7 @@ module ULOL
           def visible_cell_space?(cell_space)
             return true unless active?
             return false unless cell_space&.valid?
-            if @highlight_row_id || (@highlight_cell_ids.is_a?(Hash) && !@highlight_cell_ids.empty?)
-              return false unless @highlight_cell_ids.is_a?(Hash)
-
+            if @highlight_cell_ids.is_a?(Hash) && !@highlight_cell_ids.empty?
               return cell_gml_ids(cell_space).any? { |id| @highlight_cell_ids[id] == true }
             end
 
