@@ -467,6 +467,11 @@ module ULOL
 
                   selection.removeAllRanges();
                 });
+                window.addEventListener('load', function() {
+                  if (typeof sketchup !== 'undefined' && sketchup.reportDomReady) {
+                    sketchup.reportDomReady();
+                  }
+                });
               </script>
             HTML
           end

@@ -235,6 +235,9 @@ module ULOL
               @pending_scripts.clear
               @ready_callback&.call
             end
+            dialog.add_action_callback('reportDomReady') do |_context|
+              handle_report_dom_ready
+            end
             dialog.add_action_callback('fitContentHeight') do |_context, content_height|
               fit_content_height(content_height)
             end
@@ -265,6 +268,12 @@ module ULOL
 
           def log_validation_focus_cells(cell_ids)
             puts "[IndoorGML] validation focus ref-cells: #{Array(cell_ids).inspect}"
+          end
+
+          def handle_report_dom_ready
+            @dom_ready = true
+            @pending_scripts.each { |script| @dialog.execute_script(script) }
+            @pending_scripts.clear
           end
 
           def handle_window_closed
