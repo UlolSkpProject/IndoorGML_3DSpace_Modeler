@@ -701,7 +701,9 @@ module ULOL
           end
 
           def register_state(state)
-            @feature_registry.add_state(state)
+            result = @feature_registry.add_state(state)
+            invalidate_overlay_transition_points if respond_to?(:invalidate_overlay_transition_points)
+            result
           end
 
           def unregister_cell_space(cell_space)
@@ -715,7 +717,9 @@ module ULOL
           def unregister_state(state)
             return if state.nil?
 
-            @feature_registry.remove_state(state)
+            result = @feature_registry.remove_state(state)
+            invalidate_overlay_transition_points if respond_to?(:invalidate_overlay_transition_points)
+            result
           end
 
           def validation_focus_highlight_tracking_active?

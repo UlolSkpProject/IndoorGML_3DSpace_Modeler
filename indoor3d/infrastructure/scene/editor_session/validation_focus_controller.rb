@@ -223,6 +223,14 @@ module ULOL
             cell_gml_ids(cell_space).first
           end
 
+          def focus_row(row_id)
+            normalized_row_id = row_id.to_s
+            return nil if normalized_row_id.empty?
+
+            row = @focus_rows && @focus_rows[normalized_row_id]
+            row ? focus_row_payload(normalized_row_id, row) : nil
+          end
+
           private
 
           def normalize_ids(values)

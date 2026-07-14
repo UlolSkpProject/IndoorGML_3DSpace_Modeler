@@ -2,6 +2,7 @@
 
 require 'fileutils'
 require 'json'
+require_relative '../../validity/validation_focus_report_mapper'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -17,7 +18,7 @@ module ULOL
           end
 
           def set_validation_focus_highlight(cell_gml_ids, code = nil, row_id: nil, row_cells: nil, states: nil, transitions: nil)
-            @editor_session.set_validation_focus_highlight(
+            result = @editor_session.set_validation_focus_highlight(
               cell_gml_ids,
               code,
               row_id: row_id,
@@ -25,6 +26,14 @@ module ULOL
               states: states,
               transitions: transitions
             )
+            if result && !row_id.to_s.empty?
+              puts "[IndoorGML] validation focus ref-cells: #{Array(row_cells).inspect}"
+            end
+            result
+          end
+
+          def validation_focus_row(row_id)
+            @editor_session.validation_focus_row(row_id)
           end
 
           def recheck_validation_focus_errors
@@ -32,6 +41,10 @@ module ULOL
               UI.messagebox('오류 요소 재검사가 이미 실행 중입니다.')
               return nil
             end
+
+            progress = IndoorGmlConverter::ExportProgressDialog.active || IndoorGmlConverter::ExportProgressDialog.new
+            progress.clear_validation_focus_selection if progress.respond_to?(:clear_validation_focus_selection)
+            @editor_session.set_validation_focus_highlight([], '')
 
             focus = @editor_session.validation_focus_elements
             if focus[:cell_spaces].empty?
@@ -49,8 +62,6 @@ module ULOL
             state[:workspace] = IndoorGmlConverter::ValidationRunWorkspace.create(
               base_dir: IndoorGmlConverter::GmlExporter.output_root
             )
-            @editor_session.set_validation_focus_highlight([], '')
-            progress = IndoorGmlConverter::ExportProgressDialog.active || IndoorGmlConverter::ExportProgressDialog.new
             progress.on_create_gml do
               export_full_gml_from_validation_focus_recheck_report(progress)
             end
@@ -195,7 +206,11 @@ module ULOL
           end
 
           def add_validation_focus_highlight_cell(cell_space)
-            update_validation_focus_report_row(@editor_session.add_validation_focus_highlight_cell(cell_space))
+            payload = @editor_session.add_validation_focus_highlight_cell(cell_space)
+            return nil unless payload
+
+            puts "[IndoorGML] validation focus ref-cells: #{Array(payload[:cells]).inspect}"
+            update_validation_focus_report_row(payload)
           end
 
           def remove_validation_focus_highlight_cell(cell_space)
@@ -323,7 +338,7 @@ module ULOL
             nil
           end
 
-          def convert_selected_solid_groups_to_cell_spaces(selection_value)
+          def convert_selected_solid_groups_to_cell_spaces(selection_value, storey = nil)
             return false if validation_focus_recheck_running?
 
             begin
@@ -334,6 +349,8 @@ module ULOL
               end
               jobs = selected_cell_space_conversion_jobs
               return false if jobs.empty?
+              requested_storey = storey.to_s.strip
+              jobs = jobs.map { |job| job.merge(storey: requested_storey) } unless requested_storey.empty?
 
               original_active_path = ActivePathController.new(model, logger: IndoorCore::Logger).snapshot
               result = convert_cell_space_jobs_bulk(
@@ -529,6 +546,8 @@ module ULOL
               return
             end
 
+            refresh_validation_focus_report(result.report) unless result.valid?
+
             progress.on_open_report do
               progress.show_report(result.report_html_path)
             end
@@ -546,6 +565,20 @@ module ULOL
               message: e.message,
               actions: [:close]
             )
+          end
+
+          def refresh_validation_focus_report(report)
+            mapper = IndoorGmlConverter::ValidationFocusReportMapper
+            cell_ids = mapper.error_focus_cell_ids(report, self)
+            return false if cell_ids.empty?
+
+            begin_validation_focus_editing(
+              cell_ids,
+              row_states: mapper.focus_row_states(report, self)
+            )
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Validation focus report refresh failed: #{e.class}: #{e.message}"
+            false
           end
 
           def cleanup_validation_focus_recheck_workspace(state)

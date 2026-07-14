@@ -69,6 +69,26 @@ module ULOL
           [option[:cell_type], option[:category_code]]
         end
 
+        def prompt_cell_space_creation_options(title, default_target: nil, default_storey: CellSpace::DEFAULT_STOREY)
+          options = CellSpaceCategory.selection_options
+          labels = options.map { |option| option[:label] }
+          default_option = options.find do |option|
+            default_target && option[:cell_type] == default_target[0] && option[:category_code] == default_target[1]
+          end || options.first
+          result = UI.inputbox(
+            ['CellSpace', '층 (F01 또는 F01~F03)'],
+            [default_option[:label], default_storey.to_s.empty? ? CellSpace::DEFAULT_STOREY : default_storey],
+            [labels.join('|'), ''],
+            title
+          )
+          return nil unless result
+
+          option = options.find { |candidate| candidate[:label] == result[0] } || default_option
+          storey = result[1].to_s.strip
+          storey = CellSpace::DEFAULT_STOREY if storey.empty?
+          [option[:cell_type], option[:category_code], storey]
+        end
+
         def tag_cell_space_type_matches_indoor_attributes?(group)
           target = tag_cell_space_type_and_category(group)
           return false if target.nil?

@@ -315,6 +315,12 @@ module ULOL
           validation_focus_controller.highlight_code
         end
 
+        def validation_focus_row(row_id)
+          validation_focus_controller.focus_row(row_id)
+        rescue StandardError
+          nil
+        end
+
         def validation_focus_highlight_active?
           validation_focus_controller.highlight_active?
         end
@@ -560,14 +566,28 @@ module ULOL
               next unless validation_focus_active?
               next unless validation_focus_controller.highlight_row_id.to_s == expected_row_id
 
-              bounds = validation_focus_highlight_bounds
-              next unless bounds
+              groups = validation_focus_highlight_groups
+              next if groups.empty?
 
               view = Sketchup.active_model()&.active_view
               next unless view
 
-              view.zoom(bounds)
-              view.invalidate
+              view.zoom(groups)
+              UI.start_timer(0, false) do
+                begin
+                  next unless generation == @validation_focus_zoom_generation
+                  next unless validation_focus_active?
+                  next unless validation_focus_controller.highlight_row_id.to_s == expected_row_id
+
+                  padded_view = Sketchup.active_model()&.active_view
+                  next unless padded_view
+
+                  padded_view.zoom(0.7)
+                  padded_view.invalidate
+                rescue StandardError => e
+                  IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight padding zoom failed: #{e.class}: #{e.message}"
+                end
+              end
             rescue StandardError => e
               IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight zoom failed: #{e.class}: #{e.message}"
             end
@@ -578,24 +598,13 @@ module ULOL
           false
         end
 
-        def validation_focus_highlight_bounds
-          return nil unless defined?(Geom::BoundingBox)
-
-          combined_bounds = Geom::BoundingBox.new
-          found = false
-          validation_focus_highlight_cell_spaces.each do |cell_space|
+        def validation_focus_highlight_groups
+          validation_focus_highlight_cell_spaces.filter_map do |cell_space|
             group = cell_space&.valid_sketchup_group
-            next unless group&.valid?
-
-            group_bounds = group.bounds
-            next unless group_bounds
-
-            combined_bounds.add(group_bounds)
-            found = true
+            group if group&.valid?
           rescue StandardError
-            next
+            nil
           end
-          found ? combined_bounds : nil
         end
 
         def cancel_validation_focus_zoom
