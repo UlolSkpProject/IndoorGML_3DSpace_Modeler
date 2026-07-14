@@ -1,16 +1,10 @@
 # frozen_string_literal: true
 
-require 'etc'
-require 'thread'
-
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
 
       class AdjacencyService
-        MIN_PARALLEL_PAIRS = 20_000
-        PAIR_CHUNK_SIZE = 5_000
-        MAX_WORKERS = 4
         attr_reader :last_metrics
 
         def initialize(registry, transition_builder:, transition_eraser:)
@@ -97,11 +91,7 @@ module ULOL
           return [] if pair_indices.empty?
 
           started_at = monotonic_time
-          if pair_indices.length < MIN_PARALLEL_PAIRS
-            return compute_pair_chunk(snapshots, pair_indices, tolerance)
-          end
-
-          compute_pair_results_in_parallel(snapshots, pair_indices, tolerance)
+          compute_pair_chunk(snapshots, pair_indices, tolerance)
         ensure
           @last_detailed_computation_duration = elapsed_since(started_at) if started_at
         end
@@ -133,39 +123,13 @@ module ULOL
           [min1, min2].max <= [max1, max2].min + tolerance
         end
 
-        def compute_pair_results_in_parallel(snapshots, pair_indices, tolerance)
-          chunks = pair_indices.each_slice(PAIR_CHUNK_SIZE).to_a
-          queue = Queue.new
-          chunks.each { |chunk| queue << chunk }
-          workers = [worker_count, chunks.length].min
-          threads = workers.times.map do
-            Thread.new do
-              local_results = []
-              loop do
-                chunk = queue.pop(true)
-                local_results.concat(compute_pair_chunk(snapshots, chunk, tolerance))
-              rescue ThreadError
-                break
-              end
-              local_results
-            end
-          end
-          threads.flat_map(&:value)
-        end
-
-        def worker_count
-          processor_count = Etc.respond_to?(:nprocessors) ? Etc.nprocessors : 2
-          [[processor_count.to_i - 1, 1].max, MAX_WORKERS].min
-        rescue StandardError
-          2
-        end
-
         def compute_pair_chunk(snapshots, pair_indices, tolerance)
           pair_indices.each_with_object([]) do |(index1, index2), results|
             axis = Utils::Geometry.adjacency_axis_from_snapshots(
               snapshots[index1],
               snapshots[index2],
-              tolerance: tolerance
+              tolerance: tolerance,
+              bounds_checked: true
             )
             results << [index1, index2, axis] unless axis.nil?
           end

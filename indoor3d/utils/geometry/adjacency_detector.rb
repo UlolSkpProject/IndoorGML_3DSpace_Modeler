@@ -4,6 +4,22 @@ module ULOL
   module Indoor3DGmlModeler
     module Utils
       module Geometry
+        FACE_DIRECTION_BUCKET_TOLERANCE = 0.000001 unless const_defined?(:FACE_DIRECTION_BUCKET_TOLERANCE, false)
+        FACE_DIRECTION_BUCKETS = %i[
+          positive_x negative_x
+          positive_y negative_y
+          positive_z negative_z
+          fallback
+        ].freeze unless const_defined?(:FACE_DIRECTION_BUCKETS, false)
+        OPPOSITE_FACE_DIRECTION_BUCKET = {
+          positive_x: :negative_x,
+          negative_x: :positive_x,
+          positive_y: :negative_y,
+          negative_y: :positive_y,
+          positive_z: :negative_z,
+          negative_z: :positive_z
+        }.freeze unless const_defined?(:OPPOSITE_FACE_DIRECTION_BUCKET, false)
+
         def self.adjacency_axis(entity1, entity2, tolerance: ADJACENCY_TOLERANCE)
           return nil unless entity1&.valid? && entity2&.valid?
           return nil unless touching_bounds?(entity1.bounds, entity2.bounds, tolerance)
@@ -16,16 +32,22 @@ module ULOL
           return nil unless entity.respond_to?(:definition) && entity.respond_to?(:transformation)
 
           transformation = entity.transformation
+          faces = snapshot_faces(entity, transformation)
+          face_directions = face_direction_index(faces)
           snapshot = {
             bounds: snapshot_bounds(entity.bounds),
-            faces: snapshot_faces(entity, transformation)
+            faces: faces,
+            face_buckets: face_directions[:buckets],
+            face_bucket_keys: face_directions[:keys]
           }
           deep_freeze(snapshot)
         end
 
-        def self.adjacency_axis_from_snapshots(snapshot1, snapshot2, tolerance: ADJACENCY_TOLERANCE)
+        def self.adjacency_axis_from_snapshots(snapshot1, snapshot2, tolerance: ADJACENCY_TOLERANCE, bounds_checked: false)
           return nil unless snapshot1 && snapshot2
-          return nil unless touching_snapshot_bounds?(snapshot1[:bounds], snapshot2[:bounds], tolerance)
+          unless bounds_checked
+            return nil unless touching_snapshot_bounds?(snapshot1[:bounds], snapshot2[:bounds], tolerance)
+          end
 
           adjacent_snapshot_face_axis(snapshot1, snapshot2, tolerance)
         end
@@ -144,12 +166,12 @@ module ULOL
           faces2 = entity_faces_in_parent_space(entity2)
           return nil if faces1.empty? || faces2.empty?
 
-          faces1.each do |face1|
-            faces2.each do |face2|
-              next unless coplanar_area_overlapping_faces?(face1, face2, tolerance)
+          directions1 = face_direction_index(faces1)
+          directions2 = face_direction_index(faces2)
+          each_face_direction_candidate(faces1, directions1, faces2, directions2) do |face1, face2|
+            next unless coplanar_area_overlapping_faces?(face1, face2, tolerance)
 
-              return dominant_axis(face1[:normal])
-            end
+            return dominant_axis(face1[:normal])
           end
 
           nil
@@ -200,12 +222,12 @@ module ULOL
           faces2 = snapshot2[:faces]
           return nil if faces1.empty? || faces2.empty?
 
-          faces1.each do |face1|
-            faces2.each do |face2|
-              next unless coplanar_area_overlapping_snapshot_faces?(face1, face2, tolerance)
+          directions1 = snapshot_face_direction_index(snapshot1)
+          directions2 = snapshot_face_direction_index(snapshot2)
+          each_face_direction_candidate(faces1, directions1, faces2, directions2) do |face1, face2|
+            next unless coplanar_area_overlapping_snapshot_faces?(face1, face2, tolerance)
 
-              return dominant_snapshot_axis(face1[:normal])
-            end
+            return dominant_snapshot_axis(face1[:normal])
           end
 
           nil
@@ -218,23 +240,84 @@ module ULOL
           return false unless snapshot_normals_opposite?(normal1, normal2)
           return false unless snapshot_points_on_plane?(face2[:points], normal1, face1[:points].first, tolerance)
 
-          snapshot_coplanar_overlap_area(face1, face2) > area_tolerance(tolerance)
+          snapshot_coplanar_overlap_exceeds?(face1, face2, area_tolerance(tolerance))
         end
         private_class_method :coplanar_area_overlapping_snapshot_faces?
 
-        def self.snapshot_coplanar_overlap_area(face1, face2)
-          return 0.0 if face1[:triangles].empty? || face2[:triangles].empty?
+        def self.snapshot_coplanar_overlap_exceeds?(face1, face2, threshold)
+          return false if face1[:triangles].empty? || face2[:triangles].empty?
 
           axis = dominant_snapshot_axis(face1[:normal])
-          face1[:triangles].sum do |triangle1|
+          total_area = 0.0
+          face1[:triangles].each do |triangle1|
             polygon1 = project_snapshot_points_for_axis(triangle1, axis)
-            face2[:triangles].sum do |triangle2|
+            face2[:triangles].each do |triangle2|
               polygon2 = project_snapshot_points_for_axis(triangle2, axis)
-              polygon_area_2d(clip_polygon(polygon1, polygon2)).abs
+              total_area += polygon_area_2d(clip_polygon(polygon1, polygon2)).abs
+              return true if total_area > threshold
             end
           end
+          false
         end
-        private_class_method :snapshot_coplanar_overlap_area
+        private_class_method :snapshot_coplanar_overlap_exceeds?
+
+        def self.snapshot_face_direction_index(snapshot)
+          buckets = snapshot[:face_buckets]
+          keys = snapshot[:face_bucket_keys]
+          return { buckets: buckets, keys: keys } if buckets && keys
+
+          face_direction_index(snapshot[:faces])
+        end
+        private_class_method :snapshot_face_direction_index
+
+        def self.face_direction_index(faces)
+          buckets = FACE_DIRECTION_BUCKETS.each_with_object({}) { |bucket, result| result[bucket] = [] }
+          keys = faces.map do |face|
+            bucket = face_direction_bucket(face[:normal])
+            buckets[bucket] << face
+            bucket
+          end
+          { buckets: buckets, keys: keys }
+        end
+        private_class_method :face_direction_index
+
+        def self.face_direction_bucket(normal)
+          x, y, z = face_normal_components(normal)
+          tolerance = FACE_DIRECTION_BUCKET_TOLERANCE
+          return :positive_x if (x - 1.0).abs <= tolerance && y.abs <= tolerance && z.abs <= tolerance
+          return :negative_x if (x + 1.0).abs <= tolerance && y.abs <= tolerance && z.abs <= tolerance
+          return :positive_y if (y - 1.0).abs <= tolerance && x.abs <= tolerance && z.abs <= tolerance
+          return :negative_y if (y + 1.0).abs <= tolerance && x.abs <= tolerance && z.abs <= tolerance
+          return :positive_z if (z - 1.0).abs <= tolerance && x.abs <= tolerance && y.abs <= tolerance
+          return :negative_z if (z + 1.0).abs <= tolerance && x.abs <= tolerance && y.abs <= tolerance
+
+          :fallback
+        end
+        private_class_method :face_direction_bucket
+
+        def self.face_normal_components(normal)
+          if normal.respond_to?(:x)
+            [normal.x.to_f, normal.y.to_f, normal.z.to_f]
+          else
+            [normal[0].to_f, normal[1].to_f, normal[2].to_f]
+          end
+        end
+        private_class_method :face_normal_components
+
+        def self.each_face_direction_candidate(faces1, directions1, faces2, directions2)
+          faces1.each_with_index do |face1, index|
+            bucket = directions1[:keys][index]
+            if bucket == :fallback
+              faces2.each { |face2| yield face1, face2 }
+              next
+            end
+
+            opposite_bucket = OPPOSITE_FACE_DIRECTION_BUCKET.fetch(bucket)
+            directions2[:buckets][opposite_bucket].each { |face2| yield face1, face2 }
+            directions2[:buckets][:fallback].each { |face2| yield face1, face2 }
+          end
+        end
+        private_class_method :each_face_direction_candidate
 
         def self.area_tolerance(tolerance)
           tolerance.to_f * tolerance.to_f

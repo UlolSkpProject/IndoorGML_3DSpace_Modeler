@@ -42,6 +42,8 @@ module ULOL
           assert_equal [['A', 'B']], built
           assert_equal ['A:C'], erased
           assert_equal 3, metrics[:pair_comparison_count]
+          assert metrics.key?(:total_duration)
+          assert metrics.key?(:adjacency_detailed_computation)
         end
 
         def test_synchronize_all_can_use_runtime_only_callbacks
@@ -158,7 +160,57 @@ module ULOL
           result = service.send(:compute_pair_results, entries, tolerance: Utils::Geometry::ADJACENCY_TOLERANCE)
 
           assert_equal [[0, 1, :x]], result
-          assert_equal [['A', 'B']], seen_arguments
+          assert_equal [['A', 'B', true]], seen_arguments
+        end
+
+        def test_pair_computation_uses_one_serial_chunk_regardless_of_pair_count
+          [10, 20_001].each do |pair_count|
+            service = build_service
+            pairs = Array.new(pair_count, [0, 1]).freeze
+            service.define_singleton_method(:candidate_pair_indices) do |_snapshots, _tolerance|
+              pairs
+            end
+            calls = []
+            caller_thread = Thread.current
+            service.define_singleton_method(:compute_pair_chunk) do |_snapshots, pair_indices, _tolerance|
+              calls << [pair_indices.length, Thread.current]
+              []
+            end
+
+            result = service.send(:compute_pair_results, [{ snapshot: snapshot_for('A') }], tolerance: 0.001)
+
+            assert_empty result
+            assert_equal [[pair_count, caller_thread]], calls
+            assert_equal pair_count, service.instance_variable_get(:@last_pair_comparison_count)
+          end
+        end
+
+        def test_parallel_constants_and_helpers_are_removed
+          refute AdjacencyService.const_defined?(:MIN_PARALLEL_PAIRS, false)
+          refute AdjacencyService.const_defined?(:PAIR_CHUNK_SIZE, false)
+          refute AdjacencyService.const_defined?(:MAX_WORKERS, false)
+          refute_includes AdjacencyService.private_instance_methods, :compute_pair_results_in_parallel
+          refute_includes AdjacencyService.private_instance_methods, :worker_count
+        end
+
+        def test_candidate_pairs_skip_redundant_snapshot_bounds_check
+          service = build_service
+          seen_arguments = []
+          Utils::Geometry.define_singleton_method(:adjacency_axis_from_snapshots) do |snapshot1, snapshot2, tolerance:, bounds_checked: false|
+            seen_arguments << [snapshot1[:id], snapshot2[:id], tolerance, bounds_checked]
+            :x
+          end
+          entries = [
+            { snapshot: snapshot_for('A', bounds: bounds([0, 0, 0], [1, 1, 1])) },
+            { snapshot: snapshot_for('B', bounds: bounds([1, 0, 0], [2, 1, 1])) },
+            { snapshot: snapshot_for('C', bounds: bounds([10, 10, 10], [11, 11, 11])) }
+          ]
+
+          result = service.send(:compute_pair_results, entries, tolerance: 0.001)
+
+          assert_equal [[0, 1, :x]], result
+          assert_equal [['A', 'B', 0.001, true]], seen_arguments
+          assert_equal 1, service.instance_variable_get(:@last_pair_comparison_count)
         end
 
         def test_adjacency_and_validation_share_topology_tolerance
@@ -167,6 +219,14 @@ module ULOL
         end
 
         private
+
+        def build_service
+          AdjacencyService.new(
+            FakeRegistry.new([]),
+            transition_builder: proc {},
+            transition_eraser: proc {}
+          )
+        end
 
         def stub_entity_axis(axis)
           Utils::Geometry.define_singleton_method(:adjacency_axis) do |_entity1, _entity2|
@@ -178,8 +238,8 @@ module ULOL
           Utils::Geometry.define_singleton_method(:adjacency_snapshot) do |entity|
             entity.snapshot
           end
-          Utils::Geometry.define_singleton_method(:adjacency_axis_from_snapshots) do |snapshot1, snapshot2, tolerance:|
-            seen_arguments << [snapshot1[:id], snapshot2[:id]] if seen_arguments
+          Utils::Geometry.define_singleton_method(:adjacency_axis_from_snapshots) do |snapshot1, snapshot2, tolerance:, bounds_checked: false|
+            seen_arguments << [snapshot1[:id], snapshot2[:id], bounds_checked] if seen_arguments
             snapshot1[:adjacent_to].include?(snapshot2[:id]) ? axis : nil
           end
         end
@@ -198,13 +258,17 @@ module ULOL
           end.new(true)
         end
 
-        def snapshot_for(id, adjacent_to: [])
+        def snapshot_for(id, adjacent_to: [], bounds: bounds([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]))
           {
             id: id,
             adjacent_to: adjacent_to,
-            bounds: { min: [0.0, 0.0, 0.0], max: [1.0, 1.0, 1.0] },
+            bounds: bounds,
             faces: []
           }.freeze
+        end
+
+        def bounds(minimum, maximum)
+          { min: minimum, max: maximum }
         end
 
         class FakeRegistry
