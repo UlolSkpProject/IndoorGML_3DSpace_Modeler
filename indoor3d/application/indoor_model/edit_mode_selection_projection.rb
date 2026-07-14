@@ -77,7 +77,8 @@ module ULOL
             mode: 'solid_groups',
             solid_group_count: jobs.length,
             classification: solid_groups_classification(jobs),
-            classification_locked: solid_groups_classification_locked_by_tag?(jobs)
+            classification_locked: solid_groups_classification_locked_by_tag?(jobs),
+            storey: solid_groups_storey(jobs)
           }
         end
 
@@ -114,6 +115,11 @@ module ULOL
 
         def solid_groups_classification_locked_by_tag?(jobs)
           !common_tag_classification(jobs).nil?
+        end
+
+        def solid_groups_storey(jobs)
+          storeys = jobs.map { |job| job[:storey].to_s }.reject(&:empty?).uniq
+          storeys.length == 1 ? storeys.first : CellSpace::DEFAULT_STOREY
         end
 
         def common_tag_classification(groups_or_jobs)

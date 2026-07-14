@@ -22,10 +22,17 @@ module ULOL
               return
             end
 
-            if conversion_jobs.any? { |job| job[:target].nil? }
-              cell_type, category_code = prompt_cell_space_type_and_category('Convert Solid Groups to CellSpace')
-              return if cell_type.nil?
-            end
+            targets = conversion_jobs.map { |job| job[:target] }.compact.uniq
+            storeys = conversion_jobs.map { |job| job[:storey].to_s }.reject(&:empty?).uniq
+            creation_options = prompt_cell_space_creation_options(
+              'Convert Solid Groups to CellSpace',
+              default_target: targets.length == 1 ? targets.first : nil,
+              default_storey: storeys.length == 1 ? storeys.first : CellSpace::DEFAULT_STOREY
+            )
+            return unless creation_options
+
+            cell_type, category_code, storey = creation_options
+            conversion_jobs = conversion_jobs.map { |job| job.merge(storey: storey) }
 
             result = indoor_model.convert_cell_space_jobs_bulk(
               conversion_jobs,

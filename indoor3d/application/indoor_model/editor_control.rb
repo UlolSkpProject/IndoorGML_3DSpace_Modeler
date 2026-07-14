@@ -338,7 +338,7 @@ module ULOL
             nil
           end
 
-          def convert_selected_solid_groups_to_cell_spaces(selection_value)
+          def convert_selected_solid_groups_to_cell_spaces(selection_value, storey = nil)
             return false if validation_focus_recheck_running?
 
             begin
@@ -349,6 +349,8 @@ module ULOL
               end
               jobs = selected_cell_space_conversion_jobs
               return false if jobs.empty?
+              requested_storey = storey.to_s.strip
+              jobs = jobs.map { |job| job.merge(storey: requested_storey) } unless requested_storey.empty?
 
               original_active_path = ActivePathController.new(model, logger: IndoorCore::Logger).snapshot
               result = convert_cell_space_jobs_bulk(
