@@ -10,11 +10,12 @@ module ULOL
           private
 
           def ensure_space_features_groups(transparent: false)
-            with_indoor_model_operation('IndoorGML Ensure SpaceFeatures Groups', transparent: transparent) do
+            merged = false
+            group = with_indoor_model_operation('IndoorGML Ensure SpaceFeatures Groups', transparent: transparent) do
               Utils::Materials.ensure_all()
 
               entities = (@model || Sketchup.active_model).entities
-              @primal_group = find_group(entities, PRIMAL_GROUP_NAME)
+              @primal_group, merged = resolve_and_merge_primal_groups(entities)
               unless @primal_group&.valid?
                 @primal_group = entities.add_group
                 @primal_group.name = PRIMAL_GROUP_NAME
@@ -23,13 +24,17 @@ module ULOL
               write_space_features_attributes(@primal_group, PRIMAL_GROUP_FEATURE)
               ensure_space_features_origin_point(@primal_group)
               attach_entities_observers
+              @primal_group
             end
+            refresh_runtime_after_primal_merge if merged
+            group
           end
 
           def find_existing_space_features_groups
             entities = (@model || Sketchup.active_model).entities
-            @primal_group = find_group(entities, PRIMAL_GROUP_NAME)
+            @primal_group, merged = resolve_and_merge_primal_groups(entities)
             IndoorCore::Logger.puts '[IndoorGML] PrimalSpaceFeatures group not found during refresh.' unless @primal_group&.valid?
+            merged
           end
 
           def attach_existing_space_features_observers
@@ -170,12 +175,121 @@ module ULOL
 
             case feature
             when PRIMAL_GROUP_FEATURE
-              @primal_group = entity
+              entities = (@model || Sketchup.active_model).entities
+              @primal_group, merged = resolve_and_merge_primal_groups(entities)
+              @primal_group ||= entity
               attach_space_features_observer(@primal_group, PRIMAL_GROUP_NAME)
               write_space_features_attributes(@primal_group, PRIMAL_GROUP_FEATURE)
               ensure_space_features_origin_point(@primal_group)
               attach_entities_observer(:primal, @primal_group.entities, @primal_entities_observer)
+              refresh_runtime_after_primal_merge if merged
             end
+          end
+
+          def resolve_and_merge_primal_groups(entities)
+            candidates = primal_group_candidates(entities)
+            canonical = canonical_primal_group(entities, candidates)
+            return [canonical, false] unless canonical&.valid?
+
+            duplicates = candidates.reject { |group| group == canonical }
+            return [canonical, false] if duplicates.empty?
+
+            @primal_group = canonical
+            merge_duplicate_primal_groups(canonical, duplicates)
+            [canonical, true]
+          end
+
+          def primal_group_candidates(entities)
+            entities.grep(Sketchup::Group).select do |group|
+              group&.valid? && (
+                indoor_feature(group) == PRIMAL_GROUP_FEATURE ||
+                group.name.to_s == PRIMAL_GROUP_NAME
+              )
+            end
+          end
+
+          def canonical_primal_group(entities, candidates)
+            root_groups = entities.grep(Sketchup::Group)
+            if @primal_group&.valid? && root_groups.include?(@primal_group)
+              return @primal_group
+            end
+
+            candidates.find do |group|
+              indoor_feature(group) == PRIMAL_GROUP_FEATURE && group.name.to_s == PRIMAL_GROUP_NAME
+            end || candidates.find do |group|
+              indoor_feature(group) == PRIMAL_GROUP_FEATURE
+            end || candidates.find do |group|
+              group.name.to_s == PRIMAL_GROUP_NAME
+            end
+          end
+
+          def merge_duplicate_primal_groups(canonical, duplicates)
+            with_guard_flag(:@merging_space_features) do
+              Array(duplicates).each do |duplicate|
+                merge_duplicate_primal_group(canonical, duplicate)
+              end
+            end
+            true
+          end
+
+          def merge_duplicate_primal_group(canonical, duplicate)
+            return false unless canonical&.valid? && duplicate&.valid?
+
+            children = duplicate.entities.grep(Sketchup::Group).select do |child|
+              child&.valid? && indoor_feature(child) == 'CellSpace'
+            end
+            copies = []
+            children.each do |child|
+              transformation = canonical.transformation.inverse * duplicate.transformation * child.transformation
+              copy = EntityCopyHelper.copy_instance(
+                source: child,
+                target_entities: canonical.entities,
+                transformation: transformation,
+                convert_to_group: :source_group,
+                make_unique: :source_group,
+                copy_attributes: [:name, :material, :layer, :visible],
+                attribute_copier: method(:copy_indoor_attributes)
+              )
+              copies << [child, copy]
+            end
+
+            copies.each do |child, _copy|
+              cleanup_merged_primal_child_tracking(child)
+            end
+            cleanup_merged_primal_group_tracking(duplicate)
+            duplicate.erase! if duplicate.valid?
+            IndoorCore::Logger.puts "[IndoorGML] Duplicate PrimalSpaceFeatures merged: cells=#{copies.length}"
+            true
+          rescue StandardError
+            Array(copies).each do |_child, copy|
+              copy.erase! if copy&.valid?
+            rescue StandardError
+              nil
+            end
+            raise
+          end
+
+          def cleanup_merged_primal_child_tracking(child)
+            delete_entity_observer_key(@cell_space_observed_ids, child)
+            @cell_space_change_snapshots.delete(entity_observer_key(child))
+            @scene_group_guard.untrack(child)
+          rescue StandardError
+            nil
+          end
+
+          def cleanup_merged_primal_group_tracking(group)
+            delete_entity_observer_key(@space_features_observed_ids, group)
+            @space_features_change_snapshots.delete(entity_observer_key(group))
+            @entities_observed_ids.delete([:primal, group.entities.object_id])
+            @scene_group_guard.untrack(group)
+          rescue StandardError
+            nil
+          end
+
+          def refresh_runtime_after_primal_merge
+            return true if guard_active?(:@refreshing_runtime)
+
+            refresh_runtime_data
           end
 
           def ensure_space_features_origin_point(group)
