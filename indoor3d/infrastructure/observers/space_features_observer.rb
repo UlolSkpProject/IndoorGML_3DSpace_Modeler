@@ -21,8 +21,6 @@ module ULOL
         end
 
         def onEraseEntity(entity)
-          return unless indoor_gml_entity?(entity)
-
           log_event('onEraseEntity', entity)
           @indoor_model.space_features_erased(entity)
         end

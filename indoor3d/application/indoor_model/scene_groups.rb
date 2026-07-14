@@ -36,6 +36,7 @@ module ULOL
             model = @model || Sketchup.active_model
             attach_entities_observer(:root, model.entities, @root_entities_observer)
             attach_space_features_observer(@primal_group, PRIMAL_GROUP_NAME, normalize: false)
+            @root_entities_observer.track_entity(@primal_group) if @primal_group&.valid?
             attach_entities_observer(:primal, @primal_group.entities, @primal_entities_observer) if @primal_group&.valid?
             @primal_entities_observer.track_entities(@primal_group.entities) if @primal_group&.valid?
           end
@@ -146,6 +147,7 @@ module ULOL
           def attach_entities_observers
             model = @model || Sketchup.active_model
             attach_entities_observer(:root, model.entities, @root_entities_observer)
+            @root_entities_observer.track_entity(@primal_group) if @primal_group&.valid?
             attach_entities_observer(:primal, @primal_group.entities, @primal_entities_observer) if @primal_group&.valid?
             @primal_entities_observer.track_entities(@primal_group.entities) if @primal_group&.valid?
           end

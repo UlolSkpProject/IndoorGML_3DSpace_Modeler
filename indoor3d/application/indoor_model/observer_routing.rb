@@ -248,12 +248,44 @@ module ULOL
 
           def space_features_erased(entity)
             begin
-              @primal_group = nil if entity == @primal_group
+              primal_group_erased = entity == @primal_group
+              @primal_group = nil if primal_group_erased
               delete_entity_observer_key(@space_features_observed_ids, entity)
               @scene_group_guard.untrack(entity)
-            rescue StandardError
-              nil
+              clear_runtime_after_primal_group_erased if primal_group_erased
+              true
+            rescue StandardError => e
+              IndoorCore::Logger.puts "[IndoorGML] SpaceFeatures erase cleanup failed: #{e.class}: #{e.message}"
+              false
             end
+          end
+
+          def root_entity_removed(entity_id)
+            primal_group = @primal_group
+            return false unless primal_group
+            return false unless primal_group.entityID == entity_id
+
+            space_features_erased(primal_group)
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Root entity removal cleanup failed: #{e.class}: #{e.message}"
+            false
+          end
+
+          private
+
+          def clear_runtime_after_primal_group_erased
+            reset_runtime_collections
+            @cell_space_observed_ids.clear
+            @cell_space_change_snapshots.clear
+            @primal_entities_observer.clear_tracked_entities if @primal_entities_observer.respond_to?(:clear_tracked_entities)
+            @root_entities_observer.clear_tracked_entities if @root_entities_observer.respond_to?(:clear_tracked_entities)
+            @scene_group_guard.restore!({}) if @scene_group_guard.respond_to?(:restore!)
+            if @editor_session&.validation_focus_active?
+              @editor_session.clear_validation_focus
+            end
+            invalidate_overlay_transition_points
+            Sketchup.active_model&.active_view&.invalidate
+            true
           end
         end
       end

@@ -60,16 +60,37 @@ module ULOL
           }
         end
 
+        def synchronize_within(cell_spaces, transition_builder: nil, transition_eraser: nil)
+          started_at = monotonic_time
+          entries = adjacency_snapshot_entries(cell_spaces)
+          pair_results = compute_pair_results(entries, tolerance: Utils::Geometry::ADJACENCY_TOLERANCE)
+          apply_pair_results(
+            entries,
+            pair_results,
+            transition_builder: transition_builder || @transition_builder,
+            transition_eraser: transition_eraser || @transition_eraser,
+            stale_pair_keys: pair_keys_within(entries)
+          )
+          @last_metrics = {
+            total_duration: elapsed_since(started_at),
+            pair_comparison_count: @last_pair_comparison_count.to_i,
+            adjacency_detailed_computation: @last_detailed_computation_duration.to_f
+          }
+        end
+
         def erase_for(cell_space)
           return if cell_space.nil?
 
-          @registry.adjacent_pair_keys.each do |pair_key|
-            @transition_eraser.call(pair_key) if pair_key.split(':').include?(cell_space.id)
-          end
-
-          @registry.transition_pair_keys.each do |pair_key|
-            @transition_eraser.call(pair_key) if pair_key.split(':').include?(cell_space.id)
-          end
+          pair_keys = if @registry.respond_to?(:adjacent_pair_keys_for_cell) &&
+                         @registry.respond_to?(:transition_pair_keys_for_cell)
+                        @registry.adjacent_pair_keys_for_cell(cell_space.id) |
+                          @registry.transition_pair_keys_for_cell(cell_space.id)
+                      else
+                        (@registry.adjacent_pair_keys | @registry.transition_pair_keys).select do |pair_key|
+                          pair_key.split(':').include?(cell_space.id)
+                        end
+                      end
+          pair_keys.each { |pair_key| @transition_eraser.call(pair_key) }
         end
 
         def cell_pair_key(cell1, cell2)
@@ -78,8 +99,8 @@ module ULOL
 
         private
 
-        def adjacency_snapshot_entries
-          @registry.cell_spaces.each_with_object([]) do |cell_space, entries|
+        def adjacency_snapshot_entries(cell_spaces = @registry.cell_spaces)
+          Array(cell_spaces).uniq.each_with_object([]) do |cell_space, entries|
             next if cell_space.nil? || !cell_space.valid?
             next unless cell_space.duality_state&.valid?
 
@@ -171,7 +192,7 @@ module ULOL
           end
         end
 
-        def apply_pair_results(entries, pair_results, transition_builder:, transition_eraser:)
+        def apply_pair_results(entries, pair_results, transition_builder:, transition_eraser:, stale_pair_keys: nil)
           next_pairs = {}
           pair_results.each do |index1, index2, adjacency_axis|
             cell1 = entries[index1][:cell_space]
@@ -182,7 +203,10 @@ module ULOL
             next_pairs[pair_key] = [cell1, cell2]
           end
 
-          stale_pair_keys(next_pairs.keys).each { |pair_key| transition_eraser.call(pair_key) }
+          stale_keys = stale_pair_keys || self.stale_pair_keys(next_pairs.keys)
+          stale_keys.reject { |pair_key| next_pairs.key?(pair_key) }.each do |pair_key|
+            transition_eraser.call(pair_key)
+          end
           next_pairs.each do |pair_key, (cell1, cell2)|
             @registry.set_adjacent_pair(pair_key, cell1, cell2)
             transition_builder.call(cell1, cell2)
@@ -194,6 +218,30 @@ module ULOL
           (@registry.adjacent_pair_keys | @registry.transition_pair_keys).reject do |pair_key|
             next_pair_key_set[pair_key]
           end
+        end
+
+        def pair_keys_within(entries)
+          cells = entries.map { |entry| entry[:cell_space] }
+          keys = []
+          cells.each_with_index do |cell1, index|
+            cells[(index + 1)..].to_a.each do |cell2|
+              pair_key = cell_pair_key(cell1, cell2)
+              adjacent = if @registry.respond_to?(:adjacent_pair?)
+                           @registry.adjacent_pair?(pair_key)
+                         else
+                           @registry.adjacent_pair_keys.include?(pair_key)
+                         end
+              transition = if @registry.respond_to?(:transition_for_pair)
+                             !@registry.transition_for_pair(pair_key).nil?
+                           else
+                             @registry.transition_pair_keys.include?(pair_key)
+                           end
+              next unless adjacent || transition
+
+              keys << pair_key
+            end
+          end
+          keys
         end
 
         def transition_allowed_for_axis?(adjacency_axis)

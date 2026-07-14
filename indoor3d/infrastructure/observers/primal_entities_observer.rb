@@ -38,6 +38,10 @@ module ULOL
           entities.to_a.each { |entity| track_entity(entity) }
         end
 
+        def clear_tracked_entities
+          @indoor_entity_ids.clear
+        end
+
         private
 
         def untrack_entity_id(entity_id)
