@@ -42,6 +42,7 @@ var totalTransitionCount = document.getElementById('totalTransitionCount');
 var currentMode = null;
 var currentSelectionKey = null;
 var fixMode = false;
+var validationBusy = false;
 var currentStoreyRangeAllowed = false;
 var suppressFilterEvents = false;
 var currentVisibilityFilter = {
@@ -390,7 +391,8 @@ function setStorey(value, rangeAllowed) {
   storeyFromLevel.value = parsed.from.level;
   storeyToKind.value = currentStoreyRangeAllowed ? parsed.to.kind : parsed.from.kind;
   storeyToLevel.value = currentStoreyRangeAllowed ? parsed.to.level : parsed.from.level;
-  setControlLocked([storeyToKind, storeyToLevel], !currentStoreyRangeAllowed);
+  setControlLocked([storeyFromKind, storeyFromLevel], validationBusy);
+  setControlLocked([storeyToKind, storeyToLevel], validationBusy || !currentStoreyRangeAllowed);
   storeyFields.classList.toggle('is-single-storey', !currentStoreyRangeAllowed);
   show(storeyFields);
 }
@@ -401,6 +403,7 @@ function setStorey(value, rangeAllowed) {
 function init(config) {
   config = config || {};
   fixMode = Boolean(config.fixMode);
+  validationBusy = Boolean(config.validationBusy);
 
   modeTitle.textContent = fixMode ? '수정 모드' : '편집 모드';
   finishButton.textContent = fixMode ? '수정 완료' : '편집 완료';
@@ -415,6 +418,7 @@ function init(config) {
   applyFilterDisabled();
 
   setVisible(recheckErrorsButton, fixMode);
+  setControlLocked([finishButton, recheckErrorsButton], validationBusy);
   updateSelection(null);
   fitDialogToContent();
 }
@@ -424,6 +428,9 @@ function init(config) {
 // ────────────────────────────────────────────────────────────────
 function updateSelection(snapshot) {
   var nextMode = snapshot && snapshot.mode ? snapshot.mode : 'empty';
+  if (snapshot && Object.prototype.hasOwnProperty.call(snapshot, 'validationBusy')) {
+    validationBusy = Boolean(snapshot.validationBusy);
+  }
   var nextKey = selectionKey(snapshot);
 
   if (nextKey === currentSelectionKey) {
@@ -436,6 +443,7 @@ function updateSelection(snapshot) {
   setVisible(filterPanel, true);
   setVisible(clearAllButton, !fixMode && nextMode === 'empty');
   setVisible(recheckErrorsButton, fixMode);
+  setControlLocked([finishButton, recheckErrorsButton], validationBusy);
   renderVisibilityFilter((snapshot || {}).visibilityFilter || currentVisibilityFilter);
 
   if (nextMode === 'solid_groups') {
@@ -468,6 +476,7 @@ function selectionKey(snapshot) {
     snapshot.name || '',
     snapshot.classification || '',
     snapshot.classificationLocked ? 'locked' : 'unlocked',
+    snapshot.validationBusy ? 'validation-busy' : 'validation-idle',
     snapshot.storey || '',
     snapshot.storeyEditable ? 'storey-editable' : 'storey-readonly',
     snapshot.storeyRangeAllowed ? 'storey-range' : 'storey-single',
@@ -538,7 +547,7 @@ function renderSolidGroups(snapshot) {
 
   setControlLocked(
     [solidClassification, convertSelectedButton],
-    snapshot.classificationLocked
+    validationBusy || snapshot.classificationLocked
   );
 }
 
@@ -557,7 +566,7 @@ function renderCellSpaces(snapshot) {
 
   setControlLocked(
     [selectedClassification, changeTypeButton],
-    snapshot.classificationLocked
+    validationBusy || snapshot.classificationLocked
   );
 }
 
@@ -574,7 +583,7 @@ function renderCellSpace(snapshot) {
 
   setControlLocked(
     [selectedClassification, changeTypeButton],
-    snapshot.classificationLocked
+    validationBusy || snapshot.classificationLocked
   );
 }
 
