@@ -28,6 +28,21 @@ module ULOL
           assert_equal "[IndoorGML] validation focus ref-cells: [\"A\", \"B\"]\n", output
         end
 
+        def test_row_selection_logs_the_memory_backed_refs_that_are_applied
+          model = FakeIndoorModel.new(nil)
+
+          output, = capture_io do
+            model.set_validation_focus_highlight(
+              %w[cell_A cell_B],
+              '203',
+              row_id: 'validation-error-row-0',
+              row_cells: %w[A B]
+            )
+          end
+
+          assert_equal "[IndoorGML] validation focus ref-cells: [\"A\", \"B\"]\n", output
+        end
+
         class FakeIndoorModel
           include IndoorModel::EditorControl
 
@@ -36,6 +51,14 @@ module ULOL
           def initialize(payload)
             @editor_session = Struct.new(:payload) do
               def add_validation_focus_highlight_cell(_cell_space)
+                payload
+              end
+
+              def set_validation_focus_highlight(*)
+                true
+              end
+
+              def validation_focus_row(_row_id)
                 payload
               end
             end.new(payload)

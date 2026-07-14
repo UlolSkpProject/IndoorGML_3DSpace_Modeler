@@ -293,30 +293,46 @@ module ULOL
           progress&.on_validation_focus_cells do |cell_ids, code, state_ids, transition_ids, row_id|
             next unless session.guard_report_action
 
-            refs = { cells: cell_ids, states: state_ids, transitions: transition_ids }
+            incoming_refs = { cells: cell_ids, states: state_ids, transitions: transition_ids }
             indoor_model = session.indoor_model
+            row = if indoor_model.validation_focus_active? && !row_id.to_s.empty? && indoor_model.respond_to?(:validation_focus_row)
+                    indoor_model.validation_focus_row(row_id)
+                  end
+            refs = row || incoming_refs
             row_cell_ids = validation_focus_cell_ids_for_refs(refs, indoor_model)
             if row_cell_ids.empty?
               indoor_model.set_validation_focus_highlight([], code) if indoor_model.validation_focus_active?
-            else
-              unless indoor_model.validation_focus_active?
-                report_cell_ids = validation_report_error_focus_cell_ids(result.report, indoor_model)
-                next if report_cell_ids.empty?
+              next
+            end
 
-                next unless indoor_model.begin_validation_focus_editing(
-                  report_cell_ids,
-                  row_states: validation_report_focus_row_states(result.report, indoor_model)
-                )
-              end
-              indoor_model.set_validation_focus_highlight(
-                row_cell_ids,
-                code,
-                row_id: row_id,
-                row_cells: cell_ids,
-                states: state_ids,
-                transitions: transition_ids
+            unless indoor_model.validation_focus_active?
+              report_cell_ids = validation_report_error_focus_cell_ids(result.report, indoor_model)
+              next if report_cell_ids.empty?
+
+              next unless indoor_model.begin_validation_focus_editing(
+                report_cell_ids,
+                row_states: validation_report_focus_row_states(result.report, indoor_model)
               )
             end
+
+            row ||= if !row_id.to_s.empty? && indoor_model.respond_to?(:validation_focus_row)
+                    indoor_model.validation_focus_row(row_id)
+                  end
+            refs = row || incoming_refs
+            row_cell_ids = validation_focus_cell_ids_for_refs(refs, indoor_model)
+            if row_cell_ids.empty?
+              indoor_model.set_validation_focus_highlight([], row ? row[:code] : code)
+              next
+            end
+
+            indoor_model.set_validation_focus_highlight(
+              row_cell_ids,
+              row ? row[:code] : code,
+              row_id: row_id,
+              row_cells: refs[:cells],
+              states: refs[:states],
+              transitions: refs[:transitions]
+            )
           end
           progress&.on_fix_validation_errors do
             next unless session.guard_report_action

@@ -59,16 +59,6 @@ module ULOL
             refute Val3dityRunner.shutting_down?
           end
 
-          def test_validation_focus_cells_are_logged_to_ruby_console
-            dialog = ExportProgressDialog.new
-
-            output, = capture_io do
-              dialog.send(:log_validation_focus_cells, %w[A B])
-            end
-
-            assert_equal "[IndoorGML] validation focus ref-cells: [\"A\", \"B\"]\n", output
-          end
-
           def test_report_dom_ready_flushes_queued_row_updates
             executed_scripts = []
             fake_dialog = Struct.new(:executed_scripts) do
