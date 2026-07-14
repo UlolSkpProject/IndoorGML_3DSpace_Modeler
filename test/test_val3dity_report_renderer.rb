@@ -130,6 +130,32 @@ module ULOL
             assert_includes html, 'data-cells="igg7up1f,ryok9vdg"'
             refute_includes html, 'data-cells="IF_001"'
           end
+
+          def test_dual_vertex_feature_row_uses_cell_space_id_in_error_item
+            html = Val3dityReportRenderer.new.render(
+              'validity' => false,
+              'features_overview' => [{ 'total' => 1, 'valid' => 0 }],
+              'primitives_overview' => [],
+              'parameters' => {},
+              'features' => [
+                {
+                  'id' => 'IF_001',
+                  'errors' => [
+                    {
+                      'code' => 702,
+                      'id' => 'CellSpace id=cell_hw5p10tr',
+                      'description' => 'DUAL_VERTEX_OUTSIDE_CELL'
+                    }
+                  ],
+                  'primitives' => []
+                }
+              ]
+            )
+
+            assert_includes html, 'Feature CellSpace id=cell_hw5p10tr'
+            assert_includes html, 'data-code="702" data-cells="hw5p10tr"'
+            refute_includes html, 'data-cells="IF_001"'
+          end
         end
       end
     end

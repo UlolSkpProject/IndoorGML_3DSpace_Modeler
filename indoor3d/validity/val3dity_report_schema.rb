@@ -182,7 +182,10 @@ module ULOL
             refs = empty_refs
             case row && row[:scope].to_s
             when 'Feature'
-              add_feature_ref(refs, row.dig(:context, :feature_id))
+              add_explicit_refs(refs, row[:item])
+              add_explicit_refs(refs, row.dig(:raw, 'id'))
+              add_explicit_refs(refs, row.dig(:raw, :id))
+              add_feature_ref(refs, row.dig(:context, :feature_id)) if refs.values.all?(&:empty?)
             when 'Primitive'
               add_explicit_refs(refs, row[:item])
               add_explicit_refs(refs, row.dig(:raw, 'id'))
@@ -224,8 +227,6 @@ module ULOL
               refs[:transitions] << id
             elsif id.start_with?('cell_')
               refs[:cells] << normalize_cell_ref(id)
-            else
-              refs[:cells] << id
             end
             refs.each_value(&:uniq!)
           end

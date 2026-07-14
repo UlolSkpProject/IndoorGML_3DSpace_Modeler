@@ -74,14 +74,14 @@ module ULOL
             assert_equal [], refs[:transitions]
           end
 
-          def test_feature_error_refs_use_feature_id_only
+          def test_feature_error_refs_use_explicit_error_id_before_parent_feature
             report = {
               'features' => [
                 {
-                  'id' => 'A',
+                  'id' => 'cell_A',
                   'errors' => [
                     {
-                      'id' => 'cell_B',
+                      'id' => 'CellSpace id=cell_B',
                       'code' => 302,
                       'description' => 'feature mentions cell_C state_A transition_A',
                       'details' => 'cell_D'
@@ -95,7 +95,55 @@ module ULOL
             row = Schema.error_item_rows(report).first
             refs = Schema.canonical_error_row_refs(row)
 
-            assert_equal ['A'], refs[:cells]
+            assert_equal ['B'], refs[:cells]
+            assert_equal [], refs[:states]
+            assert_equal [], refs[:transitions]
+          end
+
+          def test_feature_error_does_not_treat_untyped_container_id_as_cell_space
+            report = {
+              'features' => [
+                {
+                  'id' => 'IF_001',
+                  'errors' => [
+                    {
+                      'id' => '',
+                      'code' => 999,
+                      'description' => 'feature-level error'
+                    }
+                  ],
+                  'primitives' => []
+                }
+              ]
+            }
+
+            row = Schema.error_item_rows(report).first
+            refs = Schema.canonical_error_row_refs(row)
+
+            assert_equal({ cells: [], states: [], transitions: [] }, refs)
+          end
+
+          def test_dual_vertex_feature_error_uses_cell_space_id_from_error_item
+            report = {
+              'features' => [
+                {
+                  'id' => 'IF_001',
+                  'errors' => [
+                    {
+                      'id' => 'CellSpace id=cell_hw5p10tr',
+                      'code' => 702,
+                      'description' => 'DUAL_VERTEX_OUTSIDE_CELL'
+                    }
+                  ],
+                  'primitives' => []
+                }
+              ]
+            }
+
+            row = Schema.error_item_rows(report).first
+            refs = Schema.final_error_row_refs(row, report)
+
+            assert_equal ['hw5p10tr'], refs[:cells]
             assert_equal [], refs[:states]
             assert_equal [], refs[:transitions]
           end
