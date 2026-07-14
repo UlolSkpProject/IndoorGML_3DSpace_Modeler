@@ -121,7 +121,7 @@ module ULOL
         private
 
         def stored_scale
-          Sketchup.test_defaults[[UserPreferences::SECTION, DualOverlayPreferences::STATE_RADIUS_SCALE_KEY]]
+          Sketchup.test_defaults[[UserPreferences::SECTION, DualOverlayPreferences::STATE_SCALE_KEY]]
         end
 
         def fake_model
