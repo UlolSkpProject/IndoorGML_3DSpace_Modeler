@@ -15,6 +15,7 @@ module ULOL
           MULTI_FOCUS_RENDERING_OPTION_KEYS = %w[HideRestOfModel].freeze
 
           def initialize
+            @active = false
             @cell_ids = nil
             @focus_rows = {}
             @highlight_cell_ids = nil
@@ -26,11 +27,16 @@ module ULOL
           attr_reader :highlight_code
           attr_reader :highlight_row_id
 
+          def highlighted_row_id
+            @highlight_row_id
+          end
+
           def begin(cell_gml_ids)
             ids = normalize_ids(cell_gml_ids)
             return false if ids.empty?
 
             @cell_ids = id_hash(ids)
+            @active = true
             true
           end
 
@@ -54,7 +60,7 @@ module ULOL
           end
 
           def active?
-            @cell_ids.is_a?(Hash) && !@cell_ids.empty?
+            @active == true
           end
 
           def focus_id_count
@@ -126,6 +132,25 @@ module ULOL
             payloads
           end
 
+          def reconcile_cells(valid_cell_ids)
+            valid_ids = normalize_cell_refs(valid_cell_ids).each_with_object({}) do |cell_id, ids|
+              ids[cell_id] = true
+            end
+            payloads = []
+            @focus_rows.each do |row_id, row|
+              cells = Array(row[:cells])
+              retained = cells.select { |cell_id| valid_ids[cell_id] }
+              next if retained == cells
+
+              row[:cells] = retained
+              row[:focus_ids] = normalize_ids(retained)
+              payloads << focus_row_payload(row_id, row)
+            end
+            sync_highlight_ids_from_row
+            rebuild_focus_ids_from_rows
+            payloads
+          end
+
           def highlight_cell_spaces(cell_spaces)
             return [] unless @highlight_cell_ids.is_a?(Hash) && !@highlight_cell_ids.empty?
 
@@ -170,6 +195,7 @@ module ULOL
           end
 
           def clear
+            @active = false
             @cell_ids = nil
             @focus_rows = {}
             @highlight_cell_ids = nil
@@ -231,6 +257,41 @@ module ULOL
             row ? focus_row_payload(normalized_row_id, row) : nil
           end
 
+          def highlighted_row_cells
+            row = focus_row(@highlight_row_id)
+            row ? row[:cells] : []
+          end
+
+          def highlighted_row_focus_ids
+            row = focus_row(@highlight_row_id)
+            row ? row[:focus_ids] : []
+          end
+
+          def highlighted_row_include_cell?(cell_id)
+            highlighted_row_cells.include?(normalize_cell_ref(cell_id))
+          end
+
+          def snapshot
+            {
+              active: @active == true,
+              cell_ids: duplicate_hash(@cell_ids),
+              focus_rows: duplicate_focus_rows(@focus_rows),
+              highlight_cell_ids: duplicate_hash(@highlight_cell_ids),
+              highlight_code: @highlight_code,
+              highlight_row_id: @highlight_row_id
+            }
+          end
+
+          def restore!(snapshot)
+            @active = snapshot.key?(:active) ? snapshot[:active] == true : !snapshot[:cell_ids].nil?
+            @cell_ids = duplicate_hash(snapshot[:cell_ids])
+            @focus_rows = duplicate_focus_rows(snapshot[:focus_rows])
+            @highlight_cell_ids = duplicate_hash(snapshot[:highlight_cell_ids])
+            @highlight_code = snapshot[:highlight_code]
+            @highlight_row_id = snapshot[:highlight_row_id]
+            true
+          end
+
           private
 
           def normalize_ids(values)
@@ -287,7 +348,7 @@ module ULOL
           end
 
           def update_highlight_row_cells(add: nil, remove: nil)
-            return nil unless active? && @highlight_row_id
+            return nil unless @highlight_row_id
 
             row = @focus_rows && @focus_rows[@highlight_row_id]
             return nil unless row
@@ -321,6 +382,22 @@ module ULOL
             ids = @focus_rows.values.flat_map { |row| Array(row[:focus_ids]) }.uniq
             @cell_ids = id_hash(ids)
             true
+          end
+
+          def duplicate_hash(value)
+            value.is_a?(Hash) ? value.dup : value
+          end
+
+          def duplicate_focus_rows(rows)
+            Hash(rows).each_with_object({}) do |(row_id, row), copy|
+              copy[row_id] = {
+                cells: Array(row[:cells]).dup,
+                states: Array(row[:states]).dup,
+                transitions: Array(row[:transitions]).dup,
+                focus_ids: Array(row[:focus_ids]).dup,
+                code: row[:code].to_s
+              }
+            end
           end
 
           def focus_row_payload(row_id, row)

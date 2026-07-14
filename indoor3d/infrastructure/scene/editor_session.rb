@@ -167,6 +167,13 @@ module ULOL
         def finish
           return false unless @editing
 
+          if @indoor_model.respond_to?(:validation_focus_topology_dirty?) &&
+             @indoor_model.validation_focus_topology_dirty? &&
+             !@indoor_model.synchronize_validation_focus_topology_if_dirty
+            IndoorCore::Logger.puts '[IndoorGML] Edit mode finish stopped: validation focus topology sync failed'
+            return false
+          end
+
           model = Sketchup.active_model()
           with_active_path_enforcement_suspended do
             active_path_controller.prepare_for_finish(model)
@@ -325,30 +332,66 @@ module ULOL
           validation_focus_controller.highlight_active?
         end
 
-        def add_validation_focus_highlight_cell(cell_space)
+        def validation_focus_highlight_row_id
+          validation_focus_controller.highlight_row_id
+        end
+
+        def validation_focus_highlight_row_cells
+          validation_focus_controller.highlighted_row_cells
+        end
+
+        def validation_focus_highlight_row_include_cell?(cell_space)
+          validation_focus_controller.highlighted_row_include_cell?(cell_space&.id)
+        end
+
+        def validation_focus_snapshot
+          validation_focus_controller.snapshot
+        end
+
+        def restore_validation_focus_snapshot(snapshot, refresh: true)
+          validation_focus_controller.restore!(snapshot)
+          refresh_validation_focus_after_mutation if refresh
+        end
+
+        def add_validation_focus_highlight_cell(cell_space, refresh: true)
           payload = validation_focus_controller.add_highlight_cell(cell_space&.id)
           return nil unless payload
 
-          apply_validation_focus_visibility
-          invalidate_overlay_transition_points
-          invalidate_view(Sketchup.active_model())
+          refresh_validation_focus_after_mutation if refresh
           payload
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight add failed: #{e.class}: #{e.message}"
           nil
         end
 
-        def remove_validation_focus_highlight_cell(cell_space)
+        def remove_validation_focus_highlight_cell(cell_space, refresh: true)
           payloads = validation_focus_controller.remove_cell(cell_space&.id)
           return [] if payloads.empty?
 
-          apply_validation_focus_visibility
-          invalidate_overlay_transition_points
-          invalidate_view(Sketchup.active_model())
+          refresh_validation_focus_after_mutation if refresh
           payloads
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight remove failed: #{e.class}: #{e.message}"
           []
+        end
+
+        def reconcile_validation_focus_cells(cell_spaces)
+          payloads = validation_focus_controller.reconcile_cells(Array(cell_spaces).map(&:id))
+          refresh_validation_focus_after_mutation unless payloads.empty?
+          payloads
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Validation focus cell reconciliation failed: #{e.class}: #{e.message}"
+          []
+        end
+
+        def refresh_validation_focus_after_mutation
+          apply_validation_focus_visibility
+          invalidate_overlay_transition_points
+          invalidate_view(Sketchup.active_model())
+          true
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Validation focus mutation refresh failed: #{e.class}: #{e.message}"
+          false
         end
 
         def validation_focus_elements

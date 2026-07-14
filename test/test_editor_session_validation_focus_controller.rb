@@ -126,6 +126,59 @@ module ULOL
           assert_equal false, controller.visible_cell_space?(cell_c)
         end
 
+        def test_highlighted_row_can_replace_its_last_cell_without_losing_row_selection
+          controller = EditorSession::ValidationFocusController.new
+          controller.begin(['cell_A'])
+          controller.set_focus_rows([{ id: 'row-1', cells: ['A'], focus_ids: ['cell_A'], code: '203' }])
+          controller.set_highlight(['cell_A'], '203', row_id: 'row-1', row_cells: ['A'])
+
+          removed = controller.remove_cell('A')
+          assert controller.active?
+          added = controller.add_highlight_cell('cell_B')
+
+          assert_equal 'row-1', controller.highlight_row_id
+          assert_equal [], removed.first[:cells]
+          assert_equal ['B'], controller.highlighted_row_cells
+          assert_equal %w[B cell_B], controller.highlighted_row_focus_ids
+          assert_equal ['B'], added[:cells]
+          assert_equal true, controller.highlighted_row_include_cell?('B')
+          assert_equal true, controller.highlighted_row_include_cell?('cell_B')
+        end
+
+        def test_snapshot_restore_recovers_focus_rows_and_highlight
+          controller = EditorSession::ValidationFocusController.new
+          controller.begin(['cell_A'])
+          controller.set_focus_rows([{ id: 'row-1', cells: ['A'], focus_ids: ['cell_A'], code: '203' }])
+          controller.set_highlight(['cell_A'], '203', row_id: 'row-1', row_cells: ['A'])
+          snapshot = controller.snapshot
+
+          controller.remove_cell('A')
+          controller.add_highlight_cell('B')
+          controller.restore!(snapshot)
+
+          assert_equal ['A'], controller.highlighted_row_cells
+          assert_equal ['cell_A'], controller.highlighted_row_focus_ids
+          assert_equal 'row-1', controller.highlight_row_id
+        end
+
+        def test_reconcile_cells_only_removes_stale_refs_without_guessing_new_cells
+          controller = EditorSession::ValidationFocusController.new
+          controller.begin(%w[cell_A cell_B])
+          controller.set_focus_rows([
+                                      { id: 'row-1', cells: %w[A B], focus_ids: %w[cell_A cell_B], code: '203' },
+                                      { id: 'row-2', cells: %w[B C], focus_ids: %w[cell_B cell_C], code: '204' }
+                                    ])
+          controller.set_highlight(%w[cell_A cell_B], '203', row_id: 'row-1', row_cells: %w[A B])
+
+          payloads = controller.reconcile_cells(%w[B D])
+
+          assert_equal %w[row-1 row-2], payloads.map { |payload| payload[:row_id] }
+          assert_equal ['B'], controller.focus_row('row-1')[:cells]
+          assert_equal ['B'], controller.focus_row('row-2')[:cells]
+          refute_includes controller.focus_row('row-1')[:cells], 'D'
+          assert_equal ['B'], controller.highlighted_row_cells
+        end
+
         def test_rendering_options_are_captured_and_restored_for_multi_cell_focus
           options = {
             'HideRestOfModel' => true,

@@ -42,16 +42,6 @@ module ULOL
               return nil
             end
 
-            progress = IndoorGmlConverter::ExportProgressDialog.active || IndoorGmlConverter::ExportProgressDialog.new
-            progress.clear_validation_focus_selection if progress.respond_to?(:clear_validation_focus_selection)
-            @editor_session.set_validation_focus_highlight([], '')
-
-            focus = @editor_session.validation_focus_elements
-            if focus[:cell_spaces].empty?
-              UI.messagebox('재검사할 오류 CellSpace가 없습니다.')
-              return nil
-            end
-
             state = {
               session: nil,
               completed: false,
@@ -59,6 +49,27 @@ module ULOL
               workspace_cleaned: false
             }
             begin_validation_focus_recheck(state)
+            if respond_to?(:validation_focus_topology_dirty?) &&
+               validation_focus_topology_dirty? &&
+               !synchronize_validation_focus_topology_if_dirty
+              state[:completed] = true
+              finish_validation_focus_recheck(state)
+              UI.messagebox('전체 topology 동기화에 실패하여 오류 요소 재검사를 시작할 수 없습니다.')
+              return nil
+            end
+
+            progress = IndoorGmlConverter::ExportProgressDialog.active || IndoorGmlConverter::ExportProgressDialog.new
+            progress.clear_validation_focus_selection if progress.respond_to?(:clear_validation_focus_selection)
+            @editor_session.set_validation_focus_highlight([], '')
+
+            focus = @editor_session.validation_focus_elements
+            if focus[:cell_spaces].empty?
+              state[:completed] = true
+              finish_validation_focus_recheck(state)
+              UI.messagebox('재검사할 오류 CellSpace가 없습니다.')
+              return nil
+            end
+
             state[:workspace] = IndoorGmlConverter::ValidationRunWorkspace.create(
               base_dir: IndoorGmlConverter::GmlExporter.output_root
             )
@@ -108,7 +119,6 @@ module ULOL
             return false if validation_focus_recheck_running?
 
             with_guard_flag(:@finishing_editing) do
-              @editor_session.restore_validation_focus_visibility if @editor_session.validation_focus_active?
               finished = @editor_session.finish()
               if finished
                 normalize_primal_children_for_finish()
@@ -125,8 +135,9 @@ module ULOL
             result = UI.messagebox("CellSpace 편집을 종료하시겠습니까?", MB_YESNO)
             return false unless result == IDYES
 
-            finish_editing
-            return true
+            finished = finish_editing
+            UI.messagebox('전체 topology 동기화에 실패하여 편집 모드를 종료하지 못했습니다.') unless finished
+            finished
           end
 
           def editing?
@@ -205,17 +216,55 @@ module ULOL
             @editor_session.validation_focus_highlight_active?
           end
 
+          def validation_focus_highlight_row_id
+            @editor_session.validation_focus_highlight_row_id
+          end
+
+          def with_validation_focus_mutation_batch
+            return yield if validation_focus_highlight_row_id.to_s.empty?
+            return yield if @validation_focus_mutation_depth.to_i.positive?
+
+            snapshot = @editor_session.validation_focus_snapshot
+            topology_dirty_before = validation_focus_topology_dirty? if respond_to?(:validation_focus_topology_dirty?)
+            @validation_focus_mutation_depth = 1
+            @validation_focus_pending_row_payloads = {}
+            result = yield
+            @validation_focus_mutation_depth = 0
+            flush_validation_focus_mutation_batch
+            result
+          rescue StandardError
+            @validation_focus_mutation_depth = 0
+            discard_validation_focus_row_topology_sync
+            @validation_focus_pending_row_payloads = {}
+            @validation_focus_topology_dirty = topology_dirty_before == true
+            @editor_session.restore_validation_focus_snapshot(snapshot) if snapshot
+            raise
+          ensure
+            @validation_focus_mutation_depth = 0
+          end
+
           def add_validation_focus_highlight_cell(cell_space)
-            payload = @editor_session.add_validation_focus_highlight_cell(cell_space)
+            deferred = @validation_focus_mutation_depth.to_i.positive?
+            payload = if deferred
+                        @editor_session.add_validation_focus_highlight_cell(cell_space, refresh: false)
+                      else
+                        @editor_session.add_validation_focus_highlight_cell(cell_space)
+                      end
             return nil unless payload
 
             puts "[IndoorGML] validation focus ref-cells: #{Array(payload[:cells]).inspect}"
-            update_validation_focus_report_row(payload)
+            deferred ? queue_validation_focus_report_row(payload) : update_validation_focus_report_row(payload)
           end
 
           def remove_validation_focus_highlight_cell(cell_space)
-            Array(@editor_session.remove_validation_focus_highlight_cell(cell_space)).each do |payload|
-              update_validation_focus_report_row(payload)
+            deferred = @validation_focus_mutation_depth.to_i.positive?
+            payloads = if deferred
+                         @editor_session.remove_validation_focus_highlight_cell(cell_space, refresh: false)
+                       else
+                         @editor_session.remove_validation_focus_highlight_cell(cell_space)
+                       end
+            Array(payloads).each do |payload|
+              deferred ? queue_validation_focus_report_row(payload) : update_validation_focus_report_row(payload)
             end
           end
 
@@ -472,6 +521,23 @@ module ULOL
 
           private
 
+          def queue_validation_focus_report_row(payload)
+            return nil unless payload
+
+            (@validation_focus_pending_row_payloads ||= {})[payload[:row_id]] = payload
+            payload
+          end
+
+          def flush_validation_focus_mutation_batch
+            flush_validation_focus_row_topology_sync
+            @editor_session.refresh_validation_focus_after_mutation
+            Hash(@validation_focus_pending_row_payloads).each_value do |payload|
+              update_validation_focus_report_row(payload)
+            end
+            @validation_focus_pending_row_payloads = {}
+            true
+          end
+
           def start_validation_focus_recheck(progress, state, focus)
             workspace = state[:workspace]
             output_path = workspace.gml_path
@@ -524,7 +590,10 @@ module ULOL
 
             path = "#{path}.gml" unless File.extname(path).downcase == '.gml'
             FileUtils.mkdir_p(File.dirname(path))
-            finish_editing if editing?
+            if editing? && !finish_editing
+              progress&.set_result_message('GML export failed: topology synchronization failed.')
+              return nil
+            end
             IndoorGmlConverter::GmlExporter.new(self).export(output_path: path)
             progress&.set_result_message("GML exported:\n#{path}")
             path
