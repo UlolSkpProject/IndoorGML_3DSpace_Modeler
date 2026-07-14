@@ -14,44 +14,22 @@ module ULOL
           @transform_context = transform_context
           @transition_curve_cache = {}
           @render_transition_line_points = nil
-          @render_transition_line_points_key = nil
+          @render_transition_line_points_dirty = true
         end
 
         def invalidate
           @transition_curve_cache&.clear
           @render_transition_line_points = nil
-          @render_transition_line_points_key = nil
+          @render_transition_line_points_dirty = true
         end
 
         def transition_line_points
-          transition_line_points_with_key.first
-        end
-
-        def transition_line_points_with_key
-          cache_key = render_transition_line_points_cache_key
-          if @render_transition_line_points.nil? || @render_transition_line_points_key != cache_key
+          if @render_transition_line_points_dirty || @render_transition_line_points.nil?
             @render_transition_line_points = build_render_transition_line_points
-            @render_transition_line_points_key = cache_key
+            @render_transition_line_points_dirty = false
           end
-          [@render_transition_line_points, @render_transition_line_points_key]
-        end
 
-        def render_transition_line_points_cache_key
-          [
-            @transform_context.overlay_render_context_cache_key,
-            @indoor_model.transitions.map do |transition|
-              next nil unless transition&.valid?
-
-              [
-                transition.id,
-                @transform_context.rounded_point_key(transition.state1_point || @transform_context.overlay_state_root_local_point(transition.state1)),
-                @transform_context.rounded_point_key(transition.state2_point || @transform_context.overlay_state_root_local_point(transition.state2)),
-                @transform_context.rounded_point_key(transition.selected_waypoint),
-                @transform_context.rounded_vector_key(transition.selected_waypoint_normal1),
-                @transform_context.rounded_vector_key(transition.selected_waypoint_normal2)
-              ]
-            end.compact
-          ]
+          @render_transition_line_points
         end
 
         def build_render_transition_line_points

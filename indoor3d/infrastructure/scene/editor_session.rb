@@ -294,6 +294,7 @@ module ULOL
             end
             return false
           end
+          invalidate_overlay_transition_points
           invalidate_view(Sketchup.active_model())
           true
         rescue StandardError => e
@@ -320,6 +321,7 @@ module ULOL
           return nil unless payload
 
           apply_validation_focus_visibility
+          invalidate_overlay_transition_points
           invalidate_view(Sketchup.active_model())
           payload
         rescue StandardError => e
@@ -332,6 +334,7 @@ module ULOL
           return [] if payloads.empty?
 
           apply_validation_focus_visibility
+          invalidate_overlay_transition_points
           invalidate_view(Sketchup.active_model())
           payloads
         rescue StandardError => e
@@ -418,6 +421,7 @@ module ULOL
 
         def clear_validation_focus
           validation_focus_controller.clear
+          invalidate_overlay_transition_points
         end
 
         def apply_edit_mode_visibility_filter(ignore_validation: false)

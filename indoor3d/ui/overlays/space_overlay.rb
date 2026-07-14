@@ -54,14 +54,6 @@ module ULOL
           transformation.to_a.map { |value| value.to_f.round(6) }
         end
 
-        def camera_billboard_axes(view)
-          up_axis = view.camera.up.clone
-          up_axis.normalize!
-          right_axis = view.camera.direction.cross(up_axis)
-          right_axis.normalize!
-          [right_axis, up_axis]
-        end
-
         def overlay_state_root_local_point(state)
           group = state&.duality_cell&.valid_sketchup_group
           return Utils::Transformation.entity_origin_in_root_local(group, @indoor_model.primal_group) if group
