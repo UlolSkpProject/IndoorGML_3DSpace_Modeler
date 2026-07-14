@@ -10,7 +10,12 @@ module ULOL
     module IndoorCore
       module ExportCommands
         def validation_operation_running?
-          @validation_session&.running? == true || @validation_operation_running == true
+          return true if @validation_session&.running? == true || @validation_operation_running == true
+
+          indoor_model = IndoorModel.current
+          indoor_model.respond_to?(:validation_focus_recheck_running?) && indoor_model.validation_focus_recheck_running?
+        rescue StandardError
+          false
         end
 
         def export_gml
@@ -434,11 +439,11 @@ module ULOL
 
         def validation_report_focus_row_states(report, indoor_model = IndoorModel.current)
           schema = IndoorGmlConverter::Val3dityReportSchema
-          schema.sorted_error_item_rows(report || {}).each_with_index.map do |row, index|
-            refs = schema.final_error_row_refs(row, report || {})
+          schema.grouped_error_item_rows(report || {}).map do |group|
+            refs = schema.grouped_error_row_refs(group)
             {
-              id: schema.error_item_row_id(index),
-              code: row[:code].to_s,
+              id: group[:id],
+              code: group[:code].to_s,
               cells: Array(refs[:cells]).map(&:to_s),
               states: Array(refs[:states]).map(&:to_s),
               transitions: Array(refs[:transitions]).map(&:to_s),

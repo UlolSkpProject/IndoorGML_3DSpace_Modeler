@@ -28,22 +28,29 @@ module ULOL
           end
 
           def recheck_validation_focus_errors
+            if validation_focus_recheck_running?
+              UI.messagebox('오류 요소 재검사가 이미 실행 중입니다.')
+              return nil
+            end
+
             focus = @editor_session.validation_focus_elements
             if focus[:cell_spaces].empty?
               UI.messagebox('재검사할 오류 CellSpace가 없습니다.')
               return nil
             end
 
-            @editor_session.set_validation_focus_highlight([], '')
-            progress = IndoorGmlConverter::ExportProgressDialog.active || IndoorGmlConverter::ExportProgressDialog.new
             state = {
               session: nil,
               completed: false,
-              workspace: IndoorGmlConverter::ValidationRunWorkspace.create(
-                base_dir: IndoorGmlConverter::GmlExporter.output_root
-              ),
+              workspace: nil,
               workspace_cleaned: false
             }
+            begin_validation_focus_recheck(state)
+            state[:workspace] = IndoorGmlConverter::ValidationRunWorkspace.create(
+              base_dir: IndoorGmlConverter::GmlExporter.output_root
+            )
+            @editor_session.set_validation_focus_highlight([], '')
+            progress = IndoorGmlConverter::ExportProgressDialog.active || IndoorGmlConverter::ExportProgressDialog.new
             progress.on_create_gml do
               export_full_gml_from_validation_focus_recheck_report(progress)
             end
@@ -59,11 +66,15 @@ module ULOL
               )
             end
             progress.on_request_close do
-              terminate_validation_focus_recheck(state) unless state[:completed]
+              unless state[:completed]
+                terminate_validation_focus_recheck(state)
+                state[:completed] = true
+              end
               cleanup_validation_focus_recheck_workspace(state) if state[:completed]
               :close
             end
             progress.on_ready do
+              next if state[:completed]
               next if state[:started]
 
               state[:started] = true
@@ -72,13 +83,19 @@ module ULOL
             progress.show
             focus
           rescue StandardError => e
-            cleanup_validation_focus_recheck_workspace(state) if defined?(state) && state
+            if defined?(state) && state
+              cleanup_validation_focus_recheck_workspace(state)
+            else
+              finish_validation_focus_recheck(nil)
+            end
             IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck failed: #{e.class}: #{e.message}"
             UI.messagebox("오류 요소 재검사 실패:\n#{e.message}")
             nil
           end
 
           def finish_editing
+            return false if validation_focus_recheck_running?
+
             with_guard_flag(:@finishing_editing) do
               @editor_session.restore_validation_focus_visibility if @editor_session.validation_focus_active?
               finished = @editor_session.finish()
@@ -91,6 +108,8 @@ module ULOL
           end
 
           def request_finish_editing
+            return false if validation_focus_recheck_running?
+
             IndoorCore::Logger.puts '[IndoorGML] EditModeDialog#RequestfinishEditing'
             result = UI.messagebox("CellSpace 편집을 종료하시겠습니까?", MB_YESNO)
             return false unless result == IDYES
@@ -141,6 +160,10 @@ module ULOL
 
           def validation_focus_active?
             @editor_session.validation_focus_active?
+          end
+
+          def validation_focus_recheck_running?
+            @validation_focus_recheck_running == true
           end
 
           def validation_focus_cell_space?(cell_space)
@@ -301,6 +324,8 @@ module ULOL
           end
 
           def convert_selected_solid_groups_to_cell_spaces(selection_value)
+            return false if validation_focus_recheck_running?
+
             begin
               cell_type, category_code = CellSpaceCategory.parse_selection_value(selection_value)
               model = Sketchup.active_model
@@ -331,6 +356,8 @@ module ULOL
           end
 
           def set_selected_cell_space_type(cell_type_label, category_code = nil)
+            return false if validation_focus_recheck_running?
+
             begin
               cell_spaces = selected_cell_spaces
               cell_spaces = [@editor_session.editing_cell_space].compact if cell_spaces.empty?
@@ -359,11 +386,15 @@ module ULOL
           end
 
           def set_selected_cell_space_classification(selection_value)
+            return false if validation_focus_recheck_running?
+
             cell_type, category_code = CellSpaceCategory.parse_selection_value(selection_value)
             set_selected_cell_space_type(CellSpaceType.label(cell_type), category_code)
           end
 
           def set_selected_cell_space_storey(storey)
+            return false if validation_focus_recheck_running?
+
             begin
               cell_spaces = selected_cell_spaces
               cell_spaces = [@editor_session.editing_cell_space].compact if cell_spaces.empty?
@@ -452,6 +483,7 @@ module ULOL
             )
             state[:session] = runner.start(progress: progress) do |result|
               state[:completed] = true
+              finish_validation_focus_recheck(state)
               handle_validation_focus_recheck_result(progress, state, result)
             end
           rescue StandardError => e
@@ -526,9 +558,14 @@ module ULOL
             end
 
             finalize_validation_focus_recheck_session(state)
+            finish_validation_focus_recheck(state)
 
             workspace = state[:workspace]
-            return unless workspace&.respond_to?(:cleanup)
+            unless workspace&.respond_to?(:cleanup)
+              state[:workspace_cleaned] = true
+              stop_validation_focus_recheck_cleanup_timer(state)
+              return true
+            end
 
             cleaned = workspace.cleanup
             if cleaned
@@ -613,6 +650,24 @@ module ULOL
             session.close if session.respond_to?(:close)
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck session finalize failed: #{e.class}: #{e.message}"
+          end
+
+          def begin_validation_focus_recheck(state)
+            @validation_focus_recheck_state = state
+            @validation_focus_recheck_running = true
+            @editor_session.selection_changed if @editor_session.respond_to?(:selection_changed)
+            true
+          end
+
+          def finish_validation_focus_recheck(state)
+            return false unless validation_focus_recheck_running?
+            return false if state && @validation_focus_recheck_state && !@validation_focus_recheck_state.equal?(state)
+
+            @validation_focus_recheck_running = false
+            @validation_focus_recheck_state = nil
+            state[:operation_finished] = true if state
+            @editor_session.selection_changed if @editor_session.respond_to?(:selection_changed)
+            true
           end
 
           def validation_focus_recheck_summary(focus)

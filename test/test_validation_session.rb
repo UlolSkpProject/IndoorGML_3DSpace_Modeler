@@ -3,6 +3,7 @@
 require 'minitest/autorun'
 
 require_relative '../indoor3d/validity/validation_session'
+require_relative '../indoor3d/validity/val3dity_report_renderer'
 require_relative '../indoor3d/ui/commands/export_commands'
 
 module ULOL
@@ -328,6 +329,46 @@ module ULOL
             progress.fix_callback.call
 
             assert_equal [['cell_A', 'cell_B']], indoor_a.begin_focus_calls
+          end
+
+          def test_grouped_report_row_ids_and_refs_match_renderer_and_fix_mode_states
+            report = {
+              'validity' => false,
+              'features_overview' => [{ 'total' => 1, 'valid' => 0 }],
+              'primitives_overview' => [{ 'total' => 1, 'valid' => 0 }],
+              'parameters' => {},
+              'features' => [
+                {
+                  'id' => 'cell_A',
+                  'errors' => [
+                    {
+                      'id' => 'cell_A and cell_B state_S',
+                      'code' => 203,
+                      'description' => 'INVALID_SHELL'
+                    }
+                  ],
+                  'primitives' => [
+                    {
+                      'id' => 'solid_cell_B and cell_A transition_T',
+                      'errors' => [{ 'code' => 203, 'description' => 'INVALID_SHELL' }]
+                    }
+                  ]
+                }
+              ]
+            }
+            indoor_model = FakeIndoorModel.new(FakeModel.new('A'))
+            states = Dispatcher.new.send(:validation_report_focus_row_states, report, indoor_model)
+            html = Val3dityReportRenderer.new.render(report)
+            rendered_ids = html.scan(/<details class="recheck-row validation-error-row[^"]*" data-row-id="([^"]+)"/).flatten
+
+            assert_equal states.map { |row| row[:id] }, rendered_ids
+            assert_equal 1, states.length
+            assert_equal %w[A B], states.first[:cells]
+            assert_equal ['state_S'], states.first[:states]
+            assert_equal ['transition_T'], states.first[:transitions]
+            assert_includes html, 'data-cells="A,B"'
+            assert_includes html, 'data-states="state_S"'
+            assert_includes html, 'data-transitions="transition_T"'
           end
 
           def test_report_focus_expands_state_and_transition_refs_to_runtime_cells

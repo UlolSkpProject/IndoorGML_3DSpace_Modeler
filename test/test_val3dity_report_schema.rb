@@ -74,14 +74,14 @@ module ULOL
             assert_equal [], refs[:transitions]
           end
 
-          def test_feature_error_refs_use_feature_id_only
+          def test_feature_error_refs_use_explicit_error_id_before_parent_feature
             report = {
               'features' => [
                 {
-                  'id' => 'A',
+                  'id' => 'cell_A',
                   'errors' => [
                     {
-                      'id' => 'cell_B',
+                      'id' => 'CellSpace id=cell_B',
                       'code' => 302,
                       'description' => 'feature mentions cell_C state_A transition_A',
                       'details' => 'cell_D'
@@ -95,7 +95,55 @@ module ULOL
             row = Schema.error_item_rows(report).first
             refs = Schema.canonical_error_row_refs(row)
 
-            assert_equal ['A'], refs[:cells]
+            assert_equal ['B'], refs[:cells]
+            assert_equal [], refs[:states]
+            assert_equal [], refs[:transitions]
+          end
+
+          def test_feature_error_does_not_treat_untyped_container_id_as_cell_space
+            report = {
+              'features' => [
+                {
+                  'id' => 'IF_001',
+                  'errors' => [
+                    {
+                      'id' => '',
+                      'code' => 999,
+                      'description' => 'feature-level error'
+                    }
+                  ],
+                  'primitives' => []
+                }
+              ]
+            }
+
+            row = Schema.error_item_rows(report).first
+            refs = Schema.canonical_error_row_refs(row)
+
+            assert_equal({ cells: [], states: [], transitions: [] }, refs)
+          end
+
+          def test_dual_vertex_feature_error_uses_cell_space_id_from_error_item
+            report = {
+              'features' => [
+                {
+                  'id' => 'IF_001',
+                  'errors' => [
+                    {
+                      'id' => 'CellSpace id=cell_hw5p10tr',
+                      'code' => 702,
+                      'description' => 'DUAL_VERTEX_OUTSIDE_CELL'
+                    }
+                  ],
+                  'primitives' => []
+                }
+              ]
+            }
+
+            row = Schema.error_item_rows(report).first
+            refs = Schema.final_error_row_refs(row, report)
+
+            assert_equal ['hw5p10tr'], refs[:cells]
             assert_equal [], refs[:states]
             assert_equal [], refs[:transitions]
           end
@@ -329,6 +377,87 @@ module ULOL
             assert_equal %w[igg7up1f ryok9vdg ps7jkkje], final_refs[:cells]
             refute_includes first_refs[:cells], 'IF_001'
             refute_includes final_refs[:cells], 'IF_001'
+          end
+
+          def test_grouped_rows_merge_same_code_description_and_cell_with_members
+            rows = [
+              Schema.error_row('Feature', 'cell_A', { 'code' => 203, 'description' => 'INVALID_SHELL' }),
+              Schema.error_row('Primitive', 'solid_cell_A', { 'code' => '203', 'description' => 'INVALID_SHELL' })
+            ]
+
+            groups = Schema.group_error_item_rows(rows, {})
+
+            assert_equal 1, groups.length
+            assert_equal '203', groups.first[:code]
+            assert_equal 'INVALID_SHELL', groups.first[:description]
+            assert_equal ['A'], groups.first.dig(:refs, :cells)
+            assert_equal 2, groups.first[:count]
+            assert_equal rows, groups.first[:members]
+            assert_equal 'validation-error-row-0', groups.first[:id]
+          end
+
+          def test_grouped_rows_ignore_reference_cell_order
+            rows = [
+              Schema.error_row('Feature', 'cell_A and cell_B', { 'code' => 701, 'description' => 'CELLS_OVERLAP' }),
+              Schema.error_row('Feature', 'cell_B and cell_A', { 'code' => 701, 'description' => 'CELLS_OVERLAP' })
+            ]
+
+            groups = Schema.group_error_item_rows(rows, {})
+
+            assert_equal 1, groups.length
+            assert_equal %w[A B], groups.first.dig(:refs, :cells)
+          end
+
+          def test_grouped_rows_do_not_merge_different_reference_cells
+            rows = [
+              Schema.error_row('Feature', 'cell_A', { 'code' => 203, 'description' => 'INVALID_SHELL' }),
+              Schema.error_row('Feature', 'cell_B', { 'code' => 203, 'description' => 'INVALID_SHELL' })
+            ]
+
+            assert_equal 2, Schema.group_error_item_rows(rows, {}).length
+          end
+
+          def test_grouped_rows_do_not_merge_different_codes
+            rows = [
+              Schema.error_row('Feature', 'cell_A', { 'code' => 203, 'description' => 'INVALID_SHELL' }),
+              Schema.error_row('Feature', 'cell_A', { 'code' => 204, 'description' => 'INVALID_SHELL' })
+            ]
+
+            assert_equal 2, Schema.group_error_item_rows(rows, {}).length
+          end
+
+          def test_grouped_rows_do_not_merge_different_descriptions
+            rows = [
+              Schema.error_row('Feature', 'cell_A', { 'code' => 203, 'description' => 'INVALID_SHELL' }),
+              Schema.error_row('Feature', 'cell_A', { 'code' => 203, 'description' => 'INVALID_POLYGON' })
+            ]
+
+            assert_equal 2, Schema.group_error_item_rows(rows, {}).length
+          end
+
+          def test_grouped_rows_do_not_merge_errors_without_reference_cells
+            rows = [
+              Schema.error_row('Dataset', 'report.gml', { 'code' => 203, 'description' => 'INVALID_DATASET' }),
+              Schema.error_row('Dataset', 'report.gml', { 'code' => 203, 'description' => 'INVALID_DATASET' })
+            ]
+
+            groups = Schema.group_error_item_rows(rows, {})
+
+            assert_equal 2, groups.length
+            assert groups.all? { |group| group.dig(:refs, :cells).empty? }
+          end
+
+          def test_grouped_row_refs_union_member_state_and_transition_refs_without_duplicates
+            rows = [
+              Schema.error_row('Feature', 'cell_A state_S', { 'code' => 203, 'description' => 'INVALID_SHELL' }),
+              Schema.error_row('Primitive', 'solid_cell_A state_S transition_T', { 'code' => 203, 'description' => 'INVALID_SHELL' })
+            ]
+
+            refs = Schema.grouped_error_row_refs(Schema.group_error_item_rows(rows, {}).first)
+
+            assert_equal ['A'], refs[:cells]
+            assert_equal ['state_S'], refs[:states]
+            assert_equal ['transition_T'], refs[:transitions]
           end
 
           def test_overview_counts_tolerate_nil

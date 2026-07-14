@@ -130,6 +130,96 @@ module ULOL
             assert_includes html, 'data-cells="igg7up1f,ryok9vdg"'
             refute_includes html, 'data-cells="IF_001"'
           end
+
+          def test_dual_vertex_feature_row_uses_cell_space_id_in_error_item
+            html = Val3dityReportRenderer.new.render(
+              'validity' => false,
+              'features_overview' => [{ 'total' => 1, 'valid' => 0 }],
+              'primitives_overview' => [],
+              'parameters' => {},
+              'features' => [
+                {
+                  'id' => 'IF_001',
+                  'errors' => [
+                    {
+                      'code' => 702,
+                      'id' => 'CellSpace id=cell_hw5p10tr',
+                      'description' => 'DUAL_VERTEX_OUTSIDE_CELL'
+                    }
+                  ],
+                  'primitives' => []
+                }
+              ]
+            )
+
+            assert_includes html, 'Feature CellSpace id=cell_hw5p10tr'
+            assert_includes html, 'data-code="702" data-cells="hw5p10tr"'
+            refute_includes html, 'data-cells="IF_001"'
+          end
+
+          def test_render_groups_duplicate_error_cards_and_shows_member_details_and_group_counts
+            report = {
+              'validity' => false,
+              'features_overview' => [{ 'total' => 1, 'valid' => 0 }],
+              'primitives_overview' => [{ 'total' => 1, 'valid' => 0 }],
+              'parameters' => {},
+              'features' => [
+                {
+                  'id' => 'cell_A',
+                  'errors' => [
+                    {
+                      'id' => 'cell_A',
+                      'code' => 203,
+                      'description' => 'INVALID_SHELL',
+                      'details' => '<unsafe detail>'
+                    }
+                  ],
+                  'primitives' => [
+                    {
+                      'id' => 'solid_cell_A',
+                      'errors' => [{ 'code' => 203, 'description' => 'INVALID_SHELL' }]
+                    }
+                  ]
+                }
+              ]
+            }
+
+            html = Val3dityReportRenderer.new.render(report)
+
+            assert_equal 1, html.scan(/<details class="recheck-row validation-error-row/).length
+            assert_equal 2, html.scan(/<div class="error-member">/).length
+            assert_includes html, '상세 2건'
+            assert_includes html, '<span class="metric-value">1</span>'
+            assert_includes html, '<span class="section-count">1건</span>'
+            assert_includes html, 'data-filter="all">전체 1</button>'
+            assert_includes html, 'data-filter="203">203 (1)</button>'
+            assert_includes html, '<span class="member-value">Feature</span>'
+            assert_includes html, '<span class="member-value">Primitive</span>'
+            assert_includes html, '&lt;unsafe detail&gt;'
+            refute_includes html, '<unsafe detail>'
+          end
+
+          def test_member_detail_text_is_selectable_while_select_all_remains_blocked
+            html = Val3dityReportRenderer.new.render(
+              'validity' => false,
+              'features_overview' => [{ 'total' => 1, 'valid' => 0 }],
+              'primitives_overview' => [],
+              'parameters' => {},
+              'features' => [
+                {
+                  'id' => 'cell_A',
+                  'errors' => [{ 'code' => 203, 'description' => 'INVALID_SHELL' }],
+                  'primitives' => []
+                }
+              ]
+            )
+
+            assert_includes html, "event.target.closest('.cell-name, .member-value')"
+            assert_includes html, "var selectableTextSelector = '.cell-name, .member-value';"
+            assert_includes html, "String(event.key).toLowerCase() === 'a'"
+            assert_includes html, 'event.preventDefault();'
+            assert_includes html, 'event.stopPropagation();'
+          end
         end
       end
     end
