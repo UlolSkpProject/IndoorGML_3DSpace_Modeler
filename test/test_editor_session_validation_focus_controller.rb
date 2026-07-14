@@ -106,6 +106,11 @@ module ULOL
           assert_equal %w[B C], added[:cells]
           assert_equal 'cell_B and cell_C', added[:label]
           assert_equal true, controller.visible_cell_space?(cell_c)
+          assert_equal %w[B C], controller.focus_row('row-1')[:cells]
+
+          row_snapshot = controller.focus_row('row-1')
+          row_snapshot[:cells] << 'external-change'
+          refute_includes controller.focus_row('row-1')[:cells], 'external-change'
 
           removed_from_rows = controller.remove_cell('C')
 

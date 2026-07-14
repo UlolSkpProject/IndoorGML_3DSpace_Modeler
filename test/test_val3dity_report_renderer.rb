@@ -36,7 +36,9 @@ module ULOL
                   'status' => 'kept',
                   'tolerated' => false,
                   'distance_mm' => 0.1,
-                  'reason' => 'kept'
+                  'actual_overlap_volume_mm3' => 2.5,
+                  'intersection_component_count' => 3,
+                  'reason' => 'REPRODUCED_AS_VALID_SKETCHUP_INTERSECTION'
                 }
               ]
             }
@@ -46,6 +48,7 @@ module ULOL
             assert_includes html, 'sketchup.fixValidationErrors'
             assert_includes html, 'sketchup.createGml'
             assert_includes html, 'sketchup.focusValidationCells'
+            assert_includes html, 'sketchup.reportDomReady();'
             assert_includes html, 'class="recheck-row validation-error-row c700"'
             assert_includes html, 'data-row-id="validation-error-row-0"'
             assert_includes html, 'data-code="701"'
@@ -53,7 +56,14 @@ module ULOL
             assert_includes html, 'data-states=""'
             assert_includes html, 'data-transitions=""'
             assert_includes html, '701 (1)'
+            assert_includes html, '<span class="member-label">Not suppressed reason</span>'
+            assert_includes html, '<span class="member-value">SketchUp Boolean에서 유효한 intersection 재현</span>'
+            assert_includes html, '<span class="member-label">Overlap volume</span>'
+            assert_includes html, '<span class="member-value">2.5 mm³</span>'
+            refute_includes html, '<span class="member-label">Distance</span>'
+            refute_includes html, '<span class="member-label">Intersection components</span>'
             assert_includes html, 'updateValidationFocusRow'
+            assert_includes html, 'window.clearValidationFocusSelection = function()'
           end
 
           def test_render_hides_fix_action_for_valid_report
@@ -91,7 +101,7 @@ module ULOL
               ]
             )
 
-            assert_includes html, 'Primitive solid_cell_b67d90rs'
+            assert_includes html, 'title="cell_b67d90rs"'
             assert_includes html, 'data-cells="b67d90rs"'
           end
 
@@ -152,7 +162,7 @@ module ULOL
               ]
             )
 
-            assert_includes html, 'Feature CellSpace id=cell_hw5p10tr'
+            assert_includes html, '<span class="member-value">CellSpace id=cell_hw5p10tr</span>'
             assert_includes html, 'data-code="702" data-cells="hw5p10tr"'
             refute_includes html, 'data-cells="IF_001"'
           end
@@ -168,7 +178,7 @@ module ULOL
                   'id' => 'cell_A',
                   'errors' => [
                     {
-                      'id' => 'cell_A',
+                      'id' => 'feature_error_A',
                       'code' => 203,
                       'description' => 'INVALID_SHELL',
                       'details' => '<unsafe detail>'
@@ -177,7 +187,7 @@ module ULOL
                   'primitives' => [
                     {
                       'id' => 'solid_cell_A',
-                      'errors' => [{ 'code' => 203, 'description' => 'INVALID_SHELL' }]
+                      'errors' => [{ 'id' => 'primitive_error_A', 'code' => 203, 'description' => 'INVALID_SHELL' }]
                     }
                   ]
                 }
@@ -193,9 +203,13 @@ module ULOL
             assert_includes html, '<span class="section-count">1건</span>'
             assert_includes html, 'data-filter="all">전체 1</button>'
             assert_includes html, 'data-filter="203">203 (1)</button>'
-            assert_includes html, '<span class="member-value">Feature</span>'
-            assert_includes html, '<span class="member-value">Primitive</span>'
-            assert_includes html, '&lt;unsafe detail&gt;'
+            assert_equal 2, html.scan('<span class="member-label">Description</span>').length
+            assert_includes html, '<span class="member-value">feature_error_A</span>'
+            assert_includes html, '<span class="member-value">primitive_error_A</span>'
+            refute_includes html, '<span class="member-label">Scope</span>'
+            refute_includes html, '<span class="member-label">Parent feature</span>'
+            refute_includes html, '<span class="member-label">Details</span>'
+            refute_includes html, '&lt;unsafe detail&gt;'
             refute_includes html, '<unsafe detail>'
           end
 

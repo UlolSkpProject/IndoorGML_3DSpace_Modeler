@@ -37,8 +37,20 @@ module ULOL
           assert_includes script, 'validationBusy || snapshot.classificationLocked'
           assert_includes script, 'validationBusy || !currentStoreyRangeAllowed'
           assert_includes script, 'setControlLocked([storeyFromKind, storeyFromLevel], validationBusy)'
+          assert_includes script, 'setControlLocked([solidStoreyFromKind, solidStoreyFromLevel], validationBusy)'
           assert_includes script, 'setControlLocked([finishButton, recheckErrorsButton], validationBusy)'
           assert_includes script, "snapshot.validationBusy ? 'validation-busy' : 'validation-idle'"
+        end
+
+        def test_solid_conversion_ui_passes_selected_storey
+          html = File.read(File.expand_path('../indoor3d/ui/html/edit_mode/index.html', __dir__))
+          script = File.read(File.expand_path('../indoor3d/ui/html/edit_mode/app.js', __dir__))
+
+          assert_includes html, 'id="solidStoreyFields"'
+          assert_includes html, 'id="solidStoreyFromLevel"'
+          assert_includes html, 'id="solidStoreyToLevel"'
+          assert_includes script, "invokeSketchup('convertSelectedSolidGroups', [solidClassification.value, composeSolidStorey()])"
+          assert_includes script, 'classificationAllowsStoreyRange(solidClassification.value)'
         end
 
         def test_change_type_toolbar_checks_validation_busy_before_selection_state

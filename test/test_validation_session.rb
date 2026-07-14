@@ -215,6 +215,29 @@ module ULOL
             FakeGmlExporter.reset
           end
 
+          def test_report_export_regenerates_gml_from_current_runtime_model
+            model = FakeModel.new('A')
+            indoor = FakeIndoorModel.new(model)
+            indoor.editing = true
+            progress = FakeProgress.new
+            session = result_ready_session(model, indoor, progress)
+            dispatcher = Dispatcher.new
+            Sketchup.test_active_model = model
+            UI.savepanel_path = File.join(Dir.pwd, 'tmp', 'report_runtime_export')
+
+            with_replaced_constant(IndoorGmlConverter, :GmlExporter, FakeGmlExporter) do
+              dispatcher.send(:handle_validation_result, session, FakeResult.invalid, 'obsolete-temp.gml')
+              progress.create_gml_callback.call
+            end
+
+            assert_equal 1, indoor.finish_editing_count
+            assert_same indoor, FakeGmlExporter.last_indoor_model
+            assert_equal "#{UI.savepanel_path}.gml", FakeGmlExporter.last_output_path
+            assert_equal "GML exported:\n#{UI.savepanel_path}.gml", progress.result_message
+          ensure
+            FakeGmlExporter.reset
+          end
+
           def test_stale_report_focus_action_expires_without_editing_new_model
             model_a = FakeModel.new('A')
             model_b = FakeModel.new('B')
@@ -287,6 +310,24 @@ module ULOL
 
             assert_equal [['cell_A', 'cell_B']], indoor_a.begin_focus_calls
             assert_equal [[['cell_A'], '203'], [[], '']], indoor_a.highlight_calls
+          end
+
+          def test_report_row_focus_uses_updated_memory_refs_instead_of_stale_dom_refs
+            model_a = FakeModel.new('A')
+            indoor_a = FakeIndoorModel.new(model_a)
+            progress = FakeProgress.new
+            session = result_ready_session(model_a, indoor_a, progress)
+            dispatcher = Dispatcher.new
+            Sketchup.test_active_model = model_a
+
+            dispatcher.send(:handle_validation_result, session, FakeResult.invalid_with_primitive_report, 'temp.gml')
+            progress.validation_focus_callback.call(['A'], '203', [], [], 'validation-error-row-0')
+            indoor_a.replace_validation_focus_row_cells('validation-error-row-0', %w[A C])
+
+            progress.validation_focus_callback.call(['A'], '203', [], [], 'validation-error-row-0')
+
+            assert_equal %w[cell_A cell_C], indoor_a.highlight_calls.last.first
+            assert_equal %w[A C], indoor_a.highlight_details.last[:row_cells]
           end
 
           def test_report_fix_uses_captured_indoor_model_when_model_is_current
@@ -538,6 +579,8 @@ module ULOL
             attr_reader :result_calls
             attr_reader :validation_focus_callback
             attr_reader :fix_callback
+            attr_reader :create_gml_callback
+            attr_reader :result_message
 
             def initialize
               @close_count = 0
@@ -547,6 +590,10 @@ module ULOL
 
             def on_create_gml(&block)
               @create_gml_callback = block
+            end
+
+            def set_result_message(message)
+              @result_message = message
             end
 
             def on_open_report(&block)
@@ -611,6 +658,7 @@ module ULOL
               @highlight_details = []
               @states = []
               @transitions = []
+              @focus_rows = {}
               @validation_focus_active = false
               @begin_focus_result = begin_focus_result
             end
@@ -632,8 +680,29 @@ module ULOL
             def begin_validation_focus_editing(cell_ids, row_states: nil)
               @begin_focus_calls << cell_ids
               @begin_focus_row_states << Array(row_states)
+              @focus_rows = Array(row_states).each_with_object({}) do |row, memo|
+                memo[row[:id].to_s] = row.dup
+              end
               @validation_focus_active = true if @begin_focus_result
               @begin_focus_result
+            end
+
+            def validation_focus_row(row_id)
+              row = @focus_rows[row_id.to_s]
+              return nil unless row
+
+              row.merge(
+                cells: Array(row[:cells]).dup,
+                states: Array(row[:states]).dup,
+                transitions: Array(row[:transitions]).dup,
+                focus_ids: Array(row[:focus_ids]).dup
+              )
+            end
+
+            def replace_validation_focus_row_cells(row_id, cells)
+              row = @focus_rows.fetch(row_id.to_s)
+              row[:cells] = Array(cells).dup
+              row[:focus_ids] = Array(cells).map { |cell_id| "cell_#{cell_id}" }
             end
 
             def set_validation_focus_highlight(cell_ids, code, row_id: nil, row_cells: nil, states: nil, transitions: nil)

@@ -148,6 +148,15 @@ module ULOL
             IndoorCore::Logger.puts "[IndoorGML] Validation focus row update failed: #{e.class}: #{e.message}"
           end
 
+          def clear_validation_focus_selection
+            execute_or_queue(
+              "if (typeof clearValidationFocusSelection === 'function') " \
+              'clearValidationFocusSelection();'
+            )
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Validation focus selection clear failed: #{e.class}: #{e.message}"
+          end
+
           def on_create_gml(&block)
             @create_gml_callback = block
           end
@@ -235,6 +244,9 @@ module ULOL
               @pending_scripts.clear
               @ready_callback&.call
             end
+            dialog.add_action_callback('reportDomReady') do |_context|
+              handle_report_dom_ready
+            end
             dialog.add_action_callback('fitContentHeight') do |_context, content_height|
               fit_content_height(content_height)
             end
@@ -260,6 +272,12 @@ module ULOL
               handle_window_closed
             end if dialog.respond_to?(:set_on_closed)
             dialog
+          end
+
+          def handle_report_dom_ready
+            @dom_ready = true
+            @pending_scripts.each { |script| @dialog.execute_script(script) }
+            @pending_scripts.clear
           end
 
           def handle_window_closed

@@ -403,13 +403,16 @@ module ULOL
                 });
                 document.addEventListener('click', function(event) {
                   if (event.target.closest('.validation-error-row') || event.target.closest('.filter-btn')) return;
-                  document.querySelectorAll('.validation-error-row.focused').forEach(function(item) {
-                    item.classList.remove('focused');
-                  });
+                  window.clearValidationFocusSelection();
                   if (typeof sketchup !== 'undefined' && sketchup.focusValidationCells) {
                     sketchup.focusValidationCells([], '', [], []);
                   }
                 });
+                window.clearValidationFocusSelection = function() {
+                  document.querySelectorAll('.validation-error-row.focused').forEach(function(item) {
+                    item.classList.remove('focused');
+                  });
+                };
                 window.updateValidationFocusRow = function(payload) {
                   if (!payload || !payload.rowId) return;
                   var row = document.querySelector('[data-row-id="' + String(payload.rowId).replace(/"/g, '\\"') + '"]');
@@ -466,6 +469,11 @@ module ULOL
                   if ((anchor && anchor.closest(selectableTextSelector)) && (focus && focus.closest(selectableTextSelector))) return;
 
                   selection.removeAllRanges();
+                });
+                window.addEventListener('load', function() {
+                  if (typeof sketchup !== 'undefined' && sketchup.reportDomReady) {
+                    sketchup.reportDomReady();
+                  }
                 });
               </script>
             HTML
@@ -529,20 +537,11 @@ module ULOL
           end
 
           def error_group_member_html(row, raw_report, index)
-            refs = Val3dityReportSchema.final_error_row_refs(row, raw_report)
             recheck_row = matching_error_recheck_row(row, raw_report)
             raw_id = row.dig(:raw, 'id') || row.dig(:raw, :id)
-            details = row.dig(:raw, 'details') || row.dig(:raw, :details)
             fields = [
-              ['Source', error_item_label(row)],
-              ['Scope', row[:scope]],
-              ['Item', row[:item]],
-              ['Parent feature', row.dig(:context, :feature_id)],
-              ['Raw error ID', raw_id],
               ['Description', row[:description]],
-              ['Details', report_detail_value(details)],
-              ['States', Array(refs[:states]).join(', ')],
-              ['Transitions', Array(refs[:transitions]).join(', ')]
+              ['Error ID', raw_id]
             ]
             fields.concat(overlap_member_fields(recheck_row)) if recheck_row
             <<~HTML
@@ -564,25 +563,10 @@ module ULOL
             HTML
           end
 
-          def report_detail_value(value)
-            case value
-            when Hash
-              value.map { |key, item| "#{key}: #{report_detail_value(item)}" }.join(' · ')
-            when Array
-              value.map { |item| report_detail_value(item) }.join(', ')
-            else
-              value
-            end
-          end
-
           def overlap_member_fields(row)
             [
-              ['Overlap reason', compact_overlap_reason(row['reason'])],
-              ['Distance', report_measure_value(row['distance_mm'], 'mm')],
-              ['Normal thickness', report_measure_value(row['normal_thickness_mm'], 'mm')],
-              ['Overlap area', report_measure_value(row['overlap_area_mm2'], 'mm²')],
-              ['Overlap volume', report_measure_value(row['actual_overlap_volume_mm3'], 'mm³')],
-              ['Intersection components', row['intersection_component_count']]
+              ['Not suppressed reason', compact_overlap_reason(row['reason'])],
+              ['Overlap volume', report_measure_value(row['actual_overlap_volume_mm3'], 'mm³')]
             ]
           end
 

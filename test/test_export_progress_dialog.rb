@@ -58,6 +58,57 @@ module ULOL
             assert_equal 1, second_close_requests
             refute Val3dityRunner.shutting_down?
           end
+
+          def test_report_dom_ready_flushes_queued_row_updates
+            executed_scripts = []
+            fake_dialog = Struct.new(:executed_scripts) do
+              def visible?
+                true
+              end
+
+              def execute_script(script)
+                executed_scripts << script
+              end
+            end.new(executed_scripts)
+            dialog = ExportProgressDialog.new
+            dialog.instance_variable_set(:@dialog, fake_dialog)
+
+            dialog.update_validation_focus_row(
+              row_id: 'validation-error-row-0',
+              cells: %w[A B],
+              label: 'cell_A and cell_B'
+            )
+            assert_empty executed_scripts
+
+            dialog.send(:handle_report_dom_ready)
+
+            assert_equal true, dialog.instance_variable_get(:@dom_ready)
+            assert_equal 1, executed_scripts.length
+            assert_includes executed_scripts.first, 'updateValidationFocusRow'
+            assert_includes executed_scripts.first, '"cells":["A","B"]'
+            assert_empty dialog.instance_variable_get(:@pending_scripts)
+          end
+
+          def test_clear_validation_focus_selection_executes_report_function
+            executed_scripts = []
+            fake_dialog = Struct.new(:executed_scripts) do
+              def visible?
+                true
+              end
+
+              def execute_script(script)
+                executed_scripts << script
+              end
+            end.new(executed_scripts)
+            dialog = ExportProgressDialog.new
+            dialog.instance_variable_set(:@dialog, fake_dialog)
+            dialog.instance_variable_set(:@dom_ready, true)
+
+            dialog.clear_validation_focus_selection
+
+            assert_equal 1, executed_scripts.length
+            assert_includes executed_scripts.first, 'clearValidationFocusSelection();'
+          end
         end
       end
     end
