@@ -25,6 +25,7 @@ module ULOL
           def observer_routing_suppressed?
             guard_active?(:@syncing) ||
               guard_active?(:@bulk_cell_space_conversion) ||
+              guard_active?(:@merging_space_features) ||
               guard_active?(:@transaction_reconciliation) ||
               (respond_to?(:transaction_replay_pending?, true) && transaction_replay_pending?)
           end

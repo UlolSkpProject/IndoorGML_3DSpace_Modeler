@@ -204,12 +204,12 @@ module ULOL
 
           def restore_runtime_from_current_model(persist_repaired_ids: false)
             @model ||= Sketchup.active_model
-            find_existing_space_features_groups
+            primal_groups_merged = find_existing_space_features_groups
             reset_runtime_collections
             attach_existing_space_features_observers
             @runtime_restorer.restore(
               primal_group: @primal_group,
-              persist_repaired_ids: persist_repaired_ids
+              persist_repaired_ids: persist_repaired_ids || primal_groups_merged == true
             )
           end
 
