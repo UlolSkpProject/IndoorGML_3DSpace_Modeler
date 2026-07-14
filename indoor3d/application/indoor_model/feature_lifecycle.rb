@@ -6,12 +6,16 @@ module ULOL
       class IndoorModel
         module FeatureLifecycle
           def convert_single_group_to_cell_space(sketchup_group, cell_type = CellSpaceType::GENERAL, category_code = nil)
-            with_indoor_model_operation('IndoorGML Convert Group to CellSpace') do
-              cell_space_lifecycle_service.create_from_group(
-                sketchup_group,
-                cell_type: cell_type,
-                category_code: category_code
-              )
+            with_validation_focus_mutation_batch do
+              with_indoor_model_operation('IndoorGML Convert Group to CellSpace') do
+                cell_space = cell_space_lifecycle_service.create_from_group(
+                  sketchup_group,
+                  cell_type: cell_type,
+                  category_code: category_code
+                )
+                flush_validation_focus_row_topology_sync
+                cell_space
+              end
             end
           end
 
@@ -31,7 +35,7 @@ module ULOL
                   storey: storey
                 )
               end,
-              synchronize_all: proc { topology_coordinator.synchronize_all },
+              synchronize_all: proc { synchronize_topology_after_bulk_conversion },
               apply_lock_policy: proc { apply_indoor_lock_policy },
               runtime_snapshot: proc { bulk_conversion_runtime_snapshot },
               runtime_restore: proc { |snapshot| restore_bulk_conversion_runtime(snapshot) },
@@ -44,7 +48,7 @@ module ULOL
               preserve_source: preserve_source,
               operation_name: operation_name
             )
-            service.call
+            with_validation_focus_mutation_batch { service.call }
           end
 
           def change_cell_space_type(sketchup_group, cell_type, category_code = nil)
@@ -129,11 +133,13 @@ module ULOL
           def erase_cell_space(cell_space, erase_sketchup_group: true)
             return if cell_space.nil?
 
-            erase_guard do
-              cell_space_lifecycle_service.erase(
-                cell_space,
-                erase_sketchup_group: erase_sketchup_group
-              )
+            with_validation_focus_mutation_batch do
+              erase_guard do
+                cell_space_lifecycle_service.erase(
+                  cell_space,
+                  erase_sketchup_group: erase_sketchup_group
+                )
+              end
             end
           end
 
@@ -188,6 +194,17 @@ module ULOL
           def clear_bulk_dirty_topology
             dirty_topology_queue.clear
             dirty_topology_queue.unschedule!
+          end
+
+          def synchronize_topology_after_bulk_conversion
+            if validation_focus_row_local_topology_sync?
+              synchronize_validation_focus_row_topology
+              flush_validation_focus_row_topology_sync || {}
+            else
+              metrics = topology_coordinator.synchronize_all
+              clear_validation_focus_topology_dirty
+              metrics
+            end
           end
 
           def tag_cell_space_type_change_target(cell_space, cell_type, category_code)
@@ -723,10 +740,10 @@ module ULOL
           end
 
           def validation_focus_highlight_tracking_active?
-            respond_to?(:validation_focus_highlight_active?) &&
+            respond_to?(:validation_focus_highlight_row_id) &&
               respond_to?(:add_validation_focus_highlight_cell) &&
               respond_to?(:remove_validation_focus_highlight_cell) &&
-              validation_focus_highlight_active? &&
+              !validation_focus_highlight_row_id.to_s.empty? &&
               !guard_active?(:@refreshing_runtime)
           rescue StandardError
             false

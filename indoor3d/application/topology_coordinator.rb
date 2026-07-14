@@ -86,6 +86,10 @@ module ULOL
           @adjacency_service.synchronize_all(**kwargs)
         end
 
+        def synchronize_within(cell_spaces, **kwargs)
+          @adjacency_service.synchronize_within(cell_spaces, **kwargs)
+        end
+
         def erase_for(cell_space)
           @adjacency_service.erase_for(cell_space)
         end
