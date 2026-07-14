@@ -567,7 +567,21 @@ module ULOL
               next unless view
 
               view.zoom(groups)
-              view.invalidate
+              UI.start_timer(0, false) do
+                begin
+                  next unless generation == @validation_focus_zoom_generation
+                  next unless validation_focus_active?
+                  next unless validation_focus_controller.highlight_row_id.to_s == expected_row_id
+
+                  padded_view = Sketchup.active_model()&.active_view
+                  next unless padded_view
+
+                  padded_view.zoom(0.8)
+                  padded_view.invalidate
+                rescue StandardError => e
+                  IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight padding zoom failed: #{e.class}: #{e.message}"
+                end
+              end
             rescue StandardError => e
               IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight zoom failed: #{e.class}: #{e.message}"
             end
