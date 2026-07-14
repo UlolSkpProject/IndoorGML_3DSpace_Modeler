@@ -46,6 +46,8 @@ module ULOL
         end
 
         def change_selected_cell_space_type
+          return if respond_to?(:validation_operation_running?) && validation_operation_running?
+
           model = Sketchup.active_model
           groups = model.selection.to_a.select { |entity| convertible_container?(entity) }
 

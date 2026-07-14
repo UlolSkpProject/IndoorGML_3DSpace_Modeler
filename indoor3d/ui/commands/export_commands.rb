@@ -10,7 +10,12 @@ module ULOL
     module IndoorCore
       module ExportCommands
         def validation_operation_running?
-          @validation_session&.running? == true || @validation_operation_running == true
+          return true if @validation_session&.running? == true || @validation_operation_running == true
+
+          indoor_model = IndoorModel.current
+          indoor_model.respond_to?(:validation_focus_recheck_running?) && indoor_model.validation_focus_recheck_running?
+        rescue StandardError
+          false
         end
 
         def export_gml

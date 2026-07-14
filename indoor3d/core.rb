@@ -179,6 +179,8 @@ module ULOL
         dispatcher.change_selected_cell_space_type()
       end
       change_type_command.set_validation_proc do
+        next MF_GRAYED if dispatcher.validation_operation_running?
+
         indoor_model = IndoorCore::IndoorModel.current
         selected_cell_spaces = dispatcher.selected_indoor_gml_entities.select do |entity|
           dispatcher.indoor_feature(entity) == 'CellSpace'

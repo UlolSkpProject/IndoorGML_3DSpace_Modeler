@@ -123,6 +123,8 @@ module ULOL
           )
           @editor_session = EditorSession.new(self)
           @finishing_editing = false
+          @validation_focus_recheck_running = false
+          @validation_focus_recheck_state = nil
         end
       end
 
