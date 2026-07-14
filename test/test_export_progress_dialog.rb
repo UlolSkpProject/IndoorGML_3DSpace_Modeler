@@ -58,6 +58,16 @@ module ULOL
             assert_equal 1, second_close_requests
             refute Val3dityRunner.shutting_down?
           end
+
+          def test_validation_focus_cells_are_logged_to_ruby_console
+            dialog = ExportProgressDialog.new
+
+            output, = capture_io do
+              dialog.send(:log_validation_focus_cells, %w[A B])
+            end
+
+            assert_equal "[IndoorGML] validation focus ref-cells: [\"A\", \"B\"]\n", output
+          end
         end
       end
     end

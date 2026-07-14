@@ -245,6 +245,7 @@ module ULOL
               @open_report_callback&.call
             end
             dialog.add_action_callback('focusValidationCells') do |_context, cell_ids, code, state_ids, transition_ids, row_id|
+              log_validation_focus_cells(cell_ids)
               @validation_focus_callback&.call(Array(cell_ids), code.to_s, Array(state_ids), Array(transition_ids), row_id.to_s)
             end
             dialog.add_action_callback('fixValidationErrors') do |_context|
@@ -260,6 +261,10 @@ module ULOL
               handle_window_closed
             end if dialog.respond_to?(:set_on_closed)
             dialog
+          end
+
+          def log_validation_focus_cells(cell_ids)
+            puts "[IndoorGML] validation focus ref-cells: #{Array(cell_ids).inspect}"
           end
 
           def handle_window_closed

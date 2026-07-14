@@ -576,7 +576,7 @@ module ULOL
                   padded_view = Sketchup.active_model()&.active_view
                   next unless padded_view
 
-                  padded_view.zoom(0.8)
+                  padded_view.zoom(0.7)
                   padded_view.invalidate
                 rescue StandardError => e
                   IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight padding zoom failed: #{e.class}: #{e.message}"

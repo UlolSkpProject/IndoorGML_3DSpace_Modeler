@@ -243,7 +243,7 @@ module ULOL
             end
           end
 
-          assert_equal [[cell_a.valid_sketchup_group, cell_b.valid_sketchup_group], 0.8], view.zoom_calls
+          assert_equal [[cell_a.valid_sketchup_group, cell_b.valid_sketchup_group], 0.7], view.zoom_calls
           assert_equal true, view.invalidated
         end
 
