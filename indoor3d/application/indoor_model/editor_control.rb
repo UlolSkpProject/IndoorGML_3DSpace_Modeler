@@ -204,6 +204,14 @@ module ULOL
             end
           end
 
+          def with_validation_focus_row_mutation(&block)
+            @editor_session.with_validation_focus_row_mutation(&block)
+          end
+
+          def discard_validation_focus_row_mutation
+            @editor_session.discard_validation_focus_row_mutation
+          end
+
           def invalidate_overlay_transition_points
             @editor_session.invalidate_overlay_transition_points
           end
