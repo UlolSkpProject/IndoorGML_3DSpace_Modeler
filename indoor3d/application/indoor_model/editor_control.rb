@@ -195,7 +195,11 @@ module ULOL
           end
 
           def add_validation_focus_highlight_cell(cell_space)
-            update_validation_focus_report_row(@editor_session.add_validation_focus_highlight_cell(cell_space))
+            payload = @editor_session.add_validation_focus_highlight_cell(cell_space)
+            return nil unless payload
+
+            puts "[IndoorGML] validation focus ref-cells: #{Array(payload[:cells]).inspect}"
+            update_validation_focus_report_row(payload)
           end
 
           def remove_validation_focus_highlight_cell(cell_space)
