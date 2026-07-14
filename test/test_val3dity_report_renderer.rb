@@ -198,6 +198,28 @@ module ULOL
             assert_includes html, '&lt;unsafe detail&gt;'
             refute_includes html, '<unsafe detail>'
           end
+
+          def test_member_detail_text_is_selectable_while_select_all_remains_blocked
+            html = Val3dityReportRenderer.new.render(
+              'validity' => false,
+              'features_overview' => [{ 'total' => 1, 'valid' => 0 }],
+              'primitives_overview' => [],
+              'parameters' => {},
+              'features' => [
+                {
+                  'id' => 'cell_A',
+                  'errors' => [{ 'code' => 203, 'description' => 'INVALID_SHELL' }],
+                  'primitives' => []
+                }
+              ]
+            )
+
+            assert_includes html, "event.target.closest('.cell-name, .member-value')"
+            assert_includes html, "var selectableTextSelector = '.cell-name, .member-value';"
+            assert_includes html, "String(event.key).toLowerCase() === 'a'"
+            assert_includes html, 'event.preventDefault();'
+            assert_includes html, 'event.stopPropagation();'
+          end
         end
       end
     end
