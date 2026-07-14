@@ -84,6 +84,8 @@ module ULOL
         end
 
         def open_dual_overlay_scale_dialog
+          return if respond_to?(:validation_operation_running?) && validation_operation_running?
+
           @dual_overlay_scale_dialog ||= DualOverlayScaleDialog.new
           @dual_overlay_scale_dialog.show
         rescue StandardError => e
@@ -107,7 +109,7 @@ module ULOL
             menu.add_item('Edit IndoorGML') { begin_indoor_gml_editing() } unless validation_operation_running?
           end
 
-          if indoor_model.editing?() && cell_space_type_change_available?(selected_cell_spaces)
+          if indoor_model.editing?() && !validation_operation_running? && cell_space_type_change_available?(selected_cell_spaces)
             menu.add_item('Change CellSpace Type') { change_selected_cell_space_type() }
           end
         rescue StandardError => e
