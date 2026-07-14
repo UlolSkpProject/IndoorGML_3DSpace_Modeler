@@ -215,6 +215,29 @@ module ULOL
             FakeGmlExporter.reset
           end
 
+          def test_report_export_regenerates_gml_from_current_runtime_model
+            model = FakeModel.new('A')
+            indoor = FakeIndoorModel.new(model)
+            indoor.editing = true
+            progress = FakeProgress.new
+            session = result_ready_session(model, indoor, progress)
+            dispatcher = Dispatcher.new
+            Sketchup.test_active_model = model
+            UI.savepanel_path = File.join(Dir.pwd, 'tmp', 'report_runtime_export')
+
+            with_replaced_constant(IndoorGmlConverter, :GmlExporter, FakeGmlExporter) do
+              dispatcher.send(:handle_validation_result, session, FakeResult.invalid, 'obsolete-temp.gml')
+              progress.create_gml_callback.call
+            end
+
+            assert_equal 1, indoor.finish_editing_count
+            assert_same indoor, FakeGmlExporter.last_indoor_model
+            assert_equal "#{UI.savepanel_path}.gml", FakeGmlExporter.last_output_path
+            assert_equal "GML exported:\n#{UI.savepanel_path}.gml", progress.result_message
+          ensure
+            FakeGmlExporter.reset
+          end
+
           def test_stale_report_focus_action_expires_without_editing_new_model
             model_a = FakeModel.new('A')
             model_b = FakeModel.new('B')
@@ -556,6 +579,8 @@ module ULOL
             attr_reader :result_calls
             attr_reader :validation_focus_callback
             attr_reader :fix_callback
+            attr_reader :create_gml_callback
+            attr_reader :result_message
 
             def initialize
               @close_count = 0
@@ -565,6 +590,10 @@ module ULOL
 
             def on_create_gml(&block)
               @create_gml_callback = block
+            end
+
+            def set_result_message(message)
+              @result_message = message
             end
 
             def on_open_report(&block)

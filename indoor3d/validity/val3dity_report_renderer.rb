@@ -403,13 +403,16 @@ module ULOL
                 });
                 document.addEventListener('click', function(event) {
                   if (event.target.closest('.validation-error-row') || event.target.closest('.filter-btn')) return;
-                  document.querySelectorAll('.validation-error-row.focused').forEach(function(item) {
-                    item.classList.remove('focused');
-                  });
+                  window.clearValidationFocusSelection();
                   if (typeof sketchup !== 'undefined' && sketchup.focusValidationCells) {
                     sketchup.focusValidationCells([], '', [], []);
                   }
                 });
+                window.clearValidationFocusSelection = function() {
+                  document.querySelectorAll('.validation-error-row.focused').forEach(function(item) {
+                    item.classList.remove('focused');
+                  });
+                };
                 window.updateValidationFocusRow = function(payload) {
                   if (!payload || !payload.rowId) return;
                   var row = document.querySelector('[data-row-id="' + String(payload.rowId).replace(/"/g, '\\"') + '"]');

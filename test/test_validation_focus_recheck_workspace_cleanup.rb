@@ -81,6 +81,8 @@ module ULOL
             result = harness.recheck_validation_focus_errors
 
             assert_equal [[], ''], editor_session.highlight_calls.first
+            assert_equal [:clear_highlight, :collect_focus], editor_session.events.first(2)
+            assert_equal 1, progress_class.last.clear_selection_count
             assert_equal 1, progress_class.last.show_count
             assert_equal 1, result[:cell_spaces].length
           end
@@ -148,6 +150,24 @@ module ULOL
               FakeVal3dityRunner.instances.last.complete(result)
               refute harness.validation_focus_recheck_running?
             end
+          end
+        end
+
+        def test_invalid_recheck_replaces_runtime_focus_rows_from_new_report
+          with_recheck_dependencies do |progress_class|
+            harness = Harness.new
+            editor_session = FakeEditorSession.new(cell_spaces: [Object.new])
+            harness.instance_variable_set(:@editor_session, editor_session)
+
+            harness.recheck_validation_focus_errors
+            progress_class.last.ready_callback.call
+            FakeVal3dityRunner.instances.last.complete(FakeResult.invalid)
+
+            assert_equal [%w[cell_A]], editor_session.begin_focus_calls
+            row = editor_session.begin_focus_row_states.first.first
+            assert_equal 'validation-error-row-0', row[:id]
+            assert_equal ['A'], row[:cells]
+            assert_equal ['cell_A'], row[:focus_ids]
           end
         end
 
@@ -355,12 +375,23 @@ module ULOL
 
         class Harness
           include IndoorModel::EditorControl
+
+          attr_reader :states
+          attr_reader :transitions
+
+          def initialize
+            @states = []
+            @transitions = []
+          end
         end
 
         class FakeEditorSession
           attr_reader :highlight_calls
           attr_reader :finish_count
           attr_reader :selection_changed_count
+          attr_reader :events
+          attr_reader :begin_focus_calls
+          attr_reader :begin_focus_row_states
 
           def initialize(cell_spaces:, editing: false)
             @focus = { cell_spaces: cell_spaces, states: [], transitions: [] }
@@ -368,13 +399,24 @@ module ULOL
             @editing = editing
             @finish_count = 0
             @selection_changed_count = 0
+            @events = []
+            @begin_focus_calls = []
+            @begin_focus_row_states = []
+          end
+
+          def begin_validation_focus_editing(cell_ids, row_states: nil)
+            @begin_focus_calls << cell_ids
+            @begin_focus_row_states << Array(row_states)
+            true
           end
 
           def validation_focus_elements
+            @events << :collect_focus
             @focus
           end
 
           def set_validation_focus_highlight(ids, code)
+            @events << :clear_highlight if ids.empty?
             @highlight_calls << [ids, code]
             true
           end
@@ -420,11 +462,17 @@ module ULOL
           attr_reader :request_close_callback
           attr_reader :ready_callback
           attr_reader :result_payload
+          attr_reader :clear_selection_count
 
           def initialize
             self.class.last = self
             self.class.instances << self
             @show_count = 0
+            @clear_selection_count = 0
+          end
+
+          def clear_validation_focus_selection
+            @clear_selection_count += 1
           end
 
           def on_create_gml(&block)
@@ -590,16 +638,30 @@ module ULOL
           end
 
           def self.invalid
-            new(valid: false)
+            new(
+              valid: false,
+              report: {
+                'features' => [
+                  {
+                    'id' => 'cell_A',
+                    'errors' => [
+                      { 'code' => 302, 'description' => 'Invalid cell_A' }
+                    ],
+                    'primitives' => []
+                  }
+                ]
+              }
+            )
           end
 
           def self.error
             new(valid: false, error: RuntimeError.new('runner failed'))
           end
 
-          def initialize(valid:, error: nil)
+          def initialize(valid:, error: nil, report: {})
             @valid = valid
             @error = error
+            @report = report
           end
 
           def valid?
@@ -611,6 +673,7 @@ module ULOL
           end
 
           attr_reader :error
+          attr_reader :report
 
           def report_html_path
             'tmp/report.html'

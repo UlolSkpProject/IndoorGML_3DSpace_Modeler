@@ -2,6 +2,7 @@
 
 require 'fileutils'
 require 'json'
+require_relative '../../validity/validation_focus_report_mapper'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -41,6 +42,10 @@ module ULOL
               return nil
             end
 
+            progress = IndoorGmlConverter::ExportProgressDialog.active || IndoorGmlConverter::ExportProgressDialog.new
+            progress.clear_validation_focus_selection if progress.respond_to?(:clear_validation_focus_selection)
+            @editor_session.set_validation_focus_highlight([], '')
+
             focus = @editor_session.validation_focus_elements
             if focus[:cell_spaces].empty?
               UI.messagebox('재검사할 오류 CellSpace가 없습니다.')
@@ -57,8 +62,6 @@ module ULOL
             state[:workspace] = IndoorGmlConverter::ValidationRunWorkspace.create(
               base_dir: IndoorGmlConverter::GmlExporter.output_root
             )
-            @editor_session.set_validation_focus_highlight([], '')
-            progress = IndoorGmlConverter::ExportProgressDialog.active || IndoorGmlConverter::ExportProgressDialog.new
             progress.on_create_gml do
               export_full_gml_from_validation_focus_recheck_report(progress)
             end
@@ -541,6 +544,8 @@ module ULOL
               return
             end
 
+            refresh_validation_focus_report(result.report) unless result.valid?
+
             progress.on_open_report do
               progress.show_report(result.report_html_path)
             end
@@ -558,6 +563,20 @@ module ULOL
               message: e.message,
               actions: [:close]
             )
+          end
+
+          def refresh_validation_focus_report(report)
+            mapper = IndoorGmlConverter::ValidationFocusReportMapper
+            cell_ids = mapper.error_focus_cell_ids(report, self)
+            return false if cell_ids.empty?
+
+            begin_validation_focus_editing(
+              cell_ids,
+              row_states: mapper.focus_row_states(report, self)
+            )
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Validation focus report refresh failed: #{e.class}: #{e.message}"
+            false
           end
 
           def cleanup_validation_focus_recheck_workspace(state)

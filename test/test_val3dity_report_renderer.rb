@@ -63,6 +63,7 @@ module ULOL
             refute_includes html, '<span class="member-label">Distance</span>'
             refute_includes html, '<span class="member-label">Intersection components</span>'
             assert_includes html, 'updateValidationFocusRow'
+            assert_includes html, 'window.clearValidationFocusSelection = function()'
           end
 
           def test_render_hides_fix_action_for_valid_report

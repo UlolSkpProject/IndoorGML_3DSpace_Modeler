@@ -148,6 +148,15 @@ module ULOL
             IndoorCore::Logger.puts "[IndoorGML] Validation focus row update failed: #{e.class}: #{e.message}"
           end
 
+          def clear_validation_focus_selection
+            execute_or_queue(
+              "if (typeof clearValidationFocusSelection === 'function') " \
+              'clearValidationFocusSelection();'
+            )
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Validation focus selection clear failed: #{e.class}: #{e.message}"
+          end
+
           def on_create_gml(&block)
             @create_gml_callback = block
           end
