@@ -103,6 +103,22 @@ module ULOL
           assert_equal 2, context.render_point_calls
         end
 
+        def test_clear_cache_includes_state_registered_after_first_draw
+          first_state = drawable_state(position: Geom::Point3d.new(1, 0, 0))
+          states = [first_state]
+          renderer = renderer_for(states)
+          first_view = recording_view
+          second_view = recording_view
+
+          renderer.draw(first_view)
+          second_state = drawable_state(position: Geom::Point3d.new(2, 0, 0))
+          states << second_state
+          renderer.clear_cache
+          renderer.draw(second_view)
+
+          assert_equal [first_state.position, second_state.position], second_view.point_calls.first[:points]
+        end
+
         def test_point_size_applies_preference_and_clamps
           renderer = renderer_for([])
 
