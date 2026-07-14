@@ -442,7 +442,7 @@ module ULOL
                   });
                 });
                 document.addEventListener('dragstart', function(event) {
-                  if (!event.target.closest('.cell-name')) {
+                  if (!event.target.closest('.cell-name, .member-value')) {
                     event.preventDefault();
                   }
                 });
@@ -462,7 +462,8 @@ module ULOL
                   var focus = selection.focusNode && selection.focusNode.nodeType === Node.ELEMENT_NODE ?
                     selection.focusNode :
                     selection.focusNode && selection.focusNode.parentElement;
-                  if ((anchor && anchor.closest('.cell-name')) && (focus && focus.closest('.cell-name'))) return;
+                  var selectableTextSelector = '.cell-name, .member-value';
+                  if ((anchor && anchor.closest(selectableTextSelector)) && (focus && focus.closest(selectableTextSelector))) return;
 
                   selection.removeAllRanges();
                 });
