@@ -48,6 +48,7 @@ module ULOL
             assert_includes html, 'sketchup.fixValidationErrors'
             assert_includes html, 'sketchup.createGml'
             assert_includes html, 'sketchup.focusValidationCells'
+            assert_includes html, 'sketchup.reportDomReady();'
             assert_includes html, 'class="recheck-row validation-error-row c700"'
             assert_includes html, 'data-row-id="validation-error-row-0"'
             assert_includes html, 'data-code="701"'
