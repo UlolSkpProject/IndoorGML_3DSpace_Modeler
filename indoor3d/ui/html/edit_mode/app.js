@@ -17,6 +17,11 @@ var recheckErrorsButton = document.getElementById('recheckErrors');
 var solidCount = document.getElementById('solidCount');
 var solidClassification = document.getElementById('solidClassification');
 var convertSelectedButton = document.getElementById('convertSelected');
+var solidStoreyFields = document.getElementById('solidStoreyFields');
+var solidStoreyFromKind = document.getElementById('solidStoreyFromKind');
+var solidStoreyFromLevel = document.getElementById('solidStoreyFromLevel');
+var solidStoreyToKind = document.getElementById('solidStoreyToKind');
+var solidStoreyToLevel = document.getElementById('solidStoreyToLevel');
 
 var singleCellInfo = document.getElementById('singleCellInfo');
 var multiCellInfo = document.getElementById('multiCellInfo');
@@ -44,6 +49,8 @@ var currentSelectionKey = null;
 var fixMode = false;
 var validationBusy = false;
 var currentStoreyRangeAllowed = false;
+var currentSolidStoreyRangeAllowed = false;
+var rangeStoreyClassifications = [];
 var suppressFilterEvents = false;
 var currentVisibilityFilter = {
   storeyOptions: [],
@@ -397,6 +404,41 @@ function setStorey(value, rangeAllowed) {
   show(storeyFields);
 }
 
+function composeSolidStorey() {
+  clampStoreyLevel(solidStoreyFromLevel);
+  clampStoreyLevel(solidStoreyToLevel);
+
+  var from = solidStoreyFromKind.value + padLevel(solidStoreyFromLevel.value);
+  if (!currentSolidStoreyRangeAllowed) {
+    solidStoreyToKind.value = solidStoreyFromKind.value;
+    solidStoreyToLevel.value = solidStoreyFromLevel.value;
+    return from;
+  }
+
+  var to = solidStoreyToKind.value + padLevel(solidStoreyToLevel.value);
+  return from === to ? from : from + '~' + to;
+}
+
+function setSolidStorey(value, rangeAllowed) {
+  var parsed = parseStorey(value);
+
+  currentSolidStoreyRangeAllowed = Boolean(rangeAllowed);
+  solidStoreyFromKind.value = parsed.from.kind;
+  solidStoreyFromLevel.value = parsed.from.level;
+  solidStoreyToKind.value = currentSolidStoreyRangeAllowed ? parsed.to.kind : parsed.from.kind;
+  solidStoreyToLevel.value = currentSolidStoreyRangeAllowed ? parsed.to.level : parsed.from.level;
+  setControlLocked([solidStoreyFromKind, solidStoreyFromLevel], validationBusy);
+  setControlLocked(
+    [solidStoreyToKind, solidStoreyToLevel],
+    validationBusy || !currentSolidStoreyRangeAllowed
+  );
+  solidStoreyFields.classList.toggle('is-single-storey', !currentSolidStoreyRangeAllowed);
+}
+
+function classificationAllowsStoreyRange(value) {
+  return rangeStoreyClassifications.indexOf(String(value || '')) >= 0;
+}
+
 // ────────────────────────────────────────────────────────────────
 // Initialization called from Ruby
 // ────────────────────────────────────────────────────────────────
@@ -404,6 +446,7 @@ function init(config) {
   config = config || {};
   fixMode = Boolean(config.fixMode);
   validationBusy = Boolean(config.validationBusy);
+  rangeStoreyClassifications = normalizeArray(config.rangeStoreyClassifications);
 
   modeTitle.textContent = fixMode ? '수정 모드' : '편집 모드';
   finishButton.textContent = fixMode ? '수정 완료' : '편집 완료';
@@ -544,6 +587,10 @@ function renderCountRows(container, counts) {
 function renderSolidGroups(snapshot) {
   solidCount.textContent = snapshot.solidGroupCount || 0;
   solidClassification.value = snapshot.classification || 'GeneralSpace|Room';
+  setSolidStorey(
+    snapshot.storey || 'F01',
+    classificationAllowsStoreyRange(solidClassification.value)
+  );
 
   setControlLocked(
     [solidClassification, convertSelectedButton],
@@ -621,6 +668,38 @@ storeyToLevel.addEventListener('keydown', function (event) {
   if (event.key === 'Enter') storeyToLevel.blur();
 });
 
+solidClassification.addEventListener('change', function () {
+  setSolidStorey(
+    composeSolidStorey(),
+    classificationAllowsStoreyRange(solidClassification.value)
+  );
+});
+
+solidStoreyFromKind.addEventListener('change', function () {
+  if (!currentSolidStoreyRangeAllowed) setSolidStorey(composeSolidStorey(), false);
+});
+
+solidStoreyToKind.addEventListener('change', function () {
+  composeSolidStorey();
+});
+
+solidStoreyFromLevel.addEventListener('blur', function () {
+  clampStoreyLevel(solidStoreyFromLevel);
+  if (!currentSolidStoreyRangeAllowed) setSolidStorey(composeSolidStorey(), false);
+});
+
+solidStoreyToLevel.addEventListener('blur', function () {
+  clampStoreyLevel(solidStoreyToLevel);
+});
+
+solidStoreyFromLevel.addEventListener('keydown', function (event) {
+  if (event.key === 'Enter') solidStoreyFromLevel.blur();
+});
+
+solidStoreyToLevel.addEventListener('keydown', function (event) {
+  if (event.key === 'Enter') solidStoreyToLevel.blur();
+});
+
 filterToggle.addEventListener('click', toggleFilterPanel);
 
 changeTypeButton.addEventListener('click', function () {
@@ -628,7 +707,7 @@ changeTypeButton.addEventListener('click', function () {
 });
 
 convertSelectedButton.addEventListener('click', function () {
-  invokeSketchup('convertSelectedSolidGroups', [solidClassification.value]);
+  invokeSketchup('convertSelectedSolidGroups', [solidClassification.value, composeSolidStorey()]);
 });
 
 finishButton.addEventListener('click', function () {

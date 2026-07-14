@@ -743,6 +743,9 @@ module ULOL
 
           assert_includes toolbar_method, 'convert_cell_space_jobs_bulk'
           assert_includes edit_mode_method, 'convert_cell_space_jobs_bulk'
+          assert_includes toolbar_method, 'prompt_cell_space_creation_options'
+          assert_includes toolbar_method, 'job.merge(storey: storey)'
+          assert_includes edit_mode_method, 'job.merge(storey: requested_storey)'
           refute_includes toolbar_method, 'run_batched'
           refute_includes edit_mode_method, 'run_batched'
           refute_includes toolbar_method, 'start_operation'

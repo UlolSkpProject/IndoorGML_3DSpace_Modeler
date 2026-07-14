@@ -61,8 +61,8 @@ module ULOL
           snapshot = projection.snapshot(
             selected_cell_spaces: [],
             solid_jobs: [
-              { source: Object.new, target: target },
-              { source: Object.new, target: target }
+              { source: Object.new, target: target, storey: 'F01~F03' },
+              { source: Object.new, target: target, storey: 'F01~F03' }
             ]
           )
 
@@ -70,6 +70,7 @@ module ULOL
           assert_equal 2, snapshot[:solid_group_count]
           assert_equal CellSpaceCategory.selection_value(*target), snapshot[:classification]
           assert_equal true, snapshot[:classification_locked]
+          assert_equal 'F01~F03', snapshot[:storey]
         end
 
         def test_multi_cell_space_snapshot_counts_selected_types
