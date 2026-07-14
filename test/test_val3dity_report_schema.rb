@@ -379,6 +379,87 @@ module ULOL
             refute_includes final_refs[:cells], 'IF_001'
           end
 
+          def test_grouped_rows_merge_same_code_description_and_cell_with_members
+            rows = [
+              Schema.error_row('Feature', 'cell_A', { 'code' => 203, 'description' => 'INVALID_SHELL' }),
+              Schema.error_row('Primitive', 'solid_cell_A', { 'code' => '203', 'description' => 'INVALID_SHELL' })
+            ]
+
+            groups = Schema.group_error_item_rows(rows, {})
+
+            assert_equal 1, groups.length
+            assert_equal '203', groups.first[:code]
+            assert_equal 'INVALID_SHELL', groups.first[:description]
+            assert_equal ['A'], groups.first.dig(:refs, :cells)
+            assert_equal 2, groups.first[:count]
+            assert_equal rows, groups.first[:members]
+            assert_equal 'validation-error-row-0', groups.first[:id]
+          end
+
+          def test_grouped_rows_ignore_reference_cell_order
+            rows = [
+              Schema.error_row('Feature', 'cell_A and cell_B', { 'code' => 701, 'description' => 'CELLS_OVERLAP' }),
+              Schema.error_row('Feature', 'cell_B and cell_A', { 'code' => 701, 'description' => 'CELLS_OVERLAP' })
+            ]
+
+            groups = Schema.group_error_item_rows(rows, {})
+
+            assert_equal 1, groups.length
+            assert_equal %w[A B], groups.first.dig(:refs, :cells)
+          end
+
+          def test_grouped_rows_do_not_merge_different_reference_cells
+            rows = [
+              Schema.error_row('Feature', 'cell_A', { 'code' => 203, 'description' => 'INVALID_SHELL' }),
+              Schema.error_row('Feature', 'cell_B', { 'code' => 203, 'description' => 'INVALID_SHELL' })
+            ]
+
+            assert_equal 2, Schema.group_error_item_rows(rows, {}).length
+          end
+
+          def test_grouped_rows_do_not_merge_different_codes
+            rows = [
+              Schema.error_row('Feature', 'cell_A', { 'code' => 203, 'description' => 'INVALID_SHELL' }),
+              Schema.error_row('Feature', 'cell_A', { 'code' => 204, 'description' => 'INVALID_SHELL' })
+            ]
+
+            assert_equal 2, Schema.group_error_item_rows(rows, {}).length
+          end
+
+          def test_grouped_rows_do_not_merge_different_descriptions
+            rows = [
+              Schema.error_row('Feature', 'cell_A', { 'code' => 203, 'description' => 'INVALID_SHELL' }),
+              Schema.error_row('Feature', 'cell_A', { 'code' => 203, 'description' => 'INVALID_POLYGON' })
+            ]
+
+            assert_equal 2, Schema.group_error_item_rows(rows, {}).length
+          end
+
+          def test_grouped_rows_do_not_merge_errors_without_reference_cells
+            rows = [
+              Schema.error_row('Dataset', 'report.gml', { 'code' => 203, 'description' => 'INVALID_DATASET' }),
+              Schema.error_row('Dataset', 'report.gml', { 'code' => 203, 'description' => 'INVALID_DATASET' })
+            ]
+
+            groups = Schema.group_error_item_rows(rows, {})
+
+            assert_equal 2, groups.length
+            assert groups.all? { |group| group.dig(:refs, :cells).empty? }
+          end
+
+          def test_grouped_row_refs_union_member_state_and_transition_refs_without_duplicates
+            rows = [
+              Schema.error_row('Feature', 'cell_A state_S', { 'code' => 203, 'description' => 'INVALID_SHELL' }),
+              Schema.error_row('Primitive', 'solid_cell_A state_S transition_T', { 'code' => 203, 'description' => 'INVALID_SHELL' })
+            ]
+
+            refs = Schema.grouped_error_row_refs(Schema.group_error_item_rows(rows, {}).first)
+
+            assert_equal ['A'], refs[:cells]
+            assert_equal ['state_S'], refs[:states]
+            assert_equal ['transition_T'], refs[:transitions]
+          end
+
           def test_overview_counts_tolerate_nil
             assert_equal 0, Schema.total_count(nil)
             assert_equal 5, Schema.total_count([{ 'total' => 2 }, { 'total' => '3' }])

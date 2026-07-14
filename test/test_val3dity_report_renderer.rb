@@ -156,6 +156,48 @@ module ULOL
             assert_includes html, 'data-code="702" data-cells="hw5p10tr"'
             refute_includes html, 'data-cells="IF_001"'
           end
+
+          def test_render_groups_duplicate_error_cards_and_shows_member_details_and_group_counts
+            report = {
+              'validity' => false,
+              'features_overview' => [{ 'total' => 1, 'valid' => 0 }],
+              'primitives_overview' => [{ 'total' => 1, 'valid' => 0 }],
+              'parameters' => {},
+              'features' => [
+                {
+                  'id' => 'cell_A',
+                  'errors' => [
+                    {
+                      'id' => 'cell_A',
+                      'code' => 203,
+                      'description' => 'INVALID_SHELL',
+                      'details' => '<unsafe detail>'
+                    }
+                  ],
+                  'primitives' => [
+                    {
+                      'id' => 'solid_cell_A',
+                      'errors' => [{ 'code' => 203, 'description' => 'INVALID_SHELL' }]
+                    }
+                  ]
+                }
+              ]
+            }
+
+            html = Val3dityReportRenderer.new.render(report)
+
+            assert_equal 1, html.scan(/<details class="recheck-row validation-error-row/).length
+            assert_equal 2, html.scan(/<div class="error-member">/).length
+            assert_includes html, '상세 2건'
+            assert_includes html, '<span class="metric-value">1</span>'
+            assert_includes html, '<span class="section-count">1건</span>'
+            assert_includes html, 'data-filter="all">전체 1</button>'
+            assert_includes html, 'data-filter="203">203 (1)</button>'
+            assert_includes html, '<span class="member-value">Feature</span>'
+            assert_includes html, '<span class="member-value">Primitive</span>'
+            assert_includes html, '&lt;unsafe detail&gt;'
+            refute_includes html, '<unsafe detail>'
+          end
         end
       end
     end

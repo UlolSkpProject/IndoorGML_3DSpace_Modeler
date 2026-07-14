@@ -439,11 +439,11 @@ module ULOL
 
         def validation_report_focus_row_states(report, indoor_model = IndoorModel.current)
           schema = IndoorGmlConverter::Val3dityReportSchema
-          schema.sorted_error_item_rows(report || {}).each_with_index.map do |row, index|
-            refs = schema.final_error_row_refs(row, report || {})
+          schema.grouped_error_item_rows(report || {}).map do |group|
+            refs = schema.grouped_error_row_refs(group)
             {
-              id: schema.error_item_row_id(index),
-              code: row[:code].to_s,
+              id: group[:id],
+              code: group[:code].to_s,
               cells: Array(refs[:cells]).map(&:to_s),
               states: Array(refs[:states]).map(&:to_s),
               transitions: Array(refs[:transitions]).map(&:to_s),

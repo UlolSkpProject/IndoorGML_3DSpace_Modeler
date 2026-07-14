@@ -23,9 +23,10 @@ module ULOL
 
           def error_kind_rows(raw_report)
             counts = Hash.new { |hash, key| hash[key] = { code: key, description: 'UNKNOWN', count: 0 } }
-            error_item_rows(raw_report).each do |row|
-              item = counts[row[:code]]
-              item[:description] = row[:description]
+            grouped_error_item_rows(raw_report).each do |group|
+              code = Array(group[:members]).first&.[](:code)
+              item = counts[code]
+              item[:description] = group[:description]
               item[:count] += 1
             end
             counts.values.sort_by { |row| row[:code].to_s }
@@ -61,6 +62,80 @@ module ULOL
 
           def sorted_error_item_rows(raw_report)
             sort_error_item_rows(error_item_rows(raw_report))
+          end
+
+          def grouped_error_item_rows(raw_report)
+            group_error_item_rows(error_item_rows(raw_report || {}), raw_report || {})
+          end
+
+          def group_error_item_rows(rows, raw_report = nil)
+            groups = {}
+            Array(rows).each_with_index do |row, source_index|
+              refs = final_error_row_refs(row, raw_report)
+              cells = normalize_cell_refs(refs[:cells]).sort
+              code = normalized_error_code(row[:code])
+              description = (row[:description] || row.dig(:raw, 'type') || row.dig(:raw, :type) || 'UNKNOWN').to_s
+              key = cells.empty? ? [:unreferenced, source_index] : [code, description, cells]
+              group = groups[key] ||= {
+                code: code,
+                description: description,
+                refs: { cells: cells, states: [], transitions: [] },
+                members: [],
+                count: 0,
+                label: nil,
+                overlap_recheck: nil,
+                source_index: source_index
+              }
+              group[:members] << row
+              group[:refs][:states].concat(Array(refs[:states]).map(&:to_s))
+              group[:refs][:transitions].concat(Array(refs[:transitions]).map(&:to_s))
+              group[:overlap_recheck] ||= matching_overlap_recheck_row(row, raw_report)
+            end
+
+            grouped = groups.values.each do |group|
+              group[:refs][:states] = group[:refs][:states].reject(&:empty?).uniq.sort
+              group[:refs][:transitions] = group[:refs][:transitions].reject(&:empty?).uniq.sort
+              group[:count] = group[:members].length
+              group[:label] = grouped_error_item_label(group)
+            end
+            sort_grouped_error_item_rows(grouped).each_with_index do |group, index|
+              group[:id] = error_item_row_id(index)
+            end
+          end
+
+          def sort_grouped_error_item_rows(groups)
+            Array(groups).sort_by do |group|
+              [
+                error_code_number(group[:code]),
+                group[:code].to_s,
+                group[:description].to_s,
+                Array(group.dig(:refs, :cells)).join("\0"),
+                group[:label].to_s,
+                group[:source_index].to_i
+              ]
+            end
+          end
+
+          def grouped_error_row_refs(group)
+            refs = group && group[:refs] || empty_refs
+            {
+              cells: normalize_cell_refs(refs[:cells]).sort,
+              states: Array(refs[:states]).map(&:to_s).reject(&:empty?).uniq.sort,
+              transitions: Array(refs[:transitions]).map(&:to_s).reject(&:empty?).uniq.sort
+            }
+          end
+
+          def grouped_error_item_label(group)
+            cells = Array(group.dig(:refs, :cells))
+            return cells.map { |cell_id| "cell_#{cell_id}" }.join(' / ') unless cells.empty?
+
+            error_item_label(Array(group[:members]).first)
+          end
+
+          def normalized_error_code(code)
+            text = code.to_s
+            digits = text[/\d+/]
+            digits ? digits.to_i.to_s : text
           end
 
           def sort_error_item_rows(rows)
