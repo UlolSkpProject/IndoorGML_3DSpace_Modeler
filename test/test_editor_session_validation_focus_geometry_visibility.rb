@@ -208,6 +208,149 @@ module ULOL
           ], calls
         end
 
+        def test_row_selection_zooms_to_the_union_of_highlighted_cell_bounds_after_visibility
+          calls = []
+          view = fake_zoom_view
+          cell_a = fake_zoom_cell('A', :bounds_a)
+          cell_b = fake_zoom_cell('B', :bounds_b)
+          indoor_model = Struct.new(:cell_spaces).new([cell_a, cell_b])
+          controller = EditorSession::ValidationFocusController.new
+          controller.begin(%w[cell_A cell_B])
+          controller.set_focus_rows([{ id: 'row-1', cells: %w[A B], code: '203' }])
+          session = EditorSession.allocate
+          session.instance_variable_set(:@indoor_model, indoor_model)
+          session.instance_variable_set(:@validation_focus_controller, controller)
+          session.define_singleton_method(:apply_validation_focus_visibility) { calls << :visibility; true }
+          session.define_singleton_method(:invalidate_overlay_transition_points) { calls << :overlay }
+          session.define_singleton_method(:invalidate_view) { |_model| calls << :invalidate_view }
+
+          with_fake_active_model(Struct.new(:active_view).new(view)) do
+            with_fake_bounding_box do
+              with_fake_ui_timers do |timers|
+                assert session.set_validation_focus_highlight(
+                  %w[cell_A cell_B],
+                  '203',
+                  row_id: 'row-1',
+                  row_cells: %w[A B]
+                )
+                assert_equal [:visibility, :overlay, :invalidate_view], calls
+                assert_equal 1, timers.length
+
+                timers.first[2].call
+              end
+            end
+          end
+
+          assert_equal %i[bounds_a bounds_b], view.zoomed_bounds.items
+          assert_equal true, view.invalidated
+        end
+
+        def test_row_selection_does_not_zoom_without_a_valid_cell_group
+          view = fake_zoom_view
+          indoor_model = Struct.new(:cell_spaces).new([fake_zoom_cell('A', nil)])
+          controller = EditorSession::ValidationFocusController.new
+          controller.begin(['cell_A'])
+          controller.set_focus_rows([{ id: 'row-1', cells: ['A'], code: '203' }])
+          session = EditorSession.allocate
+          session.instance_variable_set(:@indoor_model, indoor_model)
+          session.instance_variable_set(:@validation_focus_controller, controller)
+          session.define_singleton_method(:apply_validation_focus_visibility) { true }
+          session.define_singleton_method(:invalidate_overlay_transition_points) {}
+          session.define_singleton_method(:invalidate_view) { |_model| }
+
+          with_fake_active_model(Struct.new(:active_view).new(view)) do
+            with_fake_bounding_box do
+              with_fake_ui_timers do |timers|
+                session.set_validation_focus_highlight(['cell_A'], '203', row_id: 'row-1', row_cells: ['A'])
+                timers.first[2].call
+              end
+            end
+          end
+
+          assert_nil view.zoomed_bounds
+          assert_equal false, view.invalidated
+        end
+
+        def test_highlight_clear_does_not_schedule_zoom
+          session = EditorSession.allocate
+          calls = []
+          controller = EditorSession::ValidationFocusController.new
+          controller.begin(['cell_A'])
+          session.instance_variable_set(:@validation_focus_controller, controller)
+          session.define_singleton_method(:apply_validation_focus_visibility) { calls << :visibility; true }
+          session.define_singleton_method(:invalidate_overlay_transition_points) { calls << :overlay }
+          session.define_singleton_method(:invalidate_view) { |_model| calls << :invalidate_view }
+
+          with_fake_ui_timers do |timers|
+            assert session.set_validation_focus_highlight([], '')
+            assert_empty timers
+          end
+
+          assert_equal [:visibility, :overlay, :invalidate_view], calls
+        end
+
+        def test_validation_focus_row_mutation_publishes_only_the_final_replacement
+          updates = []
+          calls = []
+          old_cell = fake_mutation_cell('A')
+          new_cell = fake_mutation_cell('B')
+          indoor_model = Struct.new(:cell_spaces, :updates) do
+            def update_validation_focus_report_row(payload)
+              updates << payload
+            end
+          end.new([new_cell], updates)
+          controller = EditorSession::ValidationFocusController.new
+          controller.begin(['cell_A'])
+          controller.set_focus_rows([{ id: 'row-1', cells: ['A'], states: ['S1'], transitions: ['T1'], code: '203' }])
+          controller.set_highlight(['cell_A'], '203', row_id: 'row-1', row_cells: ['A'])
+          session = EditorSession.allocate
+          session.instance_variable_set(:@indoor_model, indoor_model)
+          session.instance_variable_set(:@validation_focus_controller, controller)
+          session.define_singleton_method(:apply_validation_focus_visibility) { calls << :visibility; true }
+          session.define_singleton_method(:invalidate_overlay_transition_points) { calls << :overlay }
+          session.define_singleton_method(:invalidate_view) { |_model| calls << :invalidate_view }
+          session.define_singleton_method(:zoom_validation_focus_highlight) { |row_id:| calls << [:zoom, row_id]; true }
+
+          session.with_validation_focus_row_mutation do
+            assert_equal [], session.remove_validation_focus_highlight_cell(old_cell)
+            assert_nil session.add_validation_focus_highlight_cell(new_cell)
+            assert_empty updates
+          end
+
+          assert_equal 1, updates.length
+          assert_equal 'row-1', updates.first[:row_id]
+          assert_equal ['B'], updates.first[:cells]
+          assert_equal ['S1'], updates.first[:states]
+          assert_equal ['T1'], updates.first[:transitions]
+          assert_equal 'cell_B', updates.first[:label]
+          assert_equal [:visibility, :overlay, :invalidate_view, [:zoom, 'row-1']], calls
+        end
+
+        def test_discarded_validation_focus_row_mutation_does_not_publish_created_cells
+          updates = []
+          new_cell = fake_mutation_cell('B')
+          indoor_model = Struct.new(:cell_spaces, :updates) do
+            def update_validation_focus_report_row(payload)
+              updates << payload
+            end
+          end.new([new_cell], updates)
+          controller = EditorSession::ValidationFocusController.new
+          controller.begin(['cell_A'])
+          controller.set_focus_rows([{ id: 'row-1', cells: ['A'], code: '203' }])
+          controller.set_highlight(['cell_A'], '203', row_id: 'row-1', row_cells: ['A'])
+          session = EditorSession.allocate
+          session.instance_variable_set(:@indoor_model, indoor_model)
+          session.instance_variable_set(:@validation_focus_controller, controller)
+
+          session.with_validation_focus_row_mutation do
+            session.add_validation_focus_highlight_cell(new_cell)
+            session.discard_validation_focus_row_mutation
+          end
+
+          assert_empty updates
+          assert_equal false, controller.visible_cell_space?(new_cell)
+        end
+
         def test_set_visibility_filter_is_ignored_in_fix_mode
           session = EditorSession.allocate
           calls = []
@@ -307,6 +450,75 @@ module ULOL
               reenter
             end
           end.new(calls)
+        end
+
+        def fake_zoom_cell(id, bounds)
+          group = if bounds
+                    Struct.new(:bounds) do
+                      def valid?
+                        true
+                      end
+                    end.new(bounds)
+                  end
+          Struct.new(:id, :valid_sketchup_group) do
+            def valid?
+              true
+            end
+          end.new(id, group)
+        end
+
+        def fake_mutation_cell(id)
+          Struct.new(:id) do
+            def valid?
+              true
+            end
+          end.new(id)
+        end
+
+        def fake_zoom_view
+          Struct.new(:zoomed_bounds, :invalidated) do
+            def zoom(bounds)
+              self.zoomed_bounds = bounds
+            end
+
+            def invalidate
+              self.invalidated = true
+            end
+          end.new(nil, false)
+        end
+
+        def with_fake_active_model(model)
+          original = Sketchup.method(:active_model)
+          Sketchup.define_singleton_method(:active_model) { model }
+          yield
+        ensure
+          Sketchup.define_singleton_method(:active_model) { |*args| original.call(*args) }
+        end
+
+        def with_fake_bounding_box
+          geom_existed = Object.const_defined?(:Geom, false)
+          geom = geom_existed ? Object.const_get(:Geom) : Module.new
+          Object.const_set(:Geom, geom) unless geom_existed
+          bounds_existed = geom.const_defined?(:BoundingBox, false)
+          previous_bounds = geom.const_get(:BoundingBox) if bounds_existed
+          geom.send(:remove_const, :BoundingBox) if bounds_existed
+          fake_bounds = Class.new do
+            attr_reader :items
+
+            def initialize
+              @items = []
+            end
+
+            def add(bounds)
+              @items << bounds
+            end
+          end
+          geom.const_set(:BoundingBox, fake_bounds)
+          yield
+        ensure
+          geom.send(:remove_const, :BoundingBox) if geom&.const_defined?(:BoundingBox, false)
+          geom.const_set(:BoundingBox, previous_bounds) if bounds_existed
+          Object.send(:remove_const, :Geom) unless geom_existed
         end
 
         def with_fake_ui_timers

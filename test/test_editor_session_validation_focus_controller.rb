@@ -121,6 +121,63 @@ module ULOL
           assert_equal false, controller.visible_cell_space?(cell_c)
         end
 
+        def test_atomic_cell_replacement_updates_each_affected_row_once
+          controller = EditorSession::ValidationFocusController.new
+          controller.begin(%w[cell_A cell_C])
+          controller.set_focus_rows([
+                                      { id: 'row-1', cells: %w[A C], states: ['S1'], transitions: ['T1'], code: '203' },
+                                      { id: 'row-2', cells: %w[A], states: ['S2'], transitions: ['T2'], code: '203' }
+                                    ])
+          controller.set_highlight(%w[cell_A cell_C], '203', row_id: 'row-1', row_cells: %w[A C])
+
+          payloads = controller.apply_cell_mutation(removed: ['cell_A'], added: %w[cell_B B])
+
+          assert_equal %w[row-1 row-2], payloads.map { |payload| payload[:row_id] }
+          active_payload = payloads.first
+          assert_equal %w[C B], active_payload[:cells]
+          assert_equal %w[C cell_C B cell_B], active_payload[:focus_ids]
+          assert_equal ['S1'], active_payload[:states]
+          assert_equal ['T1'], active_payload[:transitions]
+          assert_equal 'cell_C and cell_B', active_payload[:label]
+          assert_equal [], payloads.last[:cells]
+          assert_equal 'No CellSpace', payloads.last[:label]
+        end
+
+        def test_empty_highlight_row_remains_selected_and_accepts_a_new_cell
+          controller = EditorSession::ValidationFocusController.new
+          controller.begin(['cell_A'])
+          controller.set_focus_rows([{ id: 'row-1', cells: ['A'], code: '203' }])
+          controller.set_highlight(['cell_A'], '203', row_id: 'row-1', row_cells: ['A'])
+
+          empty_payload = controller.remove_cell('A').first
+
+          assert controller.active?
+          assert controller.highlight_active?
+          assert_equal 'No CellSpace', empty_payload[:label]
+
+          added_payload = controller.add_highlight_cell('cell_B')
+
+          assert_equal ['B'], added_payload[:cells]
+          assert_equal 'cell_B', added_payload[:label]
+        end
+
+        def test_transaction_reconciliation_prunes_stale_cells_without_inferring_new_refs
+          controller = EditorSession::ValidationFocusController.new
+          existing = fake_cell_space(id: 'B')
+          unrelated = fake_cell_space(id: 'C')
+          controller.begin(%w[cell_A cell_B])
+          controller.set_focus_rows([{ id: 'row-1', cells: %w[A B], code: '203' }])
+          controller.set_highlight(%w[cell_A cell_B], '203', row_id: 'row-1', row_cells: %w[A B])
+
+          payloads = controller.prune_missing_cells([existing, unrelated])
+
+          assert_equal 1, payloads.length
+          assert_equal ['B'], payloads.first[:cells]
+          refute_includes payloads.first[:cells], 'C'
+          assert_equal true, controller.visible_cell_space?(existing)
+          assert_equal false, controller.visible_cell_space?(unrelated)
+        end
+
         def test_rendering_options_are_captured_and_restored_for_multi_cell_focus
           options = {
             'HideRestOfModel' => true,

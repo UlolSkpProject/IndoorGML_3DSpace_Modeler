@@ -58,6 +58,27 @@ module ULOL
             assert_equal 1, second_close_requests
             refute Val3dityRunner.shutting_down?
           end
+
+          def test_validation_focus_row_update_keeps_row_id_and_serializes_all_actionable_refs
+            scripts = []
+            dialog = ExportProgressDialog.allocate
+            dialog.define_singleton_method(:execute_or_queue) { |script| scripts << script }
+
+            dialog.update_validation_focus_row(
+              row_id: 'validation-error-row-3',
+              cells: %w[B C],
+              states: ['S1'],
+              transitions: ['T1'],
+              label: 'cell_B and cell_C'
+            )
+
+            assert_equal 1, scripts.length
+            assert_includes scripts.first, '"rowId":"validation-error-row-3"'
+            assert_includes scripts.first, '"cells":["B","C"]'
+            assert_includes scripts.first, '"states":["S1"]'
+            assert_includes scripts.first, '"transitions":["T1"]'
+            assert_includes scripts.first, '"label":"cell_B and cell_C"'
+          end
         end
       end
     end

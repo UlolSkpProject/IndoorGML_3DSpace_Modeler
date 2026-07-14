@@ -266,6 +266,22 @@ module ULOL
           assert_equal [[target_entities.last_copy, :room, 'Room']], converted
         end
 
+        def test_executor_returns_the_created_cell_space
+          source = FakeGroup.new(manifold: true)
+          created_cell_space = Object.new
+          executor = CellSpaceConversionExecutor.new(
+            target_entities: FakeTargetEntities.new,
+            converter: proc { |_group, _cell_type, _category_code| created_cell_space },
+            preserve_source: proc { |_group| true },
+            logger: FakeLogger.new
+          )
+
+          result = executor.execute(job_for(source), fallback_target: [:general, nil])
+
+          assert result.converted?
+          assert_same created_cell_space, result.created_cell_space
+        end
+
         def test_executor_passes_propagated_storey_to_converter
           source = FakeGroup.new(manifold: true)
           target_entities = FakeTargetEntities.new
@@ -510,6 +526,26 @@ module ULOL
             :commit_operation,
             :restore_active_path
           ], calls
+        end
+
+        def test_bulk_service_returns_only_successfully_created_cell_spaces
+          calls = 0
+          created_cell_space = Object.new
+          service = bulk_service(
+            model: FakeOperationModel.new,
+            jobs: [job_for(FakeGroup.new(manifold: true)), job_for(FakeGroup.new(manifold: true))],
+            converter: proc do |_source, _cell_type, _category_code|
+              calls += 1
+              raise 'creation failed' if calls == 2
+
+              created_cell_space
+            end
+          )
+
+          result = service.call
+
+          assert_equal 1, result.converted_count
+          assert_equal [created_cell_space], result.created_cell_spaces
         end
 
         def test_bulk_service_aborts_and_restores_runtime_when_commit_fails
