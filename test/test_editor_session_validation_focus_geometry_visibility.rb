@@ -6,6 +6,10 @@ module Sketchup
   def self.active_model
     nil
   end
+
+  def self.send_action(_action)
+    true
+  end
 end
 
 module ULOL
@@ -266,9 +270,10 @@ module ULOL
           ], calls
         end
 
-        def test_row_selection_zooms_to_highlighted_cell_groups_after_visibility
+        def test_row_selection_applies_visibility_then_top_iso_extents_and_padding_in_order
           calls = []
-          view = fake_zoom_view
+          camera_events = []
+          view = fake_zoom_view(camera_events)
           cell_a = fake_zoom_cell('A', :bounds_a)
           cell_b = fake_zoom_cell('B', :bounds_b)
           controller = EditorSession::ValidationFocusController.new
@@ -277,31 +282,40 @@ module ULOL
           session = EditorSession.allocate
           session.instance_variable_set(:@indoor_model, Struct.new(:cell_spaces).new([cell_a, cell_b]))
           session.instance_variable_set(:@validation_focus_controller, controller)
-          session.define_singleton_method(:apply_validation_focus_visibility) { calls << :visibility; true }
+          session.define_singleton_method(:apply_validation_focus_visibility) do
+            calls << :visibility
+            camera_events << :visibility
+            true
+          end
           session.define_singleton_method(:invalidate_overlay_transition_points) { calls << :overlay }
           session.define_singleton_method(:invalidate_view) { |_model| calls << :invalidate_view }
 
-          with_fake_active_model(Struct.new(:active_view).new(view)) do
-            with_fake_ui_timers do |timers|
-              assert session.set_validation_focus_highlight(
-                %w[cell_A cell_B],
-                '203',
-                row_id: 'row-1',
-                row_cells: %w[A B]
-              )
-              assert_equal [:visibility, :overlay, :invalidate_view], calls
-              assert_equal [[0, false]], timers.map { |delay, repeat, _block| [delay, repeat] }
+          with_fake_sketchup_actions(camera_events) do
+            with_fake_active_model(Struct.new(:active_view).new(view)) do
+              with_fake_ui_timers do |timers|
+                assert session.set_validation_focus_highlight(
+                  %w[cell_A cell_B],
+                  '203',
+                  row_id: 'row-1',
+                  row_cells: %w[A B]
+                )
+                assert_equal [:visibility, :overlay, :invalidate_view], calls
+                assert_equal [[0, false]], timers.map { |delay, repeat, _block| [delay, repeat] }
 
-              timers.first[2].call
-              assert_equal [[0, false], [0, false]], timers.map { |delay, repeat, _block| [delay, repeat] }
-              assert_equal [[cell_a.valid_sketchup_group, cell_b.valid_sketchup_group]], view.zoom_calls
-              assert_equal false, view.invalidated
-
-              timers.last[2].call
+                timers[0][2].call
+                assert_equal [:visibility, 'viewTop:'], camera_events
+                timers[1][2].call
+                assert_equal [:visibility, 'viewTop:', 'viewIso:'], camera_events
+                timers[2][2].call
+                assert_equal [:visibility, 'viewTop:', 'viewIso:', :zoom_extents], camera_events
+                assert_equal false, view.invalidated
+                timers[3][2].call
+              end
             end
           end
 
-          assert_equal [[cell_a.valid_sketchup_group, cell_b.valid_sketchup_group], 0.7], view.zoom_calls
+          assert_equal [:visibility, 'viewTop:', 'viewIso:', :zoom_extents, [:zoom, 0.7], :invalidate], camera_events
+          assert_equal [0.7], view.zoom_calls
           assert_equal true, view.invalidated
         end
 
@@ -469,20 +483,37 @@ module ULOL
           end.new(id, group)
         end
 
-        def fake_zoom_view
-          Struct.new(:zoom_calls, :invalidated) do
+        def fake_zoom_view(events = [])
+          Struct.new(:zoom_calls, :invalidated, :events) do
             def zoom(value)
               unless value.is_a?(Array) || value.is_a?(Numeric)
                 raise ArgumentError, 'expected an entity array or numeric zoom factor'
               end
 
               zoom_calls << value
+              events << [:zoom, value]
+            end
+
+            def zoom_extents
+              events << :zoom_extents
             end
 
             def invalidate
               self.invalidated = true
+              events << :invalidate
             end
-          end.new([], false)
+          end.new([], false, events)
+        end
+
+        def with_fake_sketchup_actions(events)
+          original = Sketchup.method(:send_action)
+          Sketchup.define_singleton_method(:send_action) do |action|
+            events << action
+            true
+          end
+          yield
+        ensure
+          Sketchup.define_singleton_method(:send_action) { |*args| original.call(*args) }
         end
 
         def with_fake_active_model(model)
