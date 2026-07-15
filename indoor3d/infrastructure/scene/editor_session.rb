@@ -600,35 +600,50 @@ module ULOL
           expected_row_id = row_id.to_s
           return false if expected_row_id.empty?
           return false unless defined?(UI) && UI.respond_to?(:start_timer)
-          return false unless defined?(Sketchup) && Sketchup.respond_to?(:send_action)
 
           @validation_focus_zoom_generation = @validation_focus_zoom_generation.to_i + 1
           generation = @validation_focus_zoom_generation
-          schedule_validation_focus_camera_step(generation, expected_row_id, 'top view') do
+          schedule_validation_focus_camera_step(generation, expected_row_id, 'camera sequence') do
             next if validation_focus_highlight_groups.empty?
 
-            Sketchup.send_action('viewTop:')
-            schedule_validation_focus_camera_step(generation, expected_row_id, 'isometric view') do
-              Sketchup.send_action('viewIso:')
-              schedule_validation_focus_camera_step(generation, expected_row_id, 'zoom extents') do
-                view = Sketchup.active_model()&.active_view
-                next unless view&.respond_to?(:zoom_extents)
+            view = Sketchup.active_model()&.active_view
+            next unless view&.respond_to?(:zoom_extents)
+            next unless apply_validation_focus_camera_orientation(view)
 
-                view.zoom_extents
-                schedule_validation_focus_camera_step(generation, expected_row_id, 'padding zoom') do
-                  padded_view = Sketchup.active_model()&.active_view
-                  next unless padded_view
-
-                  padded_view.zoom(0.7)
-                  padded_view.invalidate
-                end
-              end
-            end
+            view.zoom_extents
+            view.zoom(0.7)
+            view.invalidate
           end
           true
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight zoom scheduling failed: #{e.class}: #{e.message}"
           false
+        end
+
+        def apply_validation_focus_camera_orientation(view)
+          camera = view.respond_to?(:camera) ? view.camera : nil
+          target = camera&.target
+          eye = camera&.eye
+          return false unless camera&.respond_to?(:set)
+          return false unless target&.respond_to?(:x) && target.respond_to?(:y) && target.respond_to?(:z)
+
+          distance = eye&.respond_to?(:distance) ? eye.distance(target).to_f.abs : 0.0
+          distance = 1.0 unless distance.finite? && distance.positive?
+          target_point = Geom::Point3d.new(target.x.to_f, target.y.to_f, target.z.to_f)
+
+          camera.set(
+            Geom::Point3d.new(target_point.x, target_point.y, target_point.z + distance),
+            target_point,
+            Geom::Vector3d.new(0.0, 1.0, 0.0)
+          )
+
+          iso_offset = distance / Math.sqrt(3.0)
+          camera.set(
+            Geom::Point3d.new(target_point.x + iso_offset, target_point.y - iso_offset, target_point.z + iso_offset),
+            target_point,
+            Geom::Vector3d.new(-1.0, 1.0, 2.0)
+          )
+          true
         end
 
         def schedule_validation_focus_camera_step(generation, expected_row_id, label, &step)
