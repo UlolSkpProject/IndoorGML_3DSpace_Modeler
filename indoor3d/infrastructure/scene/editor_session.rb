@@ -600,45 +600,49 @@ module ULOL
           expected_row_id = row_id.to_s
           return false if expected_row_id.empty?
           return false unless defined?(UI) && UI.respond_to?(:start_timer)
+          return false unless defined?(Sketchup) && Sketchup.respond_to?(:send_action)
 
           @validation_focus_zoom_generation = @validation_focus_zoom_generation.to_i + 1
           generation = @validation_focus_zoom_generation
-          UI.start_timer(0, false) do
-            begin
-              next unless generation == @validation_focus_zoom_generation
-              next unless validation_focus_active?
-              next unless validation_focus_controller.highlight_row_id.to_s == expected_row_id
+          schedule_validation_focus_camera_step(generation, expected_row_id, 'top view') do
+            next if validation_focus_highlight_groups.empty?
 
-              groups = validation_focus_highlight_groups
-              next if groups.empty?
+            Sketchup.send_action('viewTop:')
+            schedule_validation_focus_camera_step(generation, expected_row_id, 'isometric view') do
+              Sketchup.send_action('viewIso:')
+              schedule_validation_focus_camera_step(generation, expected_row_id, 'zoom extents') do
+                view = Sketchup.active_model()&.active_view
+                next unless view&.respond_to?(:zoom_extents)
 
-              view = Sketchup.active_model()&.active_view
-              next unless view
-
-              view.zoom(groups)
-              UI.start_timer(0, false) do
-                begin
-                  next unless generation == @validation_focus_zoom_generation
-                  next unless validation_focus_active?
-                  next unless validation_focus_controller.highlight_row_id.to_s == expected_row_id
-
+                view.zoom_extents
+                schedule_validation_focus_camera_step(generation, expected_row_id, 'padding zoom') do
                   padded_view = Sketchup.active_model()&.active_view
                   next unless padded_view
 
                   padded_view.zoom(0.7)
                   padded_view.invalidate
-                rescue StandardError => e
-                  IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight padding zoom failed: #{e.class}: #{e.message}"
                 end
               end
-            rescue StandardError => e
-              IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight zoom failed: #{e.class}: #{e.message}"
             end
           end
           true
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight zoom scheduling failed: #{e.class}: #{e.message}"
           false
+        end
+
+        def schedule_validation_focus_camera_step(generation, expected_row_id, label, &step)
+          UI.start_timer(0, false) do
+            begin
+              next unless generation == @validation_focus_zoom_generation
+              next unless validation_focus_active?
+              next unless validation_focus_controller.highlight_row_id.to_s == expected_row_id
+
+              step.call
+            rescue StandardError => e
+              IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight #{label} failed: #{e.class}: #{e.message}"
+            end
+          end
         end
 
         def validation_focus_highlight_groups
