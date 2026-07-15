@@ -32,7 +32,7 @@ module ULOL
             return unless creation_options
 
             cell_type, category_code, storey = creation_options
-            conversion_jobs = conversion_jobs.map { |job| job.merge(storey: storey) }
+            conversion_jobs = CellSpaceConversionJobBuilder.apply_fallback_storey(conversion_jobs, storey)
 
             result = indoor_model.convert_cell_space_jobs_bulk(
               conversion_jobs,
