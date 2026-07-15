@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../utils/geometry'
+require_relative '../infrastructure/scene/entity_copy_helper'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -203,15 +204,21 @@ module ULOL
             return { status: :inconclusive, reason: 'BOOLEAN_OPERATION_FAILED' } unless model
 
             started = false
+            copy1 = nil
+            copy2 = nil
             result = nil
 
             model.start_operation('IndoorGML overlap recheck', true)
             started = true
 
             return { status: :inconclusive, reason: 'INPUT_NOT_MANIFOLD' } unless valid_manifold_group?(group1) && valid_manifold_group?(group2)
-            return { status: :inconclusive, reason: 'BOOLEAN_OPERATION_FAILED' } unless group1.respond_to?(:intersect)
+            copy1 = build_boolean_copy(group1)
+            copy2 = build_boolean_copy(group2)
+            return { status: :inconclusive, reason: 'BOOLEAN_COPY_FAILED' } unless copy1 && copy2
+            return { status: :inconclusive, reason: 'BOOLEAN_COPY_NOT_MANIFOLD' } unless valid_manifold_group?(copy1) && valid_manifold_group?(copy2)
+            return { status: :inconclusive, reason: 'BOOLEAN_OPERATION_FAILED' } unless copy1.respond_to?(:intersect)
 
-            result = group1.intersect(group2)
+            result = copy1.intersect(copy2)
             return { status: :inconclusive, reason: 'BOOLEAN_OPERATION_FAILED' } if result.nil?
 
             faces = result.definition.entities.grep(Sketchup::Face).select(&:valid?)
@@ -233,13 +240,34 @@ module ULOL
             { status: :inconclusive, reason: "BOOLEAN_OPERATION_FAILED: #{e.class}: #{e.message}" }
           ensure
             model.abort_operation if started
-            [result].compact.each do |entity|
+            [result, copy1, copy2].compact.each do |entity|
               next if entity.equal?(group1) || entity.equal?(group2)
 
               entity.erase! if entity.respond_to?(:valid?) && entity.valid?
             rescue StandardError
               nil
             end
+          end
+
+          def build_boolean_copy(source)
+            parent = source.respond_to?(:parent) ? source.parent : nil
+            target_entities = if parent.respond_to?(:entities)
+                                parent.entities
+                              elsif parent.respond_to?(:add_instance)
+                                parent
+                              end
+            return nil unless target_entities
+
+            EntityCopyHelper.copy_instance(
+              source: source,
+              target_entities: target_entities,
+              transformation: source.transformation,
+              convert_to_group: false,
+              make_unique: true
+            )
+          rescue StandardError => e
+            log("Model CellSpace Boolean copy failed: #{e.class}: #{e.message}")
+            nil
           end
 
           def valid_manifold_group?(group)

@@ -97,25 +97,50 @@ module ULOL
             assert_equal candidates.first, rechecker.best_candidate(candidates, 704)
           end
 
-          def test_boolean_uses_original_entities_and_aborts_temporary_result_operation
+          def test_boolean_uses_isolated_entity_copies_and_preserves_original_entities
             model = FakeBooleanModel.new
             group1 = FakeBooleanGroup.new(intersection: nil)
             group2 = FakeBooleanGroup.new(intersection: nil)
+            copy1 = FakeBooleanGroup.new(intersection: nil)
+            copy2 = FakeBooleanGroup.new(intersection: nil)
             indoor_model = FakeIndoorModel.new([], model)
             rechecker = BooleanRechecker.new(
               indoor_model: indoor_model,
               tolerance: 0.001,
-              model: model
+              model: model,
+              copies: [copy1, copy2]
             )
 
             result = rechecker.send(:model_solid_intersection, group1, group2)
 
             assert_equal :inconclusive, result[:status]
             assert_equal 'BOOLEAN_OPERATION_FAILED', result[:reason]
-            assert_same group2, group1.intersected_with
+            assert_nil group1.intersected_with
+            assert_nil group2.intersected_with
+            assert_same copy2, copy1.intersected_with
             assert group1.valid?
             assert group2.valid?
+            refute copy1.valid?
+            refute copy2.valid?
             assert_equal 1, model.abort_count
+          end
+
+          def test_boolean_copy_reuses_source_definition_and_transformation_but_is_made_unique
+            copy = FakeCopiedInstance.new
+            entities = FakeCopyEntities.new(copy)
+            definition = FakeDefinition.new
+            transformation = Object.new
+            source = FakeCopySource.new(definition, transformation, FakeParent.new(entities))
+            rechecker = Val3dityOverlapGeometryRechecker.new(
+              indoor_model: FakeIndoorModel.new([], nil),
+              tolerance: 0.001
+            )
+
+            result = rechecker.send(:build_boolean_copy, source)
+
+            assert_same copy, result
+            assert_equal [[definition, transformation]], entities.added_instances
+            assert_equal 1, copy.make_unique_count
           end
 
           FakeCellSpace = Struct.new(:id, :sketchup_group)
@@ -158,10 +183,19 @@ module ULOL
           end
 
           class BooleanRechecker < Val3dityOverlapGeometryRechecker
+            def initialize(copies:, **options)
+              super(**options)
+              @copies = copies
+            end
+
             private
 
             def valid_manifold_group?(_group)
               true
+            end
+
+            def build_boolean_copy(_group)
+              @copies.shift
             end
           end
 
@@ -200,6 +234,58 @@ module ULOL
 
             def erase!
               @valid = false
+            end
+          end
+
+          FakeParent = Struct.new(:entities)
+
+          class FakeDefinition
+            def valid?
+              true
+            end
+          end
+
+          class FakeCopySource
+            attr_reader :definition, :transformation, :parent
+
+            def initialize(definition, transformation, parent)
+              @definition = definition
+              @transformation = transformation
+              @parent = parent
+            end
+
+            def valid?
+              true
+            end
+          end
+
+          class FakeCopyEntities
+            attr_reader :added_instances
+
+            def initialize(copy)
+              @copy = copy
+              @added_instances = []
+            end
+
+            def add_instance(definition, transformation)
+              @added_instances << [definition, transformation]
+              @copy
+            end
+          end
+
+          class FakeCopiedInstance
+            attr_reader :make_unique_count
+
+            def initialize
+              @make_unique_count = 0
+            end
+
+            def valid?
+              true
+            end
+
+            def make_unique
+              @make_unique_count += 1
             end
           end
         end
