@@ -4,6 +4,15 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class CellSpaceConversionJobBuilder
+        def self.apply_fallback_storey(jobs, fallback_storey)
+          fallback_storey = fallback_storey.to_s.strip
+          return Array(jobs) if fallback_storey.empty?
+
+          Array(jobs).map do |job|
+            job[:storey].to_s.empty? ? job.merge(storey: fallback_storey) : job
+          end
+        end
+
         def initialize(entities:, parent_target: active_context_parent_target, parent_storey: active_context_parent_storey, ancestors: active_context_ancestors)
           @entities = Array(entities)
           @parent_target = parent_target

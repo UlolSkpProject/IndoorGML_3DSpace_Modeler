@@ -1,18 +1,20 @@
 # frozen_string_literal: true
 
-require_relative '../utils/geometry/polygon2d'
+require_relative '../utils/geometry'
 
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       module IndoorGmlConverter
         class Val3dityOverlapGeometryRechecker
-          def initialize(snapshot_reader:, tolerance:, model: nil, logger: nil)
-            @snapshot_reader = snapshot_reader
+          def initialize(indoor_model:, tolerance:, model: nil, logger: nil)
+            @indoor_model = indoor_model
             @tolerance = tolerance
-            @model = model
+            @model = model || indoor_model&.model
             @logger = logger || (defined?(IndoorCore::Logger) && IndoorCore::Logger)
             @pair_analysis = {}
+            @cell_geometry = {}
+            @cell_spaces_by_report_id = nil
           end
 
           def pair_analysis(cell_id1, cell_id2)
@@ -39,26 +41,23 @@ module ULOL
           private
 
           def analyze_pair(cell_id1, cell_id2)
-            snapshot = @snapshot_reader.read
-            cell1 = snapshot[cell_id1]
-            cell2 = snapshot[cell_id2]
-            if !(cell1 && cell2)
-              inconclusive(cell_id1, cell_id2, 'GML_RECONSTRUCTION_FAILED')
-            elsif cell1[:unsupported] || cell2[:unsupported]
-              inconclusive(cell_id1, cell_id2, 'GML_RECONSTRUCTION_FAILED')
-            else
-              {
-                status: :ok,
-                cells: [cell_id1, cell_id2],
-                cell1: cell1,
-                cell2: cell2,
-                adjacency_candidates: shared_face_candidates(cell1[:faces], cell2[:faces], mode: :adjacency),
-                overlap_candidates: shared_face_candidates(cell1[:faces], cell2[:faces], mode: :overlap),
-                intersection: exported_solid_intersection(cell1, cell2)
-              }
-            end
+            cell1 = model_cell_geometry(cell_id1)
+            return inconclusive(cell_id1, cell_id2, cell1[:reason]) unless cell1[:status] == :ok
+
+            cell2 = model_cell_geometry(cell_id2)
+            return inconclusive(cell_id1, cell_id2, cell2[:reason]) unless cell2[:status] == :ok
+
+            {
+              status: :ok,
+              cells: [cell_id1, cell_id2],
+              cell1: cell1,
+              cell2: cell2,
+              adjacency_candidates: shared_face_candidates(cell1[:faces], cell2[:faces], mode: :adjacency),
+              overlap_candidates: shared_face_candidates(cell1[:faces], cell2[:faces], mode: :overlap),
+              intersection: model_solid_intersection(cell1[:entity], cell2[:entity])
+            }
           rescue StandardError => e
-            inconclusive(cell_id1, cell_id2, "GML_RECONSTRUCTION_FAILED: #{e.class}: #{e.message}")
+            inconclusive(cell_id1, cell_id2, "MODEL_GEOMETRY_RECHECK_FAILED: #{e.class}: #{e.message}")
           end
 
           def inconclusive(cell_id1, cell_id2, reason)
@@ -71,6 +70,60 @@ module ULOL
 
           def pair_key(cell_id1, cell_id2)
             [cell_id1, cell_id2].sort.join('|')
+          end
+
+          def model_cell_geometry(report_cell_id)
+            @cell_geometry[report_cell_id] ||= begin
+              cell_space = cell_spaces_by_report_id[report_cell_id]
+              if cell_space.nil?
+                { status: :inconclusive, reason: "CELLSPACE_NOT_FOUND: #{report_cell_id}" }
+              else
+                entity = cell_space.sketchup_group
+                if !(entity&.valid?)
+                  { status: :inconclusive, reason: "CELLSPACE_ENTITY_INVALID: #{report_cell_id}" }
+                else
+                  faces = entity_faces(entity)
+                  if faces.empty?
+                    { status: :inconclusive, reason: "CELLSPACE_GEOMETRY_UNAVAILABLE: #{report_cell_id}" }
+                  else
+                    { status: :ok, cell_space: cell_space, entity: entity, faces: faces }
+                  end
+                end
+              end
+            end
+          end
+
+          def cell_spaces_by_report_id
+            @cell_spaces_by_report_id ||= begin
+              cell_spaces = Array(@indoor_model&.cell_spaces)
+              index = cell_spaces.each_with_object({}) do |cell_space, result|
+                runtime_id = cell_space&.id.to_s
+                result[runtime_id] = cell_space unless runtime_id.empty?
+              end
+              used_report_ids = {}
+              cell_spaces.each do |cell_space|
+                normalized_id = safe_report_id(cell_space&.id)
+                normalized_id = 'missing' if normalized_id.empty?
+                base = "cell_#{normalized_id}"
+                report_id = base
+                suffix = 2
+                while used_report_ids[report_id]
+                  report_id = "#{base}_#{suffix}"
+                  suffix += 1
+                end
+                used_report_ids[report_id] = true
+                index[report_id] = cell_space
+              end
+              index
+            end
+          end
+
+          def safe_report_id(value)
+            value.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')
+          end
+
+          def entity_faces(entity)
+            Utils::Geometry.entity_faces_in_parent_space(entity)
           end
 
           def shared_face_candidates(faces1, faces2, mode:)
@@ -145,21 +198,16 @@ module ULOL
             { area: total_area, polygons: polygons }
           end
 
-          def exported_solid_intersection(cell1, cell2)
+          def model_solid_intersection(group1, group2)
             model = @model || Sketchup.active_model
             return { status: :inconclusive, reason: 'BOOLEAN_OPERATION_FAILED' } unless model
 
             started = false
-            group1 = nil
-            group2 = nil
             result = nil
 
             model.start_operation('IndoorGML overlap recheck', true)
             started = true
 
-            group1 = build_temp_solid_group(cell1)
-            group2 = build_temp_solid_group(cell2)
-            return { status: :inconclusive, reason: 'GML_RECONSTRUCTION_FAILED' } unless group1 && group2
             return { status: :inconclusive, reason: 'INPUT_NOT_MANIFOLD' } unless valid_manifold_group?(group1) && valid_manifold_group?(group2)
             return { status: :inconclusive, reason: 'BOOLEAN_OPERATION_FAILED' } unless group1.respond_to?(:intersect)
 
@@ -181,34 +229,17 @@ module ULOL
               component_count: face_components(faces).length
             }
           rescue StandardError => e
-            log("Exported solid intersection failed: #{e.class}: #{e.message}")
+            log("Model CellSpace intersection failed: #{e.class}: #{e.message}")
             { status: :inconclusive, reason: "BOOLEAN_OPERATION_FAILED: #{e.class}: #{e.message}" }
           ensure
             model.abort_operation if started
-            [result, group1, group2].compact.each do |entity|
+            [result].compact.each do |entity|
+              next if entity.equal?(group1) || entity.equal?(group2)
+
               entity.erase! if entity.respond_to?(:valid?) && entity.valid?
             rescue StandardError
               nil
             end
-          end
-
-          def build_temp_solid_group(cell)
-            model = @model || Sketchup.active_model
-            return nil unless model&.respond_to?(:entities)
-
-            group = model.entities.add_group
-            cell[:faces].each do |face|
-              created = group.entities.add_face(face[:points])
-              unless created&.valid?
-                group.erase! if group.valid?
-                return nil
-              end
-              face[:interiors].to_a.each do |ring|
-                inner = group.entities.add_face(ring)
-                inner.erase! if inner&.valid?
-              end
-            end
-            group
           end
 
           def valid_manifold_group?(group)

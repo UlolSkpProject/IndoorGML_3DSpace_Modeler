@@ -130,6 +130,18 @@ module ULOL
           assert_equal 'B02~F01', jobs.first[:storey]
         end
 
+        def test_fallback_storey_never_overrides_tag_derived_job_storey
+          jobs = [
+            { source: :tagged, storey: 'F01~F03' },
+            { source: :untagged, storey: nil }
+          ]
+
+          resolved = CellSpaceConversionJobBuilder.apply_fallback_storey(jobs, 'B02')
+
+          assert_equal 'F01~F03', resolved[0][:storey]
+          assert_equal 'B02', resolved[1][:storey]
+        end
+
         def test_job_builder_stops_storey_propagation_at_assigned_non_storey_tag
           child = FakeGroup.new(manifold: true)
           intermediate = FakeGroup.new(children: [child], tag_assigned: true)
@@ -744,8 +756,8 @@ module ULOL
           assert_includes toolbar_method, 'convert_cell_space_jobs_bulk'
           assert_includes edit_mode_method, 'convert_cell_space_jobs_bulk'
           assert_includes toolbar_method, 'prompt_cell_space_creation_options'
-          assert_includes toolbar_method, 'job.merge(storey: storey)'
-          assert_includes edit_mode_method, 'job.merge(storey: requested_storey)'
+          assert_includes toolbar_method, 'CellSpaceConversionJobBuilder.apply_fallback_storey(conversion_jobs, storey)'
+          assert_includes edit_mode_method, 'CellSpaceConversionJobBuilder.apply_fallback_storey(jobs, requested_storey)'
           refute_includes toolbar_method, 'run_batched'
           refute_includes edit_mode_method, 'run_batched'
           refute_includes toolbar_method, 'start_operation'

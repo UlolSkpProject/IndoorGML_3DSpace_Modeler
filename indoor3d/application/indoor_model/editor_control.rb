@@ -399,7 +399,7 @@ module ULOL
               jobs = selected_cell_space_conversion_jobs
               return false if jobs.empty?
               requested_storey = storey.to_s.strip
-              jobs = jobs.map { |job| job.merge(storey: requested_storey) } unless requested_storey.empty?
+              jobs = CellSpaceConversionJobBuilder.apply_fallback_storey(jobs, requested_storey)
 
               original_active_path = ActivePathController.new(model, logger: IndoorCore::Logger).snapshot
               result = convert_cell_space_jobs_bulk(
