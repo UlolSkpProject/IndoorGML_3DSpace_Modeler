@@ -234,6 +234,25 @@ module ULOL
           assert_equal 1, indoor.operation_count
         end
 
+        def test_runtime_restore_persists_repaired_ids_after_primal_groups_were_merged
+          indoor = FakeIndoorModel.new(@model)
+          primal = @model.create_primal_group
+          first = primal.entities.add_group('first')
+          duplicate = primal.entities.add_group('duplicate')
+          write_cell_attributes(first, id: 'shared', state_id: 'state_shared')
+          write_cell_attributes(duplicate, id: 'shared', state_id: 'state_shared')
+          indoor.define_singleton_method(:find_existing_space_features_groups) do
+            @primal_group = @model.primal_group
+            true
+          end
+
+          indoor.reconcile_runtime_after_transaction(source: :redo, generation: 1)
+
+          ids = indoor.cell_spaces.map(&:id) + indoor.states.map(&:id)
+          assert_equal ids.length, ids.uniq.length
+          assert_equal 1, indoor.serializer.write_count
+        end
+
         def test_reconciliation_notifies_editor_session_without_refresh_writes
           editor_session = FakeEditorSession.new
           indoor = FakeIndoorModel.new(@model, editor_session: editor_session)

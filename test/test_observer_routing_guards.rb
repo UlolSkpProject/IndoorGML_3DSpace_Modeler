@@ -57,6 +57,16 @@ module ULOL
           assert_empty model.calls
         end
 
+        def test_primal_merge_guard_suppresses_temporary_entity_routes
+          model = FakeIndoorModel.new(merging: true)
+
+          model.root_entity_added(FakeEntity.new)
+          model.primal_entity_added(FakeEntity.new)
+          model.primal_entity_removed(123)
+
+          assert_empty model.calls
+        end
+
         def test_reconciliation_guard_suppresses_space_features_changes
           model = FakeIndoorModel.new(reconciling: true)
 
@@ -298,9 +308,10 @@ module ULOL
 
           attr_reader :calls
 
-          def initialize(syncing: false, bulk: false, reconciling: false, replay_pending: false)
+          def initialize(syncing: false, bulk: false, merging: false, reconciling: false, replay_pending: false)
             @syncing = syncing
             @bulk_cell_space_conversion = bulk
+            @merging_space_features = merging
             @transaction_reconciliation = reconciling
             @transaction_replay_pending = replay_pending
             @erasing = false
