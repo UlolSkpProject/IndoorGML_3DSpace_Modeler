@@ -2,13 +2,23 @@
 
 require 'minitest/autorun'
 
+module Geom
+  Point3d = Struct.new(:x, :y, :z) do
+    def distance(other)
+      Math.sqrt((x - other.x)**2 + (y - other.y)**2 + (z - other.z)**2)
+    end
+  end unless const_defined?(:Point3d)
+
+  Vector3d = Struct.new(:x, :y, :z) do
+    def to_a
+      [x, y, z]
+    end
+  end unless const_defined?(:Vector3d)
+end
+
 module Sketchup
   def self.active_model
     nil
-  end
-
-  def self.send_action(_action)
-    true
   end
 end
 
@@ -290,31 +300,23 @@ module ULOL
           session.define_singleton_method(:invalidate_overlay_transition_points) { calls << :overlay }
           session.define_singleton_method(:invalidate_view) { |_model| calls << :invalidate_view }
 
-          with_fake_sketchup_actions(camera_events) do
-            with_fake_active_model(Struct.new(:active_view).new(view)) do
-              with_fake_ui_timers do |timers|
-                assert session.set_validation_focus_highlight(
-                  %w[cell_A cell_B],
-                  '203',
-                  row_id: 'row-1',
-                  row_cells: %w[A B]
-                )
-                assert_equal [:visibility, :overlay, :invalidate_view], calls
-                assert_equal [[0, false]], timers.map { |delay, repeat, _block| [delay, repeat] }
+          with_fake_active_model(Struct.new(:active_view).new(view)) do
+            with_fake_ui_timers do |timers|
+              assert session.set_validation_focus_highlight(
+                %w[cell_A cell_B],
+                '203',
+                row_id: 'row-1',
+                row_cells: %w[A B]
+              )
+              assert_equal [:visibility, :overlay, :invalidate_view], calls
+              assert_equal [[0, false]], timers.map { |delay, repeat, _block| [delay, repeat] }
 
-                timers[0][2].call
-                assert_equal [:visibility, 'viewTop:'], camera_events
-                timers[1][2].call
-                assert_equal [:visibility, 'viewTop:', 'viewIso:'], camera_events
-                timers[2][2].call
-                assert_equal [:visibility, 'viewTop:', 'viewIso:', :zoom_extents], camera_events
-                assert_equal false, view.invalidated
-                timers[3][2].call
-              end
+              timers[0][2].call
+              assert_equal 1, timers.length
             end
           end
 
-          assert_equal [:visibility, 'viewTop:', 'viewIso:', :zoom_extents, [:zoom, 0.7], :invalidate], camera_events
+          assert_equal [:visibility, :top_view, :isometric_view, :zoom_extents, [:zoom, 0.7], :invalidate], camera_events
           assert_equal [0.7], view.zoom_calls
           assert_equal true, view.invalidated
         end
@@ -484,7 +486,13 @@ module ULOL
         end
 
         def fake_zoom_view(events = [])
-          Struct.new(:zoom_calls, :invalidated, :events) do
+          camera = FakeZoomCamera.new(
+            FakeZoomPoint.new(0.0, 0.0, 10.0),
+            FakeZoomPoint.new(0.0, 0.0, 0.0),
+            events,
+            []
+          )
+          Struct.new(:zoom_calls, :invalidated, :events, :camera) do
             def zoom(value)
               unless value.is_a?(Array) || value.is_a?(Numeric)
                 raise ArgumentError, 'expected an entity array or numeric zoom factor'
@@ -502,18 +510,17 @@ module ULOL
               self.invalidated = true
               events << :invalidate
             end
-          end.new([], false, events)
+          end.new([], false, events, camera)
         end
 
-        def with_fake_sketchup_actions(events)
-          original = Sketchup.method(:send_action)
-          Sketchup.define_singleton_method(:send_action) do |action|
-            events << action
+        FakeZoomPoint = Geom::Point3d
+
+        FakeZoomCamera = Struct.new(:eye, :target, :events, :set_calls) do
+          def set(next_eye, next_target, up)
+            set_calls << [next_eye, next_target, up]
+            events << (up.to_a == [0.0, 1.0, 0.0] ? :top_view : :isometric_view)
             true
           end
-          yield
-        ensure
-          Sketchup.define_singleton_method(:send_action) { |*args| original.call(*args) }
         end
 
         def with_fake_active_model(model)
