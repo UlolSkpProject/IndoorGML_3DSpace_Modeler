@@ -9,6 +9,12 @@
 ![IndoorGML](https://img.shields.io/badge/IndoorGML-1.0.3-orange)
 ![val3dity](https://img.shields.io/badge/val3dity-2.2.0-lightgrey)
 
+## v1.0.4 주요 변경사항
+
+- val3dity 701/704 재검사 시 GML solid를 다시 만들지 않고 report의 CellSpace ID로 현재 SketchUp 모델의 원본 CellSpace를 찾습니다. 면 분석은 원본 geometry를 사용하고, 파괴적인 Boolean 연산만 독립 복제본에서 수행합니다.
+- CellSpace 생성 시 층 정보는 `직접 TAG → 상위 컨테이너 TAG → 사용자가 선택한 층 → 기본층` 순서로 결정됩니다.
+- Validation report의 row-card를 선택하면 visibility 적용 후 upright isometric camera, zoom extents, `0.7` padding zoom 순서로 focus하며 중간 camera frame은 그리지 않습니다.
+
 ## Overview
 
 IndoorGML 3D Modeler는 SketchUp 모델 안의 manifold solid group을 IndoorGML `CellSpace` 런타임 객체로 관리하고, 인접한 CellSpace 사이의 `State`/`Transition` dual graph를 자동으로 동기화합니다.
@@ -160,7 +166,7 @@ Navigation semantic code는 [indoor3d/domain/navigation_semantic.rb](indoor3d/do
 | `RM_DR` | `ConnectionSpace / Door` |
 | `RM_WD` | `CellSpace / Window` |
 
-Tag 이름 앞부분은 `F01F02_` 또는 `B01F01_` 같은 층 패턴이어야 합니다. 예를 들어 `F01F02_MV_RM_02`는 `TransitionSpace / Stair`로 해석됩니다. Tag로 타입이 결정된 선택 항목은 Edit Mode dialog에서 classification이 잠길 수 있습니다.
+Tag 이름 앞부분은 `F01F02_` 또는 `B01F01_` 같은 층 패턴이어야 합니다. 예를 들어 `F01F02_MV_RM_02`는 `TransitionSpace / Stair`로 해석됩니다. Tag로 타입이 결정된 선택 항목은 Edit Mode dialog에서 classification이 잠길 수 있습니다. CellSpace 생성 시 유효한 직접 TAG와 상위 컨테이너에서 전파된 TAG의 층 정보는 dialog에서 선택한 층보다 항상 우선합니다.
 
 ## Storey
 
@@ -281,7 +287,7 @@ GML 좌표:
 4. bundled `val3dity.exe`를 실행합니다.
 5. stdout progress를 dialog에 표시합니다.
 6. val3dity report JSON을 UTF-8로 정규화합니다.
-7. 701/704 overlap error를 SketchUp geometry 기준으로 재검사합니다.
+7. 701/704 overlap error의 CellSpace ID를 현재 모델의 원본 entity와 연결하여 SketchUp geometry 기준으로 재검사합니다. 면 분석은 원본 entity를 사용하고 Boolean 교차검사는 원본을 보호하기 위해 독립 복제본에서 수행합니다.
 8. 최종 JSON과 HTML report를 생성합니다.
 
 검증 report에서 가능한 작업:
