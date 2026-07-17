@@ -33,6 +33,7 @@ module ULOL
               export_started_at = monotonic_time
               reset_export_cache
               measure_export_step('refresh runtime data') { @indoor_model.refresh_runtime_data } if @refresh_runtime_data
+              measure_export_step('local vertex normalization') { ensure_local_vertices_normalized! }
               validate_exportable_content!
               output_path = File.expand_path(output_path)
               FileUtils.mkdir_p(File.dirname(output_path))
@@ -69,6 +70,25 @@ module ULOL
             exportable_cell_spaces.each do |cell_space|
               NavigationSemanticResolver.resolve(cell_space) if GmlWriter.cell_space_tag(cell_space).start_with?('navi:')
             end
+          end
+
+          def ensure_local_vertices_normalized!
+            unless @indoor_model.respond_to?(:ensure_vertices_locally_normalized_for_export)
+              raise 'IndoorModel does not support local vertex normalization required for GML export'
+            end
+
+            report = @indoor_model.ensure_vertices_locally_normalized_for_export(
+              cell_spaces: @requested_cell_spaces
+            )
+            normalized_count = report&.[](:cell_space_count).to_i
+            skipped_count = report&.[](:already_normalized_cell_space_count).to_i
+            if defined?(IndoorCore::Logger)
+              IndoorCore::Logger.puts(
+                "[IndoorGML] Export local vertex normalization: normalized=#{normalized_count} " \
+                "already_normalized=#{skipped_count} tolerance=#{report&.[](:tolerance_mm)}mm"
+              )
+            end
+            report
           end
 
           def measure_export_step(label)
