@@ -143,8 +143,66 @@ module ULOL
             assert_equal 1, copy.make_unique_count
           end
 
+          def test_planar_non_solid_result_on_shared_face_is_boundary_contact
+            rechecker = Val3dityOverlapGeometryRechecker.new(
+              indoor_model: FakeIndoorModel.new([], nil),
+              tolerance: 0.001
+            )
+            intersection = {
+              status: :non_solid,
+              lower_dimensional: true,
+              face_points: [FakePoint.new(1.0, 2.0, 0.0)],
+              volume: 0.0
+            }
+            candidates = [{ normal: FakePoint.new(0.0, 0.0, 1.0), plane1: 0.0 }]
+
+            result = rechecker.send(:resolve_non_solid_intersection, intersection, candidates)
+
+            assert_equal :not_reproduced, result[:status]
+            assert_equal 'BOUNDARY_CONTACT_ONLY', result[:reason]
+            assert_equal 0.0, result[:volume]
+          end
+
+          def test_non_solid_result_away_from_shared_face_remains_inconclusive
+            rechecker = Val3dityOverlapGeometryRechecker.new(
+              indoor_model: FakeIndoorModel.new([], nil),
+              tolerance: 0.001
+            )
+            intersection = {
+              status: :non_solid,
+              lower_dimensional: true,
+              face_points: [FakePoint.new(1.0, 2.0, 0.01)],
+              volume: 0.0
+            }
+            candidates = [{ normal: FakePoint.new(0.0, 0.0, 1.0), plane1: 0.0 }]
+
+            result = rechecker.send(:resolve_non_solid_intersection, intersection, candidates)
+
+            assert_equal :inconclusive, result[:status]
+            assert_equal 'BOOLEAN_INTERSECTION_INCONCLUSIVE', result[:reason]
+          end
+
+          def test_non_solid_result_without_shared_face_evidence_remains_inconclusive
+            rechecker = Val3dityOverlapGeometryRechecker.new(
+              indoor_model: FakeIndoorModel.new([], nil),
+              tolerance: 0.001
+            )
+            intersection = {
+              status: :non_solid,
+              lower_dimensional: true,
+              face_points: [FakePoint.new(1.0, 2.0, 0.0)],
+              volume: 0.0
+            }
+
+            result = rechecker.send(:resolve_non_solid_intersection, intersection, [])
+
+            assert_equal :inconclusive, result[:status]
+            assert_equal 'BOOLEAN_INTERSECTION_INCONCLUSIVE', result[:reason]
+          end
+
           FakeCellSpace = Struct.new(:id, :sketchup_group)
           FakeIndoorModel = Struct.new(:cell_spaces, :model)
+          FakePoint = Struct.new(:x, :y, :z)
 
           class FakeEntity
             def initialize(valid: true)

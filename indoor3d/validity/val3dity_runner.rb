@@ -520,7 +520,7 @@ module ULOL
               return {
                 tolerated: true,
                 status: 'suppressed',
-                reason: 'NO_VALID_INTERSECTION_GROUP_RETURNED',
+                reason: intersection[:reason] || 'NO_VALID_INTERSECTION_GROUP_RETURNED',
                 candidate: overlap_geometry_rechecker.best_candidate(analysis[:adjacency_candidates], 701),
                 actual_overlap_volume: 0.0,
                 intersection_component_count: 0,

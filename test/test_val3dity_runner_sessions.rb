@@ -89,6 +89,35 @@ module ULOL
             end
           end
 
+          def test_701_boundary_contact_reason_is_preserved_when_suppressed
+            runner = Val3dityRunner.allocate
+            runner.instance_variable_set(:@indoor_model, FakeIndoorModel.new(nil))
+            runner.instance_variable_set(
+              :@overlap_geometry_rechecker,
+              Struct.new(:candidate) do
+                def best_candidate(_candidates, _code)
+                  candidate
+                end
+              end.new(:shared_face)
+            )
+            analysis = {
+              intersection: {
+                status: :not_reproduced,
+                reason: 'BOUNDARY_CONTACT_ONLY',
+                volume: 0.0,
+                component_count: 1
+              },
+              adjacency_candidates: [:candidate]
+            }
+
+            decision = runner.send(:overlap_recheck_701_decision, analysis)
+
+            assert_equal true, decision[:tolerated]
+            assert_equal 'suppressed', decision[:status]
+            assert_equal 'BOUNDARY_CONTACT_ONLY', decision[:reason]
+            assert_equal 0.0, decision[:actual_overlap_volume]
+          end
+
           private
 
           def reset_sessions

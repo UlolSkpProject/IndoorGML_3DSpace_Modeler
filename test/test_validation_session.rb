@@ -412,6 +412,47 @@ module ULOL
             assert_includes html, 'data-transitions="transition_T"'
           end
 
+          def test_focus_row_states_include_export_polygon_face_references
+            report = {
+              'features' => [
+                {
+                  'id' => 'IF_001',
+                  'errors' => [],
+                  'primitives' => [
+                    {
+                      'id' => 'solid_cell_A',
+                      'errors' => [
+                        {
+                          'id' => 'polygon_11_cell_A',
+                          'code' => 203,
+                          'description' => 'NON_PLANAR_POLYGON_DISTANCE_PLANE'
+                        },
+                        {
+                          'id' => 'polygon_28_cell_A',
+                          'code' => 203,
+                          'description' => 'NON_PLANAR_POLYGON_DISTANCE_PLANE'
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+            indoor_model = FakeIndoorModel.new(FakeModel.new('A'))
+
+            states = Dispatcher.new.send(
+              :validation_report_focus_row_states,
+              report,
+              indoor_model
+            )
+
+            assert_equal 1, states.length
+            assert_equal [
+              { cell_id: 'A', face_index: 11 },
+              { cell_id: 'A', face_index: 28 }
+            ], states.first.dig(:geometry_refs, :faces)
+          end
+
           def test_report_focus_expands_state_and_transition_refs_to_runtime_cells
             model_a = FakeModel.new('A')
             indoor_a = FakeIndoorModel.new(model_a)

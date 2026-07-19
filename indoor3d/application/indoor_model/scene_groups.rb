@@ -6,6 +6,15 @@ module ULOL
       class IndoorModel
         module SceneGroups
           STATE_FIXED_HEIGHT_OFFSET = 1000.mm unless const_defined?(:STATE_FIXED_HEIGHT_OFFSET, false)
+          # Temporary feature flag. When enabled, CellSpace local-center
+          # calculation first aligns local X/Y to the horizontal OBB. Local Z
+          # remains equal to world Z and the world-space geometry is preserved.
+          ALIGN_CELL_SPACE_LOCAL_CENTER_TO_HORIZONTAL_OBB = true unless const_defined?(
+            :ALIGN_CELL_SPACE_LOCAL_CENTER_TO_HORIZONTAL_OBB,
+            false
+          )
+
+          HORIZONTAL_OBB_EPSILON = 1.0e-12 unless const_defined?(:HORIZONTAL_OBB_EPSILON, false)
 
           private
 
@@ -80,8 +89,139 @@ module ULOL
             cell_space_entity
           end
 
+          def align_cell_space_local_axes_to_horizontal_obb(cell_space_entity)
+            return cell_space_entity unless cell_space_entity&.valid?
+            return cell_space_entity unless @primal_group&.valid?
+            return cell_space_entity unless cell_space_entity.respond_to?(:definition)
+
+            cell_space_entity.make_unique if cell_space_entity.respond_to?(:make_unique)
+
+            root_world = Utils::Transformation.root_transformation_in_model(@primal_group)
+            old_world = root_world * cell_space_entity.transformation
+            world_points = cell_space_world_vertex_points(cell_space_entity, old_world)
+            axes = horizontal_obb_axes(world_points)
+            return cell_space_entity unless axes
+
+            desired_world = Geom::Transformation.axes(
+              old_world.origin,
+              Geom::Vector3d.new(axes[:x]),
+              Geom::Vector3d.new(axes[:y]),
+              Geom::Vector3d.new(0.0, 0.0, 1.0)
+            )
+            geometry_transform = desired_world.inverse * old_world
+            definition_entities = cell_space_entity.definition.entities
+            entities = definition_entities.to_a
+            return cell_space_entity if entities.empty?
+
+            definition_entities.transform_entities(geometry_transform, entities)
+            set_group_transformation(
+              cell_space_entity,
+              root_world.inverse * desired_world
+            )
+
+            IndoorCore::Logger.puts(
+              '[IndoorGML] CellSpace local-center axes aligned to horizontal OBB: ' \
+              "entity_id=#{cell_space_entity.entityID} angle_deg=#{format('%.9f', axes[:angle] * 180.0 / Math::PI)}"
+            )
+            cell_space_entity
+          end
+
+          def cell_space_world_vertex_points(cell_space_entity, world_transformation)
+            cell_space_entity.definition.entities
+                             .grep(Sketchup::Edge)
+                             .flat_map(&:vertices)
+                             .uniq
+                             .map { |vertex| vertex.position.transform(world_transformation) }
+          end
+
+          def horizontal_obb_axes(world_points)
+            hull = horizontal_convex_hull(world_points)
+            return nil if hull.length < 3
+
+            best = nil
+            hull.each_with_index do |point, index|
+              following = hull[(index + 1) % hull.length]
+              dx = following[0] - point[0]
+              dy = following[1] - point[1]
+              length = Math.sqrt((dx * dx) + (dy * dy))
+              next if length <= HORIZONTAL_OBB_EPSILON
+
+              x_axis = [dx / length, dy / length]
+              y_axis = [-x_axis[1], x_axis[0]]
+              x_values = hull.map { |candidate| horizontal_dot(candidate, x_axis) }
+              y_values = hull.map { |candidate| horizontal_dot(candidate, y_axis) }
+              x_extent = x_values.max - x_values.min
+              y_extent = y_values.max - y_values.min
+              area = x_extent * y_extent
+
+              if y_extent > x_extent
+                x_axis = y_axis
+                y_axis = [-x_axis[1], x_axis[0]]
+                x_extent, y_extent = y_extent, x_extent
+              end
+
+              if x_axis[0] < -HORIZONTAL_OBB_EPSILON ||
+                 (x_axis[0].abs <= HORIZONTAL_OBB_EPSILON && x_axis[1] < 0.0)
+                x_axis = x_axis.map { |value| -value }
+                y_axis = y_axis.map { |value| -value }
+              end
+
+              angle = Math.atan2(x_axis[1], x_axis[0])
+              candidate = {
+                area: area,
+                alignment: x_axis[0].abs,
+                angle: angle,
+                x: [x_axis[0], x_axis[1], 0.0],
+                y: [y_axis[0], y_axis[1], 0.0],
+                extents: [x_extent, y_extent]
+              }
+              best = candidate if better_horizontal_obb_candidate?(candidate, best)
+            end
+            best
+          end
+
+          def horizontal_convex_hull(world_points)
+            points = Array(world_points).map { |point| [point.x.to_f, point.y.to_f] }.uniq.sort
+            return points if points.length <= 2
+
+            lower = []
+            points.each do |point|
+              lower.pop while lower.length >= 2 && horizontal_cross(lower[-2], lower[-1], point) <= HORIZONTAL_OBB_EPSILON
+              lower << point
+            end
+
+            upper = []
+            points.reverse_each do |point|
+              upper.pop while upper.length >= 2 && horizontal_cross(upper[-2], upper[-1], point) <= HORIZONTAL_OBB_EPSILON
+              upper << point
+            end
+            lower[0...-1] + upper[0...-1]
+          end
+
+          def horizontal_cross(origin, first, second)
+            ((first[0] - origin[0]) * (second[1] - origin[1])) -
+              ((first[1] - origin[1]) * (second[0] - origin[0]))
+          end
+
+          def horizontal_dot(point, axis)
+            (point[0] * axis[0]) + (point[1] * axis[1])
+          end
+
+          def better_horizontal_obb_candidate?(candidate, current)
+            return true unless current
+
+            tolerance = [candidate[:area].abs, current[:area].abs, 1.0].max * 1.0e-12
+            return true if candidate[:area] < current[:area] - tolerance
+            return false if candidate[:area] > current[:area] + tolerance
+
+            candidate[:alignment] > current[:alignment]
+          end
+
           def recenter_cell_space_geometry(cell_space_entity, fixed_z_offset_from_bottom: nil)
             with_indoor_model_operation('IndoorGML Recenter CellSpace Geometry', transparent: true) do
+              if ALIGN_CELL_SPACE_LOCAL_CENTER_TO_HORIZONTAL_OBB
+                align_cell_space_local_axes_to_horizontal_obb(cell_space_entity)
+              end
               fixed_z = fixed_z_offset_from_bottom.nil? ? nil : fixed_local_z_from_world_offset(cell_space_entity, fixed_z_offset_from_bottom)
               center = Utils::Geometry.find_shell_inner_centroid(cell_space_entity, fixed_z: fixed_z)
               # IndoorCore::Logger.puts "[IndoorGML] recenter_cell_space_geometry center=#{center} distance=#{center.distance(ORIGIN)}"

@@ -52,7 +52,8 @@ module ULOL
                 states: Array(row[:states]).map(&:to_s),
                 transitions: Array(row[:transitions]).map(&:to_s),
                 focus_ids: focus_ids,
-                code: row[:code].to_s
+                code: row[:code].to_s,
+                geometry_refs: duplicate_geometry_refs(row[:geometry_refs])
               }
             end
             rebuild_focus_ids_from_rows if active? && !@focus_rows.empty?
@@ -86,7 +87,7 @@ module ULOL
             []
           end
 
-          def set_highlight(cell_gml_ids, code = nil, row_id: nil, row_cells: nil, states: nil, transitions: nil)
+          def set_highlight(cell_gml_ids, code = nil, row_id: nil, row_cells: nil, states: nil, transitions: nil, geometry_refs: nil)
             ids = normalize_ids(cell_gml_ids)
             @highlight_cell_ids = ids.empty? ? nil : id_hash(ids)
             @highlight_code = code.to_s
@@ -97,7 +98,8 @@ module ULOL
               states: states,
               transitions: transitions,
               focus_ids: ids,
-              code: code
+              code: code,
+              geometry_refs: geometry_refs
             ) if @highlight_row_id
             true
           end
@@ -328,7 +330,7 @@ module ULOL
             safe_id.start_with?('cell_') ? safe_id.sub(/\Acell_/, '') : safe_id
           end
 
-          def upsert_focus_row(row_id, cells: nil, states: nil, transitions: nil, focus_ids: nil, code: nil)
+          def upsert_focus_row(row_id, cells: nil, states: nil, transitions: nil, focus_ids: nil, code: nil, geometry_refs: nil)
             return false if row_id.to_s.empty?
 
             row = (@focus_rows ||= {})[row_id] ||= {
@@ -336,13 +338,15 @@ module ULOL
               states: [],
               transitions: [],
               focus_ids: [],
-              code: ''
+              code: '',
+              geometry_refs: { faces: [] }
             }
             row[:cells] = normalize_cell_refs(cells) unless cells.nil?
             row[:states] = Array(states).map(&:to_s) unless states.nil?
             row[:transitions] = Array(transitions).map(&:to_s) unless transitions.nil?
             row[:focus_ids] = normalize_ids(focus_ids || row[:cells])
             row[:code] = code.to_s unless code.nil?
+            row[:geometry_refs] = duplicate_geometry_refs(geometry_refs) unless geometry_refs.nil?
             rebuild_focus_ids_from_rows
             true
           end
@@ -388,6 +392,37 @@ module ULOL
             value.is_a?(Hash) ? value.dup : value
           end
 
+          def duplicate_geometry_refs(value)
+            refs = value.is_a?(Hash) ? value : {}
+            faces = refs[:faces] || refs['faces']
+            overlap = refs[:overlap_recheck] || refs['overlap_recheck']
+            {
+              faces: Array(faces).filter_map do |face|
+                next unless face.is_a?(Hash)
+
+                cell_id = face[:cell_id] || face['cell_id']
+                face_index = face[:face_index] || face['face_index']
+                next if cell_id.to_s.empty? || face_index.nil?
+
+                { cell_id: cell_id.to_s, face_index: face_index.to_i }
+              end,
+              overlap_recheck: duplicate_overlap_recheck(overlap)
+            }
+          end
+
+          def duplicate_overlap_recheck(value)
+            return nil unless value.is_a?(Hash)
+
+            {
+              cells: Array(value[:cells] || value['cells']).map(&:to_s),
+              tolerated: value[:tolerated] == true || value['tolerated'] == true,
+              status: (value[:status] || value['status']).to_s,
+              reason: (value[:reason] || value['reason']).to_s,
+              actual_overlap_volume_mm3: value[:actual_overlap_volume_mm3] ||
+                value['actual_overlap_volume_mm3']
+            }
+          end
+
           def duplicate_focus_rows(rows)
             Hash(rows).each_with_object({}) do |(row_id, row), copy|
               copy[row_id] = {
@@ -395,7 +430,8 @@ module ULOL
                 states: Array(row[:states]).dup,
                 transitions: Array(row[:transitions]).dup,
                 focus_ids: Array(row[:focus_ids]).dup,
-                code: row[:code].to_s
+                code: row[:code].to_s,
+                geometry_refs: duplicate_geometry_refs(row[:geometry_refs])
               }
             end
           end
@@ -409,6 +445,7 @@ module ULOL
               transitions: Array(row[:transitions]).dup,
               focus_ids: Array(row[:focus_ids]).dup,
               code: row[:code].to_s,
+              geometry_refs: duplicate_geometry_refs(row[:geometry_refs]),
               label: focus_row_label(cells)
             }
           end
