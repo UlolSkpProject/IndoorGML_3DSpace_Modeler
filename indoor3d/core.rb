@@ -41,6 +41,7 @@ module ULOL
 
     require_relative 'infrastructure/scene/scene_group_guard'
     require_relative 'infrastructure/scene/entity_copy_helper'
+    require_relative 'validity/validation_error_geometry_resolver'
     require_relative 'infrastructure/scene/active_path_controller'
     require_relative 'infrastructure/scene/editor_session'
 
@@ -68,6 +69,7 @@ module ULOL
     require_relative 'ui/commands/conversion_message_formatter'
     require_relative 'ui/overlays/screen_overlay'
     require_relative 'ui/overlays/space_overlay'
+    require_relative 'ui/overlays/validation_error_geometry_overlay'
     require_relative 'ui/overlays/indoor_mode_screen_overlay'
     require_relative 'ui/overlays/builders/transition_curve_builder'
     require_relative 'ui/overlays/renderers/state_overlay_renderer'

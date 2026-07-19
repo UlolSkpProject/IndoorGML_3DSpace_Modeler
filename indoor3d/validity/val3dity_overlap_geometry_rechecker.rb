@@ -2,6 +2,7 @@
 
 require_relative '../utils/geometry'
 require_relative '../infrastructure/scene/entity_copy_helper'
+require_relative 'validation_error_geometry_resolver'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -16,6 +17,7 @@ module ULOL
             @pair_analysis = {}
             @cell_geometry = {}
             @cell_spaces_by_report_id = nil
+            ValidationErrorGeometryResolver.clear_overlap_geometry(model: @model) if @model
           end
 
           def pair_analysis(cell_id1, cell_id2)
@@ -48,14 +50,24 @@ module ULOL
             cell2 = model_cell_geometry(cell_id2)
             return inconclusive(cell_id1, cell_id2, cell2[:reason]) unless cell2[:status] == :ok
 
+            adjacency_candidates = shared_face_candidates(cell1[:faces], cell2[:faces], mode: :adjacency)
+            overlap_candidates = shared_face_candidates(cell1[:faces], cell2[:faces], mode: :overlap)
+            intersection = model_solid_intersection_for_pair(
+              cell1[:entity],
+              cell2[:entity],
+              cell_id1,
+              cell_id2
+            )
+            intersection = resolve_non_solid_intersection(intersection, adjacency_candidates)
+
             {
               status: :ok,
               cells: [cell_id1, cell_id2],
               cell1: cell1,
               cell2: cell2,
-              adjacency_candidates: shared_face_candidates(cell1[:faces], cell2[:faces], mode: :adjacency),
-              overlap_candidates: shared_face_candidates(cell1[:faces], cell2[:faces], mode: :overlap),
-              intersection: model_solid_intersection(cell1[:entity], cell2[:entity])
+              adjacency_candidates: adjacency_candidates,
+              overlap_candidates: overlap_candidates,
+              intersection: intersection
             }
           rescue StandardError => e
             inconclusive(cell_id1, cell_id2, "MODEL_GEOMETRY_RECHECK_FAILED: #{e.class}: #{e.message}")
@@ -199,6 +211,13 @@ module ULOL
             { area: total_area, polygons: polygons }
           end
 
+          def model_solid_intersection_for_pair(group1, group2, cell_id1, cell_id2)
+            @current_intersection_cell_ids = [cell_id1, cell_id2]
+            model_solid_intersection(group1, group2)
+          ensure
+            @current_intersection_cell_ids = nil
+          end
+
           def model_solid_intersection(group1, group2)
             model = @model || Sketchup.active_model
             return { status: :inconclusive, reason: 'BOOLEAN_OPERATION_FAILED' } unless model
@@ -224,10 +243,16 @@ module ULOL
             faces = result.definition.entities.grep(Sketchup::Face).select(&:valid?)
             edges = result.definition.entities.grep(Sketchup::Edge).select(&:valid?)
             return { status: :not_reproduced, reason: 'NO_VALID_INTERSECTION_GROUP_RETURNED', volume: 0.0, component_count: 0 } if faces.empty? && edges.empty?
-            return { status: :inconclusive, reason: 'INVALID_INTERSECTION_RESULT' } unless valid_manifold_group?(result)
+            return non_solid_intersection_result(result, faces, edges) unless valid_manifold_group?(result)
 
             volume = solid_group_volume(result)
-            return { status: :inconclusive, reason: 'INVALID_INTERSECTION_RESULT' } if volume.nil? || volume <= 0.0
+            return non_solid_intersection_result(result, faces, edges) if volume.nil? || volume <= 0.0
+
+            cache_intersection_overlay_geometry(
+              result,
+              @current_intersection_cell_ids,
+              volume
+            )
 
             {
               status: :reproduced,
@@ -289,6 +314,156 @@ module ULOL
             volume.to_f.abs
           rescue StandardError
             nil
+          end
+
+          def non_solid_intersection_result(result, faces, edges)
+            volume = solid_group_volume(result)
+            edge_face_counts = edges.map do |edge|
+              Array(edge.respond_to?(:faces) ? edge.faces : []).count { |face| face&.valid? }
+            rescue StandardError
+              0
+            end
+            boundary_edge_count = edge_face_counts.count(1)
+            nonmanifold_edge_count = edge_face_counts.count { |count| count > 2 }
+            lower_dimensional = !faces.empty? &&
+                                (volume.nil? || volume <= 0.0) &&
+                                boundary_edge_count.positive? &&
+                                nonmanifold_edge_count.zero?
+
+            {
+              status: :non_solid,
+              reason: 'NON_SOLID_INTERSECTION_RESULT',
+              volume: volume,
+              component_count: face_components(faces).length,
+              face_count: faces.length,
+              edge_count: edges.length,
+              boundary_edge_count: boundary_edge_count,
+              nonmanifold_edge_count: nonmanifold_edge_count,
+              lower_dimensional: lower_dimensional,
+              face_points: intersection_face_points(result, faces)
+            }
+          end
+
+          def resolve_non_solid_intersection(intersection, adjacency_candidates)
+            return intersection unless intersection[:status] == :non_solid
+
+            candidates = Array(adjacency_candidates)
+            if lower_dimensional_boundary_contact?(intersection, candidates)
+              return intersection.merge(
+                status: :not_reproduced,
+                reason: 'BOUNDARY_CONTACT_ONLY',
+                volume: 0.0
+              )
+            end
+
+            intersection.merge(
+              status: :inconclusive,
+              reason: 'BOOLEAN_INTERSECTION_INCONCLUSIVE'
+            )
+          end
+
+          def lower_dimensional_boundary_contact?(intersection, candidates)
+            return false unless intersection[:lower_dimensional] == true
+            return false if candidates.empty?
+
+            points = Array(intersection[:face_points])
+            return false if points.empty?
+
+            points.all? do |point|
+              candidates.any? do |candidate|
+                point_plane_distance(point, candidate[:normal], candidate[:plane1]) <= @tolerance
+              end
+            end
+          end
+
+          def point_plane_distance(point, normal, plane_constant)
+            return Float::INFINITY unless point && normal && !plane_constant.nil?
+
+            value = normal.x.to_f * point.x.to_f +
+                    normal.y.to_f * point.y.to_f +
+                    normal.z.to_f * point.z.to_f
+            (value - plane_constant.to_f).abs
+          rescue StandardError
+            Float::INFINITY
+          end
+
+          def intersection_face_points(result, faces)
+            transform = result.transformation
+            faces.flat_map do |face|
+              face.vertices.map { |vertex| vertex.position.transform(transform) }
+            end.uniq { |point| [point.x.to_f, point.y.to_f, point.z.to_f] }
+          rescue StandardError
+            []
+          end
+
+          def cache_intersection_overlay_geometry(result, cell_ids, volume)
+            return false if Array(cell_ids).any? { |cell_id| cell_id.to_s.empty? }
+
+            transform = Utils::Transformation.root_transformation_in_model(
+              @indoor_model&.primal_group
+            ) * result.transformation
+            geometry = intersection_overlay_geometry(result, transform)
+            return false if geometry[:triangles].empty?
+
+            ValidationErrorGeometryResolver.store_overlap_geometry(
+              model: @model || Sketchup.active_model,
+              cell_ids: cell_ids,
+              geometry: {
+                status: :ready,
+                triangles: geometry[:triangles],
+                edges: geometry[:edges],
+                volume_in3: volume
+              }
+            )
+          rescue StandardError => e
+            log("Overlap overlay cache failed: #{e.class}: #{e.message}")
+            false
+          end
+
+          def intersection_overlay_geometry(group, transform)
+            triangles = []
+            edges = []
+            edge_keys = {}
+
+            group.definition.entities.grep(Sketchup::Face).select(&:valid?).each do |face|
+              mesh = face.mesh(0)
+              mesh.polygons.each do |polygon|
+                points = polygon.map do |index|
+                  overlay_world_point(mesh.point_at(index.abs), transform)
+                end
+                triangles.concat(triangulate_overlay_polygon(points))
+              end
+              face.edges.each do |edge|
+                points = edge.vertices.map do |vertex|
+                  overlay_world_point(vertex.position, transform)
+                end
+                key = points.map { |point| overlay_point_key(point) }.sort
+                next if edge_keys[key]
+
+                edge_keys[key] = true
+                edges.concat(points)
+              end
+            end
+
+            { triangles: triangles, edges: edges }
+          end
+
+          def triangulate_overlay_polygon(points)
+            return [] if points.length < 3
+            return [points] if points.length == 3
+
+            (1...(points.length - 1)).map do |index|
+              [points[0], points[index], points[index + 1]]
+            end
+          end
+
+          def overlay_world_point(point, transform)
+            transformed = point.transform(transform)
+            Geom::Point3d.new(transformed.x, transformed.y, transformed.z)
+          end
+
+          def overlay_point_key(point)
+            [point.x.to_f.round(8), point.y.to_f.round(8), point.z.to_f.round(8)]
           end
 
           def face_components(faces)

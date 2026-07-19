@@ -384,33 +384,77 @@ module ULOL
           def report_filter_script
             <<~HTML
               <script>
+                var selectedValidationFocusRow = null;
+                var pendingValidationFocusRow = null;
+                var validationFocusDeselectionInProgress = false;
+
+                function activateValidationFocusRow(row) {
+                  if (!row) return;
+
+                  var rowId = row.getAttribute('data-row-id') || '';
+                  var cells = (row.getAttribute('data-cells') || '').split(',').filter(Boolean);
+                  var states = (row.getAttribute('data-states') || '').split(',').filter(Boolean);
+                  var transitions = (row.getAttribute('data-transitions') || '').split(',').filter(Boolean);
+                  var code = row.getAttribute('data-code') || '';
+                  selectedValidationFocusRow = row;
+                  row.classList.add('focused');
+                  row.open = true;
+                  if ((cells.length > 0 || states.length > 0 || transitions.length > 0) && typeof sketchup !== 'undefined' && sketchup.focusValidationCells) {
+                    sketchup.focusValidationCells(cells, code, states, transitions, rowId);
+                  }
+                }
+
+                function requestValidationFocusRowChange(nextRow) {
+                  if (validationFocusDeselectionInProgress) {
+                    pendingValidationFocusRow = nextRow;
+                    return;
+                  }
+                  if (!selectedValidationFocusRow) {
+                    activateValidationFocusRow(nextRow);
+                    return;
+                  }
+
+                  pendingValidationFocusRow = selectedValidationFocusRow === nextRow ? null : nextRow;
+                  validationFocusDeselectionInProgress = true;
+                  selectedValidationFocusRow = null;
+                  if (typeof sketchup !== 'undefined' && sketchup.focusValidationCells) {
+                    sketchup.focusValidationCells([], '', [], [], '');
+                  } else {
+                    window.completeValidationFocusRowDeselection();
+                  }
+                }
+
+                window.completeValidationFocusRowDeselection = function() {
+                  document.querySelectorAll('.validation-error-row.focused').forEach(function(item) {
+                    item.classList.remove('focused');
+                    item.open = false;
+                  });
+                  validationFocusDeselectionInProgress = false;
+                  var nextRow = pendingValidationFocusRow;
+                  pendingValidationFocusRow = null;
+                  activateValidationFocusRow(nextRow);
+                };
+
                 document.querySelectorAll('.validation-error-row').forEach(function(row) {
-                  row.addEventListener('click', function(event) {
+                  var summary = row.querySelector(':scope > summary');
+                  if (!summary) return;
+                  summary.addEventListener('click', function(event) {
+                    event.preventDefault();
                     event.stopPropagation();
-                    var rowId = row.getAttribute('data-row-id') || '';
-                    var cells = (row.getAttribute('data-cells') || '').split(',').filter(Boolean);
-                    var states = (row.getAttribute('data-states') || '').split(',').filter(Boolean);
-                    var transitions = (row.getAttribute('data-transitions') || '').split(',').filter(Boolean);
-                    var code = row.getAttribute('data-code') || '';
-                    document.querySelectorAll('.validation-error-row.focused').forEach(function(item) {
-                      item.classList.remove('focused');
-                    });
-                    row.classList.add('focused');
-                    if ((cells.length > 0 || states.length > 0 || transitions.length > 0) && typeof sketchup !== 'undefined' && sketchup.focusValidationCells) {
-                      sketchup.focusValidationCells(cells, code, states, transitions, rowId);
-                    }
+                    requestValidationFocusRowChange(row);
                   });
                 });
                 document.addEventListener('click', function(event) {
                   if (event.target.closest('.validation-error-row') || event.target.closest('.filter-btn')) return;
-                  window.clearValidationFocusSelection();
-                  if (typeof sketchup !== 'undefined' && sketchup.focusValidationCells) {
-                    sketchup.focusValidationCells([], '', [], []);
-                  }
+                  requestValidationFocusRowChange(null);
                 });
                 window.clearValidationFocusSelection = function() {
+                  selectedValidationFocusRow = null;
+                  pendingValidationFocusRow = null;
+                  validationFocusDeselectionInProgress = false;
                   document.querySelectorAll('.validation-error-row.focused').forEach(function(item) {
                     item.classList.remove('focused');
+                    item.open = false;
                   });
                 };
                 window.updateValidationFocusRow = function(payload) {
@@ -504,6 +548,8 @@ module ULOL
             text = reason.to_s
             return 'SketchUp Boolean에서 유효한 intersection group 미반환' if text.include?('NO_VALID_INTERSECTION_GROUP_RETURNED')
             return 'SketchUp Boolean에서 유효한 intersection 재현' if text.include?('REPRODUCED_AS_VALID_SKETCHUP_INTERSECTION')
+            return '체적 없이 공유 경계에서만 접촉' if text.include?('BOUNDARY_CONTACT_ONLY')
+            return 'SketchUp Boolean 교차 결과 판정 불가' if text.include?('BOOLEAN_INTERSECTION_INCONCLUSIVE')
             return '공유면 인접 거리 허용 오차 이내' if text.include?('near-coplanar shared-face')
 
             text
