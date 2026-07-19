@@ -319,8 +319,9 @@ module ULOL
             refs = row || incoming_refs
             row_cell_ids = validation_focus_cell_ids_for_refs(refs, indoor_model)
             if row_cell_ids.empty?
-              indoor_model.set_validation_focus_highlight([], code) if indoor_model.validation_focus_active?
-              next
+              next true unless indoor_model.validation_focus_active?
+
+              next indoor_model.set_validation_focus_highlight([], code)
             end
 
             unless indoor_model.validation_focus_active?
@@ -339,8 +340,7 @@ module ULOL
             refs = row || incoming_refs
             row_cell_ids = validation_focus_cell_ids_for_refs(refs, indoor_model)
             if row_cell_ids.empty?
-              indoor_model.set_validation_focus_highlight([], row ? row[:code] : code)
-              next
+              next indoor_model.set_validation_focus_highlight([], row ? row[:code] : code)
             end
 
             indoor_model.set_validation_focus_highlight(

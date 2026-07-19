@@ -745,7 +745,9 @@ module ULOL
               respond_to?(:add_validation_focus_highlight_cell) &&
               respond_to?(:remove_validation_focus_highlight_cell) &&
               !validation_focus_highlight_row_id.to_s.empty? &&
-              !guard_active?(:@refreshing_runtime)
+              !guard_active?(:@refreshing_runtime) &&
+              !guard_active?(:@transaction_reconciliation) &&
+              !(respond_to?(:transaction_replay_pending?, true) && transaction_replay_pending?)
           rescue StandardError
             false
           end
