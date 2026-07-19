@@ -287,6 +287,7 @@ module ULOL
 
         def set_validation_focus_highlight(cell_gml_ids, code = nil, row_id: nil, row_cells: nil, states: nil, transitions: nil)
           cancel_validation_focus_zoom
+          clearing_row_selection = Array(cell_gml_ids).empty? && row_id.to_s.empty?
           highlight_options = {}
           highlight_options[:row_id] = row_id unless row_id.nil?
           highlight_options[:row_cells] = row_cells unless row_cells.nil?
@@ -297,18 +298,40 @@ module ULOL
           else
             validation_focus_controller.set_highlight(cell_gml_ids, code, **highlight_options)
           end
+          if clearing_row_selection && !reset_validation_focus_row_edit_context
+            IndoorCore::Logger.puts '[IndoorGML] Validation focus highlight clear failed: primal edit context was not restored'
+            return false
+          end
           unless apply_validation_focus_visibility
             if defined?(IndoorCore::Logger)
               IndoorCore::Logger.puts '[IndoorGML] Validation focus highlight failed: visibility apply returned false'
             end
             return false
           end
+          update_validation_error_geometry(row_id)
           invalidate_overlay_transition_points
           invalidate_view(Sketchup.active_model())
           zoom_validation_focus_highlight(row_id: row_id) unless row_id.to_s.empty?
           true
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight failed: #{e.class}: #{e.message}"
+          false
+        end
+
+        def reset_validation_focus_row_edit_context
+          model = Sketchup.active_model()
+          model.selection.clear if model&.respond_to?(:selection) && model.selection
+
+          primal_group = @indoor_model.primal_group
+          return false unless model && primal_group&.valid?
+
+          target_path = [primal_group]
+          active_path_controller.set_target_path(target_path)
+          active_path_controller.set(model, target_path)
+          selection_changed()
+          true
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Validation focus row deselection failed: #{e.class}: #{e.message}"
           false
         end
 
@@ -350,7 +373,11 @@ module ULOL
 
         def restore_validation_focus_snapshot(snapshot, refresh: true)
           validation_focus_controller.restore!(snapshot)
-          refresh_validation_focus_after_mutation if refresh
+          if refresh
+            refresh_validation_focus_after_mutation
+          else
+            update_validation_error_geometry(validation_focus_controller.highlight_row_id)
+          end
         end
 
         def add_validation_focus_highlight_cell(cell_space, refresh: true)
@@ -386,6 +413,8 @@ module ULOL
 
         def refresh_validation_focus_after_mutation
           apply_validation_focus_visibility
+          overlay_controller.invalidate_validation_geometry_cache
+          update_validation_error_geometry(validation_focus_controller.highlight_row_id)
           invalidate_overlay_transition_points
           invalidate_view(Sketchup.active_model())
           true
@@ -474,7 +503,22 @@ module ULOL
         def clear_validation_focus
           cancel_validation_focus_zoom
           validation_focus_controller.clear
+          overlay_controller.clear_validation_geometry
+          overlay_controller.invalidate_validation_geometry_cache
           invalidate_overlay_transition_points
+        end
+
+        def update_validation_error_geometry(row_id)
+          row = validation_focus_controller.focus_row(row_id)
+          return overlay_controller.clear_validation_geometry unless row
+
+          overlay_controller.set_validation_geometry(row)
+        rescue StandardError => e
+          IndoorCore::Logger.puts(
+            "[IndoorGML] Validation error geometry update failed: " \
+            "#{e.class}: #{e.message}"
+          )
+          overlay_controller.clear_validation_geometry
         end
 
         def apply_edit_mode_visibility_filter(ignore_validation: false)

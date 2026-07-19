@@ -109,6 +109,65 @@ module ULOL
             assert_equal 1, executed_scripts.length
             assert_includes executed_scripts.first, 'clearValidationFocusSelection();'
           end
+
+          def test_row_deselection_completion_runs_after_ruby_focus_callback
+            events = []
+            fake_dialog = Struct.new(:events) do
+              def execute_script(script)
+                events << [:script, script]
+              end
+            end.new(events)
+            dialog = ExportProgressDialog.new
+            dialog.on_validation_focus_cells do |cells, code, states, transitions, row_id|
+              events << [:callback, cells, code, states, transitions, row_id]
+              true
+            end
+
+            dialog.send(:handle_validation_focus_cells, fake_dialog, [], '', [], [], '')
+
+            assert_equal :callback, events[0][0]
+            assert_equal [[], '', [], [], ''], events[0][1..]
+            assert_equal :script, events[1][0]
+            assert_includes events[1][1], 'completeValidationFocusRowDeselection();'
+          end
+
+          def test_failed_row_deselection_does_not_collapse_report_detail
+            executed_scripts = []
+            fake_dialog = Struct.new(:executed_scripts) do
+              def execute_script(script)
+                executed_scripts << script
+              end
+            end.new(executed_scripts)
+            dialog = ExportProgressDialog.new
+            dialog.on_validation_focus_cells { |_cells, _code, _states, _transitions, _row_id| false }
+
+            dialog.send(:handle_validation_focus_cells, fake_dialog, [], '', [], [], '')
+
+            assert_empty executed_scripts
+          end
+
+          def test_row_selection_does_not_run_deselection_completion
+            executed_scripts = []
+            fake_dialog = Struct.new(:executed_scripts) do
+              def execute_script(script)
+                executed_scripts << script
+              end
+            end.new(executed_scripts)
+            dialog = ExportProgressDialog.new
+            dialog.on_validation_focus_cells { |_cells, _code, _states, _transitions, _row_id| true }
+
+            dialog.send(
+              :handle_validation_focus_cells,
+              fake_dialog,
+              ['cell_A'],
+              '203',
+              [],
+              [],
+              'validation-error-row-0'
+            )
+
+            assert_empty executed_scripts
+          end
         end
       end
     end

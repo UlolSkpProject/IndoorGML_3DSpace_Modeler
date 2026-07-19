@@ -369,6 +369,50 @@ module ULOL
           assert_empty view.zoom_calls
         end
 
+        def test_row_highlight_clear_resets_selection_then_active_path_to_primal
+          calls = []
+          controller = EditorSession::ValidationFocusController.new
+          controller.begin(['cell_A'])
+          controller.set_focus_rows([{ id: 'row-1', cells: ['A'], code: '203' }])
+          controller.set_highlight(['cell_A'], '203', row_id: 'row-1', row_cells: ['A'])
+          selection = Struct.new(:controller, :calls) do
+            def clear
+              calls << [:selection_clear, controller.highlight_row_id]
+            end
+          end.new(controller, calls)
+          model = Struct.new(:selection).new(selection)
+          primal_group = Struct.new(:valid?).new(true)
+          path_controller = Struct.new(:calls) do
+            def set_target_path(path)
+              calls << [:target_path, path]
+            end
+
+            def set(_model, path)
+              calls << [:active_path, path]
+            end
+          end.new(calls)
+          session = EditorSession.allocate
+          session.instance_variable_set(:@editing, true)
+          session.instance_variable_set(:@indoor_model, Struct.new(:primal_group).new(primal_group))
+          session.instance_variable_set(:@validation_focus_controller, controller)
+          session.instance_variable_set(:@active_path_controller, path_controller)
+          session.define_singleton_method(:selection_changed) { calls << :selection_changed }
+          session.define_singleton_method(:apply_validation_focus_visibility) { calls << :visibility; true }
+          session.define_singleton_method(:update_validation_error_geometry) { |_row_id| calls << :geometry }
+          session.define_singleton_method(:invalidate_overlay_transition_points) { calls << :overlay }
+          session.define_singleton_method(:invalidate_view) { |_model| calls << :invalidate }
+
+          with_fake_active_model(model) do
+            assert session.set_validation_focus_highlight([], '')
+          end
+
+          assert_nil controller.highlight_row_id
+          assert_equal [:selection_clear, nil], calls[0]
+          assert_equal [:target_path, [primal_group]], calls[1]
+          assert_equal [:active_path, [primal_group]], calls[2]
+          assert_equal :selection_changed, calls[3]
+        end
+
         def test_set_visibility_filter_is_ignored_in_fix_mode
           session = EditorSession.allocate
           calls = []

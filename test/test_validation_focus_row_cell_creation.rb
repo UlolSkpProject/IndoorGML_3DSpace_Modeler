@@ -3,6 +3,7 @@
 require 'minitest/autorun'
 
 require_relative '../indoor3d/application/indoor_model/editor_control'
+require_relative '../indoor3d/application/indoor_model/feature_lifecycle'
 require_relative '../indoor3d/infrastructure/scene/editor_session/validation_focus_controller'
 
 module ULOL
@@ -64,6 +65,52 @@ module ULOL
           assert_equal ['B'], model.updated_payloads.first[:cells]
           assert_equal 'cell_B', model.updated_payloads.first[:label]
           assert_equal ['B'], controller.highlighted_row_cells
+        end
+
+        def test_runtime_reconciliation_does_not_track_restored_cells_as_row_edits
+          model = TrackingGuardIndoorModel.new
+
+          assert model.validation_focus_tracking_active?
+
+          model.transaction_reconciliation = true
+          refute model.validation_focus_tracking_active?
+
+          model.transaction_reconciliation = false
+          model.transaction_replay_pending = true
+          refute model.validation_focus_tracking_active?
+        end
+
+        class TrackingGuardIndoorModel
+          include IndoorModel::FeatureLifecycle
+
+          attr_accessor :transaction_reconciliation, :transaction_replay_pending
+
+          def initialize
+            @transaction_reconciliation = false
+            @transaction_replay_pending = false
+          end
+
+          def validation_focus_tracking_active?
+            validation_focus_highlight_tracking_active?
+          end
+
+          def validation_focus_highlight_row_id
+            'validation-error-row-0'
+          end
+
+          def add_validation_focus_highlight_cell(_cell_space); end
+
+          def remove_validation_focus_highlight_cell(_cell_space); end
+
+          def transaction_replay_pending?
+            @transaction_replay_pending == true
+          end
+
+          private
+
+          def guard_active?(flag)
+            instance_variable_get(flag)
+          end
         end
 
         class FakeIndoorModel

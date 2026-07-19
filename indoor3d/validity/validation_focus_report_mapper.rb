@@ -23,9 +23,59 @@ module ULOL
                 cells: Array(refs[:cells]).map(&:to_s),
                 states: Array(refs[:states]).map(&:to_s),
                 transitions: Array(refs[:transitions]).map(&:to_s),
-                focus_ids: cell_ids_for_refs(refs, indoor_model)
+                focus_ids: cell_ids_for_refs(refs, indoor_model),
+                geometry_refs: geometry_refs_for_group(group)
               }
             end
+          end
+
+          def geometry_refs_for_group(group)
+            faces = Array(group && group[:members]).flat_map do |member|
+              geometry_reference_texts(member).flat_map do |text|
+                text.scan(/polygon_(\d+)_cell_([A-Za-z0-9_.-]+)/).map do |index, cell_id|
+                  {
+                    cell_id: normalize_cell_ref(cell_id),
+                    face_index: index.to_i
+                  }
+                end
+              end
+            end
+
+            {
+              faces: faces.uniq { |face| [face[:cell_id], face[:face_index]] },
+              overlap_recheck: overlap_recheck_geometry_ref(group && group[:overlap_recheck])
+            }
+          end
+
+          def overlap_recheck_geometry_ref(row)
+            return nil unless row.is_a?(Hash)
+
+            {
+              cells: Array(row['cells'] || row[:cells]).map { |cell| normalize_cell_ref(cell) },
+              tolerated: row['tolerated'] == true || row[:tolerated] == true,
+              status: (row['status'] || row[:status]).to_s,
+              reason: (row['reason'] || row[:reason]).to_s,
+              actual_overlap_volume_mm3: row['actual_overlap_volume_mm3'] ||
+                row[:actual_overlap_volume_mm3]
+            }
+          end
+
+          def geometry_reference_texts(value)
+            case value
+            when Hash
+              value.flat_map do |key, nested_value|
+                geometry_reference_texts(key) + geometry_reference_texts(nested_value)
+              end
+            when Array
+              value.flat_map { |item| geometry_reference_texts(item) }
+            else
+              [value.to_s]
+            end
+          end
+
+          def normalize_cell_ref(value)
+            safe = safe_id(value)
+            safe.start_with?('cell_') ? safe.sub(/\Acell_/, '') : safe
           end
 
           def cell_ids_for_refs(refs, indoor_model)

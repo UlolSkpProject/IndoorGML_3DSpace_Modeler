@@ -48,6 +48,9 @@ module ULOL
             assert_includes html, 'sketchup.fixValidationErrors'
             assert_includes html, 'sketchup.createGml'
             assert_includes html, 'sketchup.focusValidationCells'
+            assert_includes html, 'selectedValidationFocusRow = null'
+            assert_includes html, 'completeValidationFocusRowDeselection'
+            assert_includes html, 'item.open = false'
             assert_includes html, 'sketchup.reportDomReady();'
             assert_includes html, 'class="recheck-row validation-error-row c700"'
             assert_includes html, 'data-row-id="validation-error-row-0"'
@@ -233,6 +236,14 @@ module ULOL
             assert_includes html, "String(event.key).toLowerCase() === 'a'"
             assert_includes html, 'event.preventDefault();'
             assert_includes html, 'event.stopPropagation();'
+          end
+
+          def test_boundary_contact_reason_is_rendered_as_non_volumetric_contact
+            renderer = Val3dityReportRenderer.new
+
+            label = renderer.send(:compact_overlap_reason, 'BOUNDARY_CONTACT_ONLY')
+
+            assert_equal '체적 없이 공유 경계에서만 접촉', label
           end
         end
       end

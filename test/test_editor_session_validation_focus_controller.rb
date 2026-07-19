@@ -148,7 +148,15 @@ module ULOL
         def test_snapshot_restore_recovers_focus_rows_and_highlight
           controller = EditorSession::ValidationFocusController.new
           controller.begin(['cell_A'])
-          controller.set_focus_rows([{ id: 'row-1', cells: ['A'], focus_ids: ['cell_A'], code: '203' }])
+          controller.set_focus_rows([{
+                                      id: 'row-1',
+                                      cells: ['A'],
+                                      focus_ids: ['cell_A'],
+                                      code: '203',
+                                      geometry_refs: {
+                                        faces: [{ cell_id: 'A', face_index: 11 }]
+                                      }
+                                    }])
           controller.set_highlight(['cell_A'], '203', row_id: 'row-1', row_cells: ['A'])
           snapshot = controller.snapshot
 
@@ -159,6 +167,8 @@ module ULOL
           assert_equal ['A'], controller.highlighted_row_cells
           assert_equal ['cell_A'], controller.highlighted_row_focus_ids
           assert_equal 'row-1', controller.highlight_row_id
+          assert_equal [{ cell_id: 'A', face_index: 11 }],
+                       controller.focus_row('row-1').dig(:geometry_refs, :faces)
         end
 
         def test_reconcile_cells_only_removes_stale_refs_without_guessing_new_cells
