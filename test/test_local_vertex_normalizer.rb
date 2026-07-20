@@ -139,6 +139,56 @@ module ULOL
           end
         end
 
+        SliverVertex = Struct.new(:position)
+
+        class SliverEdge
+          attr_reader :vertices
+          attr_accessor :faces
+
+          def initialize(vertex_a, vertex_b)
+            @vertices = [vertex_a, vertex_b]
+            @faces = []
+          end
+
+          def valid?
+            true
+          end
+        end
+
+        SliverLoop = Struct.new(:vertices, :edges)
+        SupportFace = Struct.new(:persistent_id)
+
+        class SliverFace
+          attr_reader :outer_loop, :persistent_id
+
+          def initialize(outer_loop, persistent_id)
+            @outer_loop = outer_loop
+            @persistent_id = persistent_id
+          end
+
+          def valid?
+            true
+          end
+
+          def loops
+            [@outer_loop]
+          end
+        end
+
+        class SliverEntities
+          def initialize(faces, edges)
+            @faces = faces
+            @edges = edges
+          end
+
+          def grep(klass)
+            return @faces if klass == SliverFace
+            return @edges if klass == SliverEdge
+
+            []
+          end
+        end
+
         class FakeModel
           attr_reader :calls
           attr_accessor :start_result, :commit_result, :abort_result
@@ -466,14 +516,198 @@ module ULOL
           assert_equal 2, report.dig(:stages, :final, :repaired_triangles)
         end
 
+        def test_short_edge_sliver_shape_requires_opposite_short_edges
+          instance = normalizer
+          sliver = [
+            mm_point(0, 0, 0),
+            mm_point(0.2, 0, 0),
+            mm_point(0.2, 0, 100),
+            mm_point(0, 0, 100)
+          ]
+          isolated_short_crease = [
+            mm_point(0, 0, 0),
+            mm_point(0.2, 0, 0),
+            mm_point(10, 10, 0),
+            mm_point(0, 10, 0)
+          ]
+
+          shape = instance.send(:short_edge_sliver_quad_shape, sliver)
+
+          refute_nil shape
+          assert_equal 2, shape[:short_edge_pairs].length
+          assert_operator shape[:aspect_ratio], :>, 400.0
+          assert_nil instance.send(
+            :short_edge_sliver_quad_shape,
+            isolated_short_crease
+          )
+        end
+
+        def test_short_edge_sliver_collapse_preserves_closed_shell_euler_characteristic
+          instance = normalizer
+          triangles, points = sliver_prism_triangle_records
+          baseline = instance.send(:validate_normalized_triangle_mesh!, triangles)
+          bottom_a = points.fetch(:bottom_a)
+          bottom_b = points.fetch(:bottom_b)
+          top_a = points.fetch(:top_a)
+          top_b = points.fetch(:top_b)
+          plan = {
+            repairable: true,
+            detected_face_count: 2,
+            repairable_patch_count: 1,
+            repaired_face_count: 2,
+            point_targets: {
+              instance.send(:grid_indices, bottom_b) => bottom_a,
+              instance.send(:grid_indices, top_b) => top_a
+            },
+            collapsed_clusters: [],
+            collapsed_cluster_count: 2,
+            collapsed_vertex_count: 2,
+            max_displacement_mm: 0.2,
+            skipped_patches: [],
+            candidates: []
+          }
+
+          repaired, report = instance.send(
+            :collapse_short_edge_sliver_triangles,
+            triangles,
+            plan,
+            baseline
+          )
+          validation = instance.send(:validate_normalized_triangle_mesh!, repaired)
+          instance.send(
+            :validate_short_edge_sliver_topology!,
+            baseline,
+            validation,
+            report
+          )
+
+          assert_equal 2, instance.send(:triangle_mesh_euler_characteristic, baseline)
+          assert_equal 2, instance.send(:triangle_mesh_euler_characteristic, validation)
+          assert_equal 4, report[:removed_degenerate_triangle_count]
+          assert_equal 0, report[:removed_duplicate_triangle_count]
+          assert_equal 10, baseline[:vertex_count]
+          assert_equal 8, validation[:vertex_count]
+          assert_equal 1, validation[:component_count]
+        end
+
+        def test_short_edge_cluster_wider_than_one_millimetre_is_not_collapsed
+          instance = normalizer
+          points = [
+            mm_point(0, 0, 0),
+            mm_point(0.6, 0, 0),
+            mm_point(1.2, 0, 0)
+          ]
+          point_by_key = points.each_with_object({}) do |point, result|
+            result[instance.send(:grid_indices, point)] = point
+          end
+          keys = points.map { |point| instance.send(:grid_indices, point) }
+
+          result = instance.send(
+            :short_edge_cluster_targets,
+            [[keys[0], keys[1]], [keys[1], keys[2]]],
+            point_by_key
+          )
+
+          refute result[:ok]
+          assert_equal :cluster_too_wide, result[:reason]
+        end
+
+        def test_only_repeated_sliver_faces_between_the_same_support_faces_are_repairable
+          support_top = SupportFace.new(10_001)
+          support_bottom = SupportFace.new(10_002)
+          first_face, first_edges = sliver_face(
+            x_mm: 0,
+            persistent_id: 20_001,
+            support_top: support_top,
+            support_bottom: support_bottom
+          )
+          second_face, second_edges = sliver_face(
+            x_mm: 10,
+            persistent_id: 20_002,
+            support_top: support_top,
+            support_bottom: support_bottom
+          )
+          instance = normalizer(
+            face_class: SliverFace,
+            edge_class: SliverEdge
+          )
+
+          isolated = instance.send(
+            :short_edge_sliver_collapse_plan,
+            SliverEntities.new([first_face], first_edges)
+          )
+          repeated = instance.send(
+            :short_edge_sliver_collapse_plan,
+            SliverEntities.new(
+              [first_face, second_face],
+              first_edges + second_edges
+            )
+          )
+
+          assert_equal 1, isolated[:detected_face_count]
+          refute isolated[:repairable]
+          assert_equal 2, repeated[:detected_face_count]
+          assert repeated[:repairable]
+          assert_equal 1, repeated[:repairable_patch_count]
+          assert_equal 4, repeated[:collapsed_cluster_count]
+          assert_equal 4, repeated[:collapsed_vertex_count]
+        end
+
+        def test_crash_ring_style_short_edges_form_one_repairable_patch
+          support_top = SupportFace.new(30_001)
+          support_bottom = SupportFace.new(30_002)
+          widths_mm = [
+            0.210341482,
+            0.056224511,
+            0.210341482,
+            0.154205206,
+            0.210341482,
+            0.210341482,
+            0.210341482,
+            0.210341482,
+            0.154205206,
+            0.056224511
+          ]
+          faces = []
+          edges = []
+          widths_mm.each_with_index do |width_mm, index|
+            face, face_edges = sliver_face(
+              x_mm: index * 10,
+              width_mm: width_mm,
+              height_mm: 4_800,
+              persistent_id: 31_000 + index,
+              support_top: support_top,
+              support_bottom: support_bottom
+            )
+            faces << face
+            edges.concat(face_edges)
+          end
+          instance = normalizer(
+            face_class: SliverFace,
+            edge_class: SliverEdge
+          )
+
+          plan = instance.send(
+            :short_edge_sliver_collapse_plan,
+            SliverEntities.new(faces, edges)
+          )
+
+          assert plan[:repairable]
+          assert_equal 10, plan[:detected_face_count]
+          assert_equal 1, plan[:repairable_patch_count]
+          assert_equal 20, plan[:collapsed_cluster_count]
+          assert_equal 20, plan[:collapsed_vertex_count]
+          assert_operator plan[:max_displacement_mm], :<, 0.106
+        end
+
         private
 
-        def normalizer(model: nil, face_class: FakeFace)
+        def normalizer(model: nil, face_class: FakeFace, edge_class: Sketchup::Edge)
           LocalVertexNormalizer.new(
             0.001,
             point_factory: ->(x, y, z) { Point.new(x, y, z) },
             vector_factory: ->(x, y, z) { [x, y, z] },
-            edge_class: Sketchup::Edge,
+            edge_class: edge_class,
             face_class: face_class,
             model: model
           )
@@ -498,6 +732,88 @@ module ULOL
 
         def mm_point(x, y, z)
           point(x.to_f / 25.4, y.to_f / 25.4, z.to_f / 25.4)
+        end
+
+        def sliver_prism_triangle_records
+          bottom = [
+            mm_point(0, 0, 0),
+            mm_point(0.2, 0, 0),
+            mm_point(10, 0, 0),
+            mm_point(10, 10, 0),
+            mm_point(0, 10, 0)
+          ]
+          top = bottom.map { |point| mm_point(point.x * 25.4, point.y * 25.4, 10) }
+          triangles = []
+          add_triangle_record(triangles, bottom[3], bottom[4], bottom[0], :bottom)
+          add_triangle_record(triangles, bottom[3], bottom[0], bottom[1], :bottom)
+          add_triangle_record(triangles, bottom[3], bottom[1], bottom[2], :bottom)
+          add_triangle_record(triangles, top[3], top[0], top[4], :top)
+          add_triangle_record(triangles, top[3], top[1], top[0], :top)
+          add_triangle_record(triangles, top[3], top[2], top[1], :top)
+
+          5.times do |index|
+            following = (index + 1) % 5
+            add_triangle_record(
+              triangles,
+              bottom[index],
+              bottom[following],
+              top[following],
+              "side_#{index}".to_sym
+            )
+            add_triangle_record(
+              triangles,
+              bottom[index],
+              top[following],
+              top[index],
+              "side_#{index}".to_sym
+            )
+          end
+
+          [
+            triangles,
+            {
+              bottom_a: bottom[0],
+              bottom_b: bottom[1],
+              top_a: top[0],
+              top_b: top[1]
+            }
+          ]
+        end
+
+        def add_triangle_record(records, point_a, point_b, point_c, source_face_key)
+          records << {
+            points: [point_a, point_b, point_c],
+            source_normal: [0.0, 0.0, 1.0],
+            material: nil,
+            back_material: nil,
+            layer: nil,
+            source_face_key: source_face_key,
+            source_polygon_index: records.length
+          }
+        end
+
+        def sliver_face(
+          x_mm:,
+          persistent_id:,
+          support_top:,
+          support_bottom:,
+          width_mm: 0.2,
+          height_mm: 100
+        )
+          vertices = [
+            SliverVertex.new(mm_point(x_mm, 0, 0)),
+            SliverVertex.new(mm_point(x_mm + width_mm, 0, 0)),
+            SliverVertex.new(mm_point(x_mm + width_mm, 0, height_mm)),
+            SliverVertex.new(mm_point(x_mm, 0, height_mm))
+          ]
+          edges = 4.times.map do |index|
+            SliverEdge.new(vertices[index], vertices[(index + 1) % 4])
+          end
+          face = SliverFace.new(SliverLoop.new(vertices, edges), persistent_id)
+          edges.each { |edge| edge.faces = [face] }
+          edges[0].faces << support_top
+          edges[2].faces << support_bottom
+          [face, edges]
         end
       end
     end

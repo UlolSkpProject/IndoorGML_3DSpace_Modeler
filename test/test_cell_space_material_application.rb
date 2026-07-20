@@ -42,11 +42,27 @@ module ULOL
           assert_nil face.back_material
         end
 
+        def test_clears_group_and_face_materials_for_demotion
+          face = FakeFace.new(material: 'front', back_material: 'back')
+          group = FakeGroup.new([face])
+          model = FakeIndoorModel.new
+
+          assert model.clear_materials(group)
+
+          assert_nil group.material
+          assert_nil face.material
+          assert_nil face.back_material
+        end
+
         class FakeIndoorModel
           include IndoorModel::FeatureLifecycle
 
           def apply_material(cell_space)
             apply_cell_space_material(cell_space)
+          end
+
+          def clear_materials(group)
+            clear_cell_space_materials(group)
           end
         end
 
@@ -56,6 +72,11 @@ module ULOL
 
           def initialize(faces)
             @entities = FakeEntities.new(faces)
+            @material = 'cell-space-material'
+          end
+
+          def valid?
+            true
           end
         end
 

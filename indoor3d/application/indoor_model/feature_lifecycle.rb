@@ -711,6 +711,21 @@ module ULOL
             end
           end
 
+          def clear_cell_space_materials(group)
+            return false unless group&.valid?
+
+            group.material = nil if group.respond_to?(:material=)
+            entities = if group.respond_to?(:definition) && group.definition&.valid?
+                         group.definition.entities
+                       elsif group.respond_to?(:entities)
+                         group.entities
+                       end
+            Array(entities&.grep(Sketchup::Face)).each do |face|
+              clear_cell_space_face_material(face)
+            end
+            true
+          end
+
           def clear_cell_space_face_material(face)
             face.material = nil if face.respond_to?(:material=)
             face.back_material = nil if face.respond_to?(:back_material=)

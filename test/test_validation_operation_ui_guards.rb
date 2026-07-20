@@ -32,13 +32,17 @@ module ULOL
         end
 
         def test_fix_mode_controls_combine_existing_locks_with_validation_busy
+          html = File.read(File.expand_path('../indoor3d/ui/html/edit_mode/index.html', __dir__))
           script = File.read(File.expand_path('../indoor3d/ui/html/edit_mode/app.js', __dir__))
 
+          assert_includes html, 'id="removeIndoorGmlAttributes"'
           assert_includes script, 'validationBusy || snapshot.classificationLocked'
           assert_includes script, 'validationBusy || !currentStoreyRangeAllowed'
           assert_includes script, 'setControlLocked([storeyFromKind, storeyFromLevel], validationBusy)'
           assert_includes script, 'setControlLocked([solidStoreyFromKind, solidStoreyFromLevel], validationBusy)'
-          assert_includes script, 'setControlLocked([finishButton, recheckErrorsButton], validationBusy)'
+          assert_includes script, 'setVisible(removeIndoorGmlAttributesButton, !fixMode)'
+          assert_includes script, "invokeSketchup('removeSelectedCellSpacesIndoorGmlAttributes')"
+          assert_includes script, '[finishButton, recheckErrorsButton, removeIndoorGmlAttributesButton]'
           assert_includes script, "snapshot.validationBusy ? 'validation-busy' : 'validation-idle'"
         end
 
