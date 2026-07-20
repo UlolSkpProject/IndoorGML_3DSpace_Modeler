@@ -239,6 +239,43 @@ module ULOL
           assert_equal [:start_operation, :abort_operation], model.calls.map(&:first)
         end
 
+        def test_operation_can_commit_failed_state_for_development_inspection
+          model = FakeModel.new
+          error = assert_raises(RuntimeError) do
+            normalizer(model: model).send(
+              :with_normalization_operation,
+              Object.new,
+              commit_on_failure: true
+            ) do
+              raise 'rebuild failed'
+            end
+          end
+
+          assert_equal 'rebuild failed', error.message
+          assert_equal [:start_operation, :commit_operation], model.calls.map(&:first)
+        end
+
+        def test_failed_state_commit_failure_falls_back_to_abort
+          model = FakeModel.new
+          model.commit_result = false
+
+          error = assert_raises(LocalVertexNormalizer::OperationError) do
+            normalizer(model: model).send(
+              :with_normalization_operation,
+              Object.new,
+              commit_on_failure: true
+            ) do
+              raise 'rebuild failed'
+            end
+          end
+
+          assert_includes error.message, 'committing the failed state also failed'
+          assert_equal(
+            [:start_operation, :commit_operation, :abort_operation],
+            model.calls.map(&:first)
+          )
+        end
+
         def test_operation_aborts_when_commit_fails
           model = FakeModel.new
           model.commit_result = false
@@ -498,6 +535,88 @@ module ULOL
           assert_equal 1, report[:repaired_triangles]
           assert_equal 1, report[:replaced_pairs]
           assert_equal expected.sort, signatures.sort
+          refute repaired.any? { |record| instance.send(:degenerate_triangle_record?, record) }
+        end
+
+        def test_source_space_degenerate_triangle_is_repaired_before_grid_rounding
+          point_p = mm_point(30_374.309310100576, -5_125.200161758802, -400)
+          point_a = mm_point(33_074.02490280663, -5_086.011917351332, -400)
+          point_b = mm_point(35_845.88451831048, -5_045.776452412334, -400)
+          point_q = mm_point(16_475.775270217444, -5_326.94702366224, 3_800)
+          face = SnapshotFace.new(
+            [point_p, point_a, point_b, point_q],
+            [[1, 2, 3], [1, 3, 4]],
+            702
+          )
+          instance = normalizer(face_class: SnapshotFace)
+          source = instance.send(:triangle_snapshot, SnapshotEntities.new([face]))
+
+          assert instance.send(
+            :degenerate_triangle_record?,
+            source.first,
+            coordinate_space: :source
+          )
+
+          rounded_without_repair = instance.send(:normalize_triangle_records, source)
+          refute instance.send(
+            :degenerate_triangle_record?,
+            rounded_without_repair.first
+          )
+
+          repaired, report = instance.send(
+            :repair_degenerate_source_triangles,
+            source,
+            coordinate_space: :source
+          )
+          normalized = instance.send(:normalize_triangle_records, repaired)
+          point_p_key = instance.send(:grid_indices, point_p)
+          point_b_key = instance.send(:grid_indices, point_b)
+          long_edge = [point_p_key, point_b_key].sort
+          normalized_edges = normalized.flat_map do |record|
+            triangle = record[:points].map do |point|
+              instance.send(:grid_indices, point)
+            end
+            3.times.map do |index|
+              [triangle[index], triangle[(index + 1) % 3]].sort
+            end
+          end
+
+          assert_equal 1, report[:repaired_triangles]
+          assert_equal 1, report[:replaced_pairs]
+          refute_includes normalized_edges, long_edge
+          refute normalized.any? { |record| instance.send(:degenerate_triangle_record?, record) }
+        end
+
+        def test_triangle_collapsed_by_grid_rounding_is_repaired_after_normalization
+          point_p = mm_point(0, 0, 0)
+          point_a = mm_point(5, 0.0004, 0)
+          point_b = mm_point(10, 0, 0)
+          point_q = mm_point(0, 10, 0)
+          face = SnapshotFace.new(
+            [point_p, point_a, point_b, point_q],
+            [[1, 2, 3], [1, 3, 4]],
+            703
+          )
+          instance = normalizer(face_class: SnapshotFace)
+          source = instance.send(:triangle_snapshot, SnapshotEntities.new([face]))
+          source_repaired, source_report = instance.send(
+            :repair_degenerate_source_triangles,
+            source,
+            coordinate_space: :source
+          )
+
+          assert_equal 0, source_report[:repaired_triangles]
+
+          normalized = instance.send(:normalize_triangle_records, source_repaired)
+          assert instance.send(:degenerate_triangle_record?, normalized.first)
+
+          repaired, report = instance.send(
+            :repair_degenerate_source_triangles,
+            normalized
+          )
+
+          assert_equal 1, report[:repaired_triangles]
+          assert_equal 1, report[:replaced_pairs]
           refute repaired.any? { |record| instance.send(:degenerate_triangle_record?, record) }
         end
 

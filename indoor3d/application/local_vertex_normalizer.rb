@@ -48,8 +48,15 @@ module ULOL
         class OperationError < Error; end
 
         class << self
-          def normalize(entity, tolerance_mm = DEFAULT_TOLERANCE_MM)
-            new(tolerance_mm).normalize(entity)
+          def normalize(
+            entity,
+            tolerance_mm = DEFAULT_TOLERANCE_MM,
+            commit_on_failure: false
+          )
+            new(tolerance_mm).normalize(
+              entity,
+              commit_on_failure: commit_on_failure
+            )
           end
 
           def normalized?(entity, tolerance_mm = DEFAULT_TOLERANCE_MM)
@@ -124,9 +131,12 @@ module ULOL
         # Rebuilds one manifold solid on the requested local-coordinate grid.
         # The complete reconstruction owns one SketchUp operation so every
         # mutation, including make_unique, is rolled back on failure.
-        def normalize(entity)
+        def normalize(entity, commit_on_failure: false)
           validate_entity!(entity)
-          with_normalization_operation(entity) do
+          with_normalization_operation(
+            entity,
+            commit_on_failure: commit_on_failure
+          ) do
             normalize_entity(entity)
           end
         end
@@ -154,9 +164,15 @@ module ULOL
                   "targets=#{vertex_metrics[:unique_target_count]}"
           end
 
+          source_space_triangles = triangle_snapshot(entities)
+          source_space_triangles, pre_normalization_degenerate_repair =
+            repair_degenerate_source_triangles(
+              source_space_triangles,
+              coordinate_space: :source
+            )
           source_duplicate_diagnostics = {}
-          source_triangles = normalized_triangle_snapshot(
-            entities,
+          source_triangles = normalize_triangle_records(
+            source_space_triangles,
             axis_plane_plan,
             duplicate_diagnostics: source_duplicate_diagnostics
           )
@@ -213,14 +229,13 @@ module ULOL
           end
 
 
-          axis_plane_merge = {
-            removed_edges: 0,
-            merged_faces: 0,
-            passes: [],
-            preserved_constrained_edges: true,
-            fallback_reason:
-              'Exact coplanar patch triangulation owns its internal diagonals'
-          }
+          axis_plane_merge = remove_coplanar_shared_edges(
+            entities,
+            plane_tolerance_mm: STRICT_COPLANAR_TOLERANCE_MM,
+            angle_tolerance_deg: STRICT_COPLANAR_ANGLE_TOLERANCE_DEG
+          )
+          axis_plane_merge[:merged_faces] = axis_plane_merge[:removed_edges]
+          axis_plane_merge[:preserved_constrained_edges] = false
 
           outward_orientation = orient_shell_outward(entities)
           orientation = {
@@ -255,6 +270,7 @@ module ULOL
           final_mesh_validation = validate_normalized_triangle_mesh!(final_triangles)
 
           degenerate_repair = aggregate_degenerate_repair_reports(
+            pre_normalization: pre_normalization_degenerate_repair,
             source: source_degenerate_repair,
             conforming: conforming_degenerate_repair,
             rebuilt: rebuilt_degenerate_repair,
@@ -289,9 +305,13 @@ module ULOL
           )
         end
 
-        def with_normalization_operation(entity)
+        # commit_on_failure is a development-only inspection aid. It preserves
+        # every mutation made before a reconstruction exception, then re-raises
+        # that original exception. The safe production default remains rollback.
+        def with_normalization_operation(entity, commit_on_failure: false)
           model = normalization_model(entity)
           operation_started = false
+          commit_attempted = false
 
           begin
             operation_started = model.start_operation(
@@ -303,6 +323,7 @@ module ULOL
             end
 
             result = yield
+            commit_attempted = true
             committed = model.commit_operation
             if committed == false
               raise OperationError, 'Failed to commit local vertex normalization operation'
@@ -311,6 +332,26 @@ module ULOL
             operation_started = false
             result
           rescue StandardError => error
+            if operation_started && commit_on_failure && !commit_attempted
+              failure_commit_error = commit_failed_normalization_operation(model)
+              unless failure_commit_error
+                operation_started = false
+                raise
+              end
+
+              rollback_error = rollback_normalization_operation(model)
+              message =
+                "Local vertex normalization failed (#{error.class}: #{error.message}) " \
+                "and committing the failed state also failed " \
+                "(#{failure_commit_error.class}: #{failure_commit_error.message})"
+              if rollback_error
+                message +=
+                  " and rollback failed " \
+                  "(#{rollback_error.class}: #{rollback_error.message})"
+              end
+              raise OperationError, message
+            end
+
             rollback_error = rollback_normalization_operation(model) if operation_started
             if rollback_error
               raise OperationError,
@@ -340,6 +381,15 @@ module ULOL
           raise
         rescue StandardError => e
           raise OperationError, "Could not resolve SketchUp model: #{e.class}: #{e.message}"
+        end
+
+        def commit_failed_normalization_operation(model)
+          committed = model.commit_operation
+          return nil unless committed == false
+
+          OperationError.new('SketchUp returned false from commit_operation')
+        rescue StandardError => e
+          e
         end
 
         def rollback_normalization_operation(model)
@@ -1335,38 +1385,25 @@ module ULOL
           axis_plane_plan = nil,
           duplicate_diagnostics: nil
         )
-          triangles = []
-          signatures = {}
-          diagnostics = duplicate_diagnostics || {}
-          diagnostics[:duplicate_count] = 0
-          diagnostics[:samples] = []
+          normalize_triangle_records(
+            triangle_snapshot(entities),
+            axis_plane_plan,
+            duplicate_diagnostics: duplicate_diagnostics
+          )
+        end
 
-          entities.grep(@face_class).each do |face|
+        # Captures SketchUp's mesh triangles without applying the normalization
+        # grid. Degenerate mesh diagonals must be repaired in this coordinate
+        # space first: independently rounding three collinear points can turn a
+        # zero-area triangle into a very thin, non-zero triangle.
+        def triangle_snapshot(entities)
+          entities.grep(@face_class).flat_map do |face|
             mesh = face.mesh(0)
             source_face_key = stable_entity_id(face)
-            mesh.polygons.each_with_index do |polygon, polygon_index|
-              points = polygon.map do |index|
-                normalized_target(mesh.point_at(index.abs), axis_plane_plan)
-              end
-
-              triangulate_polygon(points).each do |triangle_points|
-                signature = triangle_signature(triangle_points)
-                if signatures.key?(signature)
-                  diagnostics[:duplicate_count] += 1
-                  if diagnostics[:samples].length < 10
-                    kept = signatures.fetch(signature)
-                    diagnostics[:samples] << {
-                      signature: signature,
-                      kept_face_key: kept[:source_face_key],
-                      kept_polygon_index: kept[:source_polygon_index],
-                      duplicate_face_key: source_face_key,
-                      duplicate_polygon_index: polygon_index
-                    }
-                  end
-                  next
-                end
-
-                record = {
+            mesh.polygons.each_with_index.flat_map do |polygon, polygon_index|
+              points = polygon.map { |index| mesh.point_at(index.abs) }
+              triangulate_polygon(points).map do |triangle_points|
+                {
                   points: triangle_points,
                   source_normal: vector_components(face.normal),
                   material: face.material,
@@ -1375,10 +1412,45 @@ module ULOL
                   source_face_key: source_face_key,
                   source_polygon_index: polygon_index
                 }
-                signatures[signature] = record
-                triangles << record
               end
             end
+          end
+        end
+
+        def normalize_triangle_records(
+          triangle_records,
+          axis_plane_plan = nil,
+          duplicate_diagnostics: nil
+        )
+          triangles = []
+          signatures = {}
+          diagnostics = duplicate_diagnostics || {}
+          diagnostics[:duplicate_count] = 0
+          diagnostics[:samples] = []
+
+          triangle_records.each do |source_record|
+            triangle_points = source_record[:points].map do |point|
+              normalized_target(point, axis_plane_plan)
+            end
+            signature = triangle_signature(triangle_points)
+            if signatures.key?(signature)
+              diagnostics[:duplicate_count] += 1
+              if diagnostics[:samples].length < 10
+                kept = signatures.fetch(signature)
+                diagnostics[:samples] << {
+                  signature: signature,
+                  kept_face_key: kept[:source_face_key],
+                  kept_polygon_index: kept[:source_polygon_index],
+                  duplicate_face_key: source_record[:source_face_key],
+                  duplicate_polygon_index: source_record[:source_polygon_index]
+                }
+              end
+              next
+            end
+
+            record = source_record.merge(points: triangle_points)
+            signatures[signature] = record
+            triangles << record
           end
 
           triangles
@@ -1389,21 +1461,30 @@ module ULOL
         # triangulation diagonal. The replacement uses B-D:
         #   (A,B,C) + (A,C,D) -> (A,B,D) + (B,C,D)
         # No vertex is moved or removed.
-        def repair_degenerate_source_triangles(triangle_records)
+        def repair_degenerate_source_triangles(
+          triangle_records,
+          coordinate_space: :grid
+        )
           working = triangle_records.map(&:dup)
           repaired_triangles = 0
           replaced_pairs = 0
 
           loop do
             degenerate_indices = working.each_index.select do |index|
-              degenerate_triangle_record?(working[index])
+              degenerate_triangle_record?(
+                working[index],
+                coordinate_space: coordinate_space
+              )
             end
             break if degenerate_indices.empty?
 
             repair = nil
             degenerate_indices.each do |degenerate_index|
               degenerate = working[degenerate_index]
-              split = collinear_triangle_split(degenerate[:points])
+              split = collinear_triangle_split(
+                degenerate[:points],
+                coordinate_space: coordinate_space
+              )
               next unless split
 
               neighbor_indices = working.each_index.select do |candidate_index|
@@ -1411,9 +1492,14 @@ module ULOL
 
                 candidate = working[candidate_index]
                 next false unless candidate[:source_face_key] == degenerate[:source_face_key]
-                next false if degenerate_triangle_record?(candidate)
+                next false if degenerate_triangle_record?(
+                  candidate,
+                  coordinate_space: coordinate_space
+                )
 
-                candidate_keys = candidate[:points].map { |point| grid_indices(point) }
+                candidate_keys = candidate[:points].map do |point|
+                  triangle_point_key(point, coordinate_space)
+                end
                 candidate_keys.include?(split[:endpoint_a_key]) &&
                   candidate_keys.include?(split[:endpoint_c_key])
               end
@@ -1443,14 +1529,14 @@ module ULOL
                     "Could not retriangulate zero-area source triangle: " \
                     "face=#{record[:source_face_key].inspect} " \
                     "polygon=#{record[:source_polygon_index].inspect} " \
-                    "points=#{record[:points].map { |point| grid_indices(point) }.inspect}"
+                    "points=#{record[:points].map { |point| triangle_point_key(point, coordinate_space) }.inspect}"
             end
 
             degenerate = working[repair[:degenerate_index]]
             neighbor = working[repair[:neighbor_index]]
             split = repair[:split]
             neighbor_points_by_key = neighbor[:points].each_with_object({}) do |point, points|
-              points[grid_indices(point)] = point
+              points[triangle_point_key(point, coordinate_space)] = point
             end
             opposite_entry = neighbor_points_by_key.find do |key, _point|
               key != split[:endpoint_a_key] && key != split[:endpoint_c_key]
@@ -1458,7 +1544,7 @@ module ULOL
             unless opposite_entry
               raise ReconstructionError,
                     "Degenerate triangle neighbor has no opposite vertex: " \
-                    "#{neighbor[:points].map { |point| grid_indices(point) }.inspect}"
+                    "#{neighbor[:points].map { |point| triangle_point_key(point, coordinate_space) }.inspect}"
             end
             opposite_point = opposite_entry[1]
 
@@ -1473,9 +1559,13 @@ module ULOL
               )
             ]
             replacements.each do |record|
-              triangle = record[:points].map { |point| grid_indices(point) }
-              if triangle.uniq.length != 3 ||
-                 integer_zero_vector?(integer_triangle_normal(triangle))
+              triangle = record[:points].map do |point|
+                triangle_point_key(point, coordinate_space)
+              end
+              if degenerate_triangle_record?(
+                record,
+                coordinate_space: coordinate_space
+              )
                 raise ReconstructionError,
                       "Alternate diagonal still creates a zero-area triangle: " \
                       "#{triangle.inspect}"
@@ -1489,10 +1579,16 @@ module ULOL
             removed_indices.each { |index| working.delete_at(index) }
 
             existing_signatures = working.each_with_object({}) do |record, signatures|
-              signatures[triangle_signature(record[:points])] = true
+              signatures[triangle_signature_for_space(
+                record[:points],
+                coordinate_space
+              )] = true
             end
             replacements.each do |record|
-              signature = triangle_signature(record[:points])
+              signature = triangle_signature_for_space(
+                record[:points],
+                coordinate_space
+              )
               if existing_signatures.key?(signature)
                 raise ReconstructionError,
                       "Alternate diagonal creates duplicate triangle: #{signature.inspect}"
@@ -1534,16 +1630,28 @@ module ULOL
           }
         end
 
-        def degenerate_triangle_record?(record)
-          triangle = record[:points].map { |point| grid_indices(point) }
-          triangle.uniq.length != 3 ||
+        def degenerate_triangle_record?(record, coordinate_space: :grid)
+          triangle = record[:points].map do |point|
+            triangle_point_key(point, coordinate_space)
+          end
+          return true if triangle.uniq.length != 3
+
+          if coordinate_space == :source
+            !collinear_triangle_split(
+              record[:points],
+              coordinate_space: :source
+            ).nil?
+          else
             integer_zero_vector?(integer_triangle_normal(triangle))
+          end
         end
 
-        def collinear_triangle_split(points)
-          keys = points.map { |point| grid_indices(point) }
+        def collinear_triangle_split(points, coordinate_space: :grid)
+          keys = points.map { |point| triangle_point_key(point, coordinate_space) }
           return nil unless keys.uniq.length == 3
-          return nil unless integer_zero_vector?(integer_triangle_normal(keys))
+          if coordinate_space == :grid
+            return nil unless integer_zero_vector?(integer_triangle_normal(keys))
+          end
 
           keys.each_index do |middle_index|
             endpoint_indices = keys.each_index.reject { |index| index == middle_index }
@@ -1551,11 +1659,21 @@ module ULOL
             middle_key = keys[middle_index]
             endpoint_a_key = keys[endpoint_a_index]
             endpoint_c_key = keys[endpoint_c_index]
-            next unless integer_point_between?(
-              middle_key,
-              endpoint_a_key,
-              endpoint_c_key
-            )
+            between = if coordinate_space == :source
+                        !point_on_segment_parameter(
+                          points[middle_index],
+                          points[endpoint_a_index],
+                          points[endpoint_c_index],
+                          GRID_EPSILON_MM
+                        ).nil?
+                      else
+                        integer_point_between?(
+                          middle_key,
+                          endpoint_a_key,
+                          endpoint_c_key
+                        )
+                      end
+            next unless between
 
             return {
               endpoint_a: points[endpoint_a_index],
@@ -1568,6 +1686,18 @@ module ULOL
           end
 
           nil
+        end
+
+        def triangle_point_key(point, coordinate_space)
+          return grid_indices(point) unless coordinate_space == :source
+
+          [point.x.to_f, point.y.to_f, point.z.to_f]
+        end
+
+        def triangle_signature_for_space(points, coordinate_space)
+          points.map do |point|
+            triangle_point_key(point, coordinate_space)
+          end.sort
         end
 
         def integer_point_between?(point, segment_start, segment_end)
