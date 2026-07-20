@@ -179,9 +179,12 @@ ul {
 
 .result-title {
   color: #e8e6e0;
+  cursor: text;
   font-size: 13px;
   font-weight: 700;
   margin-bottom: 6px;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .result.success .result-title {
@@ -196,9 +199,12 @@ ul {
 .result-message {
   min-height: 18px;
   color: #b9b6ae;
+  cursor: text;
   font-size: 12px;
   line-height: 1.45;
   margin-bottom: 10px;
+  user-select: text;
+  -webkit-user-select: text;
   word-break: break-word;
 }
 
