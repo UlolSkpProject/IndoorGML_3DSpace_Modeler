@@ -25,17 +25,20 @@ module ULOL
 
         COPLANAR_TOLERANCE_MM = 0.01
         COPLANAR_ANGLE_TOLERANCE_DEG = 0.01
+        AXIS_PLANE_ANGLE_TOLERANCE_DEG = COPLANAR_ANGLE_TOLERANCE_DEG
 
         COLLINEAR_CROSS_EPSILON_IN2 = 1.0e-12
         MAX_STITCH_REPAIRS = 1_000
         MAX_COPLANAR_PASSES = 20
         MAX_COLLINEAR_REPAIRS = 1_000
+        SIGNED_VOLUME_EPSILON_IN3 = 1.0e-12
         MM_PER_INCH = 25.4
 
         class Error < StandardError; end
         class ReconstructionError < Error; end
         class DestructiveCoplanarCleanupError < ReconstructionError; end
         class TopologyChangedError < Error; end
+        class OperationError < Error; end
 
         class << self
           def normalize(entity, tolerance_mm = DEFAULT_TOLERANCE_MM)
@@ -52,7 +55,8 @@ module ULOL
           point_factory: nil,
           vector_factory: nil,
           edge_class: nil,
-          face_class: nil
+          face_class: nil,
+          model: nil
         )
           @tolerance_mm = Float(tolerance_mm)
           unless @tolerance_mm.positive?
@@ -63,6 +67,7 @@ module ULOL
           @vector_factory = vector_factory || ->(x, y, z) { Geom::Vector3d.new(x, y, z) }
           @edge_class = edge_class || Sketchup::Edge
           @face_class = face_class || Sketchup::Face
+          @model = model
         rescue TypeError, ArgumentError => e
           raise e if e.is_a?(ArgumentError) && e.message.include?('greater than zero')
 
@@ -78,19 +83,28 @@ module ULOL
         def normalized?(entity)
           return false unless valid_entity_definition?(entity)
 
-          vertices = geometry_vertices(entity.definition.entities)
+          entities = entity.definition.entities
+          vertices = geometry_vertices(entities)
           return false if vertices.empty?
 
+          axis_plane_plan = axis_plane_normalization_plan(entities)
           occupied = {}
           vertices.each do |vertex|
             point = vertex.position
             return false unless point_on_grid?(point)
+            target = normalized_target(point, axis_plane_plan)
+            return false if point_distance_mm(point, target) > GRID_EPSILON_MM
 
-            key = grid_indices(point)
+            key = grid_indices(target)
             return false if occupied.key?(key)
 
             occupied[key] = true
           end
+
+          # Coordinate normalization is not complete while an axis-plane
+          # family is still split by removable internal edges. This also makes
+          # the export guard normalize older, already-snapped triangle meshes.
+          return false unless axis_plane_merge_candidate_edges(entities).empty?
 
           true
         rescue StandardError
@@ -98,48 +112,93 @@ module ULOL
         end
 
         # Rebuilds one manifold solid on the requested local-coordinate grid.
-        # The caller should wrap this call in a SketchUp operation.
+        # The complete reconstruction owns one SketchUp operation so every
+        # mutation, including make_unique, is rolled back on failure.
         def normalize(entity)
           validate_entity!(entity)
+          with_normalization_operation(entity) do
+            normalize_entity(entity)
+          end
+        end
+
+        private
+
+        def normalize_entity(entity)
           ensure_unique_definition(entity)
 
           entities = entity.definition.entities
           topology_before = geometry_counts(entities)
           volume_before_mm3 = solid_volume_mm3(entity)
           source_vertices = geometry_vertices(entities)
-          vertex_metrics = normalized_vertex_metrics(source_vertices)
+          axis_plane_plan = axis_plane_normalization_plan(entities)
+          vertex_metrics = normalized_vertex_metrics(source_vertices, axis_plane_plan)
 
-          source_triangles = normalized_triangle_snapshot(entities)
+          if vertex_metrics[:unique_target_count] != source_vertices.length
+            raise ReconstructionError,
+                  "Normalization would merge distinct vertices: " \
+                  "source=#{source_vertices.length} " \
+                  "targets=#{vertex_metrics[:unique_target_count]}"
+          end
+
+          source_duplicate_diagnostics = {}
+          source_triangles = normalized_triangle_snapshot(
+            entities,
+            axis_plane_plan,
+            duplicate_diagnostics: source_duplicate_diagnostics
+          )
+          source_triangles, source_degenerate_repair =
+            repair_degenerate_source_triangles(source_triangles)
+          validate_normalized_triangle_shapes!(source_triangles)
           conforming_triangles = conforming_triangle_snapshot(source_triangles)
+          conforming_triangles, conforming_degenerate_repair =
+            repair_degenerate_source_triangles(conforming_triangles)
           if conforming_triangles.empty?
             raise ReconstructionError, "No reconstructable faces found for #{entity_label(entity)}"
           end
 
-          base = rebuild_normalized_base(entities, conforming_triangles, entity)
-          broad_cleanup_fallback = nil
+          mesh_validation = validate_normalized_triangle_mesh!(conforming_triangles)
 
-          begin
-            broad_coplanar = remove_coplanar_shared_edges(
-              entities,
-              plane_tolerance_mm: COPLANAR_TOLERANCE_MM,
-              angle_tolerance_deg: COPLANAR_ANGLE_TOLERANCE_DEG
-            )
-
-            broad_topology = geometry_counts(entities)
-            unless closed_topology?(broad_topology)
-              raise DestructiveCoplanarCleanupError,
-                    "Coplanar cleanup changed topology: #{broad_topology.inspect}"
-            end
-          rescue DestructiveCoplanarCleanupError => e
-            broad_cleanup_fallback = e.message
-            base = rebuild_normalized_base(entities, conforming_triangles, entity)
-            broad_coplanar = empty_coplanar_cleanup_report(
-              fallback_reason: broad_cleanup_fallback
-            )
+          erase_source_geometry(entities)
+          build = rebuild_triangles(entities, conforming_triangles)
+          unless build[:added_faces] == conforming_triangles.length &&
+                 build[:skipped_collinear].zero?
+            raise ReconstructionError,
+                  "Normalized triangle rebuild was incomplete: #{build.inspect}"
           end
 
-          collinear = remove_unbranched_collinear_vertices(entities)
-          orientation = orient_shell_faces_consistently(entities)
+
+          rebuilt_duplicate_diagnostics = {}
+          rebuilt_triangles = normalized_triangle_snapshot(
+            entities,
+            duplicate_diagnostics: rebuilt_duplicate_diagnostics
+          )
+          rebuilt_triangles, rebuilt_degenerate_repair =
+            repair_degenerate_source_triangles(rebuilt_triangles)
+          validate_normalized_triangle_mesh!(rebuilt_triangles)
+          verify_triangle_rebuild!(conforming_triangles, rebuilt_triangles)
+
+          consistency_orientation = orient_shell_faces_consistently(entities)
+          unless consistency_orientation[:component_count] == 1
+            raise TopologyChangedError,
+                  "Outward orientation requires one connected shell: " \
+                  "components=#{consistency_orientation[:component_count]}"
+          end
+
+
+          axis_plane_merge = merge_axis_plane_faces(entities)
+
+          outward_orientation = orient_shell_outward(entities)
+          orientation = {
+            reversed_faces: consistency_orientation[:reversed_faces] +
+              outward_orientation[:reversed_faces],
+            consistency_reversed_faces: consistency_orientation[:reversed_faces],
+            shell_component_count: consistency_orientation[:component_count],
+            outward_reversed_faces: outward_orientation[:reversed_faces],
+            signed_volume_before_mm3: outward_orientation[:signed_volume_before_in3] *
+              (MM_PER_INCH**3),
+            signed_volume_after_mm3: outward_orientation[:signed_volume_after_in3] *
+              (MM_PER_INCH**3)
+          }
 
           topology_after = geometry_counts(entities)
           validate_rebuilt_entity!(entity, topology_after)
@@ -151,6 +210,22 @@ module ULOL
                   "Rebuilt vertices are off the #{@tolerance_mm} mm grid: residual=#{residual_mm} mm"
           end
 
+          final_duplicate_diagnostics = {}
+          final_triangles = normalized_triangle_snapshot(
+            entities,
+            duplicate_diagnostics: final_duplicate_diagnostics
+          )
+          final_triangles, final_degenerate_repair =
+            repair_degenerate_source_triangles(final_triangles)
+          final_mesh_validation = validate_normalized_triangle_mesh!(final_triangles)
+
+          degenerate_repair = aggregate_degenerate_repair_reports(
+            source: source_degenerate_repair,
+            conforming: conforming_degenerate_repair,
+            rebuilt: rebuilt_degenerate_repair,
+            final: final_degenerate_repair
+          )
+
           build_normalization_report(
             entity: entity,
             topology_before: topology_before,
@@ -161,16 +236,83 @@ module ULOL
             vertex_metrics: vertex_metrics,
             source_triangles: source_triangles,
             conforming_triangles: conforming_triangles,
-            base: base,
-            broad_coplanar: broad_coplanar,
-            broad_cleanup_fallback: broad_cleanup_fallback,
-            collinear: collinear,
+            degenerate_repair: degenerate_repair,
+            build: build,
+            mesh_validation: mesh_validation,
+            final_mesh_validation: final_mesh_validation,
             orientation: orientation,
+            axis_plane_plan: axis_plane_plan,
+            axis_plane_merge: axis_plane_merge,
+            duplicate_diagnostics: {
+              source: source_duplicate_diagnostics,
+              rebuilt: rebuilt_duplicate_diagnostics,
+              final: final_duplicate_diagnostics
+            },
             residual_mm: residual_mm
           )
         end
 
-        private
+        def with_normalization_operation(entity)
+          model = normalization_model(entity)
+          operation_started = false
+
+          begin
+            operation_started = model.start_operation(
+              'Normalize IndoorGML local vertices',
+              true
+            )
+            unless operation_started
+              raise OperationError, 'Failed to start local vertex normalization operation'
+            end
+
+            result = yield
+            committed = model.commit_operation
+            if committed == false
+              raise OperationError, 'Failed to commit local vertex normalization operation'
+            end
+
+            operation_started = false
+            result
+          rescue StandardError => error
+            rollback_error = rollback_normalization_operation(model) if operation_started
+            if rollback_error
+              raise OperationError,
+                    "Local vertex normalization failed (#{error.class}: #{error.message}) " \
+                    "and rollback failed (#{rollback_error.class}: #{rollback_error.message})"
+            end
+
+            raise
+          end
+        end
+
+        def normalization_model(entity)
+          model = @model
+          model ||= entity.model if entity.respond_to?(:model)
+          if model.nil? && defined?(Sketchup) && Sketchup.respond_to?(:active_model)
+            model = Sketchup.active_model
+          end
+
+          unless model&.respond_to?(:start_operation) &&
+                 model.respond_to?(:commit_operation) &&
+                 model.respond_to?(:abort_operation)
+            raise OperationError, 'A SketchUp model is required for local vertex normalization'
+          end
+
+          model
+        rescue OperationError
+          raise
+        rescue StandardError => e
+          raise OperationError, "Could not resolve SketchUp model: #{e.class}: #{e.message}"
+        end
+
+        def rollback_normalization_operation(model)
+          aborted = model.abort_operation
+          return nil unless aborted == false
+
+          OperationError.new('SketchUp returned false from abort_operation')
+        rescue StandardError => e
+          e
+        end
 
         def build_normalization_report(
           entity:,
@@ -182,24 +324,23 @@ module ULOL
           vertex_metrics:,
           source_triangles:,
           conforming_triangles:,
-          base:,
-          broad_coplanar:,
-          broad_cleanup_fallback:,
-          collinear:,
+          degenerate_repair:,
+          build:,
+          mesh_validation:,
+          final_mesh_validation:,
           orientation:,
+          axis_plane_plan:,
+          axis_plane_merge:,
+          duplicate_diagnostics:,
           residual_mm:
         )
-          build = base.fetch(:build)
-          overlap_repair = base.fetch(:overlap_repair)
-          pre_stitch = base.fetch(:pre_stitch)
-          strict_coplanar = base.fetch(:strict_coplanar)
-          post_stitch = base.fetch(:post_stitch)
-
           {
             persistent_id: entity.respond_to?(:persistent_id) ? entity.persistent_id : nil,
             name: entity.respond_to?(:name) ? entity.name.to_s : '',
             tolerance_mm: @tolerance_mm,
             coplanar_tolerance_mm: COPLANAR_TOLERANCE_MM,
+            axis_plane_angle_tolerance_deg: AXIS_PLANE_ANGLE_TOLERANCE_DEG,
+            axis_plane_grouping: :shared_edge_connectivity,
             vertex_count: source_vertices.length,
             unique_normalized_vertex_count: vertex_metrics[:unique_target_count],
             moved_vertex_count: vertex_metrics[:moved_count],
@@ -211,57 +352,82 @@ module ULOL
             normalization_complete: true,
             normalization_passes: [
               {
-                phase: :triangle_rebuild,
+                phase: :axis_plane_constraints,
+                constrained_faces: axis_plane_plan[:face_count],
+                constrained_vertices: axis_plane_plan[:constrained_vertex_count],
+                plane_clusters: axis_plane_plan[:cluster_count],
+                max_plane_displacement_mm: axis_plane_plan[:max_displacement_mm],
+                axis_cluster_counts: axis_plane_plan[:axis_cluster_counts]
+              },
+              {
+                phase: :degenerate_triangle_retriangulation,
+                repaired_triangles: degenerate_repair[:repaired_triangles],
+                replaced_pairs: degenerate_repair[:replaced_pairs],
+                stages: degenerate_repair[:stages]
+              },
+              {
+                phase: :validated_triangle_rebuild,
                 source_triangles: conforming_triangles.length,
                 added_faces: build[:added_faces],
-                skipped_collinear: build[:skipped_collinear]
+                skipped_collinear: build[:skipped_collinear],
+                validated_vertices: mesh_validation[:vertex_count],
+                validated_edges: mesh_validation[:edge_count],
+                validated_components: mesh_validation[:component_count],
+                tested_triangle_pairs: mesh_validation[:tested_triangle_pairs]
               },
               {
-                phase: :redundant_overlap_triangle_repair,
-                removed_faces: overlap_repair[:removed_faces]
+                phase: :axis_plane_face_merge,
+                removed_internal_edges: axis_plane_merge[:removed_edges],
+                merged_faces: axis_plane_merge[:merged_faces],
+                passes: axis_plane_merge[:passes]
               },
               {
-                phase: :surface_border_stitch_before_cleanup,
-                repairs: pre_stitch[:repairs]
-              },
-              {
-                phase: :strict_coplanar_cleanup,
-                removed_edges: strict_coplanar[:removed_edges],
-                passes: strict_coplanar[:passes]
-              },
-              {
-                phase: :surface_border_stitch_after_cleanup,
-                repairs: post_stitch[:repairs]
-              },
-              {
-                phase: :coplanar_cleanup,
-                removed_edges: broad_coplanar[:removed_edges],
-                passes: broad_coplanar[:passes]
-              },
-              {
-                phase: :collinear_cleanup,
-                removed_vertices: collinear[:removed_vertices]
+                phase: :exact_duplicate_triangle_canonicalization,
+                source_duplicates: duplicate_diagnostics.dig(:source, :duplicate_count).to_i,
+                rebuilt_duplicates: duplicate_diagnostics.dig(:rebuilt, :duplicate_count).to_i,
+                final_duplicates: duplicate_diagnostics.dig(:final, :duplicate_count).to_i
               },
               {
                 phase: :face_orientation,
-                reversed_faces: orientation[:reversed_faces]
+                reversed_faces: orientation[:reversed_faces],
+                consistency_reversed_faces: orientation[:consistency_reversed_faces],
+                shell_component_count: orientation[:shell_component_count],
+                outward_reversed_faces: orientation[:outward_reversed_faces],
+                signed_volume_before_mm3: orientation[:signed_volume_before_mm3],
+                signed_volume_after_mm3: orientation[:signed_volume_after_mm3]
               }
             ],
             source_triangle_count: source_triangles.length,
             conforming_triangle_count: conforming_triangles.length,
+            degenerate_triangle_repair_count: degenerate_repair[:repaired_triangles],
+            degenerate_triangle_replaced_pair_count: degenerate_repair[:replaced_pairs],
             added_face_count: build[:added_faces],
             skipped_collinear_triangle_count: build[:skipped_collinear],
-            surface_border_repair_count: pre_stitch[:repairs] + post_stitch[:repairs],
-            redundant_overlap_triangle_removal_count: overlap_repair[:removed_faces],
-            strict_coplanar_edge_removal_count: strict_coplanar[:removed_edges],
-            coplanar_edge_removal_count: strict_coplanar[:removed_edges] + broad_coplanar[:removed_edges],
-            collinear_vertex_removal_count: collinear[:removed_vertices],
+            final_triangle_count: final_mesh_validation[:triangle_count],
+            surface_border_repair_count: 0,
+            redundant_overlap_triangle_removal_count: 0,
+            strict_coplanar_edge_removal_count: axis_plane_merge[:removed_edges],
+            coplanar_edge_removal_count: axis_plane_merge[:removed_edges],
+            axis_plane_internal_edge_removal_count: axis_plane_merge[:removed_edges],
+            axis_plane_merged_face_count: axis_plane_merge[:merged_faces],
+            duplicate_normalized_triangle_removal_count: duplicate_diagnostics.values.sum do |entry|
+              entry[:duplicate_count].to_i
+            end,
+            duplicate_normalized_triangle_samples: duplicate_diagnostics.transform_values do |entry|
+              entry[:samples] || []
+            end,
+            collinear_vertex_removal_count: 0,
             reoriented_face_count: orientation[:reversed_faces],
-            max_coplanar_plane_deviation_mm: broad_coplanar[:max_plane_deviation_mm],
-            max_coplanar_angle_deg: broad_coplanar[:max_angle_deg],
-            normalization_strategy: :rebuild,
+            max_coplanar_plane_deviation_mm: 0.0,
+            max_coplanar_angle_deg: 0.0,
+            axis_plane_face_count: axis_plane_plan[:face_count],
+            axis_plane_cluster_count: axis_plane_plan[:cluster_count],
+            axis_plane_constrained_vertex_count: axis_plane_plan[:constrained_vertex_count],
+            max_axis_plane_displacement_mm: axis_plane_plan[:max_displacement_mm],
+            normalization_strategy: :validated_triangle_rebuild,
             direct_vertex_move_fallback: nil,
-            coplanar_cleanup_fallback: broad_cleanup_fallback || strict_coplanar[:fallback_reason],
+            coplanar_cleanup_fallback: nil,
+            heuristic_repairs_enabled: false,
             volume_before_mm3: volume_before_mm3,
             volume_after_mm3: solid_volume_mm3(entity),
             topology_before: topology_before,
@@ -469,13 +635,261 @@ module ULOL
         # Grid projection and triangle snapshots
         # ----------------------------------------------------------------------
 
-        def normalized_vertex_metrics(vertices)
+        # Builds exact local X/Y/Z plane constraints before ordinary grid
+        # projection. Only faces connected through an actual shared edge
+        # participate in the same family. Coordinate distance is deliberately
+        # not a grouping condition: adjacent subdivisions of one intended plane
+        # are unified, while disconnected parallel planes such as a floor and a
+        # ceiling remain independent.
+        def axis_plane_normalization_plan(entities)
+          records = entities.grep(@face_class).filter_map do |face|
+            axis_plane_face_record(face)
+          end
+          constraints = {}
+          clusters = []
+
+          records.group_by { |record| record[:axis] }.each do |axis, axis_records|
+            axis_plane_connected_components(axis_records).each do |component|
+              component_vertices = component.flat_map { |record| record[:vertices] }
+                                            .uniq { |vertex| stable_entity_id(vertex) }
+              coordinates = component_vertices.map do |vertex|
+                point_coordinate(vertex.position, axis) * MM_PER_INCH
+              end
+              spread = coordinates.max.to_f - coordinates.min.to_f
+
+              target_index = (median_value(coordinates) / @tolerance_mm).round
+              target_mm = target_index * @tolerance_mm
+              max_target_displacement = coordinates.map do |coordinate|
+                (coordinate - target_mm).abs
+              end.max || 0.0
+
+              component_vertices.each do |vertex|
+                key = source_point_key(vertex.position)
+                constraints[key] ||= {}
+                existing = constraints[key][axis]
+                if !existing.nil? && existing != target_index
+                  raise ReconstructionError,
+                        "Conflicting axis-plane constraints at #{key.inspect}: " \
+                        "axis=#{axis} targets=#{existing},#{target_index}"
+                end
+                constraints[key][axis] = target_index
+              end
+              clusters << {
+                axis: axis,
+                target_index: target_index,
+                target_mm: target_mm,
+                face_count: component.length,
+                vertex_count: component_vertices.length,
+                source_spread_mm: spread,
+                max_displacement_mm: max_target_displacement
+              }
+            end
+          end
+
+          max_displacement_mm = constraints.flat_map do |point_key, axes|
+            axes.map do |axis, target_index|
+              ((point_key[axis] * MM_PER_INCH) - (target_index * @tolerance_mm)).abs
+            end
+          end.max || 0.0
+
+          {
+            constraints: constraints,
+            clusters: clusters,
+            face_count: clusters.sum { |cluster| cluster[:face_count] },
+            cluster_count: clusters.length,
+            constrained_vertex_count: constraints.length,
+            max_displacement_mm: max_displacement_mm,
+            axis_cluster_counts: clusters.group_by { |cluster| cluster[:axis] }
+                                         .transform_values(&:length)
+          }
+        end
+
+        def axis_plane_face_record(face)
+          return nil unless face&.valid?
+
+          axis = axis_aligned_normal_axis(face.normal)
+          return nil if axis.nil?
+
+          vertices = face.vertices
+          return nil if vertices.length < 3
+
+          coordinates_mm = vertices.map do |vertex|
+            point_coordinate(vertex.position, axis) * MM_PER_INCH
+          end
+
+          {
+            face: face,
+            axis: axis,
+            vertices: vertices,
+            vertex_ids: vertices.map { |vertex| stable_entity_id(vertex) },
+            edge_ids: face.edges.map { |edge| stable_entity_id(edge) },
+            coordinates_mm: coordinates_mm
+          }
+        rescue StandardError
+          nil
+        end
+
+        def axis_aligned_normal_axis(normal)
+          components = vector_components(normal)
+          length = vector_length(components)
+          return nil if length <= 0.0
+
+          normalized = components.map { |value| value / length }
+          axis = normalized.each_index.max_by { |index| normalized[index].abs }
+          cosine = normalized[axis].abs
+          threshold = Math.cos(AXIS_PLANE_ANGLE_TOLERANCE_DEG * Math::PI / 180.0)
+          cosine + 1.0e-15 >= threshold ? axis : nil
+        rescue StandardError
+          nil
+        end
+
+        def axis_plane_connected_components(records)
+          by_edge = Hash.new { |hash, key| hash[key] = [] }
+          records.each_with_index do |record, index|
+            record[:edge_ids].each { |edge_id| by_edge[edge_id] << index }
+          end
+
+          visited = Array.new(records.length, false)
+          records.each_index.filter_map do |seed|
+            next if visited[seed]
+
+            visited[seed] = true
+            queue = [seed]
+            component = []
+            until queue.empty?
+              index = queue.shift
+              record = records[index]
+              component << record
+              record[:edge_ids].each do |edge_id|
+                by_edge[edge_id].each do |neighbor|
+                  next if visited[neighbor]
+
+                  visited[neighbor] = true
+                  queue << neighbor
+                end
+              end
+            end
+            component
+          end
+        end
+
+        # Removes only the internal edges of rebuilt local-axis plane
+        # families. Plane equality is exact on the integer normalization grid;
+        # no distance tolerance is used here. Disconnected parallel surfaces
+        # never become candidates because there is no shared edge to erase.
+        def merge_axis_plane_faces(entities)
+          removed_edges = 0
+          merged_faces = 0
+          pass_reports = []
+
+          MAX_COPLANAR_PASSES.times do |pass_index|
+            candidates = axis_plane_merge_candidate_edges(entities)
+            break if candidates.empty?
+
+            pass_removed = 0
+            candidates.each do |edge|
+              next unless edge&.valid?
+              next unless axis_plane_merge_candidate_edge?(edge)
+
+              faces_before = entities.grep(@face_class).length
+              edge.erase!
+              faces_after = entities.grep(@face_class).length
+              face_reduction = faces_before - faces_after
+
+              unless face_reduction == 1
+                raise DestructiveCoplanarCleanupError,
+                      "Axis-plane internal edge merge was destructive: " \
+                      "faces #{faces_before} -> #{faces_after}"
+              end
+
+              pass_removed += 1
+              removed_edges += 1
+              merged_faces += face_reduction
+            end
+
+            break if pass_removed.zero?
+
+            pass_reports << {
+              pass: pass_index + 1,
+              removed_edges: pass_removed
+            }
+          end
+
+          remaining = axis_plane_merge_candidate_edges(entities)
+          unless remaining.empty?
+            raise DestructiveCoplanarCleanupError,
+                  "Axis-plane face merge did not converge: " \
+                  "remaining_internal_edges=#{remaining.length}"
+          end
+
+          topology = geometry_counts(entities)
+          unless closed_topology?(topology)
+            raise TopologyChangedError,
+                  "Axis-plane face merge damaged topology: #{topology.inspect}"
+          end
+
+          {
+            removed_edges: removed_edges,
+            merged_faces: merged_faces,
+            passes: pass_reports,
+            topology: topology
+          }
+        end
+
+        def axis_plane_merge_candidate_edges(entities)
+          entities.grep(@edge_class).select do |edge|
+            axis_plane_merge_candidate_edge?(edge)
+          end
+        end
+
+        def axis_plane_merge_candidate_edge?(edge)
+          return false unless edge&.valid? && edge.faces.length == 2
+
+          face_a, face_b = edge.faces
+          plane_a = exact_axis_plane_key(face_a)
+          return false if plane_a.nil? || plane_a != exact_axis_plane_key(face_b)
+
+          vector_dot(
+            vector_components(face_a.normal),
+            vector_components(face_b.normal)
+          ).positive?
+        rescue StandardError
+          false
+        end
+
+        def exact_axis_plane_key(face)
+          return nil unless face&.valid?
+
+          axis = axis_aligned_normal_axis(face.normal)
+          return nil if axis.nil?
+
+          indices = face.vertices.map do |vertex|
+            grid_indices(vertex.position)[axis]
+          end.uniq
+          return nil unless indices.length == 1
+
+          [axis, indices.first]
+        rescue StandardError
+          nil
+        end
+
+        def median_value(values)
+          sorted = Array(values).map(&:to_f).sort
+          raise ReconstructionError, 'Axis-plane family has no coordinates' if sorted.empty?
+
+          middle = sorted.length / 2
+          return sorted[middle] if sorted.length.odd?
+
+          (sorted[middle - 1] + sorted[middle]) / 2.0
+        end
+
+        def normalized_vertex_metrics(vertices, axis_plane_plan = nil)
           unique_targets = {}
           moved_count = 0
           max_displacement_mm = 0.0
 
           vertices.each do |vertex|
-            target = normalized_target(vertex.position)
+            target = normalized_target(vertex.position, axis_plane_plan)
             unique_targets[grid_indices(target)] = true
             displacement_mm = point_distance_mm(vertex.position, target)
             moved_count += 1 if displacement_mm > GRID_EPSILON_MM
@@ -489,38 +903,262 @@ module ULOL
           }
         end
 
-        def normalized_triangle_snapshot(entities)
+        # Converts SketchUp face meshes to one exact integer-grid triangle
+        # complex. SketchUp can occasionally return the same mesh polygon more
+        # than once for a merged n-gon with very short boundary segments. An
+        # exact duplicate is redundant in a simplicial complex, so retain one
+        # canonical triangle and let validate_normalized_triangle_mesh! decide
+        # whether the resulting surface is still a closed 2-manifold.
+        def normalized_triangle_snapshot(
+          entities,
+          axis_plane_plan = nil,
+          duplicate_diagnostics: nil
+        )
           triangles = []
           signatures = {}
+          diagnostics = duplicate_diagnostics || {}
+          diagnostics[:duplicate_count] = 0
+          diagnostics[:samples] = []
 
           entities.grep(@face_class).each do |face|
             mesh = face.mesh(0)
-            mesh.polygons.each do |polygon|
+            source_face_key = stable_entity_id(face)
+            mesh.polygons.each_with_index do |polygon, polygon_index|
               points = polygon.map do |index|
-                normalized_target(mesh.point_at(index.abs))
+                normalized_target(mesh.point_at(index.abs), axis_plane_plan)
               end
 
               triangulate_polygon(points).each do |triangle_points|
                 signature = triangle_signature(triangle_points)
                 if signatures.key?(signature)
-                  raise ReconstructionError,
-                        "Duplicate normalized triangle detected in " \
-                        "#{entity_label_from_face(face)}: #{signature.inspect}"
+                  diagnostics[:duplicate_count] += 1
+                  if diagnostics[:samples].length < 10
+                    kept = signatures.fetch(signature)
+                    diagnostics[:samples] << {
+                      signature: signature,
+                      kept_face_key: kept[:source_face_key],
+                      kept_polygon_index: kept[:source_polygon_index],
+                      duplicate_face_key: source_face_key,
+                      duplicate_polygon_index: polygon_index
+                    }
+                  end
+                  next
                 end
 
-                signatures[signature] = true
-                triangles << {
+                record = {
                   points: triangle_points,
                   source_normal: vector_components(face.normal),
                   material: face.material,
                   back_material: face.back_material,
-                  layer: face.layer
+                  layer: face.layer,
+                  source_face_key: source_face_key,
+                  source_polygon_index: polygon_index
                 }
+                signatures[signature] = record
+                triangles << record
               end
             end
           end
 
           triangles
+        end
+
+        # Replaces a zero-area triangle A-B-C (B lies on A-C) together with
+        # the non-degenerate triangle A-C-D on the other side of the internal
+        # triangulation diagonal. The replacement uses B-D:
+        #   (A,B,C) + (A,C,D) -> (A,B,D) + (B,C,D)
+        # No vertex is moved or removed.
+        def repair_degenerate_source_triangles(triangle_records)
+          working = triangle_records.map(&:dup)
+          repaired_triangles = 0
+          replaced_pairs = 0
+
+          loop do
+            degenerate_indices = working.each_index.select do |index|
+              degenerate_triangle_record?(working[index])
+            end
+            break if degenerate_indices.empty?
+
+            repair = nil
+            degenerate_indices.each do |degenerate_index|
+              degenerate = working[degenerate_index]
+              split = collinear_triangle_split(degenerate[:points])
+              next unless split
+
+              neighbor_indices = working.each_index.select do |candidate_index|
+                next false if candidate_index == degenerate_index
+
+                candidate = working[candidate_index]
+                next false unless candidate[:source_face_key] == degenerate[:source_face_key]
+                next false if degenerate_triangle_record?(candidate)
+
+                candidate_keys = candidate[:points].map { |point| grid_indices(point) }
+                candidate_keys.include?(split[:endpoint_a_key]) &&
+                  candidate_keys.include?(split[:endpoint_c_key])
+              end
+
+              if neighbor_indices.length > 1
+                raise ReconstructionError,
+                      "Degenerate triangle has multiple neighbors across its " \
+                      "internal diagonal: face=#{degenerate[:source_face_key].inspect} " \
+                      "polygon=#{degenerate[:source_polygon_index].inspect} " \
+                      "edge=#{[split[:endpoint_a_key], split[:endpoint_c_key]].inspect} " \
+                      "neighbors=#{neighbor_indices.inspect}"
+              end
+              next if neighbor_indices.empty?
+
+              repair = {
+                degenerate_index: degenerate_index,
+                neighbor_index: neighbor_indices.first,
+                split: split
+              }
+              break
+            end
+
+            unless repair
+              first_index = degenerate_indices.first
+              record = working[first_index]
+              raise ReconstructionError,
+                    "Could not retriangulate zero-area source triangle: " \
+                    "face=#{record[:source_face_key].inspect} " \
+                    "polygon=#{record[:source_polygon_index].inspect} " \
+                    "points=#{record[:points].map { |point| grid_indices(point) }.inspect}"
+            end
+
+            degenerate = working[repair[:degenerate_index]]
+            neighbor = working[repair[:neighbor_index]]
+            split = repair[:split]
+            neighbor_points_by_key = neighbor[:points].each_with_object({}) do |point, points|
+              points[grid_indices(point)] = point
+            end
+            opposite_entry = neighbor_points_by_key.find do |key, _point|
+              key != split[:endpoint_a_key] && key != split[:endpoint_c_key]
+            end
+            unless opposite_entry
+              raise ReconstructionError,
+                    "Degenerate triangle neighbor has no opposite vertex: " \
+                    "#{neighbor[:points].map { |point| grid_indices(point) }.inspect}"
+            end
+            opposite_point = opposite_entry[1]
+
+            replacements = [
+              neighbor.merge(
+                points: [split[:endpoint_a], split[:middle], opposite_point],
+                source_polygon_index: degenerate[:source_polygon_index]
+              ),
+              neighbor.merge(
+                points: [split[:middle], split[:endpoint_c], opposite_point],
+                source_polygon_index: neighbor[:source_polygon_index]
+              )
+            ]
+            replacements.each do |record|
+              triangle = record[:points].map { |point| grid_indices(point) }
+              if triangle.uniq.length != 3 ||
+                 integer_zero_vector?(integer_triangle_normal(triangle))
+                raise ReconstructionError,
+                      "Alternate diagonal still creates a zero-area triangle: " \
+                      "#{triangle.inspect}"
+              end
+            end
+
+            removed_indices = [
+              repair[:degenerate_index],
+              repair[:neighbor_index]
+            ].sort.reverse
+            removed_indices.each { |index| working.delete_at(index) }
+
+            existing_signatures = working.each_with_object({}) do |record, signatures|
+              signatures[triangle_signature(record[:points])] = true
+            end
+            replacements.each do |record|
+              signature = triangle_signature(record[:points])
+              if existing_signatures.key?(signature)
+                raise ReconstructionError,
+                      "Alternate diagonal creates duplicate triangle: #{signature.inspect}"
+              end
+
+              existing_signatures[signature] = true
+              working << record
+            end
+
+            repaired_triangles += 1
+            replaced_pairs += 1
+          end
+
+          [
+            working,
+            {
+              repaired_triangles: repaired_triangles,
+              replaced_pairs: replaced_pairs
+            }
+          ]
+        end
+
+        def aggregate_degenerate_repair_reports(stage_reports)
+          normalized_stages = stage_reports.transform_values do |report|
+            {
+              repaired_triangles: report[:repaired_triangles].to_i,
+              replaced_pairs: report[:replaced_pairs].to_i
+            }
+          end
+
+          {
+            repaired_triangles: normalized_stages.values.sum do |report|
+              report[:repaired_triangles]
+            end,
+            replaced_pairs: normalized_stages.values.sum do |report|
+              report[:replaced_pairs]
+            end,
+            stages: normalized_stages
+          }
+        end
+
+        def degenerate_triangle_record?(record)
+          triangle = record[:points].map { |point| grid_indices(point) }
+          triangle.uniq.length != 3 ||
+            integer_zero_vector?(integer_triangle_normal(triangle))
+        end
+
+        def collinear_triangle_split(points)
+          keys = points.map { |point| grid_indices(point) }
+          return nil unless keys.uniq.length == 3
+          return nil unless integer_zero_vector?(integer_triangle_normal(keys))
+
+          keys.each_index do |middle_index|
+            endpoint_indices = keys.each_index.reject { |index| index == middle_index }
+            endpoint_a_index, endpoint_c_index = endpoint_indices
+            middle_key = keys[middle_index]
+            endpoint_a_key = keys[endpoint_a_index]
+            endpoint_c_key = keys[endpoint_c_index]
+            next unless integer_point_between?(
+              middle_key,
+              endpoint_a_key,
+              endpoint_c_key
+            )
+
+            return {
+              endpoint_a: points[endpoint_a_index],
+              endpoint_a_key: endpoint_a_key,
+              middle: points[middle_index],
+              middle_key: middle_key,
+              endpoint_c: points[endpoint_c_index],
+              endpoint_c_key: endpoint_c_key
+            }
+          end
+
+          nil
+        end
+
+        def integer_point_between?(point, segment_start, segment_end)
+          direction = integer_subtract(segment_end, segment_start)
+          offset = integer_subtract(point, segment_start)
+          return false unless integer_zero_vector?(integer_cross(direction, offset))
+          return false if point == segment_start || point == segment_end
+
+          3.times.all? do |axis|
+            point[axis] >= [segment_start[axis], segment_end[axis]].min &&
+              point[axis] <= [segment_start[axis], segment_end[axis]].max
+          end
         end
 
         def conforming_triangle_snapshot(source_triangles)
@@ -553,6 +1191,421 @@ module ULOL
               record.merge(points: points)
             end
           end
+        end
+
+        # Validates the snapped surface as an exact integer-grid triangle
+        # complex before any SketchUp entities are erased. Integer arithmetic
+        # avoids introducing a second geometric tolerance into normalization.
+        def validate_normalized_triangle_shapes!(triangle_records)
+          triangle_records.each_with_index do |record, index|
+            triangle = record[:points].map { |point| grid_indices(point) }
+            next if triangle.uniq.length == 3 &&
+                    !integer_zero_vector?(integer_triangle_normal(triangle))
+
+            raise ReconstructionError,
+                  "Grid projection collapses source triangle #{index}: #{triangle.inspect}"
+          end
+        end
+
+        def validate_normalized_triangle_mesh!(triangle_records)
+          triangles = triangle_records.map do |record|
+            record[:points].map { |point| grid_indices(point) }
+          end
+          raise ReconstructionError, 'Normalized triangle mesh is empty' if triangles.empty?
+
+          signatures = {}
+          edge_incidence = Hash.new { |hash, key| hash[key] = [] }
+          vertices = {}
+
+          triangles.each_with_index do |triangle, triangle_index|
+            if triangle.uniq.length != 3 || integer_zero_vector?(integer_triangle_normal(triangle))
+              raise ReconstructionError,
+                    "Normalized triangle #{triangle_index} is degenerate: #{triangle.inspect}"
+            end
+
+            signature = canonical_triangle_key(triangle)
+            if signatures.key?(signature)
+              raise ReconstructionError,
+                    "Duplicate normalized triangle #{triangle_index}: #{triangle.inspect}"
+            end
+            signatures[signature] = triangle_index
+
+            triangle.each { |vertex| vertices[vertex] = true }
+            3.times do |edge_index|
+              edge = canonical_edge_key(
+                triangle[edge_index],
+                triangle[(edge_index + 1) % 3]
+              )
+              edge_incidence[edge] << triangle_index
+            end
+          end
+
+          bad_edges = edge_incidence.select { |_edge, owners| owners.length != 2 }
+          unless bad_edges.empty?
+            sample = bad_edges.first(10).map do |edge, owners|
+              { edge: edge, incidence: owners.length, triangles: owners }
+            end
+            raise TopologyChangedError,
+                  "Normalized mesh is not a closed 2-manifold; " \
+                  "bad_edges=#{bad_edges.length} sample=#{sample.inspect}"
+          end
+
+          adjacency = Array.new(triangles.length) { [] }
+          edge_incidence.each_value do |owners|
+            first, second = owners
+            adjacency[first] << second
+            adjacency[second] << first
+          end
+          component_count = graph_component_count(adjacency)
+          unless component_count == 1
+            raise TopologyChangedError,
+                  "Normalized mesh has #{component_count} disconnected shell components"
+          end
+
+          tested_pairs = validate_triangle_intersections!(triangles)
+
+          {
+            vertex_count: vertices.length,
+            edge_count: edge_incidence.length,
+            triangle_count: triangles.length,
+            component_count: component_count,
+            tested_triangle_pairs: tested_pairs
+          }
+        end
+
+        def verify_triangle_rebuild!(expected_records, actual_records)
+          expected = expected_records.map do |record|
+            canonical_triangle_key(record[:points].map { |point| grid_indices(point) })
+          end.sort
+          actual = actual_records.map do |record|
+            canonical_triangle_key(record[:points].map { |point| grid_indices(point) })
+          end.sort
+          return if expected == actual
+
+          missing = expected - actual
+          added = actual - expected
+          raise ReconstructionError,
+                "SketchUp changed the validated triangle complex during rebuild: " \
+                "missing=#{missing.first(10).inspect} added=#{added.first(10).inspect}"
+        end
+
+        def graph_component_count(adjacency)
+          visited = Array.new(adjacency.length, false)
+          components = 0
+
+          adjacency.each_index do |seed|
+            next if visited[seed]
+
+            components += 1
+            visited[seed] = true
+            queue = [seed]
+            until queue.empty?
+              current = queue.shift
+              adjacency[current].each do |neighbor|
+                next if visited[neighbor]
+
+                visited[neighbor] = true
+                queue << neighbor
+              end
+            end
+          end
+
+          components
+        end
+
+        def validate_triangle_intersections!(triangles)
+          tested_pairs = 0
+
+          triangles.each_with_index do |triangle_a, index_a|
+            ((index_a + 1)...triangles.length).each do |index_b|
+              triangle_b = triangles[index_b]
+              next unless integer_aabbs_overlap?(triangle_a, triangle_b)
+
+              tested_pairs += 1
+              next if exact_triangle_intersection_allowed?(triangle_a, triangle_b)
+
+              raise TopologyChangedError,
+                    "Normalized triangles intersect outside their shared simplex: " \
+                    "triangles=#{[index_a, index_b].inspect} " \
+                    "a=#{triangle_a.inspect} b=#{triangle_b.inspect}"
+            end
+          end
+
+          tested_pairs
+        end
+
+        def exact_triangle_intersection_allowed?(triangle_a, triangle_b)
+          shared = triangle_a & triangle_b
+          return false if shared.length == 3
+
+          normal_a = integer_triangle_normal(triangle_a)
+          normal_b = integer_triangle_normal(triangle_b)
+          line_direction = integer_cross(normal_a, normal_b)
+
+          if integer_zero_vector?(line_direction)
+            return true unless integer_dot(
+              normal_a,
+              integer_subtract(triangle_b[0], triangle_a[0])
+            ).zero?
+
+            coplanar_triangle_intersection_allowed?(triangle_a, triangle_b, shared)
+          else
+            noncoplanar_triangle_intersection_allowed?(
+              triangle_a,
+              triangle_b,
+              shared,
+              normal_a,
+              normal_b,
+              line_direction
+            )
+          end
+        end
+
+        def noncoplanar_triangle_intersection_allowed?(
+          triangle_a,
+          triangle_b,
+          shared,
+          normal_a,
+          normal_b,
+          line_direction
+        )
+          interval_a = triangle_plane_parameter_interval(
+            triangle_a,
+            triangle_b[0],
+            normal_b,
+            line_direction
+          )
+          interval_b = triangle_plane_parameter_interval(
+            triangle_b,
+            triangle_a[0],
+            normal_a,
+            line_direction
+          )
+          return true unless interval_a && interval_b
+
+          overlap_min = [interval_a[0], interval_b[0]].max
+          overlap_max = [interval_a[1], interval_b[1]].min
+          return true if overlap_min > overlap_max
+
+          expected = shared.map { |point| integer_dot(line_direction, point) }.minmax
+          return false if expected.nil?
+
+          overlap_min == expected[0] && overlap_max == expected[1]
+        end
+
+        def triangle_plane_parameter_interval(triangle, plane_point, plane_normal, direction)
+          signs = triangle.map do |point|
+            integer_dot(plane_normal, integer_subtract(point, plane_point))
+          end
+          return nil if signs.all?(&:positive?) || signs.all?(&:negative?)
+
+          parameters = []
+          3.times do |index|
+            point_a = triangle[index]
+            point_b = triangle[(index + 1) % 3]
+            sign_a = signs[index]
+            sign_b = signs[(index + 1) % 3]
+
+            parameters << Rational(integer_dot(direction, point_a), 1) if sign_a.zero?
+            next unless (sign_a.positive? && sign_b.negative?) ||
+                        (sign_a.negative? && sign_b.positive?)
+
+            parameter = Rational(sign_a, sign_a - sign_b)
+            value_a = integer_dot(direction, point_a)
+            value_b = integer_dot(direction, point_b)
+            parameters << (value_a + (parameter * (value_b - value_a)))
+          end
+
+          parameters.uniq.minmax unless parameters.empty?
+        end
+
+        def coplanar_triangle_intersection_allowed?(triangle_a, triangle_b, shared)
+          normal = integer_triangle_normal(triangle_a)
+          drop_axis = normal.each_index.max_by { |index| normal[index].abs }
+          polygon_a = triangle_a.map { |point| project_integer_point(point, drop_axis) }
+          polygon_b = triangle_b.map { |point| project_integer_point(point, drop_axis) }
+          intersection = convex_polygon_intersection(polygon_a, polygon_b)
+          intersection = unique_rational_points(intersection)
+
+          return intersection.empty? if shared.empty?
+
+          shared_projected = shared.map do |point|
+            project_integer_point(point, drop_axis).map { |value| Rational(value, 1) }
+          end
+          if shared.length == 1
+            return intersection.all? { |point| point == shared_projected[0] }
+          end
+
+          segment_start, segment_end = shared_projected
+          intersection.all? do |point|
+            rational_point_on_segment?(point, segment_start, segment_end)
+          end && intersection.include?(segment_start) && intersection.include?(segment_end)
+        end
+
+        def convex_polygon_intersection(subject, clip)
+          output = subject.map { |point| point.map { |value| Rational(value, 1) } }
+          clip_points = clip.map { |point| point.map { |value| Rational(value, 1) } }
+          orientation = rational_polygon_area_twice(clip_points) <=> 0
+          raise ReconstructionError, 'Degenerate coplanar clipping triangle' if orientation.zero?
+
+          clip_points.each_index do |index|
+            clip_start = clip_points[index]
+            clip_end = clip_points[(index + 1) % clip_points.length]
+            input = output
+            output = []
+            break if input.empty?
+
+            previous = input.last
+            previous_value = oriented_line_value(
+              clip_start,
+              clip_end,
+              previous,
+              orientation
+            )
+            input.each do |current|
+              current_value = oriented_line_value(
+                clip_start,
+                clip_end,
+                current,
+                orientation
+              )
+              previous_inside = previous_value >= 0
+              current_inside = current_value >= 0
+
+              if current_inside
+                if !previous_inside
+                  output << rational_line_crossing(
+                    previous,
+                    current,
+                    previous_value,
+                    current_value
+                  )
+                end
+                output << current
+              elsif previous_inside
+                output << rational_line_crossing(
+                  previous,
+                  current,
+                  previous_value,
+                  current_value
+                )
+              end
+
+              previous = current
+              previous_value = current_value
+            end
+            output = remove_consecutive_rational_duplicates(output)
+          end
+
+          output
+        end
+
+        def rational_line_crossing(point_a, point_b, value_a, value_b)
+          parameter = Rational(value_a, value_a - value_b)
+          [
+            point_a[0] + (parameter * (point_b[0] - point_a[0])),
+            point_a[1] + (parameter * (point_b[1] - point_a[1]))
+          ]
+        end
+
+        def oriented_line_value(line_start, line_end, point, orientation)
+          orientation * rational_cross_2d(
+            rational_subtract_2d(line_end, line_start),
+            rational_subtract_2d(point, line_start)
+          )
+        end
+
+        def rational_polygon_area_twice(points)
+          points.each_index.sum do |index|
+            current = points[index]
+            following = points[(index + 1) % points.length]
+            (current[0] * following[1]) - (current[1] * following[0])
+          end
+        end
+
+        def rational_point_on_segment?(point, start_point, end_point)
+          direction = rational_subtract_2d(end_point, start_point)
+          offset = rational_subtract_2d(point, start_point)
+          return false unless rational_cross_2d(direction, offset).zero?
+
+          point[0] >= [start_point[0], end_point[0]].min &&
+            point[0] <= [start_point[0], end_point[0]].max &&
+            point[1] >= [start_point[1], end_point[1]].min &&
+            point[1] <= [start_point[1], end_point[1]].max
+        end
+
+        def remove_consecutive_rational_duplicates(points)
+          compact = []
+          points.each { |point| compact << point if compact.empty? || compact.last != point }
+          compact.pop if compact.length > 1 && compact.first == compact.last
+          compact
+        end
+
+        def unique_rational_points(points)
+          points.each_with_object([]) do |point, unique|
+            unique << point unless unique.include?(point)
+          end
+        end
+
+        def rational_subtract_2d(point_a, point_b)
+          [point_a[0] - point_b[0], point_a[1] - point_b[1]]
+        end
+
+        def rational_cross_2d(vector_a, vector_b)
+          (vector_a[0] * vector_b[1]) - (vector_a[1] * vector_b[0])
+        end
+
+        def project_integer_point(point, drop_axis)
+          point.each_with_index.filter_map { |value, index| value unless index == drop_axis }
+        end
+
+        def integer_aabbs_overlap?(triangle_a, triangle_b)
+          3.times.all? do |axis|
+            range_a = triangle_a.map { |point| point[axis] }.minmax
+            range_b = triangle_b.map { |point| point[axis] }.minmax
+            range_a[0] <= range_b[1] && range_b[0] <= range_a[1]
+          end
+        end
+
+        def canonical_triangle_key(triangle)
+          triangle.sort
+        end
+
+        def canonical_edge_key(point_a, point_b)
+          (point_a <=> point_b) <= 0 ? [point_a, point_b] : [point_b, point_a]
+        end
+
+        def integer_triangle_normal(triangle)
+          integer_cross(
+            integer_subtract(triangle[1], triangle[0]),
+            integer_subtract(triangle[2], triangle[0])
+          )
+        end
+
+        def integer_subtract(vector_a, vector_b)
+          [
+            vector_a[0] - vector_b[0],
+            vector_a[1] - vector_b[1],
+            vector_a[2] - vector_b[2]
+          ]
+        end
+
+        def integer_dot(vector_a, vector_b)
+          (vector_a[0] * vector_b[0]) +
+            (vector_a[1] * vector_b[1]) +
+            (vector_a[2] * vector_b[2])
+        end
+
+        def integer_cross(vector_a, vector_b)
+          [
+            (vector_a[1] * vector_b[2]) - (vector_a[2] * vector_b[1]),
+            (vector_a[2] * vector_b[0]) - (vector_a[0] * vector_b[2]),
+            (vector_a[0] * vector_b[1]) - (vector_a[1] * vector_b[0])
+          ]
+        end
+
+        def integer_zero_vector?(vector)
+          vector.all?(&:zero?)
         end
 
         def triangle_signature(points)
@@ -1204,6 +2257,7 @@ module ULOL
         def orient_shell_faces_consistently(entities)
           visited = {}
           reversed_faces = 0
+          component_count = 0
 
           entities.grep(@face_class).each do |seed|
             next unless seed.valid?
@@ -1211,6 +2265,7 @@ module ULOL
             seed_id = stable_entity_id(seed)
             next if visited[seed_id]
 
+            component_count += 1
             visited[seed_id] = true
             queue = [seed]
 
@@ -1245,7 +2300,88 @@ module ULOL
             end
           end
 
-          { reversed_faces: reversed_faces }
+          {
+            reversed_faces: reversed_faces,
+            component_count: component_count
+          }
+        end
+
+        # A consistently oriented shell can still have every face pointing
+        # inward. Positive signed volume is the project-wide outward convention.
+        # Relative coordinates keep the determinant stable for station models
+        # whose local coordinates are far from the global origin.
+        def orient_shell_outward(entities)
+          faces = entities.grep(@face_class).select(&:valid?)
+          signed_volume_before = shell_signed_volume_in3(faces)
+          if signed_volume_before.abs <= SIGNED_VOLUME_EPSILON_IN3
+            raise TopologyChangedError,
+                  "Closed shell has zero signed volume: #{signed_volume_before} in3"
+          end
+
+          reversed_faces = 0
+          if signed_volume_before.negative?
+            faces.each do |face|
+              next unless face.valid?
+
+              face.reverse!
+              reversed_faces += 1
+            end
+          end
+
+          signed_volume_after = shell_signed_volume_in3(faces)
+          if signed_volume_after <= SIGNED_VOLUME_EPSILON_IN3
+            raise TopologyChangedError,
+                  "Closed shell is not outward after orientation: " \
+                  "#{signed_volume_after} in3"
+          end
+
+          {
+            reversed_faces: reversed_faces,
+            signed_volume_before_in3: signed_volume_before,
+            signed_volume_after_in3: signed_volume_after
+          }
+        end
+
+        def shell_signed_volume_in3(faces)
+          reference = shell_volume_reference_point(faces)
+          unless reference
+            raise TopologyChangedError, 'Closed shell has no mesh points for orientation'
+          end
+
+          faces.sum do |face|
+            mesh = face.mesh(0)
+            mesh.polygons.sum do |polygon|
+              points = polygon.map { |index| mesh.point_at(index.abs) }
+              next 0.0 if points.length < 3
+
+              origin = points.first
+              (1...(points.length - 1)).sum do |index|
+                relative_signed_tetrahedron_volume_in3(
+                  reference,
+                  origin,
+                  points[index],
+                  points[index + 1]
+                )
+              end
+            end
+          end
+        end
+
+        def shell_volume_reference_point(faces)
+          faces.each do |face|
+            mesh = face.mesh(0)
+            point = mesh.point_at(1)
+            return point if point
+          end
+
+          nil
+        end
+
+        def relative_signed_tetrahedron_volume_in3(reference, point_a, point_b, point_c)
+          vector_a = vector_between(reference, point_a)
+          vector_b = vector_between(reference, point_b)
+          vector_c = vector_between(reference, point_c)
+          vector_dot(vector_a, vector_cross(vector_b, vector_c)) / 6.0
         end
 
         def orient_face!(face, source_normal)
@@ -1265,13 +2401,25 @@ module ULOL
         # Numeric helpers
         # ----------------------------------------------------------------------
 
-        def normalized_target(point)
+        def normalized_target(point, axis_plane_plan = nil)
           indices = grid_indices(point)
+          constraints = axis_plane_plan && axis_plane_plan[:constraints]
+          (constraints && constraints[source_point_key(point)] || {}).each do |axis, target_index|
+            indices[axis] = target_index
+          end
           @point_factory.call(
             indices[0] * @tolerance_mm / MM_PER_INCH,
             indices[1] * @tolerance_mm / MM_PER_INCH,
             indices[2] * @tolerance_mm / MM_PER_INCH
           )
+        end
+
+        def source_point_key(point)
+          [point.x.to_f, point.y.to_f, point.z.to_f]
+        end
+
+        def point_coordinate(point, axis)
+          [point.x.to_f, point.y.to_f, point.z.to_f].fetch(axis)
         end
 
         def grid_indices(point)
