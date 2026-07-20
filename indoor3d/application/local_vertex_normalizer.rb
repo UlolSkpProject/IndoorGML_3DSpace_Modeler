@@ -108,10 +108,9 @@ module ULOL
             occupied[key] = true
           end
 
-          # Coordinate normalization is not complete while an axis-plane
-          # family is still split by removable internal edges. This also makes
-          # the export guard normalize older, already-snapped triangle meshes.
-          return false unless axis_plane_merge_candidate_edges(entities).empty?
+          # Constrained patch diagonals intentionally remain as SketchUp edges.
+          # Removing them would hand the n-gon back to SketchUp's triangulator
+          # and can recreate the flipped/sliver triangles normalization removed.
           return false if short_edge_sliver_collapse_plan(
             entities,
             axis_plane_plan
@@ -171,13 +170,15 @@ module ULOL
             raise ReconstructionError, "No reconstructable faces found for #{entity_label(entity)}"
           end
 
-          baseline_mesh_validation = validate_normalized_triangle_mesh!(conforming_triangles)
+          baseline_mesh_validation = validate_normalized_triangle_topology!(conforming_triangles)
           conforming_triangles, short_edge_sliver_repair =
             collapse_short_edge_sliver_triangles(
               conforming_triangles,
               short_edge_sliver_plan,
               baseline_mesh_validation
             )
+          conforming_triangles, planar_patch_retriangulation =
+            retriangulate_exact_coplanar_patches(conforming_triangles)
           mesh_validation = validate_normalized_triangle_mesh!(conforming_triangles)
           validate_short_edge_sliver_topology!(
             baseline_mesh_validation,
@@ -212,7 +213,14 @@ module ULOL
           end
 
 
-          axis_plane_merge = merge_axis_plane_faces(entities)
+          axis_plane_merge = {
+            removed_edges: 0,
+            merged_faces: 0,
+            passes: [],
+            preserved_constrained_edges: true,
+            fallback_reason:
+              'Exact coplanar patch triangulation owns its internal diagonals'
+          }
 
           outward_orientation = orient_shell_outward(entities)
           orientation = {
@@ -271,6 +279,7 @@ module ULOL
             axis_plane_plan: axis_plane_plan,
             axis_plane_merge: axis_plane_merge,
             short_edge_sliver_repair: short_edge_sliver_repair,
+            planar_patch_retriangulation: planar_patch_retriangulation,
             duplicate_diagnostics: {
               source: source_duplicate_diagnostics,
               rebuilt: rebuilt_duplicate_diagnostics,
@@ -360,6 +369,7 @@ module ULOL
           axis_plane_plan:,
           axis_plane_merge:,
           short_edge_sliver_repair:,
+          planar_patch_retriangulation:,
           duplicate_diagnostics:,
           residual_mm:
         )
@@ -415,6 +425,16 @@ module ULOL
                 repaired_triangles: degenerate_repair[:repaired_triangles],
                 replaced_pairs: degenerate_repair[:replaced_pairs],
                 stages: degenerate_repair[:stages]
+              },
+              {
+                phase: :exact_coplanar_patch_retriangulation,
+                detected_patches: planar_patch_retriangulation[:detected_patches],
+                rebuilt_patches: planar_patch_retriangulation[:rebuilt_patches],
+                preserved_patches: planar_patch_retriangulation[:preserved_patches],
+                source_triangles: planar_patch_retriangulation[:source_triangles],
+                rebuilt_triangles: planar_patch_retriangulation[:rebuilt_triangles],
+                boundary_loops: planar_patch_retriangulation[:boundary_loops],
+                holes: planar_patch_retriangulation[:holes]
               },
               {
                 phase: :validated_triangle_rebuild,
@@ -1594,6 +1614,919 @@ module ULOL
           end
         end
 
+        # Reconstructs every connected, exact coplanar triangle patch from its
+        # preserved boundary constraints. The source triangulation is treated as
+        # topology only: none of its internal diagonals survive. This avoids
+        # carrying a flipped or almost-zero SketchUp mesh triangle into the
+        # normalized shell.
+        def retriangulate_exact_coplanar_patches(triangle_records)
+          patches = exact_coplanar_triangle_patches(triangle_records)
+          rebuilt_records = []
+          rebuilt_patches = 0
+          preserved_patches = 0
+          source_triangle_count = 0
+          rebuilt_triangle_count = 0
+          boundary_loop_count = 0
+          hole_count = 0
+
+          patches.each do |patch|
+            unless exact_coplanar_patch_retriangulation_required?(patch)
+              rebuilt_records.concat(patch)
+              preserved_patches += 1
+              next
+            end
+
+            replacement, patch_report = retriangulate_exact_coplanar_patch(patch)
+            rebuilt_records.concat(replacement)
+            rebuilt_patches += 1
+            source_triangle_count += patch.length
+            rebuilt_triangle_count += replacement.length
+            boundary_loop_count += patch_report[:boundary_loops]
+            hole_count += patch_report[:holes]
+          end
+
+          [
+            rebuilt_records,
+            {
+              detected_patches: patches.length,
+              rebuilt_patches: rebuilt_patches,
+              preserved_patches: preserved_patches,
+              source_triangles: source_triangle_count,
+              rebuilt_triangles: rebuilt_triangle_count,
+              boundary_loops: boundary_loop_count,
+              holes: hole_count
+            }
+          ]
+        end
+
+        def exact_coplanar_patch_retriangulation_required?(patch)
+          triangles = patch.map do |record|
+            triangle = record[:points].map { |point| grid_indices(point) }
+            source_normal = Array(record[:source_normal]).map(&:to_f)
+            actual_normal = integer_triangle_normal(triangle)
+            return true if source_normal.length == 3 &&
+                           vector_dot(actual_normal, source_normal).negative?
+            return true if exact_triangle_minimum_altitude_mm(triangle) < @tolerance_mm
+
+            triangle
+          end
+
+          validate_triangle_intersections!(triangles)
+          false
+        rescue TopologyChangedError
+          true
+        end
+
+        def exact_triangle_minimum_altitude_mm(triangle)
+          normal_length = Math.sqrt(
+            integer_dot(
+              integer_triangle_normal(triangle),
+              integer_triangle_normal(triangle)
+            ).to_f
+          )
+          longest_edge = 3.times.map do |index|
+            edge = integer_subtract(
+              triangle[index],
+              triangle[(index + 1) % 3]
+            )
+            Math.sqrt(integer_dot(edge, edge).to_f)
+          end.max
+          return 0.0 unless longest_edge&.positive?
+
+          (normal_length / longest_edge) * @tolerance_mm
+        end
+
+        def exact_coplanar_triangle_patches(triangle_records)
+          grouped = triangle_records.group_by do |record|
+            exact_coplanar_patch_key(record)
+          end
+          patches = []
+
+          grouped.each_value do |records|
+            edge_owners = Hash.new { |hash, key| hash[key] = [] }
+            records.each_with_index do |record, index|
+              triangle = record[:points].map { |point| grid_indices(point) }
+              3.times do |edge_index|
+                edge = canonical_edge_key(
+                  triangle[edge_index],
+                  triangle[(edge_index + 1) % 3]
+                )
+                edge_owners[edge] << index
+              end
+            end
+
+            adjacency = Array.new(records.length) { [] }
+            edge_owners.each_value do |owners|
+              next unless owners.length == 2
+
+              first, second = owners
+              adjacency[first] << second
+              adjacency[second] << first
+            end
+
+            visited = Array.new(records.length, false)
+            records.each_index do |seed|
+              next if visited[seed]
+
+              visited[seed] = true
+              queue = [seed]
+              component = []
+              until queue.empty?
+                index = queue.shift
+                component << records[index]
+                adjacency[index].each do |neighbor|
+                  next if visited[neighbor]
+
+                  visited[neighbor] = true
+                  queue << neighbor
+                end
+              end
+              patches << component
+            end
+          end
+
+          patches
+        end
+
+        def exact_coplanar_patch_key(record)
+          triangle = record[:points].map { |point| grid_indices(point) }
+          plane_key = exact_integer_plane_key(triangle)
+          normal = plane_key.first(3)
+          source_normal = Array(record[:source_normal]).map(&:to_f)
+          orientation = if source_normal.length == 3 &&
+                           vector_dot(normal, source_normal).negative?
+                          -1
+                        else
+                          1
+                        end
+
+          [
+            plane_key,
+            orientation,
+            metadata_identity(record[:material]),
+            metadata_identity(record[:back_material]),
+            metadata_identity(record[:layer])
+          ]
+        end
+
+        def metadata_identity(value)
+          return nil if value.nil?
+          return [:persistent_id, value.persistent_id] if value.respond_to?(:persistent_id)
+
+          [:object_id, value.object_id]
+        rescue StandardError
+          [:object_id, value.object_id]
+        end
+
+        def exact_integer_plane_key(triangle)
+          normal = integer_triangle_normal(triangle)
+          if integer_zero_vector?(normal)
+            raise ReconstructionError,
+                  "Cannot form an exact plane from a zero-area triangle: #{triangle.inspect}"
+          end
+
+          divisor = normal.map(&:abs).reject(&:zero?).reduce { |gcd, value| gcd.gcd(value) }
+          primitive = normal.map { |value| value / divisor }
+          first_nonzero = primitive.find { |value| !value.zero? }
+          primitive = primitive.map(&:-@) if first_nonzero.negative?
+          primitive + [integer_dot(primitive, triangle[0])]
+        end
+
+        def retriangulate_exact_coplanar_patch(patch)
+          point_by_key = {}
+          edge_owners = Hash.new { |hash, key| hash[key] = [] }
+          patch.each_with_index do |record, index|
+            triangle = record[:points].map do |point|
+              key = grid_indices(point)
+              point_by_key[key] ||= point
+              key
+            end
+            3.times do |edge_index|
+              edge = canonical_edge_key(
+                triangle[edge_index],
+                triangle[(edge_index + 1) % 3]
+              )
+              edge_owners[edge] << index
+            end
+          end
+
+          overused = edge_owners.select { |_edge, owners| owners.length > 2 }
+          unless overused.empty?
+            raise TopologyChangedError,
+                  "Exact coplanar patch has overused edges: #{overused.first(10).inspect}"
+          end
+
+          boundary_edges = edge_owners.filter_map do |edge, owners|
+            edge if owners.length == 1
+          end
+          if boundary_edges.empty?
+            raise TopologyChangedError, 'Exact coplanar patch has no preserved boundary'
+          end
+
+          loops = exact_boundary_loops(boundary_edges)
+          plane_key = exact_integer_plane_key(
+            patch.first[:points].map { |point| grid_indices(point) }
+          )
+          drop_axis = plane_key.first(3).each_index.max_by do |axis|
+            plane_key[axis].abs
+          end
+          outer, holes = classify_exact_patch_loops(loops, drop_axis)
+          expected_area2 = integer_polygon_area2(
+            outer.map { |point| integer_project_2d(point, drop_axis) }
+          ).abs - holes.sum do |hole|
+            integer_polygon_area2(
+              hole.map { |point| integer_project_2d(point, drop_axis) }
+            ).abs
+          end
+          triangle_keys = triangulate_exact_polygon_with_holes(
+            outer,
+            holes,
+            drop_axis
+          )
+
+          template = patch.first
+          replacements = triangle_keys.each_with_index.map do |keys, index|
+            points = keys.map { |key| point_by_key.fetch(key) }
+            points = orient_patch_triangle(points, template[:source_normal])
+            template.merge(
+              points: points,
+              source_polygon_index: index
+            )
+          end
+
+          validate_exact_patch_replacement!(
+            replacements,
+            boundary_edges,
+            loops.length,
+            drop_axis,
+            expected_area2
+          )
+
+          [
+            replacements,
+            {
+              boundary_loops: loops.length,
+              holes: holes.length
+            }
+          ]
+        end
+
+        def exact_boundary_loops(boundary_edges)
+          adjacency = Hash.new { |hash, key| hash[key] = [] }
+          boundary_edges.each do |point_a, point_b|
+            adjacency[point_a] << point_b
+            adjacency[point_b] << point_a
+          end
+          bad_vertices = adjacency.select { |_point, neighbors| neighbors.uniq.length != 2 }
+          unless bad_vertices.empty?
+            raise TopologyChangedError,
+                  "Exact coplanar patch boundary is branched: " \
+                  "#{bad_vertices.first(10).inspect}"
+          end
+
+          unused = boundary_edges.each_with_object({}) do |edge, result|
+            result[canonical_edge_key(edge[0], edge[1])] = true
+          end
+          loops = []
+          until unused.empty?
+            seed = unused.keys.first
+            start_point, current = seed
+            previous = start_point
+            loop_points = [start_point]
+            unused.delete(seed)
+
+            boundary_edges.length.times do
+              loop_points << current
+              break if current == start_point
+
+              following = adjacency.fetch(current).find do |candidate|
+                candidate != previous &&
+                  unused.key?(canonical_edge_key(current, candidate))
+              end
+              following ||= adjacency.fetch(current).find do |candidate|
+                unused.key?(canonical_edge_key(current, candidate))
+              end
+              unless following
+                raise TopologyChangedError,
+                      "Exact coplanar patch boundary does not form a closed loop at " \
+                      "#{current.inspect}"
+              end
+
+              unused.delete(canonical_edge_key(current, following))
+              previous, current = current, following
+            end
+
+            unless loop_points.last == start_point
+              raise TopologyChangedError, 'Exact coplanar patch boundary walk did not close'
+            end
+            loop_points.pop
+            if loop_points.length < 3
+              raise TopologyChangedError,
+                    "Exact coplanar patch has a boundary loop with fewer than three vertices"
+            end
+            loops << loop_points
+          end
+
+          loops
+        end
+
+        def classify_exact_patch_loops(loops, drop_axis)
+          projected = loops.map do |loop|
+            [loop, loop.map { |point| integer_project_2d(point, drop_axis) }]
+          end
+          projected.each do |_loop, polygon|
+            if integer_polygon_area2(polygon).zero?
+              raise TopologyChangedError, 'Exact coplanar patch has a zero-area boundary loop'
+            end
+            unless simple_integer_polygon_2d?(polygon)
+              raise TopologyChangedError,
+                    'Exact coplanar patch boundary self-intersects after normalization'
+            end
+          end
+
+          outer_entry = projected.max_by do |_loop, polygon|
+            integer_polygon_area2(polygon).abs
+          end
+          outer_loop, outer_polygon = outer_entry
+          holes = projected.reject { |entry| entry.equal?(outer_entry) }
+          holes.each do |_loop, polygon|
+            unless integer_point_in_polygon_2d?(polygon.first, outer_polygon)
+              raise TopologyChangedError,
+                    'Exact coplanar patch contains more than one exterior boundary'
+            end
+          end
+
+          outer_loop = outer_loop.reverse if integer_polygon_area2(outer_polygon).negative?
+          oriented_holes = holes.map do |loop, polygon|
+            integer_polygon_area2(polygon).positive? ? loop.reverse : loop
+          end
+          [outer_loop, oriented_holes]
+        end
+
+        def triangulate_exact_polygon_with_holes(outer, holes, drop_axis)
+          polygon = outer.dup
+          original_outer_2d = outer.map { |point| integer_project_2d(point, drop_axis) }
+          original_holes_2d = holes.map do |hole|
+            hole.map { |point| integer_project_2d(point, drop_axis) }
+          end
+
+          holes.sort_by do |hole|
+            hole.map { |point| integer_project_2d(point, drop_axis)[0] }.max
+          end.reverse_each do |hole|
+            polygon = bridge_exact_hole(
+              polygon,
+              hole,
+              original_outer_2d,
+              original_holes_2d,
+              drop_axis
+            )
+          end
+
+          triangles = triangulate_exact_weak_polygon(polygon, drop_axis)
+          boundary_edges = (outer.each_index.map do |index|
+            canonical_edge_key(outer[index], outer[(index + 1) % outer.length])
+          end + holes.flat_map do |hole|
+            hole.each_index.map do |index|
+              canonical_edge_key(hole[index], hole[(index + 1) % hole.length])
+            end
+          end).to_h { |edge| [edge, true] }
+
+          optimize_exact_patch_triangulation(
+            triangles,
+            boundary_edges,
+            drop_axis
+          )
+        end
+
+        def bridge_exact_hole(polygon, hole, outer_2d, holes_2d, drop_axis)
+          hole_index = hole.each_index.max_by do |index|
+            point = integer_project_2d(hole[index], drop_axis)
+            [point[0], -point[1]]
+          end
+          hole_point = hole[hole_index]
+          hole_point_2d = integer_project_2d(hole_point, drop_axis)
+          polygon_2d = polygon.map { |point| integer_project_2d(point, drop_axis) }
+          all_loops = [polygon_2d] + holes_2d
+
+          candidates = polygon.each_index.filter_map do |polygon_index|
+            polygon_point = polygon[polygon_index]
+            polygon_point_2d = polygon_2d[polygon_index]
+            next if polygon_point_2d == hole_point_2d
+            next unless exact_bridge_visible?(
+              hole_point_2d,
+              polygon_point_2d,
+              all_loops,
+              outer_2d,
+              holes_2d
+            )
+
+            delta = integer_subtract_2d(polygon_point_2d, hole_point_2d)
+            [integer_dot_2d(delta, delta), polygon_index]
+          end
+          if candidates.empty?
+            raise ReconstructionError,
+                  'Could not connect an exact coplanar patch hole to its exterior boundary'
+          end
+
+          polygon_index = candidates.min_by(&:first).last
+          polygon_point = polygon[polygon_index]
+          rotated_hole = hole[hole_index..] + hole[0...hole_index]
+          polygon[0..polygon_index] +
+            rotated_hole +
+            [hole_point, polygon_point] +
+            Array(polygon[(polygon_index + 1)..])
+        end
+
+        def exact_bridge_visible?(point_a, point_b, loops, outer, holes)
+          loops.each do |loop|
+            loop.each_index do |index|
+              edge_a = loop[index]
+              edge_b = loop[(index + 1) % loop.length]
+              next if edge_a == point_a || edge_b == point_a ||
+                      edge_a == point_b || edge_b == point_b
+              return false if integer_segments_intersect_2d?(
+                point_a,
+                point_b,
+                edge_a,
+                edge_b
+              )
+            end
+            loop.each do |point|
+              next if point == point_a || point == point_b
+              return false if integer_point_on_segment_2d?(point, point_a, point_b)
+            end
+          end
+
+          midpoint = [
+            Rational(point_a[0] + point_b[0], 2),
+            Rational(point_a[1] + point_b[1], 2)
+          ]
+          return false unless integer_point_in_polygon_2d?(midpoint, outer)
+          return false if holes.any? do |hole|
+            integer_point_in_polygon_2d?(midpoint, hole)
+          end
+
+          true
+        end
+
+        def triangulate_exact_weak_polygon(points, drop_axis)
+          remaining = points.dup
+          triangles = []
+          limit = remaining.length * remaining.length * 2
+          attempts = 0
+
+          while remaining.length > 3
+            ear_indices = remaining.each_index.select do |index|
+              exact_polygon_ear?(remaining, index, drop_axis)
+            end
+            ear_index = ear_indices.max_by do |index|
+              exact_polygon_ear_quality(remaining, index, drop_axis)
+            end
+            unless ear_index
+              raise ReconstructionError,
+                    "Could not triangulate exact coplanar patch boundary: " \
+                    "#{remaining.inspect}"
+            end
+
+            previous_point = remaining[(ear_index - 1) % remaining.length]
+            current_point = remaining[ear_index]
+            following_point = remaining[(ear_index + 1) % remaining.length]
+            triangles << [previous_point, current_point, following_point]
+            remaining.delete_at(ear_index)
+            attempts += 1
+            if attempts > limit
+              raise ReconstructionError,
+                    'Exact coplanar patch triangulation exceeded its iteration limit'
+            end
+          end
+
+          final = remaining.map { |point| integer_project_2d(point, drop_axis) }
+          if final.uniq.length != 3 || integer_orientation_2d(*final).zero?
+            raise ReconstructionError,
+                  "Exact coplanar patch ended with a zero-area triangle: #{remaining.inspect}"
+          end
+          triangles << remaining
+          triangles
+        end
+
+        # Among all topologically valid ears, prefer the one with the greatest
+        # squared minimum-altitude proxy (area^2 / longest_edge^2). This keeps a
+        # short preserved boundary segment from being paired with a nearly
+        # collinear third point merely because that ear appeared first.
+        def exact_polygon_ear_quality(polygon, index, drop_axis)
+          points = [
+            polygon[(index - 1) % polygon.length],
+            polygon[index],
+            polygon[(index + 1) % polygon.length]
+          ].map { |point| integer_project_2d(point, drop_axis) }
+          area2 = integer_orientation_2d(*points).abs
+          longest_edge_squared = 3.times.map do |edge_index|
+            vector = integer_subtract_2d(
+              points[edge_index],
+              points[(edge_index + 1) % 3]
+            )
+            integer_dot_2d(vector, vector)
+          end.max
+
+          Rational(area2 * area2, longest_edge_squared)
+        end
+
+        # Improves the ear-clipped mesh with exact, constraint-preserving
+        # Lawson flips. Only an interior diagonal shared by two triangles may
+        # change. A flip is accepted when the two triangles still cover the
+        # identical convex quadrilateral and their worst minimum-altitude
+        # proxy strictly improves. All decisions use integer grid coordinates.
+        def optimize_exact_patch_triangulation(triangles, constraints, drop_axis)
+          optimized = triangles.map(&:dup)
+          iteration_limit = [optimized.length * optimized.length * 2, 1].max
+          iterations = 0
+
+          loop do
+            edge_owners = Hash.new { |hash, key| hash[key] = [] }
+            optimized.each_with_index do |triangle, triangle_index|
+              3.times do |edge_index|
+                edge = canonical_edge_key(
+                  triangle[edge_index],
+                  triangle[(edge_index + 1) % 3]
+                )
+                edge_owners[edge] << triangle_index
+              end
+            end
+
+            candidates = edge_owners.filter_map do |edge, owners|
+              next unless owners.length == 2
+              next if constraints.key?(edge)
+
+              first_index, second_index = owners
+              first = optimized[first_index]
+              second = optimized[second_index]
+              opposite_a = (first - edge).first
+              opposite_b = (second - edge).first
+              next unless opposite_a && opposite_b && opposite_a != opposite_b
+
+              alternate_edge = canonical_edge_key(opposite_a, opposite_b)
+              next if edge_owners.key?(alternate_edge)
+
+              replacement = exact_edge_flip_replacement(
+                edge,
+                opposite_a,
+                opposite_b,
+                drop_axis
+              )
+              next unless replacement
+
+              current_quality = [
+                exact_integer_triangle_quality(first),
+                exact_integer_triangle_quality(second)
+              ].min
+              replacement_quality = replacement.map do |triangle|
+                exact_integer_triangle_quality(triangle)
+              end.min
+              next unless replacement_quality > current_quality
+
+              [
+                replacement_quality - current_quality,
+                replacement_quality,
+                edge,
+                first_index,
+                second_index,
+                replacement
+              ]
+            end
+            break if candidates.empty?
+
+            candidate = candidates.max_by do |entry|
+              [entry[0], entry[1], entry[2]]
+            end
+            first_index = candidate[3]
+            second_index = candidate[4]
+            replacement = candidate[5]
+            optimized[first_index] = replacement[0]
+            optimized[second_index] = replacement[1]
+
+            iterations += 1
+            if iterations > iteration_limit
+              raise ReconstructionError,
+                    'Exact coplanar patch edge optimization exceeded its iteration limit'
+            end
+          end
+
+          optimized
+        end
+
+        def exact_edge_flip_replacement(edge, opposite_a, opposite_b, drop_axis)
+          edge_a, edge_b = edge
+          projected = [edge_a, edge_b, opposite_a, opposite_b].to_h do |point|
+            [point, integer_project_2d(point, drop_axis)]
+          end
+
+          side_a = integer_orientation_2d(
+            projected[edge_a],
+            projected[edge_b],
+            projected[opposite_a]
+          )
+          side_b = integer_orientation_2d(
+            projected[edge_a],
+            projected[edge_b],
+            projected[opposite_b]
+          )
+          return nil if side_a.zero? || side_b.zero?
+          return nil if side_a.positive? == side_b.positive?
+
+          alternate_side_a = integer_orientation_2d(
+            projected[opposite_a],
+            projected[opposite_b],
+            projected[edge_a]
+          )
+          alternate_side_b = integer_orientation_2d(
+            projected[opposite_a],
+            projected[opposite_b],
+            projected[edge_b]
+          )
+          return nil if alternate_side_a.zero? || alternate_side_b.zero?
+          return nil if alternate_side_a.positive? == alternate_side_b.positive?
+
+          replacements = [
+            [opposite_a, opposite_b, edge_a],
+            [opposite_b, opposite_a, edge_b]
+          ].map do |triangle|
+            orientation = integer_orientation_2d(
+              *triangle.map { |point| projected[point] }
+            )
+            return nil if orientation.zero?
+
+            orientation.positive? ? triangle : [triangle[0], triangle[2], triangle[1]]
+          end
+
+          original_area2 = [opposite_a, opposite_b].sum do |opposite|
+            integer_orientation_2d(
+              projected[edge_a],
+              projected[edge_b],
+              projected[opposite]
+            ).abs
+          end
+          replacement_area2 = replacements.sum do |triangle|
+            integer_orientation_2d(
+              *triangle.map { |point| projected[point] }
+            ).abs
+          end
+          return nil unless replacement_area2 == original_area2
+
+          replacements
+        end
+
+        def exact_integer_triangle_quality(triangle)
+          normal = integer_triangle_normal(triangle)
+          normal_squared = integer_dot(normal, normal)
+          longest_edge_squared = 3.times.map do |edge_index|
+            vector = integer_subtract(
+              triangle[edge_index],
+              triangle[(edge_index + 1) % 3]
+            )
+            integer_dot(vector, vector)
+          end.max
+
+          Rational(normal_squared, longest_edge_squared)
+        end
+
+        def exact_polygon_ear?(polygon, index, drop_axis)
+          previous_index = (index - 1) % polygon.length
+          following_index = (index + 1) % polygon.length
+          point_a = integer_project_2d(polygon[previous_index], drop_axis)
+          point_b = integer_project_2d(polygon[index], drop_axis)
+          point_c = integer_project_2d(polygon[following_index], drop_axis)
+          return false unless integer_orientation_2d(point_a, point_b, point_c).positive?
+
+          polygon.each_index do |candidate_index|
+            next if [previous_index, index, following_index].include?(candidate_index)
+
+            candidate = integer_project_2d(polygon[candidate_index], drop_axis)
+            next if candidate == point_a || candidate == point_b || candidate == point_c
+            return false if integer_point_in_triangle_2d?(
+              candidate,
+              point_a,
+              point_b,
+              point_c
+            )
+          end
+
+          polygon.each_index do |edge_index|
+            edge_following = (edge_index + 1) % polygon.length
+            next if [previous_index, index].include?(edge_index)
+            next if [previous_index, following_index].include?(edge_following)
+
+            edge_a = integer_project_2d(polygon[edge_index], drop_axis)
+            edge_b = integer_project_2d(polygon[edge_following], drop_axis)
+            next if edge_a == point_a || edge_b == point_a ||
+                    edge_a == point_c || edge_b == point_c
+            return false if integer_segments_intersect_2d?(
+              point_a,
+              point_c,
+              edge_a,
+              edge_b
+            )
+          end
+
+          true
+        end
+
+        def validate_exact_patch_replacement!(
+          records,
+          boundary_edges,
+          loop_count,
+          drop_axis = nil,
+          expected_area2 = nil
+        )
+          if records.empty?
+            raise ReconstructionError, 'Exact coplanar patch triangulation returned no triangles'
+          end
+
+          edge_owners = Hash.new { |hash, key| hash[key] = [] }
+          triangles = records.map.with_index do |record, index|
+            triangle = record[:points].map { |point| grid_indices(point) }
+            if triangle.uniq.length != 3 || integer_zero_vector?(integer_triangle_normal(triangle))
+              raise ReconstructionError,
+                    "Exact coplanar patch produced a zero-area triangle: #{triangle.inspect}"
+            end
+            3.times do |edge_index|
+              edge = canonical_edge_key(
+                triangle[edge_index],
+                triangle[(edge_index + 1) % 3]
+              )
+              edge_owners[edge] << index
+            end
+            triangle
+          end
+
+          replacement_boundary = edge_owners.filter_map do |edge, owners|
+            edge if owners.length == 1
+          end.sort
+          expected_boundary = boundary_edges.map do |edge|
+            canonical_edge_key(edge[0], edge[1])
+          end.sort
+          unless replacement_boundary == expected_boundary
+            missing = expected_boundary - replacement_boundary
+            added = replacement_boundary - expected_boundary
+            raise TopologyChangedError,
+                  "Exact coplanar retriangulation changed its constraints: " \
+                  "missing=#{missing.first(10).inspect} added=#{added.first(10).inspect}"
+          end
+
+          invalid_edges = edge_owners.select do |_edge, owners|
+            owners.length != 1 && owners.length != 2
+          end
+          unless invalid_edges.empty?
+            raise TopologyChangedError,
+                  "Exact coplanar retriangulation has invalid edge incidence: " \
+                  "#{invalid_edges.first(10).inspect}"
+          end
+
+          vertex_count = triangles.flatten(1).uniq.length
+          euler = vertex_count - edge_owners.length + triangles.length
+          expected_euler = 2 - loop_count
+          unless euler == expected_euler
+            raise TopologyChangedError,
+                  "Exact coplanar retriangulation changed patch topology: " \
+                  "euler=#{euler} expected=#{expected_euler}"
+          end
+
+
+          if drop_axis && expected_area2
+            actual_area2 = triangles.sum do |triangle|
+              integer_orientation_2d(
+                *triangle.map { |point| integer_project_2d(point, drop_axis) }
+              ).abs
+            end
+            unless actual_area2 == expected_area2
+              raise TopologyChangedError,
+                    "Exact coplanar retriangulation changed patch area: " \
+                    "area2=#{expected_area2}->#{actual_area2}"
+            end
+          end
+
+          validate_triangle_intersections!(triangles)
+        end
+
+        def orient_patch_triangle(points, source_normal)
+          keys = points.map { |point| grid_indices(point) }
+          normal = integer_triangle_normal(keys)
+          expected = Array(source_normal).map(&:to_f)
+          return points unless expected.length == 3
+          return points unless vector_dot(normal, expected).negative?
+
+          [points[0], points[2], points[1]]
+        end
+
+        def integer_project_2d(point, drop_axis)
+          point.each_with_index.filter_map do |coordinate, axis|
+            coordinate unless axis == drop_axis
+          end
+        end
+
+        def integer_polygon_area2(polygon)
+          polygon.each_index.sum do |index|
+            point_a = polygon[index]
+            point_b = polygon[(index + 1) % polygon.length]
+            (point_a[0] * point_b[1]) - (point_b[0] * point_a[1])
+          end
+        end
+
+        def integer_orientation_2d(point_a, point_b, point_c)
+          ((point_b[0] - point_a[0]) * (point_c[1] - point_a[1])) -
+            ((point_b[1] - point_a[1]) * (point_c[0] - point_a[0]))
+        end
+
+        def integer_subtract_2d(point_a, point_b)
+          [point_a[0] - point_b[0], point_a[1] - point_b[1]]
+        end
+
+        def integer_dot_2d(vector_a, vector_b)
+          (vector_a[0] * vector_b[0]) + (vector_a[1] * vector_b[1])
+        end
+
+        def integer_point_on_segment_2d?(point, segment_a, segment_b)
+          return false unless integer_orientation_2d(segment_a, segment_b, point).zero?
+
+          point[0] >= [segment_a[0], segment_b[0]].min &&
+            point[0] <= [segment_a[0], segment_b[0]].max &&
+            point[1] >= [segment_a[1], segment_b[1]].min &&
+            point[1] <= [segment_a[1], segment_b[1]].max
+        end
+
+        def integer_segments_intersect_2d?(point_a, point_b, point_c, point_d)
+          orientations = [
+            integer_orientation_2d(point_a, point_b, point_c),
+            integer_orientation_2d(point_a, point_b, point_d),
+            integer_orientation_2d(point_c, point_d, point_a),
+            integer_orientation_2d(point_c, point_d, point_b)
+          ]
+          return true if orientations[0].zero? &&
+                         integer_point_on_segment_2d?(point_c, point_a, point_b)
+          return true if orientations[1].zero? &&
+                         integer_point_on_segment_2d?(point_d, point_a, point_b)
+          return true if orientations[2].zero? &&
+                         integer_point_on_segment_2d?(point_a, point_c, point_d)
+          return true if orientations[3].zero? &&
+                         integer_point_on_segment_2d?(point_b, point_c, point_d)
+
+          (orientations[0].positive? != orientations[1].positive?) &&
+            (orientations[2].positive? != orientations[3].positive?)
+        end
+
+        def simple_integer_polygon_2d?(polygon)
+          polygon.each_index do |first_index|
+            first_following = (first_index + 1) % polygon.length
+            polygon.each_index do |second_index|
+              second_following = (second_index + 1) % polygon.length
+              next if first_index == second_index
+              next if first_following == second_index || second_following == first_index
+
+              return false if integer_segments_intersect_2d?(
+                polygon[first_index],
+                polygon[first_following],
+                polygon[second_index],
+                polygon[second_following]
+              )
+            end
+          end
+          true
+        end
+
+        def integer_point_in_polygon_2d?(point, polygon)
+          return true if polygon.each_index.any? do |index|
+            integer_point_on_segment_2d?(
+              point,
+              polygon[index],
+              polygon[(index + 1) % polygon.length]
+            )
+          end
+
+          inside = false
+          previous = polygon.last
+          polygon.each do |current|
+            crosses = (current[1] > point[1]) != (previous[1] > point[1])
+            if crosses
+              intersection_x = Rational(
+                (previous[0] - current[0]) * (point[1] - current[1]),
+                previous[1] - current[1]
+              ) + current[0]
+              inside = !inside if point[0] < intersection_x
+            end
+            previous = current
+          end
+          inside
+        end
+
+        def integer_point_in_triangle_2d?(point, point_a, point_b, point_c)
+          orientations = [
+            integer_orientation_2d(point_a, point_b, point),
+            integer_orientation_2d(point_b, point_c, point),
+            integer_orientation_2d(point_c, point_a, point)
+          ]
+          orientations.all? { |value| value >= 0 } ||
+            orientations.all? { |value| value <= 0 }
+        end
+
         # Validates the snapped surface as an exact integer-grid triangle
         # complex before any SketchUp entities are erased. Integer arithmetic
         # avoids introducing a second geometric tolerance into normalization.
@@ -1609,6 +2542,19 @@ module ULOL
         end
 
         def validate_normalized_triangle_mesh!(triangle_records)
+          validation = validate_normalized_triangle_topology!(triangle_records)
+          triangles = triangle_records.map do |record|
+            record[:points].map { |point| grid_indices(point) }
+          end
+          tested_pairs = validate_triangle_intersections!(triangles)
+
+          validation.merge(tested_triangle_pairs: tested_pairs)
+        end
+
+        # Validates only the combinatorial closed-manifold invariants. Geometry
+        # intersections are deliberately checked after exact coplanar patches
+        # have been reconstructed from their preserved boundary constraints.
+        def validate_normalized_triangle_topology!(triangle_records)
           triangles = triangle_records.map do |record|
             record[:points].map { |point| grid_indices(point) }
           end
@@ -1663,14 +2609,12 @@ module ULOL
                   "Normalized mesh has #{component_count} disconnected shell components"
           end
 
-          tested_pairs = validate_triangle_intersections!(triangles)
-
           {
             vertex_count: vertices.length,
             edge_count: edge_incidence.length,
             triangle_count: triangles.length,
             component_count: component_count,
-            tested_triangle_pairs: tested_pairs
+            tested_triangle_pairs: 0
           }
         end
 
@@ -2134,6 +3078,11 @@ module ULOL
         end
 
         def rebuild_triangles(entities, triangles)
+          if entities.respond_to?(:fill_from_mesh) &&
+             defined?(Geom::PolygonMesh)
+            return rebuild_triangles_from_mesh(entities, triangles)
+          end
+
           added_faces = 0
           skipped_collinear = 0
 
@@ -2157,6 +3106,75 @@ module ULOL
           end
 
           { added_faces: added_faces, skipped_collinear: skipped_collinear }
+        end
+
+        # Sequential add_face calls allow SketchUp to auto-heal intermediate
+        # closed loops into hole/cap faces before the remaining triangles are
+        # added. Bulk mesh filling creates the already-validated complex in one
+        # step and therefore preserves its exact edge incidence.
+        def rebuild_triangles_from_mesh(entities, triangles)
+          polygon_mesh = Geom::PolygonMesh.new
+          point_indices = {}
+          records_by_signature = {}
+
+          triangles.each do |record|
+            points = record[:points]
+            if collinear_triangle?(points)
+              raise ReconstructionError,
+                    "Validated triangle became collinear before mesh fill: " \
+                    "#{points.map { |point| point_components_mm(point) }.inspect}"
+            end
+
+            signature = triangle_signature(points)
+            if records_by_signature.key?(signature)
+              raise ReconstructionError,
+                    "Bulk triangle rebuild received a duplicate triangle: " \
+                    "#{signature.inspect}"
+            end
+            records_by_signature[signature] = record
+
+            indices = points.map do |point|
+              key = grid_indices(point)
+              point_indices[key] ||= polygon_mesh.add_point(point)
+            end
+            polygon_mesh.add_polygon(indices)
+          end
+
+          filled = entities.fill_from_mesh(polygon_mesh, true, 0)
+          unless filled
+            raise ReconstructionError, 'fill_from_mesh rejected the normalized triangle complex'
+          end
+
+          matched = {}
+          entities.grep(@face_class).each do |face|
+            next unless face&.valid? && face.vertices.length == 3
+
+            signature = triangle_signature(face.vertices.map(&:position))
+            record = records_by_signature[signature]
+            next unless record
+
+            if matched.key?(signature)
+              raise ReconstructionError,
+                    "fill_from_mesh created duplicate triangle faces: " \
+                    "#{signature.inspect}"
+            end
+            matched[signature] = true
+            orient_face!(face, record[:source_normal])
+            apply_face_metadata(face, record)
+          end
+
+          missing = records_by_signature.keys.reject { |signature| matched[signature] }
+          unless missing.empty?
+            raise ReconstructionError,
+                  "fill_from_mesh omitted normalized triangles: " \
+                  "count=#{missing.length} samples=#{missing.first(10).inspect}"
+          end
+
+          {
+            added_faces: matched.length,
+            skipped_collinear: 0,
+            strategy: :fill_from_mesh
+          }
         end
 
         def apply_face_metadata(face, record)
