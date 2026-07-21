@@ -8,19 +8,41 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       # Pipeline v2 overrides for LocalVertexNormalizer.
-      #
-      # The original implementation remains the geometry-kernel backend. This
-      # layer replaces the orchestration policy so normalization can tolerate
-      # coincident targets, apply deterministic axis-plane ownership, and try a
-      # bounded post-rebuild repair sequence before rolling the SketchUp
-      # operation back.
       class LocalVertexNormalizer
         AXIS_CONSTRAINT_PRIORITY = [2, 1, 0].freeze unless const_defined?(:AXIS_CONSTRAINT_PRIORITY, false)
         MAX_EXTERNAL_FACE_REPAIRS = 1_000 unless const_defined?(:MAX_EXTERNAL_FACE_REPAIRS, false)
 
+        class << self
+          # Production normalization always rolls back on failure. Failed-state
+          # commits remain unavailable through the public API.
+          def normalize(
+            entity,
+            tolerance_mm = DEFAULT_TOLERANCE_MM,
+            commit_on_failure: false
+          )
+            if commit_on_failure
+              raise ArgumentError,
+                    'commit_on_failure is disabled for LocalVertexNormalizer v2'
+            end
+
+            new(tolerance_mm).normalize(entity)
+          end
+        end
+
+        def normalize(entity, commit_on_failure: false)
+          if commit_on_failure
+            raise ArgumentError,
+                  'commit_on_failure is disabled for LocalVertexNormalizer v2'
+          end
+
+          validate_entity!(entity)
+          with_normalization_operation(entity, commit_on_failure: false) do
+            normalize_entity(entity)
+          end
+        end
+
         # Coincident topological vertices are allowed when every coordinate is
-        # already normalized. Whether that coincidence is topologically valid is
-        # decided by the triangle-mesh validation used by normalize.
+        # already normalized. Final topology is decided by normalize's hard gate.
         def normalized?(entity)
           return false unless valid_entity_definition?(entity)
 
@@ -51,15 +73,15 @@ module ULOL
 
         # Full v2 sequence:
         # 1. validate source solid
-        # 2. build axis-plane target ownership
+        # 2. build independent X/Y/Z axis-plane targets
         # 3. compute grid targets and allow collisions
-        # 4. snapshot/repair/normalize triangles
+        # 4. locally repair triangles and mark unresolved neighborhoods
         # 5. collapse supported sliver patches
-        # 6. retriangulate exact coplanar patches
+        # 6. force affected coplanar patches through full retriangulation
         # 7. validate the complete in-memory triangle mesh
         # 8. rebuild SketchUp geometry
         # 9. orient faces and remove safe coplanar internal edges
-        # 10. attempt bounded entity-level repairs, then validate or rollback
+        # 10. attempt bounded repairs, require manifold and exact surface equality
         def normalize_entity(entity)
           ensure_unique_definition(entity)
 
@@ -115,13 +137,24 @@ module ULOL
             post_sliver_cleanup
           )
 
+          forced_retriangulation = collect_forced_retriangulation_keys(
+            target_collision_cleanup,
+            source_degenerate_repair,
+            conforming_degenerate_repair,
+            post_sliver_cleanup,
+            short_edge_sliver_plan
+          )
           conforming_triangles, planar_patch_retriangulation =
-            retriangulate_exact_coplanar_patches(conforming_triangles)
+            retriangulate_exact_coplanar_patches(
+              conforming_triangles,
+              forced_source_face_keys: forced_retriangulation[:source_face_keys]
+            )
           conforming_triangles, post_retriangulation_cleanup =
             sanitize_triangle_records(conforming_triangles)
 
-          # Step 7 is the hard pre-mutation gate. All target collisions and
-          # sliver changes must form one closed, non-self-intersecting shell.
+          # Step 7 is the hard pre-mutation gate. All target collisions, local
+          # repairs, sliver changes, and forced patch rebuilds must form one exact
+          # closed, non-self-intersecting shell before source geometry is erased.
           mesh_validation = validate_normalized_triangle_mesh!(conforming_triangles)
           validate_sliver_topology_when_comparable!(
             baseline_mesh_inventory,
@@ -134,6 +167,7 @@ module ULOL
           build[:expected_faces] = conforming_triangles.length
           build[:complete] = build[:added_faces] == conforming_triangles.length &&
             build[:skipped_collinear].zero?
+          build[:requires_final_equivalence_validation] = !build[:complete]
           if build[:added_faces].to_i.zero?
             raise ReconstructionError,
                   "Normalized triangle rebuild created no faces: #{build.inspect}"
@@ -163,6 +197,7 @@ module ULOL
           rescue Error, ArgumentError => error
             rebuilt_pre_repair_validation = {
               valid: false,
+              matches_validated_input: false,
               error: "#{error.class}: #{error.message}",
               topology: geometry_counts(entities)
             }
@@ -191,6 +226,10 @@ module ULOL
           final_triangles, final_degenerate_repair =
             repair_degenerate_source_triangles(final_triangles)
           final_mesh_validation = validate_normalized_triangle_mesh!(final_triangles)
+          final_surface_equivalence = verify_normalized_surface_equivalence!(
+            conforming_triangles,
+            final_triangles
+          )
 
           degenerate_repair = aggregate_degenerate_repair_reports(
             pre_normalization: pre_normalization_degenerate_repair,
@@ -234,9 +273,40 @@ module ULOL
             target_collision_cleanup: target_collision_cleanup,
             post_retriangulation_cleanup: post_retriangulation_cleanup,
             rebuilt_pre_repair_validation: rebuilt_pre_repair_validation,
+            forced_retriangulation: forced_retriangulation,
+            final_surface_equivalence: final_surface_equivalence,
             final_repair: final_repair
           )
           report
+        end
+
+        def collect_forced_retriangulation_keys(*reports)
+          source_face_keys = []
+          reasons = Hash.new(0)
+
+          reports.each do |report|
+            next unless report.is_a?(Hash)
+
+            keys = Array(report[:forced_source_face_keys]) +
+              Array(report[:affected_source_face_keys])
+            unless keys.empty?
+              source_face_keys.concat(keys)
+              reasons[:triangle_repair_or_cleanup] += keys.length
+            end
+
+            next unless report[:repairable]
+
+            Array(report[:candidates]).each do |candidate|
+              source_face_keys << candidate[:face_key]
+              source_face_keys.concat(Array(candidate[:support_face_keys]))
+            end
+            reasons[:sliver_patch] += Array(report[:candidates]).length
+          end
+
+          {
+            source_face_keys: source_face_keys.compact.uniq,
+            reasons: reasons
+          }
         end
       end
     end
