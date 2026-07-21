@@ -127,6 +127,10 @@ module ULOL
           def valid?
             true
           end
+
+          def mesh(_flags)
+            FakeMesh.new(@vertices.map(&:position))
+          end
         end
 
         class AxisEntities
@@ -159,11 +163,12 @@ module ULOL
         SupportFace = Struct.new(:persistent_id)
 
         class SliverFace
-          attr_reader :outer_loop, :persistent_id
+          attr_reader :outer_loop, :persistent_id, :normal
 
           def initialize(outer_loop, persistent_id)
             @outer_loop = outer_loop
             @persistent_id = persistent_id
+            @normal = Point.new(0.0, 1.0, 0.0)
           end
 
           def valid?
@@ -172,6 +177,18 @@ module ULOL
 
           def loops
             [@outer_loop]
+          end
+
+          def material
+            nil
+          end
+
+          def back_material
+            nil
+          end
+
+          def layer
+            nil
           end
         end
 

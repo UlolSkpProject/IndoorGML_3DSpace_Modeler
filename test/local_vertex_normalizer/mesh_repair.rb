@@ -59,7 +59,8 @@ module ULOL
           instance = normalizer(face_class: SnapshotFace)
           triangles = instance.send(
             :normalized_triangle_snapshot,
-            SnapshotEntities.new([face])
+            SnapshotEntities.new([face]),
+            duplicate_diagnostics: {}
           )
 
           repaired, report = instance.send(
