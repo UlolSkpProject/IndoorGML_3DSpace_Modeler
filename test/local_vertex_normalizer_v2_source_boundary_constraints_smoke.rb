@@ -182,4 +182,117 @@ unless plan[:reasons][20].include?(:foreign_plane_sliver)
   raise "missing foreign-plane sliver detection: #{plan.inspect}"
 end
 
+# A foreign source vertex P that lies within the source boundary tolerance of
+# Edge A-B must become an ordered boundary subdivision A-P-B. The normalized
+# targets are intentionally non-collinear: subdivision is a topology operation,
+# not an exact-collinearity target constraint.
+source_a = {
+  source_key: :a,
+  point: :source_a,
+  point_mm: [0.0, 0.0, 0.0],
+  face_keys: { 30 => true }
+}
+source_b = {
+  source_key: :b,
+  point: :source_b,
+  point_mm: [10.0, 0.0, 0.0],
+  face_keys: { 30 => true }
+}
+source_c = {
+  source_key: :c,
+  point: :source_c,
+  point_mm: [10.0, 10.0, 0.0],
+  face_keys: { 30 => true }
+}
+source_d = {
+  source_key: :d,
+  point: :source_d,
+  point_mm: [0.0, 10.0, 0.0],
+  face_keys: { 30 => true }
+}
+source_p = {
+  source_key: :p,
+  point: :source_p,
+  point_mm: [5.0, 0.00005, 0.0],
+  face_keys: { 31 => true }
+}
+inventory = [source_a, source_b, source_c, source_d, source_p].to_h do |entry|
+  [entry[:source_key], entry]
+end
+expanded, relations = normalizer.send(
+  :subdivide_source_face_boundary_loop,
+  [source_a, source_b, source_c, source_d],
+  30,
+  0,
+  inventory
+)
+unless expanded.map { |entry| entry[:source_key] } == %i[a p b c d]
+  raise "foreign boundary vertex was not inserted in order: #{expanded.inspect}"
+end
+unless relations.length == 1 && relations.first[:inserted_source_key] == :p
+  raise "boundary subdivision relation missing: #{relations.inspect}"
+end
+
+normalized_a = [0, 0, 0]
+normalized_p = [5, -1, 0]
+normalized_b = [10, 0, 0]
+normalized_c = [10, 10, 0]
+normalized_d = [0, 10, 0]
+if normalizer.send(
+  :integer_point_between?,
+  normalized_p,
+  normalized_a,
+  normalized_b
+)
+  raise 'fixture must not depend on exact A-P-B collinearity'
+end
+subdivided_constraint = {
+  source_face_key: 30,
+  source_normal: [0, 0, 1],
+  boundary_subdivision_count: 1,
+  loops: [{
+    outer: true,
+    points: [
+      normalized_a,
+      normalized_p,
+      normalized_b,
+      normalized_c,
+      normalized_d
+    ]
+  }]
+}
+unsubdivided_records = [
+  {
+    points: [normalized_a, normalized_b, normalized_c],
+    source_face_key: 30,
+    source_normal: [0, 0, 1]
+  },
+  {
+    points: [normalized_a, normalized_c, normalized_d],
+    source_face_key: 30,
+    source_normal: [0, 0, 1]
+  }
+]
+plan = normalizer.send(
+  :source_face_constraint_rebuild_plan,
+  unsubdivided_records,
+  { 30 => subdivided_constraint },
+  [],
+  force_all: false
+)
+unless plan[:reasons][30].include?(:cross_face_boundary_subdivision)
+  raise "subdivision did not force source Face reconstruction: #{plan.inspect}"
+end
+constraint_edges = normalizer.send(
+  :source_face_constraint_edges,
+  subdivided_constraint
+)
+unless constraint_edges.include?([normalized_a, normalized_p].sort) &&
+       constraint_edges.include?([normalized_p, normalized_b].sort)
+  raise "subdivision edges A-P/P-B are missing: #{constraint_edges.inspect}"
+end
+if constraint_edges.include?([normalized_a, normalized_b].sort)
+  raise "obsolete A-B remained in the boundary: #{constraint_edges.inspect}"
+end
+
 puts 'LocalVertexNormalizer source boundary constraint plan smoke test: OK'
