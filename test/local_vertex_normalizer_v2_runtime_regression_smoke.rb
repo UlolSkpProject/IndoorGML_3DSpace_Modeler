@@ -1,14 +1,10 @@
 # frozen_string_literal: true
 
-# Standalone regression smoke test for the two failures observed in the
-# 159-group SketchUp run: unresolved source zero-area triangles and exact-plane
-# false negatives during final surface equivalence.
-
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class LocalVertexNormalizer
-        STRICT_COPLANAR_TOLERANCE_MM = 0.000001 unless const_defined?(:STRICT_COPLANAR_TOLERANCE_MM, false)
+        STRICT_COPLANAR_TOLERANCE_MM = 0.00001 unless const_defined?(:STRICT_COPLANAR_TOLERANCE_MM, false)
         STRICT_COPLANAR_ANGLE_TOLERANCE_DEG = 0.001 unless const_defined?(:STRICT_COPLANAR_ANGLE_TOLERANCE_DEG, false)
 
         class ReconstructionError < StandardError; end unless const_defined?(:ReconstructionError, false)
@@ -22,7 +18,6 @@ module ULOL
 
         def repair_degenerate_source_triangles(records, coordinate_space: :grid)
           raise ReconstructionError, 'unresolved source zero-area triangle' if coordinate_space == :source
-
           [records, { repaired_triangles: 0, replaced_pairs: 0 }]
         end
 
@@ -32,8 +27,8 @@ module ULOL
         end
 
         def degenerate_triangle_record?(record, coordinate_space: :grid)
-          coordinate_space
           triangle = record[:points]
+          coordinate_space
           triangle.uniq.length != 3 || integer_zero_vector?(integer_triangle_normal(triangle))
         end
 
@@ -131,7 +126,6 @@ module ULOL
                 unused[canonical_edge_key(current, candidate)]
               end
               raise 'open loop' unless following
-
               unused.delete(canonical_edge_key(current, following))
               previous, current = current, following
             end
@@ -163,14 +157,8 @@ require_relative '../indoor3d/application/local_vertex_normalizer/runtime_regres
 klass = ULOL::Indoor3DGmlModeler::IndoorCore::LocalVertexNormalizer
 normalizer = klass.new
 
-degenerate = {
-  points: [[0, 0, 0], [1, 0, 0], [2, 0, 0]],
-  source_face_key: 10
-}
-valid = {
-  points: [[0, 0, 0], [2, 0, 0], [0, 2, 0]],
-  source_face_key: 10
-}
+degenerate = { points: [[0, 0, 0], [1, 0, 0], [2, 0, 0]], source_face_key: 10 }
+valid = { points: [[0, 0, 0], [2, 0, 0], [0, 2, 0]], source_face_key: 10 }
 records, report = normalizer.send(
   :repair_degenerate_source_triangles,
   [degenerate, valid],
@@ -180,11 +168,12 @@ raise 'source fallback did not remove zero-area record' unless records.length ==
 raise 'source fallback did not mark forced patch' unless records.first[:force_retriangulation]
 raise 'source fallback report missing face key' unless report[:forced_source_face_keys] == [10]
 
-_normalized, cleanup = normalizer.send(
+normalized, cleanup = normalizer.send(
   :normalize_triangle_records_allowing_collisions,
   records
 )
 raise 'force marker was not propagated' unless cleanup[:forced_source_face_keys] == [10]
+raise 'normalized records changed unexpectedly' unless normalized == records
 
 missing_plane_triangle = {
   points: [
@@ -217,5 +206,54 @@ square_bd = [
 first_descriptor = normalizer.send(:normalized_surface_descriptor, square_ac)
 second_descriptor = normalizer.send(:normalized_surface_descriptor, square_bd)
 raise 'surface equivalence depends on diagonal' unless first_descriptor == second_descriptor
+
+# PID 2252884 regression: remove_coplanar_shared_edges merges three triangles
+# into one five-vertex Face. SketchUp then flips the internal P-B diagonal to
+# A-D and emits a 0.14 mm^2 sliver triangle A-D-B. The sliver must inherit the
+# stable plane of the same Face instead of becoming an independent plane patch.
+q = [-1_159_449, -195_213, -4_173_077]
+p_point = [-1_435_618, -195_277, -4_750_000]
+a = [-879_449, -195_148, -4_288_462]
+b = [-599_449, -195_083, -4_403_846]
+d = [-319_449, -195_018, -4_519_231]
+
+expected_diagonal = [
+  { points: [q, p_point, a], source_face_key: 101 },
+  { points: [p_point, a, b], source_face_key: 102 },
+  { points: [p_point, b, d], source_face_key: 103 }
+]
+actual_flipped_diagonal = [
+  { points: [q, p_point, a], source_face_key: 201 },
+  { points: [p_point, a, d], source_face_key: 201 },
+  { points: [a, d, b], source_face_key: 201 }
+]
+
+sliver_plane = normalizer.send(
+  :surface_triangle_plane,
+  actual_flipped_diagonal.last
+)
+stable_plane = normalizer.send(
+  :surface_triangle_plane,
+  actual_flipped_diagonal.first
+)
+if normalizer.send(:surface_planes_compatible?, stable_plane, sliver_plane)
+  raise 'regression fixture no longer exposes an unstable sliver plane'
+end
+
+expected_descriptor = normalizer.send(
+  :normalized_surface_descriptor,
+  expected_diagonal
+)
+actual_descriptor = normalizer.send(
+  :normalized_surface_descriptor,
+  actual_flipped_diagonal
+)
+unless expected_descriptor == actual_descriptor
+  raise 'same Face with a flipped sliver diagonal changed surface descriptor'
+end
+
+unless klass::STRICT_COPLANAR_TOLERANCE_MM == 0.00001
+  raise 'strict coplanar tolerance was not raised to 0.00001 mm'
+end
 
 puts 'LocalVertexNormalizer v2 runtime regression smoke test: OK'
