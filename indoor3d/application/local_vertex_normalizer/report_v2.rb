@@ -41,6 +41,20 @@ module ULOL
             topology_target_report[:search_attempts].to_i
           report[:topology_preserving_grid_max_displacement_mm] =
             topology_target_report[:max_repaired_target_displacement_mm].to_f
+          report[:topology_preserving_grid_global_shell_initial_intersection_count] =
+            topology_target_report[
+              :global_shell_initial_new_intersection_count
+            ].to_i
+          report[:topology_preserving_grid_global_shell_repaired_source_point_count] =
+            topology_target_report[
+              :global_shell_repaired_source_point_count
+            ].to_i
+          report[:topology_preserving_grid_global_shell_search_attempts] =
+            topology_target_report[:global_shell_search_attempts].to_i
+          report[:topology_preserving_grid_global_shell_max_displacement_mm] =
+            topology_target_report[
+              :global_shell_max_repaired_target_displacement_mm
+            ].to_f
           report[:target_collision_count] = vertex_metrics[:target_collision_count]
           report[:merged_target_vertex_count] = vertex_metrics[:merged_target_vertex_count]
           report[:target_collision_samples] = vertex_metrics[:target_collisions]
