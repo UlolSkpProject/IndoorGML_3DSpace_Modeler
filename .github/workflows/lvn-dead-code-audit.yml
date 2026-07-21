@@ -28,4 +28,20 @@ jobs:
           find indoor3d/application/local_vertex_normalizer -name '*.rb' -print0 | xargs -0 -n1 ruby -c
           ruby -c indoor3d/application/local_vertex_normalizer.rb
       - name: Audit definitions and references
-        run: ruby script/lvn_dead_code_audit.rb
+        run: |
+          mkdir -p tmp/lvn-audit
+          ruby script/lvn_dead_code_audit.rb | tee tmp/lvn-audit/report.txt
+      - name: Collect source bundle
+        run: |
+          mkdir -p tmp/lvn-audit/source/indoor3d/application
+          cp -R indoor3d/application/local_vertex_normalizer tmp/lvn-audit/source/indoor3d/application/
+          cp indoor3d/application/local_vertex_normalizer.rb tmp/lvn-audit/source/indoor3d/application/
+          mkdir -p tmp/lvn-audit/source/test
+          find test -maxdepth 1 -type f -name '*local_vertex_normalizer*' -exec cp {} tmp/lvn-audit/source/test/ \;
+          cp script/lvn_dead_code_audit.rb tmp/lvn-audit/source/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lvn-audit-bundle
+          path: tmp/lvn-audit
+          if-no-files-found: error
+          retention-days: 1
