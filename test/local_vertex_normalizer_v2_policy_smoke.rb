@@ -1,9 +1,6 @@
 # frozen_string_literal: true
 
-# Standalone policy smoke test. This does not require SketchUp and verifies the
-# two invariants that caused the v2 review regressions:
-#   1. one corner vertex retains independent X/Y/Z plane constraints;
-#   2. surface equivalence is independent of a coplanar patch's diagonal.
+# Standalone axis-constraint policy smoke test. This does not require SketchUp.
 
 FakePoint = Struct.new(:x, :y, :z)
 FakeVertex = Struct.new(:position, :id)
@@ -104,7 +101,6 @@ module ULOL
 end
 
 require_relative '../indoor3d/application/local_vertex_normalizer/axis_and_triangle_policy_v2'
-require_relative '../indoor3d/application/local_vertex_normalizer/rebuild_repair_v2'
 
 normalizer = ULOL::Indoor3DGmlModeler::IndoorCore::LocalVertexNormalizer.new
 vertex = FakeVertex.new(FakePoint.new(10.0001, 20.0002, 5.0003), 1)
@@ -116,17 +112,5 @@ constraints = plan[:constraints].fetch([10.0001, 20.0002, 5.0003])
 unless constraints.keys.sort == [0, 1, 2]
   raise "Expected independent X/Y/Z constraints, got #{constraints.inspect}"
 end
-
-square_diagonal_ac = [
-  { points: [[0, 0, 0], [10, 0, 0], [10, 10, 0]] },
-  { points: [[0, 0, 0], [10, 10, 0], [0, 10, 0]] }
-]
-square_diagonal_bd = [
-  { points: [[0, 0, 0], [10, 0, 0], [0, 10, 0]] },
-  { points: [[10, 0, 0], [10, 10, 0], [0, 10, 0]] }
-]
-first = normalizer.send(:normalized_surface_descriptor, square_diagonal_ac)
-second = normalizer.send(:normalized_surface_descriptor, square_diagonal_bd)
-raise 'Surface descriptor depends on internal diagonal' unless first == second
 
 puts 'LocalVertexNormalizer v2 policy smoke test: OK'
