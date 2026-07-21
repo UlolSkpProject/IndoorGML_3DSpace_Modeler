@@ -47,4 +47,4 @@ jobs:
           git commit -m 'Remove LocalVertexNormalizer dead code'
           git push origin HEAD:feature/local-vertices-normalization-v2
 
-# Triggered through the Git data API without a pull request.
+# Direct ref trigger; no pull request is used.
