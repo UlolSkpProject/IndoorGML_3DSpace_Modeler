@@ -55,24 +55,6 @@ module ULOL
             topology_target_report[
               :global_shell_max_repaired_target_displacement_mm
             ].to_f
-          report[:topology_preserving_grid_boundary_incidence_source_count] =
-            topology_target_report[:boundary_incidence_source_count].to_i
-          report[:topology_preserving_grid_boundary_incidence_initial_invalid_count] =
-            topology_target_report[
-              :boundary_incidence_initial_invalid_count
-            ].to_i
-          report[:topology_preserving_grid_boundary_incidence_repaired_count] =
-            topology_target_report[:boundary_incidence_repaired_count].to_i
-          report[:topology_preserving_grid_boundary_incidence_repaired_source_point_count] =
-            topology_target_report[
-              :boundary_incidence_repaired_source_point_count
-            ].to_i
-          report[:topology_preserving_grid_boundary_incidence_search_attempts] =
-            topology_target_report[:boundary_incidence_search_attempts].to_i
-          report[:topology_preserving_grid_boundary_incidence_max_displacement_mm] =
-            topology_target_report[
-              :boundary_incidence_max_repaired_target_displacement_mm
-            ].to_f
           report[:target_collision_count] = vertex_metrics[:target_collision_count]
           report[:merged_target_vertex_count] = vertex_metrics[:merged_target_vertex_count]
           report[:target_collision_samples] = vertex_metrics[:target_collisions]
