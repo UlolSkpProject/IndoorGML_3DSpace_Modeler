@@ -39,6 +39,7 @@ module ULOL
     require_relative 'application/storey_filter'
     require_relative 'application/local_vertex_normalizer'
     require_relative 'application/local_vertex_normalizer/coplanar_shared_edge_groups'
+    require_relative 'application/local_vertex_normalizer/pipeline_v2'
 
     require_relative 'infrastructure/scene/scene_group_guard'
     require_relative 'infrastructure/scene/entity_copy_helper'
@@ -190,7 +191,7 @@ module ULOL
         selected_cell_spaces = dispatcher.selected_indoor_gml_entities.select do |entity|
           dispatcher.indoor_feature(entity) == 'CellSpace'
         end
-      
+
         indoor_model.editing? && dispatcher.cell_space_type_change_available?(selected_cell_spaces) ? MF_ENABLED : MF_GRAYED
       end
       @edit_property_command = create_command(
