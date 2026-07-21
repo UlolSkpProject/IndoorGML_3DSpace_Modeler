@@ -8,8 +8,9 @@
 # targets, global shell-embedding grid targets, source-Face provenance,
 # overlap-backed common refinement of source Face boundaries, unique source-key
 # insertion ownership per Face loop, the bridge that exposes those refined loops
-# to grid-target topology planning, the bounded multi-point target search, then
-# the final incidence-1 chord-chain conformity repair.
+# to grid-target topology planning, the bounded multi-point target search, the
+# final incidence-1 chord-chain conformity repair, then preservation of a rebuilt
+# triangle complex that already matches the validated in-memory surface.
 require_relative 'local_vertex_normalizer/legacy_kernel'
 require_relative 'local_vertex_normalizer/coplanar_shared_edge_groups'
 require_relative 'local_vertex_normalizer/pipeline_v2'
@@ -23,3 +24,4 @@ require_relative 'local_vertex_normalizer/source_face_boundary_unique_loop_inser
 require_relative 'local_vertex_normalizer/source_face_boundary_common_refinement_topology_v2'
 require_relative 'local_vertex_normalizer/topology_grid_target_beam_search_v2'
 require_relative 'local_vertex_normalizer/final_boundary_conformity_repair_v2'
+require_relative 'local_vertex_normalizer/validated_rebuild_triangulation_preservation_v2'
