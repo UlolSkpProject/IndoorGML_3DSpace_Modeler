@@ -6,6 +6,7 @@ on:
       - feature/local-vertices-normalization-v2
     paths:
       - script/lvn_dead_code_audit.rb
+      - .github/workflows/lvn-dead-code-audit.yml
 
 permissions:
   contents: write
@@ -45,3 +46,5 @@ jobs:
           fi
           git commit -m 'Remove LocalVertexNormalizer dead code'
           git push origin HEAD:feature/local-vertices-normalization-v2
+
+# Triggered through the Git data API without a pull request.
