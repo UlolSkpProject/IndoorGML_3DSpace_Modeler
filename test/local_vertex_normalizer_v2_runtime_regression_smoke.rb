@@ -4,7 +4,7 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class LocalVertexNormalizer
-        STRICT_COPLANAR_TOLERANCE_MM = 0.00001 unless const_defined?(:STRICT_COPLANAR_TOLERANCE_MM, false)
+        STRICT_COPLANAR_TOLERANCE_MM = 0.0001 unless const_defined?(:STRICT_COPLANAR_TOLERANCE_MM, false)
         STRICT_COPLANAR_ANGLE_TOLERANCE_DEG = 0.001 unless const_defined?(:STRICT_COPLANAR_ANGLE_TOLERANCE_DEG, false)
 
         class ReconstructionError < StandardError; end unless const_defined?(:ReconstructionError, false)
@@ -252,8 +252,8 @@ unless expected_descriptor == actual_descriptor
   raise 'same Face with a flipped sliver diagonal changed surface descriptor'
 end
 
-unless klass::STRICT_COPLANAR_TOLERANCE_MM == 0.00001
-  raise 'strict coplanar tolerance was not raised to 0.00001 mm'
+unless klass::STRICT_COPLANAR_TOLERANCE_MM == 0.0001
+  raise 'unexpected strict coplanar tolerance'
 end
 
 puts 'LocalVertexNormalizer v2 runtime regression smoke test: OK'

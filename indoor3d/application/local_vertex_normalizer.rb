@@ -1,7 +1,19 @@
 # frozen_string_literal: true
 
 # Loads the LocalVertexNormalizer kernel and its v2 policies in dependency order.
-require_relative 'local_vertex_normalizer/legacy_kernel'
+require_relative 'local_vertex_normalizer/kernel_core'
+require_relative 'local_vertex_normalizer/kernel_entity_validation'
+require_relative 'local_vertex_normalizer/kernel_grid_axis'
+require_relative 'local_vertex_normalizer/kernel_sliver_repair'
+require_relative 'local_vertex_normalizer/kernel_triangle_snapshots'
+require_relative 'local_vertex_normalizer/kernel_patch_triangulation_a'
+require_relative 'local_vertex_normalizer/kernel_patch_triangulation_b'
+require_relative 'local_vertex_normalizer/kernel_patch_triangulation_c'
+require_relative 'local_vertex_normalizer/kernel_mesh_validation_a'
+require_relative 'local_vertex_normalizer/kernel_mesh_validation_b'
+require_relative 'local_vertex_normalizer/kernel_rebuild'
+require_relative 'local_vertex_normalizer/kernel_coplanar_orientation'
+require_relative 'local_vertex_normalizer/kernel_numeric'
 require_relative 'local_vertex_normalizer/coplanar_shared_edge_groups'
 require_relative 'local_vertex_normalizer/pipeline_v2'
 require_relative 'local_vertex_normalizer/runtime_regression_fixes_v2'

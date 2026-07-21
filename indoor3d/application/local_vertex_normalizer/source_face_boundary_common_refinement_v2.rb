@@ -417,13 +417,6 @@ module ULOL
             end
           )
         end
-
-        # The previous point-proximity implementation is intentionally disabled.
-        # A lone nearby vertex does not prove that two Face boundaries overlap.
-        def subdivide_source_face_boundary_loop(*)
-          raise ReconstructionError,
-                'Point-only source boundary subdivision is disabled; use Edge overlap common refinement'
-        end
       end
     end
   end
