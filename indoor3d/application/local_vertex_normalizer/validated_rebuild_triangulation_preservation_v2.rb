@@ -15,13 +15,12 @@ module ULOL
           )
         end
 
-        # A rebuilt triangle complex that exactly matches the already validated
-        # in-memory complex must not be handed back to SketchUp's n-gon
-        # triangulator. Removing its coplanar internal edges can recreate
-        # diagonals that cross adjacent surfaces even though the input triangles
-        # passed the exact topology and intersection hard gate.
+        # A rebuilt surface that already passed the post-rebuild hard checkpoint
+        # must not be handed back to SketchUp's n-gon triangulator. Different
+        # internal diagonals are acceptable when the exact patch planes and outer
+        # or hole boundary loops are unchanged.
         def orient_and_merge_rebuilt_surface(entities, validated_triangles)
-          unless rebuilt_triangle_complex_matches_validated_input?(
+          unless rebuilt_surface_matches_validated_input?(
             entities,
             validated_triangles
           )
@@ -58,19 +57,27 @@ module ULOL
           }
 
           cleanup = empty_coplanar_cleanup_report(
-            fallback_reason: :preserved_validated_triangle_complex
+            fallback_reason: :preserved_validated_surface
           )
           cleanup[:merged_faces] = 0
           cleanup[:preserved_constrained_edges] = true
           cleanup[:preserved_validated_triangle_complex] = true
+          cleanup[:preserved_validated_surface] = true
 
           [orientation, cleanup]
         end
 
-        def rebuilt_triangle_complex_matches_validated_input?(
+        def rebuilt_surface_matches_validated_input?(
           entities,
           validated_triangles
         )
+          checkpoint = @validated_rebuild_surface_checkpoint
+          if checkpoint &&
+             checkpoint[:entities_object_id] == entities.object_id &&
+             checkpoint[:validated_records_object_id] == validated_triangles.object_id
+            return checkpoint[:surface_equivalent] == true
+          end
+
           diagnostics = {}
           rebuilt = normalized_triangle_snapshot(
             entities,
@@ -78,18 +85,10 @@ module ULOL
           )
           return false unless diagnostics[:duplicate_count].to_i.zero?
 
-          expected = validated_triangles.map do |record|
-            canonical_triangle_key(
-              record[:points].map { |point| grid_indices(point) }
-            )
-          end.sort
-          actual = rebuilt.map do |record|
-            canonical_triangle_key(
-              record[:points].map { |point| grid_indices(point) }
-            )
-          end.sort
-
-          expected == actual
+          rebuilt, = repair_degenerate_source_triangles(rebuilt)
+          validate_normalized_triangle_mesh!(rebuilt)
+          verify_normalized_surface_equivalence!(validated_triangles, rebuilt)
+          true
         rescue Error, ArgumentError, StandardError
           false
         end
