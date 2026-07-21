@@ -109,7 +109,7 @@ require_relative '../indoor3d/application/local_vertex_normalizer/rebuild_repair
 normalizer = ULOL::Indoor3DGmlModeler::IndoorCore::LocalVertexNormalizer.new
 vertex = FakeVertex.new(FakePoint.new(10.0001, 20.0002, 5.0003), 1)
 faces = [0, 1, 2].map do |axis|
-  FakeFace.new(axis: axis, vertices: [vertex], face: Object.new)
+  FakeFace.new({ axis: axis, vertices: [vertex], face: Object.new })
 end
 plan = normalizer.send(:axis_plane_normalization_plan, faces)
 constraints = plan[:constraints].fetch([10.0001, 20.0002, 5.0003])
