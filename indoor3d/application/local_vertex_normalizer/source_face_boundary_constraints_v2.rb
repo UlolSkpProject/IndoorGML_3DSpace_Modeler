@@ -6,6 +6,15 @@ module ULOL
       class LocalVertexNormalizer
         SOURCE_FACE_FOREIGN_SLIVER_MAX_NORMAL_ALIGNMENT = 0.5 unless
           const_defined?(:SOURCE_FACE_FOREIGN_SLIVER_MAX_NORMAL_ALIGNMENT, false)
+        SOURCE_FACE_BOUNDARY_SUBDIVISION_TOLERANCE_MM =
+          if const_defined?(:STRICT_COPLANAR_TOLERANCE_MM, false)
+            STRICT_COPLANAR_TOLERANCE_MM
+          else
+            0.0001
+          end unless const_defined?(
+            :SOURCE_FACE_BOUNDARY_SUBDIVISION_TOLERANCE_MM,
+            false
+          )
 
         private
 
@@ -48,15 +57,33 @@ module ULOL
         )
           point_targets = short_edge_plan.is_a?(Hash) ?
             Hash(short_edge_plan[:point_targets]) : {}
+          subdivision_inventory =
+            source_face_boundary_subdivision_inventory(entities)
+          subdivision_relations = []
 
-          entities.grep(@face_class).each_with_object({}) do |face, constraints|
+          constraints = entities.grep(@face_class).each_with_object({}) do |face, result|
             next unless face&.valid?
 
             face_key = stable_entity_id(face)
             outer_loop = face.respond_to?(:outer_loop) ? face.outer_loop : nil
-            loops = Array(face.respond_to?(:loops) ? face.loops : []).map do |loop|
-              points = loop.vertices.map do |vertex|
-                normalized = normalized_target(vertex.position, axis_plane_plan)
+            face_relation_count = 0
+            loops = Array(face.respond_to?(:loops) ? face.loops : []).map.with_index do |loop, loop_index|
+              source_entries = loop.vertices.map do |vertex|
+                key = source_point_key(vertex.position)
+                subdivision_inventory.fetch(key)
+              end
+              expanded_entries, relations =
+                subdivide_source_face_boundary_loop(
+                  source_entries,
+                  face_key,
+                  loop_index,
+                  subdivision_inventory
+                )
+              subdivision_relations.concat(relations)
+              face_relation_count += relations.length
+
+              points = expanded_entries.map do |entry|
+                normalized = normalized_target(entry[:point], axis_plane_plan)
                 point_targets[grid_indices(normalized)] || normalized
               end
               {
@@ -66,15 +93,167 @@ module ULOL
             end
             next if loops.empty?
 
-            constraints[face_key] = {
+            result[face_key] = {
               source_face_key: face_key,
               source_normal: vector_components(face.normal),
               material: face.material,
               back_material: face.back_material,
               layer: face.layer,
-              loops: loops
+              loops: loops,
+              boundary_subdivision_count: face_relation_count
             }
           end
+
+          @source_face_boundary_subdivision_report = {
+            relation_count: subdivision_relations.length,
+            face_count: subdivision_relations.map { |entry| entry[:face_key] }.uniq.length,
+            inserted_source_point_count:
+              subdivision_relations.map { |entry| entry[:inserted_source_key] }.uniq.length,
+            max_source_distance_mm:
+              subdivision_relations.map { |entry| entry[:source_distance_mm] }.max || 0.0,
+            relations: subdivision_relations.first(100)
+          }
+          constraints
+        end
+
+        # Build one source-space vertex inventory shared by every Face. A SketchUp
+        # Face loop can still expose a long boundary edge A-B while a different
+        # Face owns a vertex P in the interior of that geometric edge. The source
+        # boundary is then non-conforming even though P is geometrically incident.
+        def source_face_boundary_subdivision_inventory(entities)
+          entities.grep(@face_class).each_with_object({}) do |face, inventory|
+            next unless face&.valid?
+
+            face_key = stable_entity_id(face)
+            Array(face.respond_to?(:loops) ? face.loops : []).each do |loop|
+              loop.vertices.each do |vertex|
+                point = vertex.position
+                key = source_point_key(point)
+                entry = inventory[key] ||= {
+                  source_key: key,
+                  point: point,
+                  point_mm: point_components_mm(point),
+                  face_keys: {}
+                }
+                entry[:face_keys][face_key] = true
+              end
+            end
+          end
+        end
+
+        # Insert every foreign source vertex that belongs in the open interior of
+        # one loop edge. This changes the ordered boundary from A-B to A-P-B; it
+        # does not require the independently rounded targets A, P, and B to remain
+        # exactly collinear. The resulting shared subdivision is authoritative for
+        # later source-Face reconstruction and conforming triangulation.
+        def subdivide_source_face_boundary_loop(
+          loop_entries,
+          face_key,
+          loop_index,
+          inventory
+        )
+          return [loop_entries, []] if loop_entries.length < 2
+
+          loop_source_keys = loop_entries.to_h do |entry|
+            [entry[:source_key], true]
+          end
+          expanded = []
+          relations = []
+
+          loop_entries.each_index do |index|
+            first = loop_entries[index]
+            second = loop_entries[(index + 1) % loop_entries.length]
+            expanded << first
+
+            insertions = inventory.each_value.filter_map do |candidate|
+              next if loop_source_keys[candidate[:source_key]]
+              next if candidate[:face_keys][face_key]
+              next unless source_point_within_segment_aabb?(
+                candidate[:point_mm],
+                first[:point_mm],
+                second[:point_mm],
+                SOURCE_FACE_BOUNDARY_SUBDIVISION_TOLERANCE_MM
+              )
+
+              distance, parameter = source_point_segment_distance_and_parameter_mm(
+                candidate[:point_mm],
+                first[:point_mm],
+                second[:point_mm]
+              )
+              next unless parameter && parameter.positive? && parameter < 1.0
+              next if distance > SOURCE_FACE_BOUNDARY_SUBDIVISION_TOLERANCE_MM
+
+              edge_length = source_point_distance_mm(
+                first[:point_mm],
+                second[:point_mm]
+              )
+              next unless edge_length.positive?
+              next if (parameter * edge_length) <=
+                      SOURCE_FACE_BOUNDARY_SUBDIVISION_TOLERANCE_MM
+              next if ((1.0 - parameter) * edge_length) <=
+                      SOURCE_FACE_BOUNDARY_SUBDIVISION_TOLERANCE_MM
+
+              [parameter, distance, candidate[:source_key], candidate]
+            end
+
+            insertions.sort_by! do |parameter, distance, source_key, _candidate|
+              [parameter, distance, source_key]
+            end
+            insertions.each do |parameter, distance, _source_key, candidate|
+              expanded << candidate
+              relations << {
+                face_key: face_key,
+                loop_index: loop_index,
+                edge_first_source_key: first[:source_key],
+                edge_second_source_key: second[:source_key],
+                inserted_source_key: candidate[:source_key],
+                inserted_source_face_keys: candidate[:face_keys].keys.sort,
+                source_distance_mm: distance,
+                source_parameter: parameter
+              }
+            end
+          end
+
+          compact = []
+          expanded.each do |entry|
+            compact << entry if compact.empty? ||
+              compact.last[:source_key] != entry[:source_key]
+          end
+          compact.pop if compact.length > 1 &&
+            compact.first[:source_key] == compact.last[:source_key]
+          [compact, relations]
+        end
+
+        def source_point_within_segment_aabb?(point, first, second, tolerance)
+          3.times.all? do |axis|
+            minimum, maximum = [first[axis], second[axis]].minmax
+            point[axis] >= (minimum - tolerance) &&
+              point[axis] <= (maximum + tolerance)
+          end
+        end
+
+        def source_point_segment_distance_and_parameter_mm(point, first, second)
+          direction = 3.times.map { |axis| second[axis] - first[axis] }
+          length_squared = direction.sum { |value| value * value }
+          return [Float::INFINITY, nil] unless length_squared.positive?
+
+          offset = 3.times.map { |axis| point[axis] - first[axis] }
+          parameter = 3.times.sum do |axis|
+            offset[axis] * direction[axis]
+          end / length_squared
+          closest = 3.times.map do |axis|
+            first[axis] + (parameter * direction[axis])
+          end
+          [source_point_distance_mm(point, closest), parameter]
+        end
+
+        def source_point_distance_mm(first, second)
+          Math.sqrt(
+            3.times.sum do |axis|
+              delta = first[axis] - second[axis]
+              delta * delta
+            end
+          )
         end
 
         # Rebuild source Faces whose boundary provenance is no longer represented
@@ -87,6 +266,13 @@ module ULOL
           force_all: false
         )
           constraints = @normalized_source_face_constraints || {}
+          subdivision_report = @source_face_boundary_subdivision_report || {
+            relation_count: 0,
+            face_count: 0,
+            inserted_source_point_count: 0,
+            max_source_distance_mm: 0.0,
+            relations: []
+          }
           return retriangulate_exact_coplanar_patches_before_source_boundary_v2(
             triangle_records,
             forced_source_face_keys: forced_source_face_keys,
@@ -129,6 +315,16 @@ module ULOL
           [
             rebuilt_records,
             patch_report.merge(
+              source_boundary_subdivision_relation_count:
+                subdivision_report[:relation_count],
+              source_boundary_subdivision_face_count:
+                subdivision_report[:face_count],
+              source_boundary_subdivision_inserted_source_point_count:
+                subdivision_report[:inserted_source_point_count],
+              source_boundary_subdivision_max_source_distance_mm:
+                subdivision_report[:max_source_distance_mm],
+              source_boundary_subdivision_relations:
+                subdivision_report[:relations],
               source_boundary_constraint_rebuilds:
                 constraint_report[:rebuilt_face_count],
               source_boundary_constraint_face_keys:
@@ -150,6 +346,7 @@ module ULOL
           # later debug/readback snapshot on the same normalizer instance to reuse
           # stale source Face entities.
           @normalized_source_face_constraints = nil
+          @source_face_boundary_subdivision_report = nil
         end
 
         def source_face_constraint_rebuild_plan(
@@ -170,11 +367,15 @@ module ULOL
               reasons[face_key] << :forced_triangle_repair
             end
 
-            unless source_face_record_boundary_matches_constraint?(
+            boundary_matches = source_face_record_boundary_matches_constraint?(
               face_records,
               constraint
             )
+            unless boundary_matches
               reasons[face_key] << :boundary_provenance_changed
+              if constraint[:boundary_subdivision_count].to_i.positive?
+                reasons[face_key] << :cross_face_boundary_subdivision
+              end
             end
 
             if source_face_contains_foreign_sliver?(face_records, constraint)
