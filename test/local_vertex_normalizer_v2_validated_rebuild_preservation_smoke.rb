@@ -12,10 +12,15 @@ module ULOL
         def initialize
           @snapshot = []
           @legacy_merge_called = false
+          @surface_equivalent = true
         end
 
         def snapshot=(records)
           @snapshot = records
+        end
+
+        def surface_equivalent=(value)
+          @surface_equivalent = value
         end
 
         private
@@ -30,12 +35,22 @@ module ULOL
           @snapshot
         end
 
-        def grid_indices(point)
-          point
+        def repair_degenerate_source_triangles(records)
+          [records, { repaired_triangles: 0, replaced_pairs: 0 }]
         end
 
-        def canonical_triangle_key(triangle)
-          triangle.sort
+        def validate_normalized_triangle_mesh!(_records)
+          { valid: true }
+        end
+
+        def verify_normalized_surface_equivalence!(_expected, _actual)
+          raise Error, 'different surface' unless @surface_equivalent
+
+          { equivalent: true }
+        end
+
+        def grid_indices(point)
+          point
         end
 
         def geometry_counts(_entities)
@@ -92,30 +107,47 @@ orientation, cleanup = normalizer.send(
 if normalizer.legacy_merge_called
   raise 'legacy coplanar merge ran for an exact validated rebuild'
 end
-unless cleanup[:preserved_validated_triangle_complex] == true &&
+unless cleanup[:preserved_validated_surface] == true &&
        cleanup[:preserved_constrained_edges] == true &&
-       cleanup[:fallback_reason] == :preserved_validated_triangle_complex
-  raise "validated triangle preservation report mismatch: #{cleanup.inspect}"
+       cleanup[:fallback_reason] == :preserved_validated_surface
+  raise "validated surface preservation report mismatch: #{cleanup.inspect}"
 end
 unless orientation[:shell_component_count] == 1
   raise "orientation report mismatch: #{orientation.inspect}"
 end
 
+# A different diagonal over the same square is a surface-equivalent rebuild and
+# must also preserve the rebuilt edges instead of invoking n-gon cleanup.
 normalizer = klass.new
 normalizer.snapshot = [
   record.call([[0, 0, 0], [10, 0, 0], [10, 10, 0]]),
   record.call([[0, 0, 0], [10, 10, 0], [0, 10, 0]])
 ]
+normalizer.surface_equivalent = true
+_orientation, cleanup = normalizer.send(
+  :orient_and_merge_rebuilt_surface,
+  Object.new,
+  validated
+)
+if normalizer.legacy_merge_called || cleanup[:preserved_validated_surface] != true
+  raise 'surface-equivalent alternate diagonal was not preserved'
+end
+
+# A genuinely different surface must fall back to the legacy path. The pipeline
+# hard checkpoint normally stops before this branch, but the wrapper remains
+# conservative when called independently.
+normalizer = klass.new
+normalizer.snapshot = [record.call([[0, 0, 0], [10, 0, 0], [0, 11, 0]])]
+normalizer.surface_equivalent = false
 orientation, cleanup = normalizer.send(
   :orient_and_merge_rebuilt_surface,
   Object.new,
   validated
 )
-
 unless normalizer.legacy_merge_called &&
        orientation == :legacy_orientation &&
        cleanup == { legacy: true }
-  raise 'mismatched rebuild did not use the legacy cleanup path'
+  raise 'different rebuilt surface did not use the legacy cleanup path'
 end
 
-puts 'LocalVertexNormalizer validated rebuild triangulation preservation smoke test: OK'
+puts 'LocalVertexNormalizer validated rebuild surface preservation smoke test: OK'
