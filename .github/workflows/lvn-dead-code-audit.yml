@@ -1,6 +1,9 @@
 name: LVN dead code audit
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - feature/local-vertices-normalization-v2
