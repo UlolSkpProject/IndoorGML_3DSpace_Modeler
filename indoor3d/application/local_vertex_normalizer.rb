@@ -6,9 +6,9 @@
 # v2 normalization pipeline, runtime regression fixes from integration runs,
 # the production coplanar-tolerance policy, Face-local topology-preserving grid
 # targets, global shell-embedding grid targets, source-Face provenance,
-# overlap-backed common refinement of source Face boundaries, the bridge that
-# exposes those refined loops to grid-target topology planning, then the bounded
-# multi-point target-search fallback.
+# overlap-backed common refinement of source Face boundaries, unique source-key
+# insertion ownership per Face loop, the bridge that exposes those refined loops
+# to grid-target topology planning, then the bounded multi-point target search.
 require_relative 'local_vertex_normalizer/legacy_kernel'
 require_relative 'local_vertex_normalizer/coplanar_shared_edge_groups'
 require_relative 'local_vertex_normalizer/pipeline_v2'
@@ -18,5 +18,6 @@ require_relative 'local_vertex_normalizer/topology_preserving_grid_targets_v2'
 require_relative 'local_vertex_normalizer/global_shell_embedding_grid_targets_v2'
 require_relative 'local_vertex_normalizer/source_face_boundary_constraints_v2'
 require_relative 'local_vertex_normalizer/source_face_boundary_common_refinement_v2'
+require_relative 'local_vertex_normalizer/source_face_boundary_unique_loop_insertions_v2'
 require_relative 'local_vertex_normalizer/source_face_boundary_common_refinement_topology_v2'
 require_relative 'local_vertex_normalizer/topology_grid_target_beam_search_v2'
