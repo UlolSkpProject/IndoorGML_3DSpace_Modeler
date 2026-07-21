@@ -4,10 +4,6 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class LocalVertexNormalizer
-        remove_const(:STRICT_COPLANAR_TOLERANCE_MM) if
-          const_defined?(:STRICT_COPLANAR_TOLERANCE_MM, false)
-        STRICT_COPLANAR_TOLERANCE_MM = 0.00001
-
         private
 
         unless private_method_defined?(:repair_degenerate_source_triangles_before_runtime_regression_v2)
