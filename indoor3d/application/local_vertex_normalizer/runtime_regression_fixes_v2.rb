@@ -4,6 +4,10 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class LocalVertexNormalizer
+        remove_const(:STRICT_COPLANAR_TOLERANCE_MM) if
+          const_defined?(:STRICT_COPLANAR_TOLERANCE_MM, false)
+        STRICT_COPLANAR_TOLERANCE_MM = 0.00001
+
         private
 
         unless private_method_defined?(:repair_degenerate_source_triangles_before_runtime_regression_v2)
@@ -170,12 +174,19 @@ module ULOL
           descriptors.sort
         end
 
+        # SketchUp can merge coplanar triangles into one n-gon and then expose
+        # a different internal triangulation through Face#mesh. A very thin
+        # triangle from that triangulation has an unstable normal even when every
+        # vertex lies on the original Face plane. For records emitted from the
+        # same Face, use the widest triangle as the reference plane and let every
+        # record whose vertices fit that plane inherit it.
         def surface_coplanar_clusters(records)
           clusters = []
-          records.each do |record|
-            plane = surface_triangle_plane(record)
-            cluster = clusters.find do |entry|
-              surface_planes_compatible?(entry[:plane], plane)
+          surface_records_with_reference_planes(records).each do |entry|
+            record = entry[:record]
+            plane = entry[:plane]
+            cluster = clusters.find do |candidate|
+              surface_planes_compatible?(candidate[:plane], plane)
             end
             if cluster
               cluster[:records] << record
@@ -184,6 +195,46 @@ module ULOL
             end
           end
           clusters.map { |entry| entry[:records] }
+        end
+
+        def surface_records_with_reference_planes(records)
+          grouped_indices = Hash.new { |hash, key| hash[key] = [] }
+          records.each_with_index do |record, index|
+            face_key = record[:source_face_key]
+            group_key = face_key.nil? ? [:record, index] : [:face, face_key]
+            grouped_indices[group_key] << index
+          end
+
+          plane_by_index = {}
+          tolerance_grid = STRICT_COPLANAR_TOLERANCE_MM / @tolerance_mm
+          grouped_indices.each_value do |indices|
+            reference_index = indices.max_by do |index|
+              surface_triangle_area_measure(records[index])
+            end
+            reference_plane = surface_triangle_plane(records[reference_index])
+
+            indices.each do |index|
+              record = records[index]
+              triangle = record[:points].map { |point| grid_indices(point) }
+              plane_by_index[index] =
+                if surface_plane_deviation_grid(reference_plane, triangle) <=
+                   tolerance_grid
+                  reference_plane
+                else
+                  surface_triangle_plane(record)
+                end
+            end
+          end
+
+          records.each_with_index.map do |record, index|
+            { record: record, plane: plane_by_index.fetch(index) }
+          end
+        end
+
+        def surface_triangle_area_measure(record)
+          triangle = record[:points].map { |point| grid_indices(point) }
+          normal = integer_triangle_normal(triangle)
+          integer_dot(normal, normal)
         end
 
         def surface_triangle_plane(record)
@@ -294,21 +345,40 @@ module ULOL
           end.uniq
         end
 
+        # Derive the canonical plane from a wide boundary triangle instead of
+        # the first non-collinear triple. The latter can select a micro-sliver and
+        # make the descriptor depend on SketchUp's internal n-gon diagonal.
         def surface_patch_plane_key(loops)
           points = loops.flatten(1).uniq.sort
-          origin = points.first
-          if origin
-            (1...points.length).each do |first_index|
-              ((first_index + 1)...points.length).each do |second_index|
-                triangle = [origin, points[first_index], points[second_index]]
-                next if integer_zero_vector?(integer_triangle_normal(triangle))
+          triangle = widest_surface_boundary_triangle(points)
+          return exact_integer_plane_key(triangle) if triangle
 
-                return exact_integer_plane_key(triangle)
-              end
-            end
-          end
           raise TopologyChangedError,
                 "Surface patch boundary cannot define a plane: #{loops.inspect}"
+        end
+
+        def widest_surface_boundary_triangle(points)
+          return nil if points.length < 3
+
+          widest_pair = points.combination(2).max_by do |first, second|
+            delta = integer_subtract(second, first)
+            [integer_dot(delta, delta), first, second]
+          end
+          return nil unless widest_pair
+
+          first, second = widest_pair
+          third = points.reject { |point| point == first || point == second }
+                        .max_by do |point|
+            triangle = [first, second, point]
+            normal = integer_triangle_normal(triangle)
+            [integer_dot(normal, normal), point]
+          end
+          return nil unless third
+
+          triangle = [first, second, third]
+          return nil if integer_zero_vector?(integer_triangle_normal(triangle))
+
+          triangle
         end
       end
     end
