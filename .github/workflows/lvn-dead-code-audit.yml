@@ -1,0 +1,27 @@
+name: LVN dead code audit
+
+on:
+  push:
+    branches:
+      - feature/local-vertices-normalization-v2
+    paths:
+      - script/lvn_dead_code_audit.rb
+      - .github/workflows/lvn-dead-code-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - name: Ruby syntax
+        run: |
+          find indoor3d/application/local_vertex_normalizer -name '*.rb' -print0 | xargs -0 -n1 ruby -c
+          ruby -c indoor3d/application/local_vertex_normalizer.rb
+      - name: Audit definitions and references
+        run: ruby script/lvn_dead_code_audit.rb
