@@ -71,7 +71,8 @@ module ULOL
 
         # Step 10. Each repair is bounded and accepted only when it improves the
         # entity topology. As soon as the group is again a manifold solid, later
-        # destructive repair attempts are skipped.
+        # destructive repair attempts are skipped. Geometric equivalence with the
+        # validated in-memory surface is checked after this sequence.
         def repair_rebuilt_entity_before_rollback(entity, entities)
           report = {
             attempted: false,
@@ -253,6 +254,153 @@ module ULOL
                   "repairs: #{entity_label(entity)} #{topology.inspect}"
           end
           report
+        end
+
+        # Manifold alone is insufficient: SketchUp repairs must preserve the exact
+        # validated surface. The descriptor ignores internal triangulation and
+        # collinear boundary subdivision, but preserves each connected coplanar
+        # patch plane and its outer/hole boundary loops.
+        def verify_normalized_surface_equivalence!(expected_records, actual_records)
+          expected = normalized_surface_descriptor(expected_records)
+          actual = normalized_surface_descriptor(actual_records)
+          if expected == actual
+            return {
+              equivalent: true,
+              expected_patch_count: expected.length,
+              actual_patch_count: actual.length
+            }
+          end
+
+          missing = expected - actual
+          added = actual - expected
+          raise TopologyChangedError,
+                "Final rebuilt surface differs from validated triangle surface: " \
+                "missing_patches=#{missing.length} added_patches=#{added.length} " \
+                "missing_sample=#{missing.first(3).inspect} " \
+                "added_sample=#{added.first(3).inspect}"
+        end
+
+        def normalized_surface_descriptor(triangle_records)
+          records = triangle_records.reject do |record|
+            triangle = record[:points].map { |point| grid_indices(point) }
+            triangle.uniq.length != 3 ||
+              integer_zero_vector?(integer_triangle_normal(triangle))
+          end
+          groups = records.group_by do |record|
+            exact_integer_plane_key(
+              record[:points].map { |point| grid_indices(point) }
+            )
+          end
+
+          descriptors = []
+          groups.each do |plane_key, plane_records|
+            coplanar_geometry_components(plane_records).each do |component|
+              edge_owners = Hash.new { |hash, key| hash[key] = [] }
+              component.each_with_index do |record, index|
+                triangle = record[:points].map { |point| grid_indices(point) }
+                3.times do |edge_index|
+                  edge = canonical_edge_key(
+                    triangle[edge_index],
+                    triangle[(edge_index + 1) % 3]
+                  )
+                  edge_owners[edge] << index
+                end
+              end
+              overused = edge_owners.select { |_edge, owners| owners.length > 2 }
+              unless overused.empty?
+                raise TopologyChangedError,
+                      "Surface descriptor found overused coplanar edges: " \
+                      "#{overused.first(5).inspect}"
+              end
+
+              boundary_edges = edge_owners.filter_map do |edge, owners|
+                edge if owners.length == 1
+              end
+              loops = exact_boundary_loops(boundary_edges).map do |loop|
+                canonical_exact_loop(simplify_exact_loop(loop))
+              end.sort
+              descriptors << [plane_key, loops]
+            end
+          end
+          descriptors.sort
+        end
+
+        def coplanar_geometry_components(records)
+          edge_owners = Hash.new { |hash, key| hash[key] = [] }
+          records.each_with_index do |record, index|
+            triangle = record[:points].map { |point| grid_indices(point) }
+            3.times do |edge_index|
+              edge = canonical_edge_key(
+                triangle[edge_index],
+                triangle[(edge_index + 1) % 3]
+              )
+              edge_owners[edge] << index
+            end
+          end
+
+          adjacency = Array.new(records.length) { [] }
+          edge_owners.each_value do |owners|
+            next unless owners.length == 2
+
+            first, second = owners
+            adjacency[first] << second
+            adjacency[second] << first
+          end
+
+          visited = Array.new(records.length, false)
+          records.each_index.filter_map do |seed|
+            next if visited[seed]
+
+            visited[seed] = true
+            queue = [seed]
+            component = []
+            until queue.empty?
+              index = queue.shift
+              component << records[index]
+              adjacency[index].each do |neighbor|
+                next if visited[neighbor]
+
+                visited[neighbor] = true
+                queue << neighbor
+              end
+            end
+            component
+          end
+        end
+
+        def simplify_exact_loop(loop)
+          simplified = loop.dup
+          changed = true
+          while changed && simplified.length > 3
+            changed = false
+            simplified.each_index do |index|
+              previous = simplified[(index - 1) % simplified.length]
+              current = simplified[index]
+              following = simplified[(index + 1) % simplified.length]
+              incoming = integer_subtract(current, previous)
+              outgoing = integer_subtract(following, current)
+              next unless integer_zero_vector?(integer_cross(incoming, outgoing))
+              next unless integer_dot(incoming, outgoing).positive?
+
+              simplified.delete_at(index)
+              changed = true
+              break
+            end
+          end
+          simplified
+        end
+
+        def canonical_exact_loop(loop)
+          raise TopologyChangedError, 'Surface boundary loop has fewer than three points' if
+            loop.length < 3
+
+          candidates = []
+          [loop, loop.reverse].each do |sequence|
+            sequence.each_index do |index|
+              candidates << sequence[index..] + sequence[0...index]
+            end
+          end
+          candidates.min { |first, second| first <=> second }
         end
       end
     end
