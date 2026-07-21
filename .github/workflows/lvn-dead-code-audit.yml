@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   cleanup:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -24,32 +24,24 @@ jobs:
       - name: Apply cleanup
         run: ruby script/lvn_dead_code_audit.rb
       - name: Check Ruby syntax
-        shell: pwsh
         run: |
-          Get-ChildItem indoor3d/application/local_vertex_normalizer -Filter *.rb | ForEach-Object {
-            ruby -c $_.FullName
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
+          find indoor3d/application/local_vertex_normalizer -name '*.rb' -print0 | xargs -0 -n1 ruby -c
           ruby -c indoor3d/application/local_vertex_normalizer.rb
       - name: Run LVN smoke tests
-        shell: pwsh
         run: |
-          Get-ChildItem test -Filter local_vertex_normalizer_v2_*smoke.rb | ForEach-Object {
-            ruby $_.FullName
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
+          for test_file in test/local_vertex_normalizer_v2_*smoke.rb; do
+            ruby "$test_file"
+          done
       - name: Run regression tests
         run: ruby test/run_all.rb
       - name: Commit cleanup directly to branch
-        shell: pwsh
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
-          git diff --cached --quiet
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "No cleanup changes to commit"
+          if git diff --cached --quiet; then
+            echo 'No cleanup changes to commit'
             exit 0
-          }
-          git commit -m "Remove LocalVertexNormalizer dead code"
+          fi
+          git commit -m 'Remove LocalVertexNormalizer dead code'
           git push origin HEAD:feature/local-vertices-normalization-v2
