@@ -17,6 +17,9 @@ module ULOL
           final_surface_equivalence:,
           final_repair:
         )
+          topology_target_report =
+            Hash(axis_plane_plan[:topology_target_report])
+
           report[:normalization_strategy] = :validated_triangle_rebuild_v2
           report[:axis_constraint_priority] = axis_plane_plan[:axis_priority]
           report[:constrained_coordinate_count] =
@@ -27,6 +30,17 @@ module ULOL
             axis_plane_plan[:resolved_constraint_conflict_count]
           report[:discarded_axis_constraint_count] =
             axis_plane_plan[:discarded_constraint_count]
+          report[:topology_preserving_grid_projection] = topology_target_report
+          report[:topology_preserving_grid_initial_invalid_face_count] =
+            topology_target_report[:initial_invalid_face_count].to_i
+          report[:topology_preserving_grid_repaired_face_count] =
+            topology_target_report[:repaired_face_count].to_i
+          report[:topology_preserving_grid_override_count] =
+            topology_target_report[:override_count].to_i
+          report[:topology_preserving_grid_search_attempts] =
+            topology_target_report[:search_attempts].to_i
+          report[:topology_preserving_grid_max_displacement_mm] =
+            topology_target_report[:max_repaired_target_displacement_mm].to_f
           report[:target_collision_count] = vertex_metrics[:target_collision_count]
           report[:merged_target_vertex_count] = vertex_metrics[:merged_target_vertex_count]
           report[:target_collision_samples] = vertex_metrics[:target_collisions]
