@@ -87,6 +87,7 @@ module ULOL
           @validated_rebuild_surface_checkpoint = {
             entities_object_id: snapshot[:entities_object_id],
             validated_records_object_id: expected_records.object_id,
+            validated_records: expected_records.map(&:dup),
             surface_equivalent: true,
             exact_triangle_match: exact_error.nil?,
             exact_triangle_error:
