@@ -10,8 +10,8 @@
 # insertion ownership per Face loop, the bridge that exposes those refined loops
 # to grid-target topology planning, the bounded multi-point target search, the
 # final incidence-1 chord-chain conformity repair, the post-rebuild surface hard
-# checkpoint, then preservation of a rebuilt surface that already matches the
-# validated in-memory surface.
+# checkpoint, preservation of a rebuilt surface that already matches the
+# validated in-memory surface, then stepwise surface-preserving entity repair.
 require_relative 'local_vertex_normalizer/legacy_kernel'
 require_relative 'local_vertex_normalizer/coplanar_shared_edge_groups'
 require_relative 'local_vertex_normalizer/pipeline_v2'
@@ -27,3 +27,4 @@ require_relative 'local_vertex_normalizer/topology_grid_target_beam_search_v2'
 require_relative 'local_vertex_normalizer/final_boundary_conformity_repair_v2'
 require_relative 'local_vertex_normalizer/rebuilt_surface_checkpoint_v2'
 require_relative 'local_vertex_normalizer/validated_rebuild_triangulation_preservation_v2'
+require_relative 'local_vertex_normalizer/surface_preserving_rebuilt_entity_repair_v2'
