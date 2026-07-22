@@ -4,8 +4,9 @@
 # this file installs the complete LocalVertexNormalizer implementation in the
 # required order: legacy geometric primitives, safe coplanar edge grouping, the
 # v2 normalization pipeline, then runtime regression fixes from integration
-# runs.
+# runs. The final provenance layer only emits diagnostics when patch rebuild fails.
 require_relative 'local_vertex_normalizer/legacy_kernel'
 require_relative 'local_vertex_normalizer/coplanar_shared_edge_groups'
 require_relative 'local_vertex_normalizer/pipeline_v2'
 require_relative 'local_vertex_normalizer/runtime_regression_fixes_v2'
+require_relative 'local_vertex_normalizer/coplanar_patch_provenance_trace_v2'
