@@ -227,6 +227,18 @@ module ULOL
           assert_equal [[:commit_operation]], model.calls.drop(1)
         end
 
+        def test_normalize_can_reuse_a_caller_owned_operation
+          model = FakeModel.new
+          instance = normalizer(model: model)
+          instance.define_singleton_method(:validate_entity!) { |_entity| true }
+          instance.define_singleton_method(:normalize_entity) { |_entity| :rebuilt }
+
+          result = instance.normalize(Object.new, manage_operation: false)
+
+          assert_equal :rebuilt, result
+          assert_empty model.calls
+        end
+
         def test_operation_aborts_when_reconstruction_raises
           model = FakeModel.new
           error = assert_raises(RuntimeError) do

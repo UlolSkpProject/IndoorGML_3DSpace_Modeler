@@ -15,29 +15,46 @@ module ULOL
       # which may collapse exported GML rings even when SketchUp still reports a
       # manifold solid.
       class LocalVertexNormalizer
+        # Default spacing of the local-coordinate normalization grid.
         DEFAULT_TOLERANCE_MM = 0.001
 
-        # Numerical comparison epsilon. This is not the normalization grid size.
+        # Numerical equality epsilon; this is not the normalization grid size.
         GRID_EPSILON_MM = 0.000001
 
-        STRICT_COPLANAR_TOLERANCE_MM = 0.001
+        # Maximum plane deviation accepted by strict coplanar operations.
+        STRICT_COPLANAR_TOLERANCE_MM = 0.00005
+        # Maximum normal-angle difference accepted by strict coplanar operations.
         STRICT_COPLANAR_ANGLE_TOLERANCE_DEG = 0.001
 
+        # General coplanar tolerance retained for reporting and broad policy.
         COPLANAR_TOLERANCE_MM = 0.01
+        # General angular tolerance retained for broad coplanar policy.
         COPLANAR_ANGLE_TOLERANCE_DEG = 0.01
+        # Angular tolerance used to recognize local-axis-aligned planes.
         AXIS_PLANE_ANGLE_TOLERANCE_DEG = COPLANAR_ANGLE_TOLERANCE_DEG
 
+        # Squared-area epsilon used to classify collinear triangle points.
         COLLINEAR_CROSS_EPSILON_IN2 = 1.0e-12
+        # Maximum number of iterative surface-border repair attempts.
         MAX_STITCH_REPAIRS = 1_000
+        # Maximum number of iterative coplanar shared-edge cleanup passes.
         MAX_COPLANAR_PASSES = 20
+        # Signed-volume epsilon used when deciding shell orientation.
         SIGNED_VOLUME_EPSILON_IN3 = 1.0e-12
+        # Millimetres represented by one SketchUp internal inch.
         MM_PER_INCH = 25.4
 
+        # Maximum short-edge length considered for supported sliver repair.
         SHORT_EDGE_SLIVER_THRESHOLD_MM = 1.0
+        # Minimum aspect ratio required to classify a face as a sliver.
         SHORT_EDGE_SLIVER_MIN_ASPECT_RATIO = 20.0
+        # Maximum direction difference between paired sliver boundary segments.
         SHORT_EDGE_SLIVER_PARALLEL_ANGLE_DEG = 1.0
+        # Relative length difference allowed between paired sliver segments.
         SHORT_EDGE_SLIVER_LENGTH_RELATIVE_TOLERANCE = 0.05
+        # Minimum connected face count required for a repairable sliver patch.
         SHORT_EDGE_SLIVER_MIN_PATCH_FACES = 2
+        # Maximum spatial diameter allowed for one short-edge sliver cluster.
         SHORT_EDGE_SLIVER_MAX_CLUSTER_DIAMETER_MM = 1.0
 
         class Error < StandardError; end
