@@ -717,6 +717,74 @@ module ULOL
           assert records.all? { |record| record[:source_boundary_snapshot] }
         end
 
+        def test_coplanar_cleanup_restores_validated_surface_when_geometry_changes
+          instance = normalizer
+          entities = Object.new
+          validated = [{ points: [point(0, 0, 0), point(1, 0, 0), point(0, 1, 0)] }]
+          changed = [{ points: [point(0, 0, 0), point(2, 0, 0), point(0, 1, 0)] }]
+          calls = []
+          topology = {
+            faces: 4,
+            edges: 6,
+            vertices: 4,
+            boundary_edges: 0,
+            nonmanifold_edges: 0
+          }
+          consistency = {
+            reversed_faces: 0,
+            consistency_reversed_faces: 0,
+            component_count: 1,
+            outward_reversed_faces: 0,
+            signed_volume_before_in3: 1.0,
+            signed_volume_after_in3: 1.0,
+            error: nil
+          }
+
+          instance.define_singleton_method(:geometry_counts) { |_entities| topology }
+          instance.define_singleton_method(:closed_surface?) { |_counts| true }
+          instance.define_singleton_method(:repair_reverse_faces) do |_entities|
+            consistency
+          end
+          instance.define_singleton_method(:remove_coplanar_shared_edges) do |*_args, **_kwargs|
+            calls << :cleanup
+            { removed_groups: 1, removed_edges: 1 }
+          end
+          instance.define_singleton_method(:normalized_triangle_snapshot) do |_entities|
+            calls << :snapshot
+            changed
+          end
+          instance.define_singleton_method(:repair_degenerate_source_triangles) do |records|
+            [records, {}]
+          end
+          instance.define_singleton_method(:validate_normalized_triangle_mesh!) do |_records|
+            true
+          end
+          instance.define_singleton_method(:verify_normalized_surface_equivalence!) do |*_records|
+            calls << :equivalence
+            raise LocalVertexNormalizer::TopologyChangedError, 'surface changed'
+          end
+          instance.define_singleton_method(:erase_source_geometry) do |_entities|
+            calls << :erase
+          end
+          instance.define_singleton_method(:rebuild_triangles) do |_entities, records|
+            calls << :restore
+            { added_faces: records.length, skipped_collinear: 0 }
+          end
+
+          _orientation, cleanup = instance.send(
+            :orient_and_merge_rebuilt_surface,
+            entities,
+            validated
+          )
+
+          assert_equal(
+            [:cleanup, :snapshot, :equivalence, :erase, :restore],
+            calls
+          )
+          assert_equal 0, cleanup[:removed_edges]
+          assert_match(/surface changed/, cleanup[:fallback_reason])
+        end
+
         def test_degenerate_repair_report_aggregates_each_mesh_stage
           instance = normalizer
           report = instance.send(
