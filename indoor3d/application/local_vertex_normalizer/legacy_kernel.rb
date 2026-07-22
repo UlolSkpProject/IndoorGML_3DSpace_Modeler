@@ -20,7 +20,7 @@ module ULOL
         # Numerical comparison epsilon. This is not the normalization grid size.
         GRID_EPSILON_MM = 0.000001
 
-        STRICT_COPLANAR_TOLERANCE_MM = 0.000001
+        STRICT_COPLANAR_TOLERANCE_MM = 0.001
         STRICT_COPLANAR_ANGLE_TOLERANCE_DEG = 0.001
 
         COPLANAR_TOLERANCE_MM = 0.01
