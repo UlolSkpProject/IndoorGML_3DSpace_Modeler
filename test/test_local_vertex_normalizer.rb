@@ -82,13 +82,26 @@ module ULOL
           end
         end
 
+        SnapshotVertex = Struct.new(:position)
+        SnapshotLoop = Struct.new(:vertices)
+
+        class BoundarySnapshotFace < SnapshotFace
+          attr_reader :loops
+
+          def initialize(points, polygons, persistent_id, loop_points, normal)
+            super(points, polygons, persistent_id)
+            @loops = [SnapshotLoop.new(loop_points.map { |point| SnapshotVertex.new(point) })]
+            @normal = normal
+          end
+        end
+
         class SnapshotEntities
           def initialize(faces)
             @faces = faces
           end
 
           def grep(klass)
-            klass == SnapshotFace ? @faces : []
+            @faces.select { |face| face.is_a?(klass) }
           end
         end
 
@@ -571,6 +584,141 @@ module ULOL
           assert_equal 1, report[:replaced_pairs]
           refute_includes normalized_edges, long_edge
           refute normalized.any? { |record| instance.send(:degenerate_triangle_record?, record) }
+        end
+
+        def test_face_snapshot_uses_source_boundary_instead_of_overlapping_mesh
+          point_a = mm_point(0, 0, 0)
+          point_e = mm_point(0.425, -0.000044, 0)
+          point_c = mm_point(5.0, 0.000024, 0)
+          point_d = mm_point(5.425, -0.000020, 0)
+          point_b = mm_point(10, 0, 0)
+          top_b = mm_point(10, 0, 10)
+          top_a = mm_point(0, 0, 10)
+          points = [point_a, point_b, point_c, point_d, point_e]
+          face = BoundarySnapshotFace.new(
+            points,
+            [[1, 2, 3], [3, 2, 4], [1, 3, 5]],
+            704,
+            [top_a, point_a, point_e, point_c, point_d, point_b, top_b],
+            point(0, -1, 0)
+          )
+          instance = normalizer(face_class: BoundarySnapshotFace)
+
+          records = instance.send(
+            :triangle_snapshot,
+            SnapshotEntities.new([face])
+          )
+          triangles = records.map do |record|
+            record[:points].map do |source_point|
+              instance.send(:source_precision_indices, source_point)
+            end
+          end
+
+          assert_equal 5, records.length
+          assert records.all? { |record| record[:source_boundary_snapshot] }
+          assert_operator(
+            instance.send(:validate_triangle_intersections!, triangles),
+            :>=,
+            0
+          )
+          assert instance.send(
+            :validate_source_boundary_retriangulation!,
+            records,
+            [face.loops.first.vertices.map do |vertex|
+              instance.send(:source_precision_indices, vertex.position)
+            end]
+          )
+        end
+
+        def test_face_snapshot_prefers_source_boundary_even_when_mesh_is_valid
+          point_a = mm_point(0, 0, 0)
+          point_b = mm_point(10, 0, 0)
+          point_c = mm_point(10, 10, 0)
+          point_d = mm_point(0, 10, 0)
+          face = BoundarySnapshotFace.new(
+            [point_a, point_b, point_c, point_d],
+            [[1, 2, 3], [1, 3, 4]],
+            705,
+            [point_a, point_b, point_c, point_d],
+            point(0, 0, 1)
+          )
+          instance = normalizer(face_class: BoundarySnapshotFace)
+
+          records = instance.send(
+            :triangle_snapshot,
+            SnapshotEntities.new([face])
+          )
+
+          assert_equal 2, records.length
+          assert records.all? { |record| record[:source_boundary_snapshot] }
+        end
+
+        def test_coplanar_cleanup_restores_validated_surface_when_geometry_changes
+          instance = normalizer
+          entities = Object.new
+          validated = [{ points: [point(0, 0, 0), point(1, 0, 0), point(0, 1, 0)] }]
+          changed = [{ points: [point(0, 0, 0), point(2, 0, 0), point(0, 1, 0)] }]
+          calls = []
+          topology = {
+            faces: 4,
+            edges: 6,
+            vertices: 4,
+            boundary_edges: 0,
+            nonmanifold_edges: 0
+          }
+          consistency = {
+            reversed_faces: 0,
+            consistency_reversed_faces: 0,
+            component_count: 1,
+            outward_reversed_faces: 0,
+            signed_volume_before_in3: 1.0,
+            signed_volume_after_in3: 1.0,
+            error: nil
+          }
+
+          instance.define_singleton_method(:geometry_counts) { |_entities| topology }
+          instance.define_singleton_method(:closed_surface?) { |_counts| true }
+          instance.define_singleton_method(:repair_reverse_faces) do |_entities|
+            consistency
+          end
+          instance.define_singleton_method(:remove_coplanar_shared_edges) do |*_args, **_kwargs|
+            calls << :cleanup
+            { removed_groups: 1, removed_edges: 1 }
+          end
+          instance.define_singleton_method(:normalized_triangle_snapshot) do |_entities|
+            calls << :snapshot
+            changed
+          end
+          instance.define_singleton_method(:repair_degenerate_source_triangles) do |records|
+            [records, {}]
+          end
+          instance.define_singleton_method(:validate_normalized_triangle_mesh!) do |_records|
+            true
+          end
+          instance.define_singleton_method(:verify_normalized_surface_equivalence!) do |*_records|
+            calls << :equivalence
+            raise LocalVertexNormalizer::TopologyChangedError, 'surface changed'
+          end
+          instance.define_singleton_method(:erase_source_geometry) do |_entities|
+            calls << :erase
+          end
+          instance.define_singleton_method(:rebuild_triangles) do |_entities, records|
+            calls << :restore
+            { added_faces: records.length, skipped_collinear: 0 }
+          end
+
+          _orientation, cleanup = instance.send(
+            :orient_and_merge_rebuilt_surface,
+            entities,
+            validated
+          )
+
+          assert_equal(
+            [:cleanup, :snapshot, :equivalence, :erase, :restore],
+            calls
+          )
+          assert_equal 0, cleanup[:removed_edges]
+          assert_match(/surface changed/, cleanup[:fallback_reason])
         end
 
         def test_triangle_collapsed_by_grid_rounding_is_repaired_after_normalization

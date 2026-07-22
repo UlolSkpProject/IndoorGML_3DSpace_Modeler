@@ -114,6 +114,14 @@ module ULOL
           )
 
           source_space_triangles = triangle_snapshot(entities)
+          # Preserve source vertex-on-edge incidence before independent grid
+          # rounding can bend a formerly collinear shared boundary. The target
+          # mesh then carries the same A-B/B-C subdivision even when B no longer
+          # lies exactly on the rounded A-C segment.
+          source_space_triangles = conforming_triangle_snapshot(
+            source_space_triangles,
+            coordinate_space: :source
+          )
           source_space_triangles, pre_normalization_degenerate_repair =
             repair_degenerate_source_triangles(
               source_space_triangles,
