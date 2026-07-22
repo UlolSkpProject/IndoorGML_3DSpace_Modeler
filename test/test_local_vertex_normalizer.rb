@@ -437,32 +437,6 @@ module ULOL
           assert_in_delta 10.001, second_target.z * 25.4, 1.0e-9
         end
 
-        def test_only_shared_edges_between_faces_on_the_same_exact_axis_plane_are_mergeable
-          first_vertices = [
-            AxisVertex.new(mm_point(0, 0, 10), 1),
-            AxisVertex.new(mm_point(1, 0, 10), 2),
-            AxisVertex.new(mm_point(0, 1, 10), 3)
-          ]
-          second_vertices = [
-            first_vertices[1],
-            AxisVertex.new(mm_point(1, 1, 10), 4),
-            first_vertices[2]
-          ]
-          ceiling_vertices = [
-            AxisVertex.new(mm_point(0, 0, 20), 5),
-            AxisVertex.new(mm_point(1, 0, 20), 6),
-            AxisVertex.new(mm_point(0, 1, 20), 7)
-          ]
-          first = AxisFace.new(first_vertices, point(0, 0, 1))
-          second = AxisFace.new(second_vertices, point(0, 0, 1))
-          ceiling = AxisFace.new(ceiling_vertices, point(0, 0, 1))
-          same_plane_edge = AxisEdge.new(401, [first, second])
-          different_plane_edge = AxisEdge.new(402, [first, ceiling])
-          instance = normalizer(face_class: AxisFace)
-
-          assert instance.send(:axis_plane_merge_candidate_edge?, same_plane_edge)
-          refute instance.send(:axis_plane_merge_candidate_edge?, different_plane_edge)
-        end
 
         def test_exact_duplicate_mesh_triangles_are_canonicalized_before_manifold_validation
           points = [

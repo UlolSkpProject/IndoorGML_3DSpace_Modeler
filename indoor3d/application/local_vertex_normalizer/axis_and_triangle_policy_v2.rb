@@ -466,60 +466,6 @@ module ULOL
              edge_lengths.min < SHORT_EDGE_SLIVER_THRESHOLD_MM)
         end
 
-        # Step 6 accepts explicit forced source-face keys from collision, local
-        # diagonal, and sliver processing. Unaffected healthy patches are retained.
-        def retriangulate_exact_coplanar_patches(
-          triangle_records,
-          forced_source_face_keys: [],
-          force_all: false
-        )
-          forced_keys = Array(forced_source_face_keys).compact.to_h { |key| [key, true] }
-          patches = exact_coplanar_triangle_patches(triangle_records)
-          rebuilt_records = []
-          rebuilt_patches = 0
-          preserved_patches = 0
-          forced_patches = 0
-          source_triangle_count = 0
-          rebuilt_triangle_count = 0
-          boundary_loop_count = 0
-          hole_count = 0
-
-          patches.each do |patch|
-            forced = force_all || patch.any? do |record|
-              forced_keys[record[:source_face_key]]
-            end
-            required = forced || exact_coplanar_patch_retriangulation_required?(patch)
-            unless required
-              rebuilt_records.concat(patch)
-              preserved_patches += 1
-              next
-            end
-
-            replacement, patch_report = retriangulate_exact_coplanar_patch(patch)
-            rebuilt_records.concat(replacement)
-            rebuilt_patches += 1
-            forced_patches += 1 if forced
-            source_triangle_count += patch.length
-            rebuilt_triangle_count += replacement.length
-            boundary_loop_count += patch_report[:boundary_loops]
-            hole_count += patch_report[:holes]
-          end
-
-          [
-            rebuilt_records,
-            {
-              detected_patches: patches.length,
-              rebuilt_patches: rebuilt_patches,
-              preserved_patches: preserved_patches,
-              forced_patches: forced_patches,
-              forced_source_face_keys: forced_keys.keys,
-              source_triangles: source_triangle_count,
-              rebuilt_triangles: rebuilt_triangle_count,
-              boundary_loops: boundary_loop_count,
-              holes: hole_count
-            }
-          ]
-        end
       end
     end
   end

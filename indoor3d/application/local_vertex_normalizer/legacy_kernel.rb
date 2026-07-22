@@ -30,7 +30,6 @@ module ULOL
         COLLINEAR_CROSS_EPSILON_IN2 = 1.0e-12
         MAX_STITCH_REPAIRS = 1_000
         MAX_COPLANAR_PASSES = 20
-        MAX_COLLINEAR_REPAIRS = 1_000
         SIGNED_VOLUME_EPSILON_IN3 = 1.0e-12
         MM_PER_INCH = 25.4
 
@@ -46,23 +45,6 @@ module ULOL
         class DestructiveCoplanarCleanupError < ReconstructionError; end
         class TopologyChangedError < Error; end
         class OperationError < Error; end
-
-        class << self
-          def normalize(
-            entity,
-            tolerance_mm = DEFAULT_TOLERANCE_MM,
-            commit_on_failure: false
-          )
-            new(tolerance_mm).normalize(
-              entity,
-              commit_on_failure: commit_on_failure
-            )
-          end
-
-          def normalized?(entity, tolerance_mm = DEFAULT_TOLERANCE_MM)
-            new(tolerance_mm).normalized?(entity)
-          end
-        end
 
         def initialize(
           tolerance_mm = DEFAULT_TOLERANCE_MM,
@@ -88,222 +70,8 @@ module ULOL
           raise ArgumentError, "Invalid local vertex normalize tolerance: #{tolerance_mm.inspect}"
         end
 
-        # Returns true when every definition-local vertex lies on the requested
-        # millimetre grid and no two topologically distinct vertices occupy the
-        # same grid coordinate.
-        #
-        # This is intentionally a fast coordinate/uniqueness predicate. It is not
-        # a complete solid-validity or cleanup predicate.
-        def normalized?(entity)
-          return false unless valid_entity_definition?(entity)
-
-          entities = entity.definition.entities
-          vertices = geometry_vertices(entities)
-          return false if vertices.empty?
-
-          axis_plane_plan = axis_plane_normalization_plan(entities)
-          occupied = {}
-          vertices.each do |vertex|
-            point = vertex.position
-            return false unless point_on_grid?(point)
-            target = normalized_target(point, axis_plane_plan)
-            return false if point_distance_mm(point, target) > GRID_EPSILON_MM
-
-            key = grid_indices(target)
-            return false if occupied.key?(key)
-
-            occupied[key] = true
-          end
-
-          # Constrained patch diagonals intentionally remain as SketchUp edges.
-          # Removing them would hand the n-gon back to SketchUp's triangulator
-          # and can recreate the flipped/sliver triangles normalization removed.
-          return false if short_edge_sliver_collapse_plan(
-            entities,
-            axis_plane_plan
-          )[:repairable]
-
-          true
-        rescue StandardError
-          false
-        end
-
-        # Rebuilds one manifold solid on the requested local-coordinate grid.
-        # The complete reconstruction owns one SketchUp operation so every
-        # mutation, including make_unique, is rolled back on failure.
-        def normalize(entity, commit_on_failure: false)
-          validate_entity!(entity)
-          with_normalization_operation(
-            entity,
-            commit_on_failure: commit_on_failure
-          ) do
-            normalize_entity(entity)
-          end
-        end
-
         private
 
-        def normalize_entity(entity)
-          ensure_unique_definition(entity)
-
-          entities = entity.definition.entities
-          topology_before = geometry_counts(entities)
-          volume_before_mm3 = solid_volume_mm3(entity)
-          source_vertices = geometry_vertices(entities)
-          axis_plane_plan = axis_plane_normalization_plan(entities)
-          vertex_metrics = normalized_vertex_metrics(source_vertices, axis_plane_plan)
-          short_edge_sliver_plan = short_edge_sliver_collapse_plan(
-            entities,
-            axis_plane_plan
-          )
-
-          if vertex_metrics[:unique_target_count] != source_vertices.length
-            raise ReconstructionError,
-                  "Normalization would merge distinct vertices: " \
-                  "source=#{source_vertices.length} " \
-                  "targets=#{vertex_metrics[:unique_target_count]}"
-          end
-
-          source_space_triangles = triangle_snapshot(entities)
-          source_space_triangles, pre_normalization_degenerate_repair =
-            repair_degenerate_source_triangles(
-              source_space_triangles,
-              coordinate_space: :source
-            )
-          source_duplicate_diagnostics = {}
-          source_triangles = normalize_triangle_records(
-            source_space_triangles,
-            axis_plane_plan,
-            duplicate_diagnostics: source_duplicate_diagnostics
-          )
-          source_triangles, source_degenerate_repair =
-            repair_degenerate_source_triangles(source_triangles)
-          validate_normalized_triangle_shapes!(source_triangles)
-          conforming_triangles = conforming_triangle_snapshot(source_triangles)
-          conforming_triangles, conforming_degenerate_repair =
-            repair_degenerate_source_triangles(conforming_triangles)
-          if conforming_triangles.empty?
-            raise ReconstructionError, "No reconstructable faces found for #{entity_label(entity)}"
-          end
-
-          baseline_mesh_validation = validate_normalized_triangle_topology!(conforming_triangles)
-          conforming_triangles, short_edge_sliver_repair =
-            collapse_short_edge_sliver_triangles(
-              conforming_triangles,
-              short_edge_sliver_plan,
-              baseline_mesh_validation
-            )
-          conforming_triangles, planar_patch_retriangulation =
-            retriangulate_exact_coplanar_patches(conforming_triangles)
-          mesh_validation = validate_normalized_triangle_mesh!(conforming_triangles)
-          validate_short_edge_sliver_topology!(
-            baseline_mesh_validation,
-            mesh_validation,
-            short_edge_sliver_repair
-          )
-
-          erase_source_geometry(entities)
-          build = rebuild_triangles(entities, conforming_triangles)
-          unless build[:added_faces] == conforming_triangles.length &&
-                 build[:skipped_collinear].zero?
-            raise ReconstructionError,
-                  "Normalized triangle rebuild was incomplete: #{build.inspect}"
-          end
-
-
-          rebuilt_duplicate_diagnostics = {}
-          rebuilt_triangles = normalized_triangle_snapshot(
-            entities,
-            duplicate_diagnostics: rebuilt_duplicate_diagnostics
-          )
-          rebuilt_triangles, rebuilt_degenerate_repair =
-            repair_degenerate_source_triangles(rebuilt_triangles)
-          validate_normalized_triangle_mesh!(rebuilt_triangles)
-          verify_triangle_rebuild!(conforming_triangles, rebuilt_triangles)
-
-          consistency_orientation = orient_shell_faces_consistently(entities)
-          unless consistency_orientation[:component_count] == 1
-            raise TopologyChangedError,
-                  "Outward orientation requires one connected shell: " \
-                  "components=#{consistency_orientation[:component_count]}"
-          end
-
-
-          axis_plane_merge = remove_coplanar_shared_edges(
-            entities,
-            plane_tolerance_mm: STRICT_COPLANAR_TOLERANCE_MM,
-            angle_tolerance_deg: STRICT_COPLANAR_ANGLE_TOLERANCE_DEG
-          )
-          axis_plane_merge[:merged_faces] = axis_plane_merge[:removed_edges]
-          axis_plane_merge[:preserved_constrained_edges] = false
-
-          outward_orientation = orient_shell_outward(entities)
-          orientation = {
-            reversed_faces: consistency_orientation[:reversed_faces] +
-              outward_orientation[:reversed_faces],
-            consistency_reversed_faces: consistency_orientation[:reversed_faces],
-            shell_component_count: consistency_orientation[:component_count],
-            outward_reversed_faces: outward_orientation[:reversed_faces],
-            signed_volume_before_mm3: outward_orientation[:signed_volume_before_in3] *
-              (MM_PER_INCH**3),
-            signed_volume_after_mm3: outward_orientation[:signed_volume_after_in3] *
-              (MM_PER_INCH**3)
-          }
-
-          topology_after = geometry_counts(entities)
-          validate_rebuilt_entity!(entity, topology_after)
-
-          final_vertices = geometry_vertices(entities)
-          residual_mm = max_grid_residual_mm(final_vertices)
-          if residual_mm > GRID_EPSILON_MM
-            raise TopologyChangedError,
-                  "Rebuilt vertices are off the #{@tolerance_mm} mm grid: residual=#{residual_mm} mm"
-          end
-
-          final_duplicate_diagnostics = {}
-          final_triangles = normalized_triangle_snapshot(
-            entities,
-            duplicate_diagnostics: final_duplicate_diagnostics
-          )
-          final_triangles, final_degenerate_repair =
-            repair_degenerate_source_triangles(final_triangles)
-          final_mesh_validation = validate_normalized_triangle_mesh!(final_triangles)
-
-          degenerate_repair = aggregate_degenerate_repair_reports(
-            pre_normalization: pre_normalization_degenerate_repair,
-            source: source_degenerate_repair,
-            conforming: conforming_degenerate_repair,
-            rebuilt: rebuilt_degenerate_repair,
-            final: final_degenerate_repair
-          )
-
-          build_normalization_report(
-            entity: entity,
-            topology_before: topology_before,
-            topology_after: topology_after,
-            volume_before_mm3: volume_before_mm3,
-            source_vertices: source_vertices,
-            final_vertices: final_vertices,
-            vertex_metrics: vertex_metrics,
-            source_triangles: source_triangles,
-            conforming_triangles: conforming_triangles,
-            degenerate_repair: degenerate_repair,
-            build: build,
-            mesh_validation: mesh_validation,
-            final_mesh_validation: final_mesh_validation,
-            orientation: orientation,
-            axis_plane_plan: axis_plane_plan,
-            axis_plane_merge: axis_plane_merge,
-            short_edge_sliver_repair: short_edge_sliver_repair,
-            planar_patch_retriangulation: planar_patch_retriangulation,
-            duplicate_diagnostics: {
-              source: source_duplicate_diagnostics,
-              rebuilt: rebuilt_duplicate_diagnostics,
-              final: final_duplicate_diagnostics
-            },
-            residual_mm: residual_mm
-          )
-        end
 
         # commit_on_failure is a development-only inspection aid. It preserves
         # every mutation made before a reconstruction exception, then re-raises
@@ -569,89 +337,6 @@ module ULOL
           }
         end
 
-        # Builds the normalized shell and applies only the strict coplanar cleanup.
-        # If strict cleanup damages topology, the geometry is rebuilt without it.
-        def rebuild_normalized_base(entities, triangles, entity)
-          strict_fallback_reason = nil
-
-          begin
-            result = build_normalized_surface(
-              entities,
-              triangles,
-              run_strict_cleanup: true
-            )
-          rescue DestructiveCoplanarCleanupError => e
-            strict_fallback_reason = e.message
-            result = build_normalized_surface(
-              entities,
-              triangles,
-              run_strict_cleanup: false,
-              strict_fallback_reason: strict_fallback_reason
-            )
-          end
-
-          topology = result.fetch(:topology)
-          if !closed_topology?(topology) && result.dig(:strict_coplanar, :removed_edges).to_i.positive?
-            strict_fallback_reason = "Strict coplanar cleanup changed topology: #{topology.inspect}"
-            result = build_normalized_surface(
-              entities,
-              triangles,
-              run_strict_cleanup: false,
-              strict_fallback_reason: strict_fallback_reason
-            )
-            topology = result.fetch(:topology)
-          end
-
-          unless closed_topology?(topology)
-            raise TopologyChangedError,
-                  "Rebuilt surface is open before broad coplanar cleanup: " \
-                  "#{entity_label(entity)} #{topology.inspect}"
-          end
-
-          result.delete(:topology)
-          result
-        end
-
-        def build_normalized_surface(
-          entities,
-          triangles,
-          run_strict_cleanup:,
-          strict_fallback_reason: nil
-        )
-          erase_source_geometry(entities)
-          build = rebuild_triangles(entities, triangles)
-          overlap_repair = remove_redundant_overlap_triangles(entities)
-          pre_stitch = stitch_surface_borders(entities)
-
-          strict_coplanar = if run_strict_cleanup
-                              remove_coplanar_shared_edges(
-                                entities,
-                                plane_tolerance_mm: STRICT_COPLANAR_TOLERANCE_MM,
-                                angle_tolerance_deg: STRICT_COPLANAR_ANGLE_TOLERANCE_DEG
-                              )
-                            else
-                              empty_coplanar_cleanup_report(
-                                fallback_reason: strict_fallback_reason
-                              )
-                            end
-
-          post_stitch = stitch_surface_borders(entities)
-          topology = geometry_counts(entities)
-
-          if closed_surface?(topology) && topology[:orientation_conflicts].to_i.positive?
-            orient_shell_faces_consistently(entities)
-            topology = geometry_counts(entities)
-          end
-
-          {
-            build: build,
-            overlap_repair: overlap_repair,
-            pre_stitch: pre_stitch,
-            strict_coplanar: strict_coplanar,
-            post_stitch: post_stitch,
-            topology: topology
-          }
-        end
 
         def empty_coplanar_cleanup_report(fallback_reason: nil)
           {
@@ -756,85 +441,11 @@ module ULOL
           entity.class.to_s
         end
 
-        def entity_label_from_face(face)
-          persistent_id = face.respond_to?(:persistent_id) ? face.persistent_id : nil
-          "face_persistent_id=#{persistent_id.inspect}"
-        rescue StandardError
-          face.class.to_s
-        end
 
         # ----------------------------------------------------------------------
         # Grid projection and triangle snapshots
         # ----------------------------------------------------------------------
 
-        # Builds exact local X/Y/Z plane constraints before ordinary grid
-        # projection. Only faces connected through an actual shared edge
-        # participate in the same family. Coordinate distance is deliberately
-        # not a grouping condition: adjacent subdivisions of one intended plane
-        # are unified, while disconnected parallel planes such as a floor and a
-        # ceiling remain independent.
-        def axis_plane_normalization_plan(entities)
-          records = entities.grep(@face_class).filter_map do |face|
-            axis_plane_face_record(face)
-          end
-          constraints = {}
-          clusters = []
-
-          records.group_by { |record| record[:axis] }.each do |axis, axis_records|
-            axis_plane_connected_components(axis_records).each do |component|
-              component_vertices = component.flat_map { |record| record[:vertices] }
-                                            .uniq { |vertex| stable_entity_id(vertex) }
-              coordinates = component_vertices.map do |vertex|
-                point_coordinate(vertex.position, axis) * MM_PER_INCH
-              end
-              spread = coordinates.max.to_f - coordinates.min.to_f
-
-              target_index = (median_value(coordinates) / @tolerance_mm).round
-              target_mm = target_index * @tolerance_mm
-              max_target_displacement = coordinates.map do |coordinate|
-                (coordinate - target_mm).abs
-              end.max || 0.0
-
-              component_vertices.each do |vertex|
-                key = source_point_key(vertex.position)
-                constraints[key] ||= {}
-                existing = constraints[key][axis]
-                if !existing.nil? && existing != target_index
-                  raise ReconstructionError,
-                        "Conflicting axis-plane constraints at #{key.inspect}: " \
-                        "axis=#{axis} targets=#{existing},#{target_index}"
-                end
-                constraints[key][axis] = target_index
-              end
-              clusters << {
-                axis: axis,
-                target_index: target_index,
-                target_mm: target_mm,
-                face_count: component.length,
-                vertex_count: component_vertices.length,
-                source_spread_mm: spread,
-                max_displacement_mm: max_target_displacement
-              }
-            end
-          end
-
-          max_displacement_mm = constraints.flat_map do |point_key, axes|
-            axes.map do |axis, target_index|
-              ((point_key[axis] * MM_PER_INCH) - (target_index * @tolerance_mm)).abs
-            end
-          end.max || 0.0
-
-          {
-            constraints: constraints,
-            clusters: clusters,
-            face_count: clusters.sum { |cluster| cluster[:face_count] },
-            cluster_count: clusters.length,
-            constrained_vertex_count: constraints.length,
-            max_displacement_mm: max_displacement_mm,
-            axis_cluster_counts: clusters.group_by { |cluster| cluster[:axis] }
-                                         .transform_values(&:length)
-          }
-        end
 
         def axis_plane_face_record(face)
           return nil unless face&.valid?
@@ -905,105 +516,6 @@ module ULOL
           end
         end
 
-        # Removes only the internal edges of rebuilt local-axis plane
-        # families. Plane equality is exact on the integer normalization grid;
-        # no distance tolerance is used here. Disconnected parallel surfaces
-        # never become candidates because there is no shared edge to erase.
-        def merge_axis_plane_faces(entities)
-          removed_edges = 0
-          merged_faces = 0
-          pass_reports = []
-
-          MAX_COPLANAR_PASSES.times do |pass_index|
-            candidates = axis_plane_merge_candidate_edges(entities)
-            break if candidates.empty?
-
-            pass_removed = 0
-            candidates.each do |edge|
-              next unless edge&.valid?
-              next unless axis_plane_merge_candidate_edge?(edge)
-
-              faces_before = entities.grep(@face_class).length
-              edge.erase!
-              faces_after = entities.grep(@face_class).length
-              face_reduction = faces_before - faces_after
-
-              unless face_reduction == 1
-                raise DestructiveCoplanarCleanupError,
-                      "Axis-plane internal edge merge was destructive: " \
-                      "faces #{faces_before} -> #{faces_after}"
-              end
-
-              pass_removed += 1
-              removed_edges += 1
-              merged_faces += face_reduction
-            end
-
-            break if pass_removed.zero?
-
-            pass_reports << {
-              pass: pass_index + 1,
-              removed_edges: pass_removed
-            }
-          end
-
-          remaining = axis_plane_merge_candidate_edges(entities)
-          unless remaining.empty?
-            raise DestructiveCoplanarCleanupError,
-                  "Axis-plane face merge did not converge: " \
-                  "remaining_internal_edges=#{remaining.length}"
-          end
-
-          topology = geometry_counts(entities)
-          unless closed_topology?(topology)
-            raise TopologyChangedError,
-                  "Axis-plane face merge damaged topology: #{topology.inspect}"
-          end
-
-          {
-            removed_edges: removed_edges,
-            merged_faces: merged_faces,
-            passes: pass_reports,
-            topology: topology
-          }
-        end
-
-        def axis_plane_merge_candidate_edges(entities)
-          entities.grep(@edge_class).select do |edge|
-            axis_plane_merge_candidate_edge?(edge)
-          end
-        end
-
-        def axis_plane_merge_candidate_edge?(edge)
-          return false unless edge&.valid? && edge.faces.length == 2
-
-          face_a, face_b = edge.faces
-          plane_a = exact_axis_plane_key(face_a)
-          return false if plane_a.nil? || plane_a != exact_axis_plane_key(face_b)
-
-          vector_dot(
-            vector_components(face_a.normal),
-            vector_components(face_b.normal)
-          ).positive?
-        rescue StandardError
-          false
-        end
-
-        def exact_axis_plane_key(face)
-          return nil unless face&.valid?
-
-          axis = axis_aligned_normal_axis(face.normal)
-          return nil if axis.nil?
-
-          indices = face.vertices.map do |vertex|
-            grid_indices(vertex.position)[axis]
-          end.uniq
-          return nil unless indices.length == 1
-
-          [axis, indices.first]
-        rescue StandardError
-          nil
-        end
 
         def median_value(values)
           sorted = Array(values).map(&:to_f).sort
@@ -1015,25 +527,6 @@ module ULOL
           (sorted[middle - 1] + sorted[middle]) / 2.0
         end
 
-        def normalized_vertex_metrics(vertices, axis_plane_plan = nil)
-          unique_targets = {}
-          moved_count = 0
-          max_displacement_mm = 0.0
-
-          vertices.each do |vertex|
-            target = normalized_target(vertex.position, axis_plane_plan)
-            unique_targets[grid_indices(target)] = true
-            displacement_mm = point_distance_mm(vertex.position, target)
-            moved_count += 1 if displacement_mm > GRID_EPSILON_MM
-            max_displacement_mm = displacement_mm if displacement_mm > max_displacement_mm
-          end
-
-          {
-            unique_target_count: unique_targets.length,
-            moved_count: moved_count,
-            max_displacement_mm: max_displacement_mm
-          }
-        end
 
         # ----------------------------------------------------------------------
         # Short-edge sliver patch repair
@@ -1744,50 +1237,6 @@ module ULOL
           end
         end
 
-        # Reconstructs every connected, exact coplanar triangle patch from its
-        # preserved boundary constraints. The source triangulation is treated as
-        # topology only: none of its internal diagonals survive. This avoids
-        # carrying a flipped or almost-zero SketchUp mesh triangle into the
-        # normalized shell.
-        def retriangulate_exact_coplanar_patches(triangle_records)
-          patches = exact_coplanar_triangle_patches(triangle_records)
-          rebuilt_records = []
-          rebuilt_patches = 0
-          preserved_patches = 0
-          source_triangle_count = 0
-          rebuilt_triangle_count = 0
-          boundary_loop_count = 0
-          hole_count = 0
-
-          patches.each do |patch|
-            unless exact_coplanar_patch_retriangulation_required?(patch)
-              rebuilt_records.concat(patch)
-              preserved_patches += 1
-              next
-            end
-
-            replacement, patch_report = retriangulate_exact_coplanar_patch(patch)
-            rebuilt_records.concat(replacement)
-            rebuilt_patches += 1
-            source_triangle_count += patch.length
-            rebuilt_triangle_count += replacement.length
-            boundary_loop_count += patch_report[:boundary_loops]
-            hole_count += patch_report[:holes]
-          end
-
-          [
-            rebuilt_records,
-            {
-              detected_patches: patches.length,
-              rebuilt_patches: rebuilt_patches,
-              preserved_patches: preserved_patches,
-              source_triangles: source_triangle_count,
-              rebuilt_triangles: rebuilt_triangle_count,
-              boundary_loops: boundary_loop_count,
-              holes: hole_count
-            }
-          ]
-        end
 
         def exact_coplanar_patch_retriangulation_required?(patch)
           triangles = patch.map do |record|
@@ -3313,58 +2762,6 @@ module ULOL
           face.layer = record[:layer] if face.respond_to?(:layer=) && record[:layer]
         end
 
-        # SketchUp can create a triangular overlap cap while normalized faces are
-        # added. The cap is removed only when doing so reduces topology anomalies.
-        def remove_redundant_overlap_triangles(entities)
-          removed_faces = 0
-          repairs = []
-          ignored_signatures = {}
-
-          loop do
-            before = geometry_counts(entities)
-            candidate = entities.grep(@face_class).find do |face|
-              next false unless face.valid? && face.edges.length == 3
-
-              signature = triangle_signature(face.vertices.map(&:position))
-              next false if ignored_signatures[signature]
-
-              incidence = face.edges.map { |edge| edge.faces.length }
-              overused_count = incidence.count { |count| count > 2 }
-              boundary_count = incidence.count { |count| count == 1 }
-              (overused_count >= 2 && boundary_count >= 1) || overused_count == 3
-            end
-            break unless candidate
-
-            signature = triangle_signature(candidate.vertices.map(&:position))
-            record = face_record(candidate)
-            points_mm = candidate.vertices.map do |vertex|
-              point_components_mm(vertex.position)
-            end
-
-            candidate.erase!
-            erase_wire_edges(entities)
-            after = geometry_counts(entities)
-
-            unless topology_anomaly_score(after) < topology_anomaly_score(before)
-              restored = entities.add_face(record[:points])
-              unless restored&.valid?
-                raise ReconstructionError,
-                      "Redundant overlap triangle repair could not restore " \
-                      "rejected candidate: #{before.inspect} -> #{after.inspect}"
-              end
-
-              orient_face!(restored, record[:source_normal])
-              apply_face_metadata(restored, record)
-              ignored_signatures[signature] = true
-              next
-            end
-
-            removed_faces += 1
-            repairs << { points_mm: points_mm, before: before, after: after }
-          end
-
-          { removed_faces: removed_faces, repairs: repairs }
-        end
 
         def face_record(face)
           {
@@ -3376,11 +2773,6 @@ module ULOL
           }
         end
 
-        def erase_wire_edges(entities)
-          entities.grep(@edge_class).each do |edge|
-            edge.erase! if edge.valid? && edge.faces.empty?
-          end
-        end
 
         def stitch_surface_borders(entities)
           repairs = 0
@@ -3599,122 +2991,6 @@ module ULOL
         # Coplanar, collinear and orientation cleanup
         # ----------------------------------------------------------------------
 
-        def remove_coplanar_shared_edges(
-          entities,
-          plane_tolerance_mm:,
-          angle_tolerance_deg:
-        )
-          removed = 0
-          unchanged = 0
-          ignored_edge_ids = {}
-          pass_reports = []
-          max_deviation_mm = 0.0
-          max_angle_deg = 0.0
-
-          MAX_COPLANAR_PASSES.times do |pass_index|
-            candidates = entities.grep(@edge_class).filter_map do |edge|
-              next if ignored_edge_ids[stable_entity_id(edge)]
-
-              coplanar_edge_metrics(
-                edge,
-                plane_tolerance_mm: plane_tolerance_mm,
-                angle_tolerance_deg: angle_tolerance_deg
-              )
-            end
-            break if candidates.empty?
-
-            pass_removed = 0
-            candidates.each do |entry|
-              edge = entry[:edge]
-              next unless edge&.valid? && edge.faces.length == 2
-
-              current = coplanar_edge_metrics(
-                edge,
-                plane_tolerance_mm: plane_tolerance_mm,
-                angle_tolerance_deg: angle_tolerance_deg
-              )
-              next unless current
-
-              faces_before = entities.grep(@face_class).length
-              edge_id = stable_entity_id(edge)
-
-              begin
-                edge.erase!
-              rescue ArgumentError => e
-                ignored_edge_ids[edge_id] = true
-                unchanged += 1
-                next if e.message.to_s.downcase.include?('not planar')
-
-                raise
-              end
-
-              faces_after = entities.grep(@face_class).length
-              face_reduction = faces_before - faces_after
-
-              if face_reduction.zero?
-                ignored_edge_ids[edge_id] = true
-                unchanged += 1
-                next
-              end
-
-              unless face_reduction == 1
-                raise DestructiveCoplanarCleanupError,
-                      "Coplanar edge removal was destructive at " \
-                      "tolerance=#{plane_tolerance_mm}mm " \
-                      "angle=#{current[:angle_deg]}deg " \
-                      "deviation=#{current[:plane_deviation_mm]}mm: " \
-                      "faces #{faces_before} -> #{faces_after}"
-              end
-
-              pass_removed += 1
-              removed += 1
-              max_deviation_mm = [max_deviation_mm, current[:plane_deviation_mm]].max
-              max_angle_deg = [max_angle_deg, current[:angle_deg]].max
-            end
-
-            break if pass_removed.zero?
-
-            pass_reports << { pass: pass_index + 1, removed_edges: pass_removed }
-          end
-
-          {
-            removed_edges: removed,
-            unchanged_edges: unchanged,
-            passes: pass_reports,
-            max_plane_deviation_mm: max_deviation_mm,
-            max_angle_deg: max_angle_deg,
-            fallback_reason: nil
-          }
-        end
-
-        def coplanar_edge_metrics(edge, plane_tolerance_mm:, angle_tolerance_deg:)
-          return nil unless edge&.valid? && edge.faces.length == 2
-
-          face_a, face_b = edge.faces
-          dot = vector_dot(
-            vector_components(face_a.normal),
-            vector_components(face_b.normal)
-          )
-          return nil unless dot.positive?
-
-          clamped_dot = [[dot, -1.0].max, 1.0].min
-          angle_deg = Math.acos(clamped_dot) * 180.0 / Math::PI
-          return nil if angle_deg > angle_tolerance_deg
-
-          deviation_mm = [
-            face_plane_deviation_mm(face_a, face_b),
-            face_plane_deviation_mm(face_b, face_a)
-          ].max
-          return nil if deviation_mm > plane_tolerance_mm
-
-          {
-            edge: edge,
-            plane_deviation_mm: deviation_mm,
-            angle_deg: angle_deg
-          }
-        rescue StandardError
-          nil
-        end
 
         def face_plane_deviation_mm(source_face, reference_face)
           plane = reference_face.plane.map(&:to_f)
@@ -3735,73 +3011,6 @@ module ULOL
           end.max || 0.0
         end
 
-        def remove_unbranched_collinear_vertices(entities)
-          removed = 0
-
-          MAX_COLLINEAR_REPAIRS.times do
-            candidate = geometry_vertices(entities).find do |vertex|
-              removable_collinear_vertex?(vertex)
-            end
-            break unless candidate
-
-            rebuild_faces_without_vertex(entities, candidate)
-            removed += 1
-          end
-
-          { removed_vertices: removed }
-        end
-
-        def removable_collinear_vertex?(vertex)
-          return false unless vertex.valid?
-          return false unless vertex.edges.length == 2
-          return false unless vertex.faces.length == 2
-          return false unless vertex.faces.all? do |face|
-            face.valid? && face.loops.length == 1 && face.vertices.length > 3
-          end
-
-          point = vertex.position
-          other_points = vertex.edges.map do |edge|
-            (edge.vertices - [vertex]).first.position
-          end
-
-          !point_on_segment_parameter(
-            point,
-            other_points[0],
-            other_points[1],
-            GRID_EPSILON_MM
-          ).nil?
-        rescue StandardError
-          false
-        end
-
-        def rebuild_faces_without_vertex(entities, vertex)
-          records = vertex.faces.map do |face|
-            record = face_record(face)
-            record[:points] = face.outer_loop.vertices.reject do |item|
-              item == vertex
-            end.map(&:position)
-            record
-          end
-
-          obsolete_edges = vertex.edges.to_a
-          vertex.faces.to_a.each do |face|
-            face.erase! if face.valid?
-          end
-          obsolete_edges.each do |edge|
-            edge.erase! if edge.valid? && edge.faces.empty?
-          end
-
-          records.each do |record|
-            face = entities.add_face(record[:points])
-            unless face&.valid?
-              raise ReconstructionError,
-                    'Collinear vertex cleanup could not rebuild adjacent face'
-            end
-
-            orient_face!(face, record[:source_normal])
-            apply_face_metadata(face, record)
-          end
-        end
 
         def orient_shell_faces_consistently(entities)
           visited = {}

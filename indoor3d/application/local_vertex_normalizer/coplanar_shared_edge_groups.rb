@@ -44,20 +44,6 @@ module ULOL
           nil
         end
 
-        def coplanar_edge_metrics(edge, plane_tolerance_mm:, angle_tolerance_deg:)
-          return nil unless edge&.valid? && edge.faces.length == 2
-
-          face_a, face_b = edge.faces
-          metrics = coplanar_face_pair_metrics(
-            face_a,
-            face_b,
-            plane_tolerance_mm: plane_tolerance_mm,
-            angle_tolerance_deg: angle_tolerance_deg
-          )
-          metrics&.merge(edge: edge)
-        rescue StandardError
-          nil
-        end
 
         # Returns groups keyed by the unordered pair of adjacent faces. Every
         # shared edge between the same two faces belongs to one group, including

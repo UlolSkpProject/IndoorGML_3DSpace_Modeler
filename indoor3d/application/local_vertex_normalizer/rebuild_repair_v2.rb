@@ -280,32 +280,21 @@ module ULOL
                 "added_sample=#{added.first(3).inspect}"
         end
 
+        # Surface equivalence is geometric, not metadata- or triangulation-based.
+        # Triangles are clustered with the same strict tolerances used by the
+        # post-rebuild coplanar cleanup. Shared edges are split at every collinear
+        # vertex so T-junction/subdivided boundaries form one component.
         def normalized_surface_descriptor(triangle_records)
           records = triangle_records.reject do |record|
             triangle = record[:points].map { |point| grid_indices(point) }
             triangle.uniq.length != 3 ||
               integer_zero_vector?(integer_triangle_normal(triangle))
           end
-          groups = records.group_by do |record|
-            exact_integer_plane_key(
-              record[:points].map { |point| grid_indices(point) }
-            )
-          end
 
           descriptors = []
-          groups.each do |plane_key, plane_records|
+          surface_coplanar_clusters(records).each do |plane_records|
             coplanar_geometry_components(plane_records).each do |component|
-              edge_owners = Hash.new { |hash, key| hash[key] = [] }
-              component.each_with_index do |record, index|
-                triangle = record[:points].map { |point| grid_indices(point) }
-                3.times do |edge_index|
-                  edge = canonical_edge_key(
-                    triangle[edge_index],
-                    triangle[(edge_index + 1) % 3]
-                  )
-                  edge_owners[edge] << index
-                end
-              end
+              edge_owners = split_triangle_edge_owners(component)
               overused = edge_owners.select { |_edge, owners| owners.length > 2 }
               unless overused.empty?
                 raise TopologyChangedError,
@@ -319,32 +308,75 @@ module ULOL
               loops = exact_boundary_loops(boundary_edges).map do |loop|
                 canonical_exact_loop(simplify_exact_loop(loop))
               end.sort
-              descriptors << [plane_key, loops]
+              descriptors << [surface_patch_plane_key(loops), loops]
             end
           end
           descriptors.sort
         end
 
-        def coplanar_geometry_components(records)
-          edge_owners = Hash.new { |hash, key| hash[key] = [] }
-          records.each_with_index do |record, index|
-            triangle = record[:points].map { |point| grid_indices(point) }
-            3.times do |edge_index|
-              edge = canonical_edge_key(
-                triangle[edge_index],
-                triangle[(edge_index + 1) % 3]
-              )
-              edge_owners[edge] << index
+        def surface_coplanar_clusters(records)
+          clusters = []
+          records.each do |record|
+            plane = surface_triangle_plane(record)
+            cluster = clusters.find do |entry|
+              surface_planes_compatible?(entry[:plane], plane)
+            end
+            if cluster
+              cluster[:records] << record
+            else
+              clusters << { plane: plane, records: [record] }
             end
           end
+          clusters.map { |entry| entry[:records] }
+        end
 
+        def surface_triangle_plane(record)
+          triangle = record[:points].map { |point| grid_indices(point) }
+          normal = integer_triangle_normal(triangle).map(&:to_f)
+          length = vector_length(normal)
+          if length <= 0.0
+            raise TopologyChangedError,
+                  "Cannot build surface plane from degenerate triangle: #{triangle.inspect}"
+          end
+
+          unit = normal.map { |value| value / length }
+          first_nonzero = unit.find { |value| value.abs > 1.0e-15 }
+          if first_nonzero&.negative?
+            unit = unit.map(&:-@)
+          end
+          {
+            unit_normal: unit,
+            offset: vector_dot(unit, triangle[0]),
+            triangle: triangle
+          }
+        end
+
+        def surface_planes_compatible?(first, second)
+          dot = vector_dot(first[:unit_normal], second[:unit_normal]).abs
+          threshold = Math.cos(
+            STRICT_COPLANAR_ANGLE_TOLERANCE_DEG * Math::PI / 180.0
+          )
+          return false if dot + 1.0e-15 < threshold
+
+          tolerance_grid = STRICT_COPLANAR_TOLERANCE_MM / @tolerance_mm
+          surface_plane_deviation_grid(first, second[:triangle]) <= tolerance_grid &&
+            surface_plane_deviation_grid(second, first[:triangle]) <= tolerance_grid
+        end
+
+        def surface_plane_deviation_grid(plane, triangle)
+          triangle.map do |point|
+            (vector_dot(plane[:unit_normal], point) - plane[:offset]).abs
+          end.max || 0.0
+        end
+
+        def coplanar_geometry_components(records)
+          edge_owners = split_triangle_edge_owners(records)
           adjacency = Array.new(records.length) { [] }
           edge_owners.each_value do |owners|
-            next unless owners.length == 2
-
-            first, second = owners
-            adjacency[first] << second
-            adjacency[second] << first
+            owners.uniq.combination(2) do |first, second|
+              adjacency[first] << second
+              adjacency[second] << first
+            end
           end
 
           visited = Array.new(records.length, false)
@@ -353,10 +385,10 @@ module ULOL
 
             visited[seed] = true
             queue = [seed]
-            component = []
+            component_indices = []
             until queue.empty?
               index = queue.shift
-              component << records[index]
+              component_indices << index
               adjacency[index].each do |neighbor|
                 next if visited[neighbor]
 
@@ -364,8 +396,63 @@ module ULOL
                 queue << neighbor
               end
             end
-            component
+            component_indices.map { |index| records[index] }
           end
+        end
+
+        def split_triangle_edge_owners(records)
+          points = records.flat_map do |record|
+            record[:points].map { |point| grid_indices(point) }
+          end.uniq
+          edge_owners = Hash.new { |hash, key| hash[key] = [] }
+
+          records.each_with_index do |record, record_index|
+            triangle = record[:points].map { |point| grid_indices(point) }
+            3.times do |edge_index|
+              point_a = triangle[edge_index]
+              point_b = triangle[(edge_index + 1) % 3]
+              integer_points_on_segment_sorted(point_a, point_b, points)
+                .each_cons(2) do |segment_start, segment_end|
+                  next if segment_start == segment_end
+
+                  edge = canonical_edge_key(segment_start, segment_end)
+                  edge_owners[edge] << record_index unless
+                    edge_owners[edge].include?(record_index)
+                end
+            end
+          end
+          edge_owners
+        end
+
+        def integer_points_on_segment_sorted(point_a, point_b, candidates)
+          direction = integer_subtract(point_b, point_a)
+          axis = direction.each_index.max_by { |index| direction[index].abs }
+          denominator = direction[axis]
+          return [point_a, point_b] if denominator.zero?
+
+          candidates.select do |point|
+            point == point_a || point == point_b ||
+              integer_point_between?(point, point_a, point_b)
+          end.sort_by do |point|
+            Rational(point[axis] - point_a[axis], denominator)
+          end.uniq
+        end
+
+        def surface_patch_plane_key(loops)
+          points = loops.flatten(1).uniq.sort
+          origin = points.first
+          if origin
+            (1...points.length).each do |first_index|
+              ((first_index + 1)...points.length).each do |second_index|
+                triangle = [origin, points[first_index], points[second_index]]
+                next if integer_zero_vector?(integer_triangle_normal(triangle))
+
+                return exact_integer_plane_key(triangle)
+              end
+            end
+          end
+          raise TopologyChangedError,
+                "Surface patch boundary cannot define a plane: #{loops.inspect}"
         end
 
         def simplify_exact_loop(loop)

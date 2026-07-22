@@ -27,6 +27,10 @@ module ULOL
 
             new(tolerance_mm).normalize(entity)
           end
+
+          def normalized?(entity, tolerance_mm = DEFAULT_TOLERANCE_MM)
+            new(tolerance_mm).normalized?(entity)
+          end
         end
 
         def normalize(entity, commit_on_failure: false)

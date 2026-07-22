@@ -17,6 +17,8 @@ module ULOL
         MM_PER_INCH = 25.4
         SHORT_EDGE_SLIVER_MIN_ASPECT_RATIO = 20.0
         SHORT_EDGE_SLIVER_THRESHOLD_MM = 1.0
+        STRICT_COPLANAR_TOLERANCE_MM = 0.001
+        STRICT_COPLANAR_ANGLE_TOLERANCE_DEG = 0.001
         AXIS_CONSTRAINT_PRIORITY = [2, 1, 0].freeze
 
         class ReconstructionError < StandardError; end
@@ -47,6 +49,8 @@ module ULOL
         def integer_dot(vector_a, vector_b)
           vector_a.zip(vector_b).sum { |first, second| first * second }
         end
+        def vector_dot(vector_a, vector_b) = integer_dot(vector_a, vector_b)
+        def vector_length(vector) = Math.sqrt(vector_dot(vector, vector))
         def integer_zero_vector?(vector) = vector.all?(&:zero?)
         def integer_triangle_normal(triangle)
           integer_cross(
@@ -97,6 +101,17 @@ module ULOL
             loops << points
           end
           loops
+        end
+        def integer_point_between?(point, segment_start, segment_end)
+          direction = integer_subtract(segment_end, segment_start)
+          offset = integer_subtract(point, segment_start)
+          return false unless integer_zero_vector?(integer_cross(direction, offset))
+          return false if point == segment_start || point == segment_end
+
+          3.times.all? do |axis|
+            point[axis] >= [segment_start[axis], segment_end[axis]].min &&
+              point[axis] <= [segment_start[axis], segment_end[axis]].max
+          end
         end
       end
     end

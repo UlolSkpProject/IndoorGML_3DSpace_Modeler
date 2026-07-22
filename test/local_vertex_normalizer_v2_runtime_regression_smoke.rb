@@ -8,7 +8,7 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class LocalVertexNormalizer
-        STRICT_COPLANAR_TOLERANCE_MM = 0.000001 unless const_defined?(:STRICT_COPLANAR_TOLERANCE_MM, false)
+        STRICT_COPLANAR_TOLERANCE_MM = 0.001 unless const_defined?(:STRICT_COPLANAR_TOLERANCE_MM, false)
         STRICT_COPLANAR_ANGLE_TOLERANCE_DEG = 0.001 unless const_defined?(:STRICT_COPLANAR_ANGLE_TOLERANCE_DEG, false)
 
         class ReconstructionError < StandardError; end unless const_defined?(:ReconstructionError, false)
@@ -158,6 +158,7 @@ module ULOL
   end
 end
 
+require_relative '../indoor3d/application/local_vertex_normalizer/rebuild_repair_v2'
 require_relative '../indoor3d/application/local_vertex_normalizer/runtime_regression_fixes_v2'
 
 klass = ULOL::Indoor3DGmlModeler::IndoorCore::LocalVertexNormalizer
