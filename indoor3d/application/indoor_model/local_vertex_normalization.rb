@@ -54,7 +54,10 @@ module ULOL
           def ensure_vertices_locally_normalized_for_export(
             tolerance_mm = LocalVertexNormalizer::DEFAULT_TOLERANCE_MM,
             cell_spaces: nil,
-            activate_edit_context: false
+            activate_edit_context: false,
+            debug: false,
+            report: false,
+            report_path: nil
           )
             targets = normalization_targets(cell_spaces)
             unnormalized = locally_unnormalized_cell_spaces(
@@ -63,33 +66,52 @@ module ULOL
             )
 
             if unnormalized.empty?
-              return empty_local_normalization_report(
+              empty_report = empty_local_normalization_report(
                 tolerance_mm,
                 already_normalized_cell_space_count: targets.length,
                 skipped: true,
                 activate_edit_context: activate_edit_context
               )
+              if report == true
+                timing_profile = {
+                  enabled: true,
+                  status: :success,
+                  total_seconds: 0.0,
+                  operation_total_seconds: 0.0,
+                  operation_body_seconds: 0.0,
+                  operation_boundary_overhead_seconds: 0.0,
+                  topology_sync_seconds: 0.0,
+                  cell_spaces: []
+                }
+                written_path = write_local_normalization_timing_report(
+                  timing_profile,
+                  normalization_report: empty_report,
+                  targets: targets,
+                  report_path: report_path
+                )
+                empty_report[:debug_profile] = timing_profile
+                empty_report[:timing_report_path] = written_path
+                puts "[LVN REPORT] SUCCESS total=0.000000s path=#{written_path}"
+              end
+              return empty_report
             end
 
             # Preserve compatibility with test doubles and older overrides that do
             # not accept activate_edit_context when the default mode is used.
-            report = if activate_edit_context
-                       local_vertex_normalize(
-                         tolerance_mm,
-                         cell_spaces: unnormalized,
-                         activate_edit_context: true
-                       )
-                     else
-                       local_vertex_normalize(
-                         tolerance_mm,
-                         cell_spaces: unnormalized
-                       )
-                     end
+            normalization_options = { cell_spaces: unnormalized }
+            normalization_options[:activate_edit_context] = true if activate_edit_context
+            normalization_options[:debug] = true if debug == true
+            normalization_options[:report] = true if report == true
+            normalization_options[:report_path] = report_path if report_path
+            normalization_report = local_vertex_normalize(
+              tolerance_mm,
+              **normalization_options
+            )
 
-            report[:already_normalized_cell_space_count] =
+            normalization_report[:already_normalized_cell_space_count] =
               targets.length - unnormalized.length
-            report[:skipped] = false
-            report
+            normalization_report[:skipped] = false
+            normalization_report
           end
 
           # Normalizes selected CellSpaces in one SketchUp operation.
@@ -103,17 +125,33 @@ module ULOL
           def local_vertex_normalize(
             tolerance_mm = LocalVertexNormalizer::DEFAULT_TOLERANCE_MM,
             cell_spaces: nil,
-            activate_edit_context: false
+            activate_edit_context: false,
+            debug: false,
+            report: false,
+            report_path: nil
           )
+            report_requested = report == true
+            verbose_debug = debug == true && !report_requested
+            results = []
+            topology_metrics = nil
+            topology_sync_seconds = 0.0
+            operation_body_seconds = 0.0
+            batch_started_at = local_normalization_monotonic_time
+            operation_body_started_at = nil
+            topology_started_at = nil
+            operation_started_at = nil
+            operation_total_seconds = 0.0
+            LocalVertexNormalizer.last_debug_profile = nil if report_requested
             targets = normalization_targets(cell_spaces)
             if targets.empty?
               raise 'No valid CellSpace found for local vertex normalization'
             end
 
-            results = []
-            topology_metrics = nil
+            puts "[LVN DEBUG] BATCH START cells=#{targets.length}" if verbose_debug
 
+            operation_started_at = local_normalization_monotonic_time
             with_indoor_model_operation('IndoorGML Local Vertex Normalize') do
+              operation_body_started_at = local_normalization_monotonic_time
               sync do
                 targets.each do |cell_space|
                   group = cell_space.valid_sketchup_group
@@ -125,7 +163,9 @@ module ULOL
                     cell_space,
                     group,
                     tolerance_mm,
-                    activate_edit_context: activate_edit_context
+                    activate_edit_context: activate_edit_context,
+                    debug: debug,
+                    report: report_requested
                   )
 
                   result[:cell_space_id] = cell_space.id
@@ -133,22 +173,116 @@ module ULOL
                   remember_cell_space_change_snapshot(cell_space.sketchup_group)
                 end
 
+                topology_started_at = local_normalization_monotonic_time
+                puts '[LVN DEBUG] BATCH START topology_synchronize_all' if verbose_debug
                 topology_metrics = topology_coordinator.synchronize_all
+                topology_sync_seconds =
+                  local_normalization_monotonic_time - topology_started_at
+                if verbose_debug
+                  puts format(
+                    '[LVN DEBUG] BATCH END   topology_synchronize_all duration=%.6fs',
+                    topology_sync_seconds
+                  )
+                end
               end
+              operation_body_seconds =
+                local_normalization_monotonic_time - operation_body_started_at
             end
+            operation_total_seconds =
+              local_normalization_monotonic_time - operation_started_at
 
             invalidate_overlay_transition_points
             model = @model || Sketchup.active_model
             model.active_view.invalidate if model&.active_view
 
-            report = aggregate_local_normalization_report(
+            normalization_report = aggregate_local_normalization_report(
               tolerance_mm,
               results,
               topology_metrics,
               activate_edit_context: activate_edit_context
             )
-            log_local_normalization_report(report)
-            report
+            if debug == true || report_requested
+              total_seconds = local_normalization_monotonic_time - batch_started_at
+              timing_profile = {
+                enabled: true,
+                status: :success,
+                total_seconds: total_seconds,
+                operation_total_seconds: operation_total_seconds,
+                operation_body_seconds: operation_body_seconds,
+                operation_boundary_overhead_seconds:
+                  operation_total_seconds - operation_body_seconds,
+                topology_sync_seconds: topology_sync_seconds,
+                cell_spaces: results.filter_map { |result| result[:debug_profile] }
+              }
+              normalization_report[:debug_profile] = timing_profile
+              if report_requested
+                written_path = write_local_normalization_timing_report(
+                  timing_profile,
+                  normalization_report: normalization_report,
+                  targets: targets,
+                  report_path: report_path
+                )
+                normalization_report[:timing_report_path] = written_path
+                puts format(
+                  '[LVN REPORT] SUCCESS total=%.6fs path=%s',
+                  total_seconds,
+                  written_path
+                )
+              else
+                puts format(
+                  '[LVN DEBUG] BATCH END total=%.6fs operation=%.6fs ' \
+                  'operation_boundary=%.6fs topology_sync=%.6fs',
+                  total_seconds,
+                  operation_total_seconds,
+                  operation_total_seconds - operation_body_seconds,
+                  topology_sync_seconds
+                )
+              end
+            end
+            log_local_normalization_report(normalization_report) unless report_requested
+            normalization_report
+          rescue StandardError => error
+            if defined?(report_requested) && report_requested
+              begin
+                now = local_normalization_monotonic_time
+                operation_total_seconds = now - operation_started_at if operation_started_at
+                if operation_body_started_at && operation_body_seconds.zero?
+                  operation_body_seconds = now - operation_body_started_at
+                end
+                if topology_started_at && topology_sync_seconds.zero?
+                  topology_sync_seconds = now - topology_started_at
+                end
+                profiles = Array(results).filter_map { |result| result[:debug_profile] }
+                failed_profile = LocalVertexNormalizer.last_debug_profile
+                profiles << failed_profile if failed_profile && !profiles.include?(failed_profile)
+                timing_profile = {
+                  enabled: true,
+                  status: :failed,
+                  error: "#{error.class}: #{error.message}",
+                  total_seconds: now - batch_started_at,
+                  operation_total_seconds: operation_total_seconds,
+                  operation_body_seconds: operation_body_seconds,
+                  operation_boundary_overhead_seconds:
+                    operation_total_seconds - operation_body_seconds,
+                  topology_sync_seconds: topology_sync_seconds,
+                  cell_spaces: profiles
+                }
+                written_path = write_local_normalization_timing_report(
+                  timing_profile,
+                  normalization_report: nil,
+                  targets: targets,
+                  report_path: report_path
+                )
+                puts format(
+                  '[LVN REPORT] FAILED total=%.6fs path=%s',
+                  timing_profile[:total_seconds],
+                  written_path
+                )
+              rescue StandardError => report_error
+                puts "[LVN REPORT] WRITE FAILED #{report_error.class}: #{report_error.message}"
+              end
+            end
+            raise
           end
 
           private
@@ -176,11 +310,28 @@ module ULOL
             cell_space,
             group,
             tolerance_mm,
-            activate_edit_context:
+            activate_edit_context:,
+            debug: false,
+            report: false
           )
             with_unlocked(group) do
               runner = proc do
-                LocalVertexNormalizer.normalize(group, tolerance_mm)
+                # The surrounding batch owns one atomic SketchUp operation.
+                # Opening another operation for every Solid can leave dialog and
+                # observer state unresponsive after the batch commit.
+                normalization_options = {
+                  debug: debug,
+                  manage_operation: false
+                }
+                if report == true
+                  normalization_options[:report] = true
+                  normalization_options[:write_report] = false
+                end
+                LocalVertexNormalizer.normalize(
+                  group,
+                  tolerance_mm,
+                  **normalization_options
+                )
               rescue StandardError => e
                 name = group.respond_to?(:name) ? group.name.inspect : 'n/a'
                 raise e.class,
@@ -337,6 +488,92 @@ module ULOL
             results.map { |row| row[key].to_f }.max || 0.0
           end
 
+          def write_local_normalization_timing_report(
+            timing_profile,
+            normalization_report:,
+            targets:,
+            report_path:
+          )
+            solid_profiles = Array(timing_profile[:cell_spaces])
+            payload = {
+              schema: 'ulol.local_vertex_normalization.timing.v1',
+              generated_at: Time.now.iso8601(3),
+              scope: 'batch',
+              timing_semantics: 'inclusive; nested stage totals are not additive',
+              status: timing_profile[:status],
+              total_seconds: timing_profile[:total_seconds],
+              operation: {
+                total_seconds: timing_profile[:operation_total_seconds],
+                body_seconds: timing_profile[:operation_body_seconds],
+                boundary_overhead_seconds:
+                  timing_profile[:operation_boundary_overhead_seconds]
+              },
+              topology_sync_seconds: timing_profile[:topology_sync_seconds],
+              error: timing_profile[:error],
+              geometry_totals: {
+                before: sum_profile_geometry_counts(solid_profiles, :geometry_before),
+                after: sum_profile_geometry_counts(solid_profiles, :geometry_after)
+              },
+              stage_totals: aggregate_profile_stage_timings(solid_profiles),
+              normalization_summary:
+                compact_normalization_summary(normalization_report),
+              solids: solid_profiles
+            }
+            first_group = Array(targets).filter_map do |cell_space|
+              cell_space.valid_sketchup_group if
+                cell_space.respond_to?(:valid_sketchup_group)
+            end.first
+            LocalVertexNormalizer.write_timing_report(
+              payload,
+              report_path: report_path,
+              entity: first_group,
+              prefix: 'local_vertex_normalization_batch'
+            )
+          end
+
+          def sum_profile_geometry_counts(profiles, key)
+            fields = [:faces, :edges, :vertices, :boundary_edges,
+                      :wire_edges, :overused_edges, :volume_mm3]
+            fields.to_h do |field|
+              total = if field == :volume_mm3
+                        profiles.sum { |profile| profile.dig(key, field).to_f }
+                      else
+                        profiles.sum { |profile| profile.dig(key, field).to_i }
+                      end
+              [field, total]
+            end
+          end
+
+          def aggregate_profile_stage_timings(profiles)
+            totals = {}
+            profiles.each do |profile|
+              Hash(profile[:stages]).each do |name, metrics|
+                entry = totals[name] ||= {
+                  calls: 0,
+                  total_seconds: 0.0,
+                  max_seconds: 0.0,
+                  failures: 0
+                }
+                entry[:calls] += metrics[:calls].to_i
+                entry[:total_seconds] += metrics[:total_seconds].to_f
+                entry[:max_seconds] = [
+                  entry[:max_seconds],
+                  metrics[:max_seconds].to_f
+                ].max
+                entry[:failures] += metrics[:failures].to_i
+              end
+            end
+            totals.sort_by { |_name, metrics| -metrics[:total_seconds] }.to_h
+          end
+
+          def compact_normalization_summary(report)
+            return nil unless report
+
+            report.reject do |key, _value|
+              [:cell_spaces, :debug_profile].include?(key)
+            end
+          end
+
           def log_local_normalization_report(report)
             IndoorCore::Logger.puts(
               "[IndoorGML] Local vertex normalize: " \
@@ -347,6 +584,10 @@ module ULOL
               "max_displacement=#{report[:max_displacement_mm]}mm " \
               "edit_context=#{report[:edit_context_strategy]}"
             )
+          end
+
+          def local_normalization_monotonic_time
+            Process.clock_gettime(Process::CLOCK_MONOTONIC)
           end
         end
       end

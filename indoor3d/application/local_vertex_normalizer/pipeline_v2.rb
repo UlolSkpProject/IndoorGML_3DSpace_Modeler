@@ -18,14 +18,26 @@ module ULOL
           def normalize(
             entity,
             tolerance_mm = DEFAULT_TOLERANCE_MM,
-            commit_on_failure: false
+            commit_on_failure: false,
+            debug: false,
+            report: false,
+            report_path: nil,
+            write_report: true,
+            manage_operation: true
           )
             if commit_on_failure
               raise ArgumentError,
                     'commit_on_failure is disabled for LocalVertexNormalizer v2'
             end
 
-            new(tolerance_mm).normalize(entity)
+            new(tolerance_mm).normalize(
+              entity,
+              debug: debug,
+              report: report,
+              report_path: report_path,
+              write_report: write_report,
+              manage_operation: manage_operation
+            )
           end
 
           def normalized?(entity, tolerance_mm = DEFAULT_TOLERANCE_MM)
@@ -33,13 +45,19 @@ module ULOL
           end
         end
 
-        def normalize(entity, commit_on_failure: false)
+        def normalize(
+          entity,
+          commit_on_failure: false,
+          manage_operation: true
+        )
           if commit_on_failure
             raise ArgumentError,
                   'commit_on_failure is disabled for LocalVertexNormalizer v2'
           end
 
           validate_entity!(entity)
+          return normalize_entity(entity) unless manage_operation
+
           with_normalization_operation(entity, commit_on_failure: false) do
             normalize_entity(entity)
           end

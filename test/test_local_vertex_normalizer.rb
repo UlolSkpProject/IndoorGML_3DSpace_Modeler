@@ -229,6 +229,28 @@ module ULOL
           end
         end
 
+        class EmptyReportEntities
+          def grep(_klass)
+            []
+          end
+        end
+
+        ReportDefinition = Struct.new(:entities)
+
+        class ReportEntity
+          attr_reader :definition, :name, :persistent_id
+
+          def initialize
+            @definition = ReportDefinition.new(EmptyReportEntities.new)
+            @name = 'timed-solid'
+            @persistent_id = 42
+          end
+
+          def volume
+            1.0
+          end
+        end
+
         def test_operation_commits_successful_reconstruction
           model = FakeModel.new
           result = normalizer(model: model).send(:with_normalization_operation, Object.new) do
@@ -238,6 +260,123 @@ module ULOL
           assert_equal :rebuilt, result
           assert_equal :start_operation, model.calls[0][0]
           assert_equal [[:commit_operation]], model.calls.drop(1)
+        end
+
+        def test_debug_normalization_records_stage_timings
+          model = FakeModel.new
+          instance = normalizer(model: model)
+          instance.define_singleton_method(:validate_entity!) { |_entity| true }
+          instance.define_singleton_method(:normalize_entity) do |_entity|
+            { manifold: true }
+          end
+
+          output, = capture_io do
+            @debug_result = instance.normalize(Object.new, debug: true)
+          end
+          profile = @debug_result[:debug_profile]
+
+          assert_equal :success, profile[:status]
+          assert_operator profile[:total_seconds], :>=, 0.0
+          assert_equal 1, profile.dig(:stages, :operation_start, :calls)
+          assert_equal 1, profile.dig(:stages, :operation_commit, :calls)
+          assert_equal 1, profile.dig(:stages, :operation_total, :calls)
+          assert_match(/\[LVN DEBUG\] PROFILE START/, output)
+          assert_match(/\[LVN DEBUG\] PROFILE SUCCESS/, output)
+          assert_same profile, LocalVertexNormalizer.last_debug_profile
+        ensure
+          @debug_result = nil
+        end
+
+        def test_normalize_can_reuse_a_caller_owned_operation
+          model = FakeModel.new
+          instance = normalizer(model: model)
+          instance.define_singleton_method(:validate_entity!) { |_entity| true }
+          instance.define_singleton_method(:normalize_entity) { |_entity| :rebuilt }
+
+          result = instance.normalize(Object.new, manage_operation: false)
+
+          assert_equal :rebuilt, result
+          assert_empty model.calls
+        end
+
+        def test_debug_normalization_keeps_failed_profile_after_rollback
+          model = FakeModel.new
+          instance = normalizer(model: model)
+          instance.define_singleton_method(:validate_entity!) { |_entity| true }
+          instance.define_singleton_method(:normalize_entity) do |_entity|
+            raise 'timed failure'
+          end
+
+          capture_io do
+            error = assert_raises(RuntimeError) do
+              instance.normalize(Object.new, debug: true)
+            end
+            assert_equal 'timed failure', error.message
+          end
+          profile = LocalVertexNormalizer.last_debug_profile
+
+          assert_equal :failed, profile[:status]
+          assert_match(/timed failure/, profile[:error])
+          assert_equal 1, profile.dig(:stages, :operation_rollback, :calls)
+        end
+
+        def test_report_writes_json_and_suppresses_verbose_debug_output
+          model = FakeModel.new
+          instance = normalizer(model: model)
+          instance.define_singleton_method(:validate_entity!) { |_entity| true }
+          instance.define_singleton_method(:normalize_entity) do |_entity|
+            { manifold: true }
+          end
+          entity = ReportEntity.new
+
+          Dir.mktmpdir do |directory|
+            path = File.join(directory, 'normalization-report.json')
+            output, = capture_io do
+              @report_result = instance.normalize(
+                entity,
+                debug: true,
+                report: true,
+                report_path: path
+              )
+            end
+            parsed = JSON.parse(File.read(path, encoding: 'UTF-8'))
+
+            assert_equal path, @report_result[:timing_report_path]
+            assert_equal 'ulol.local_vertex_normalization.timing.v1', parsed['schema']
+            assert_equal 'solid', parsed['scope']
+            assert_equal 'success', parsed['status']
+            assert_equal 0, parsed.dig('solid', 'geometry_before', 'faces')
+            assert_equal 0, parsed.dig('solid', 'geometry_after', 'vertices')
+            assert parsed.dig('solid', 'stages', 'operation_total')
+            assert_match(/\[LVN REPORT\] SUCCESS/, output)
+            refute_match(/\[LVN DEBUG\].*START/, output)
+          end
+        ensure
+          @report_result = nil
+        end
+
+        def test_failed_report_is_written_after_operation_rollback
+          model = FakeModel.new
+          instance = normalizer(model: model)
+          instance.define_singleton_method(:validate_entity!) { |_entity| true }
+          instance.define_singleton_method(:normalize_entity) do |_entity|
+            raise 'report failure'
+          end
+
+          Dir.mktmpdir do |directory|
+            path = File.join(directory, 'failed-report.json')
+            capture_io do
+              assert_raises(RuntimeError) do
+                instance.normalize(ReportEntity.new, report: true, report_path: path)
+              end
+            end
+            parsed = JSON.parse(File.read(path, encoding: 'UTF-8'))
+
+            assert_equal 'failed', parsed['status']
+            assert_match(/report failure/, parsed.dig('solid', 'error'))
+            assert_equal 1,
+                         parsed.dig('solid', 'stages', 'operation_rollback', 'calls')
+          end
         end
 
         def test_operation_aborts_when_reconstruction_raises

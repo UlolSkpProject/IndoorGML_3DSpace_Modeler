@@ -20,7 +20,7 @@ module ULOL
         # Numerical comparison epsilon. This is not the normalization grid size.
         GRID_EPSILON_MM = 0.000001
 
-        STRICT_COPLANAR_TOLERANCE_MM = 0.001
+        STRICT_COPLANAR_TOLERANCE_MM = 0.0001
         STRICT_COPLANAR_ANGLE_TOLERANCE_DEG = 0.001
 
         COPLANAR_TOLERANCE_MM = 0.01
@@ -82,17 +82,21 @@ module ULOL
           commit_attempted = false
 
           begin
-            operation_started = model.start_operation(
-              'Normalize IndoorGML local vertices',
-              true
-            )
+            operation_started = measure_debug_stage(:operation_start) do
+              model.start_operation(
+                'Normalize IndoorGML local vertices',
+                true
+              )
+            end
             unless operation_started
               raise OperationError, 'Failed to start local vertex normalization operation'
             end
 
             result = yield
             commit_attempted = true
-            committed = model.commit_operation
+            committed = measure_debug_stage(:operation_commit) do
+              model.commit_operation
+            end
             if committed == false
               raise OperationError, 'Failed to commit local vertex normalization operation'
             end
@@ -120,7 +124,11 @@ module ULOL
               raise OperationError, message
             end
 
-            rollback_error = rollback_normalization_operation(model) if operation_started
+            rollback_error = if operation_started
+                               measure_debug_stage(:operation_rollback) do
+                                 rollback_normalization_operation(model)
+                               end
+                             end
             if rollback_error
               raise OperationError,
                     "Local vertex normalization failed (#{error.class}: #{error.message}) " \
