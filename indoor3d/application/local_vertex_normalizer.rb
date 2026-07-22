@@ -4,10 +4,9 @@
 # this file installs the complete LocalVertexNormalizer implementation in the
 # required order: legacy geometric primitives, safe coplanar edge grouping, the
 # v2 normalization pipeline, runtime regression fixes from integration runs,
-# incident-edge subdivision repair, then the explicit coplanar tolerance policy.
+# then the explicit coplanar tolerance policy.
 require_relative 'local_vertex_normalizer/legacy_kernel'
 require_relative 'local_vertex_normalizer/coplanar_shared_edge_groups'
 require_relative 'local_vertex_normalizer/pipeline_v2'
 require_relative 'local_vertex_normalizer/runtime_regression_fixes_v2'
-require_relative 'local_vertex_normalizer/incident_edge_subdivision_v2'
 require_relative 'local_vertex_normalizer/coplanar_tolerance_policy_v2'
