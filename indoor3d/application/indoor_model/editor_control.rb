@@ -594,7 +594,10 @@ module ULOL
               progress&.set_result_message('GML export failed: topology synchronization failed.')
               return nil
             end
-            IndoorGmlConverter::GmlExporter.new(self).export(output_path: path)
+            IndoorGmlConverter::GmlExporter.new(
+              self,
+              refresh_runtime_data: false
+            ).export(output_path: path)
             progress&.set_result_message("GML exported:\n#{path}")
             path
           rescue StandardError => e

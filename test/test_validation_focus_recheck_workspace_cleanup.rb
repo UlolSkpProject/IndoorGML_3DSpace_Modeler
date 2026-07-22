@@ -114,6 +114,7 @@ module ULOL
             progress_class.last.create_gml_callback.call
 
             assert_equal harness, FakeGmlExporter.last_indoor_model
+            assert_equal false, FakeGmlExporter.last_options[:refresh_runtime_data]
             assert_equal "#{UI.savepanel_path}.gml", FakeGmlExporter.last_output_path
             assert_equal "GML exported:\n#{UI.savepanel_path}.gml", progress_class.last.result_message
           end
@@ -542,16 +543,19 @@ module ULOL
         class FakeGmlExporter
           class << self
             attr_reader :last_indoor_model
+            attr_reader :last_options
             attr_reader :last_output_path
             attr_accessor :raise_on_export
 
-            def new(indoor_model, **_options)
+            def new(indoor_model, **options)
               @last_indoor_model = indoor_model
+              @last_options = options
               allocate
             end
 
             def reset
               @last_indoor_model = nil
+              @last_options = nil
               @last_output_path = nil
               @raise_on_export = false
             end
