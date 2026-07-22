@@ -594,6 +594,49 @@ module ULOL
           refute repaired.any? { |record| instance.send(:degenerate_triangle_record?, record) }
         end
 
+        def test_source_conforming_preserves_vertex_on_edge_before_grid_rounding
+          point_a = mm_point(0.0004, 0.0004, 0)
+          point_b = mm_point(1.0004, 0.0009, 0)
+          point_c = mm_point(2.0004, 0.0014, 0)
+          point_d = mm_point(0, 10, 0)
+          point_e = mm_point(20, 20, 0)
+          point_f = mm_point(21, 20, 0)
+          records = []
+          add_triangle_record(records, point_a, point_c, point_d, :subdivided)
+          add_triangle_record(records, point_b, point_e, point_f, :candidate)
+          instance = normalizer
+
+          assert instance.send(
+            :point_on_segment_parameter,
+            point_b,
+            point_a,
+            point_c,
+            LocalVertexNormalizer::GRID_EPSILON_MM
+          )
+
+          conforming = instance.send(
+            :conforming_triangle_snapshot,
+            records,
+            coordinate_space: :source
+          )
+          edges = conforming.flat_map do |record|
+            keys = record[:points].map do |point|
+              instance.send(:triangle_point_key, point, :source)
+            end
+            3.times.map do |index|
+              [keys[index], keys[(index + 1) % 3]].sort
+            end
+          end
+          point_a_key = instance.send(:triangle_point_key, point_a, :source)
+          point_b_key = instance.send(:triangle_point_key, point_b, :source)
+          point_c_key = instance.send(:triangle_point_key, point_c, :source)
+
+          assert_equal 3, conforming.length
+          refute_includes edges, [point_a_key, point_c_key].sort
+          assert_includes edges, [point_a_key, point_b_key].sort
+          assert_includes edges, [point_b_key, point_c_key].sort
+        end
+
         def test_degenerate_repair_report_aggregates_each_mesh_stage
           instance = normalizer
           report = instance.send(

@@ -1205,11 +1205,11 @@ module ULOL
           end
         end
 
-        def conforming_triangle_snapshot(source_triangles)
+        def conforming_triangle_snapshot(source_triangles, coordinate_space: :grid)
           unique_points = {}
           source_triangles.each do |record|
             record[:points].each do |point|
-              unique_points[grid_indices(point)] ||= point
+              unique_points[triangle_point_key(point, coordinate_space)] ||= point
             end
           end
 
@@ -1217,15 +1217,27 @@ module ULOL
           signatures = {}
 
           source_triangles.flat_map do |record|
-            next [] if collinear_triangle?(record[:points])
+            if degenerate_triangle_record?(
+              record,
+              coordinate_space: coordinate_space
+            )
+              next [record] if coordinate_space == :source
+
+              next []
+            end
 
             boundary = triangle_boundary_with_segment_vertices(
               record[:points],
-              candidates
+              candidates,
+              coordinate_space: coordinate_space
             )
 
-            triangulate_convex_boundary(boundary, candidates).map do |points|
-              signature = triangle_signature(points)
+            triangulate_convex_boundary(
+              boundary,
+              candidates,
+              coordinate_space: coordinate_space
+            ).map do |points|
+              signature = triangle_signature_for_space(points, coordinate_space)
               if signatures.key?(signature)
                 raise ReconstructionError,
                       "Duplicate conforming triangle detected: #{signature.inspect}"
@@ -2536,7 +2548,11 @@ module ULOL
           points.map { |point| grid_indices(point) }.sort
         end
 
-        def triangle_boundary_with_segment_vertices(points, candidates)
+        def triangle_boundary_with_segment_vertices(
+          points,
+          candidates,
+          coordinate_space: :grid
+        )
           boundary = []
 
           3.times do |index|
@@ -2545,9 +2561,9 @@ module ULOL
             boundary << start_point
 
             inserted = candidates.filter_map do |candidate|
-              candidate_key = grid_indices(candidate)
-              next if candidate_key == grid_indices(start_point)
-              next if candidate_key == grid_indices(end_point)
+              candidate_key = triangle_point_key(candidate, coordinate_space)
+              next if candidate_key == triangle_point_key(start_point, coordinate_space)
+              next if candidate_key == triangle_point_key(end_point, coordinate_space)
 
               parameter = point_on_segment_parameter(
                 candidate,
@@ -2566,7 +2582,11 @@ module ULOL
 
         # The boundary is an original triangle with optional collinear points
         # inserted on its edges, so it remains convex.
-        def triangulate_convex_boundary(points, candidates = points)
+        def triangulate_convex_boundary(
+          points,
+          candidates = points,
+          coordinate_space: :grid
+        )
           remaining = remove_consecutive_duplicate_points(points)
           return [] if remaining.length < 3
           return [remaining] if remaining.length == 3 && !collinear_triangle?(remaining)
@@ -2583,7 +2603,8 @@ module ULOL
                 !segment_has_interior_candidate?(
                   previous_point,
                   following_point,
-                  candidates
+                  candidates,
+                  coordinate_space: coordinate_space
                 )
             end
 
@@ -2605,12 +2626,17 @@ module ULOL
           triangles
         end
 
-        def segment_has_interior_candidate?(start_point, end_point, candidates)
-          start_key = grid_indices(start_point)
-          end_key = grid_indices(end_point)
+        def segment_has_interior_candidate?(
+          start_point,
+          end_point,
+          candidates,
+          coordinate_space: :grid
+        )
+          start_key = triangle_point_key(start_point, coordinate_space)
+          end_key = triangle_point_key(end_point, coordinate_space)
 
           candidates.any? do |candidate|
-            candidate_key = grid_indices(candidate)
+            candidate_key = triangle_point_key(candidate, coordinate_space)
             next false if candidate_key == start_key || candidate_key == end_key
 
             !point_on_segment_parameter(
