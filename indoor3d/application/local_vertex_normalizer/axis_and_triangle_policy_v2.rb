@@ -578,6 +578,44 @@ module ULOL
             normalized_records
           )
           affected_indices = (collapsed_indices + duplicate_indices).uniq
+          failure_set = empty_repair_failure_set
+          add_repair_failure!(
+            failure_set,
+            reason: :collapsed_triangle,
+            triangle_indices: collapsed_indices,
+            source_face_keys: collapsed_indices.map do |index|
+              triangle_records[index][:source_face_key]
+            end
+          ) unless collapsed_indices.empty?
+          add_repair_failure!(
+            failure_set,
+            reason: :collision_duplicate_triangle,
+            triangle_indices: duplicate_indices,
+            source_face_keys: duplicate_indices.map do |index|
+              triangle_records[index][:source_face_key]
+            end
+          ) unless duplicate_indices.empty?
+          if affected_indices.empty?
+            if duplicate_diagnostics
+              duplicate_diagnostics[:duplicate_count] ||= 0
+              duplicate_diagnostics[:samples] ||= []
+            end
+            return [
+              normalized_records,
+              {
+                removed_coincident_triangle_count: 0,
+                removed_collinear_triangle_count: 0,
+                removed_duplicate_triangle_count: 0,
+                affected_source_face_keys: [],
+                forced_source_face_keys: [],
+                collapsed_triangle_count: 0,
+                collision_duplicate_triangle_count: 0,
+                repair_failure_set:
+                  finalize_repair_failure_set(failure_set)
+              }
+            ]
+          end
+
           forced_face_keys = source_face_keys_with_adjacent_triangles(
             triangle_records,
             affected_indices,
@@ -592,6 +630,7 @@ module ULOL
           cleanup[:forced_source_face_keys] = forced_face_keys
           cleanup[:collapsed_triangle_count] = collapsed_indices.length
           cleanup[:collision_duplicate_triangle_count] = duplicate_indices.length
+          cleanup[:repair_failure_set] = finalize_repair_failure_set(failure_set)
           [sanitized, cleanup]
         end
 
@@ -652,6 +691,48 @@ module ULOL
           expanded.uniq.filter_map do |index|
             triangle_records[index][:source_face_key]
           end.uniq
+        end
+
+        # Creates a provenance-preserving worklist for localized repair stages.
+        def empty_repair_failure_set
+          {
+            vertex_keys: [],
+            edge_keys: [],
+            triangle_indices: [],
+            source_face_keys: [],
+            patch_indices: [],
+            reasons: {}
+          }
+        end
+
+        # Adds one detected defect and its minimal known repair provenance.
+        def add_repair_failure!(
+          failure_set,
+          reason:,
+          vertex_keys: [],
+          edge_keys: [],
+          triangle_indices: [],
+          source_face_keys: [],
+          patch_indices: []
+        )
+          failure_set[:vertex_keys].concat(Array(vertex_keys))
+          failure_set[:edge_keys].concat(Array(edge_keys))
+          failure_set[:triangle_indices].concat(Array(triangle_indices))
+          failure_set[:source_face_keys].concat(Array(source_face_keys).compact)
+          failure_set[:patch_indices].concat(Array(patch_indices))
+          failure_set[:reasons][reason] = failure_set[:reasons].fetch(reason, 0) + 1
+          failure_set
+        end
+
+        # Freezes a repair worklist into unique deterministic arrays for reports.
+        def finalize_repair_failure_set(failure_set)
+          failure_set.each_with_object({}) do |(key, value), result|
+            result[key] = if key == :reasons
+                            value.dup
+                          else
+                            value.uniq.sort_by(&:inspect)
+                          end
+          end
         end
 
         def sanitize_triangle_records(
@@ -775,6 +856,32 @@ module ULOL
           degenerate_indices = triangle_records.each_index.select do |index|
             degenerate_triangle_record?(triangle_records[index])
           end
+          if degenerate_indices.empty?
+            return [
+              triangle_records,
+              {
+                repaired_triangles: 0,
+                replaced_pairs: 0,
+                forced_source_face_keys: [],
+                alternate_sliver_triangle_count: 0,
+                deferred_to_patch_retriangulation: false,
+                repair_failure_set:
+                  finalize_repair_failure_set(empty_repair_failure_set)
+              }
+            ]
+          end
+
+          failure_set = empty_repair_failure_set
+          add_repair_failure!(
+            failure_set,
+            reason: :degenerate_triangle,
+            triangle_indices: degenerate_indices,
+            source_face_keys: degenerate_indices.map do |index|
+              triangle_records[index][:source_face_key]
+            end
+          )
+          failure_set = finalize_repair_failure_set(failure_set)
+
           forced_face_keys = source_face_keys_with_adjacent_triangles(
             triangle_records,
             degenerate_indices,
@@ -800,7 +907,8 @@ module ULOL
           report = report.merge(
             forced_source_face_keys: forced_face_keys.uniq,
             alternate_sliver_triangle_count: alternate_slivers.length,
-            deferred_to_patch_retriangulation: alternate_slivers.any?
+            deferred_to_patch_retriangulation: alternate_slivers.any?,
+            repair_failure_set: report[:repair_failure_set] || failure_set
           )
           [repaired, report]
         rescue ReconstructionError => error
@@ -822,7 +930,8 @@ module ULOL
               removed_collinear_triangles:
                 cleanup[:removed_collinear_triangle_count],
               removed_duplicate_triangles:
-                cleanup[:removed_duplicate_triangle_count]
+                cleanup[:removed_duplicate_triangle_count],
+              repair_failure_set: failure_set
             }
           ]
         end

@@ -43,6 +43,7 @@ module ULOL
               **options
             )
             profile = finish_debug_profile(:success)
+            attach_normalization_result_to_debug_profile(profile, result)
             if report == true && write_report
               written_path = self.class.write_timing_report(
                 single_solid_timing_report(profile),
@@ -130,7 +131,90 @@ module ULOL
         end
 
         def triangle_snapshot(entities)
-          measure_debug_stage(:source_brep_snapshot) { super }
+          snapshot_role = @local_vertex_normalizer_debug_snapshot_role ||
+            :source_initial
+          previous_role = @local_vertex_normalizer_debug_snapshot_role
+          @local_vertex_normalizer_debug_snapshot_role = snapshot_role
+          measure_debug_stage(
+            :source_brep_snapshot,
+            snapshot_role: snapshot_role
+          ) { super }
+        ensure
+          @local_vertex_normalizer_debug_snapshot_role = previous_role
+        end
+
+        def source_boundary_triangle_records(face, source_face_key)
+          snapshot_role = debug_current_snapshot_role
+          measure_debug_stage(
+            debug_snapshot_stage(:source_boundary_face_snapshot, snapshot_role),
+            { snapshot_role: snapshot_role },
+            emit: false,
+            record_event: false
+          ) { super }
+        end
+
+        def triangulate_exact_polygon_with_holes(outer, holes, drop_axis)
+          snapshot_role = debug_current_snapshot_role
+          measure_debug_stage(
+            debug_snapshot_stage(:exact_polygon_triangulation, snapshot_role),
+            {
+              outer_vertex_count: outer.length,
+              hole_count: holes.length,
+              snapshot_role: snapshot_role
+            },
+            emit: false,
+            record_event: false
+          ) { super }
+        end
+
+        def triangulate_exact_weak_polygon(points, drop_axis)
+          snapshot_role = debug_current_snapshot_role
+          measure_debug_stage(
+            debug_snapshot_stage(:exact_ear_clipping, snapshot_role),
+            { vertex_count: points.length, snapshot_role: snapshot_role },
+            emit: false,
+            record_event: false
+          ) { super }
+        end
+
+        def optimize_exact_patch_triangulation(triangles, constraints, drop_axis)
+          snapshot_role = debug_current_snapshot_role
+          measure_debug_stage(
+            debug_snapshot_stage(
+              :exact_lawson_flip_optimization,
+              snapshot_role
+            ),
+            {
+              triangle_count: triangles.length,
+              snapshot_role: snapshot_role
+            },
+            emit: false,
+            record_event: false
+          ) { super }
+        end
+
+        def validate_source_boundary_retriangulation!(
+          records,
+          loops,
+          triangle_keys: nil
+        )
+          snapshot_role = debug_current_snapshot_role
+          measure_debug_stage(
+            debug_snapshot_stage(:source_boundary_validation, snapshot_role),
+            {
+              triangle_count: records.length,
+              loop_count: loops.length,
+              snapshot_role: snapshot_role
+            },
+            emit: false,
+            record_event: false
+          ) do
+            super(
+              records,
+              loops,
+              triangle_keys: triangle_keys
+            )
+          end
         end
 
         def conforming_triangle_snapshot(source_triangles, coordinate_space: :grid)
@@ -275,9 +359,25 @@ module ULOL
         def normalized_triangle_snapshot(
           entities,
           axis_plane_plan = nil,
-          duplicate_diagnostics: nil
+          duplicate_diagnostics: nil,
+          snapshot_role: nil
         )
-          measure_debug_stage(:rebuilt_geometry_snapshot) { super }
+          role = snapshot_role || :rebuilt_unspecified
+          previous_role = @local_vertex_normalizer_debug_snapshot_role
+          @local_vertex_normalizer_debug_snapshot_role = role
+          measure_debug_stage(
+            :rebuilt_geometry_snapshot,
+            snapshot_role: role
+          ) do
+            super(
+              entities,
+              axis_plane_plan,
+              duplicate_diagnostics: duplicate_diagnostics,
+              snapshot_role: snapshot_role
+            )
+          end
+        ensure
+          @local_vertex_normalizer_debug_snapshot_role = previous_role
         end
 
         def verify_triangle_rebuild!(expected_records, actual_records)
@@ -384,7 +484,8 @@ module ULOL
             status: :running,
             depth: 0,
             events: [],
-            stages: {}
+            stages: {},
+            snapshot_roles: {}
           }
           if verbose
             debug_profile_log(
@@ -435,7 +536,13 @@ module ULOL
           profile
         end
 
-        def measure_debug_stage(stage, details = nil, emit: true, **detail_keywords)
+        def measure_debug_stage(
+          stage,
+          details = nil,
+          emit: true,
+          record_event: true,
+          **detail_keywords
+        )
           profile = @local_vertex_normalizer_debug_profile
           return yield unless profile
 
@@ -477,7 +584,7 @@ module ULOL
               details: details
             }
             event[:error] = "#{error.class}: #{error.message}" if error
-            profile[:events] << event
+            profile[:events] << event if record_event
             metrics = profile[:stages][stage] ||= {
               calls: 0,
               total_seconds: 0.0,
@@ -488,6 +595,13 @@ module ULOL
             metrics[:total_seconds] += duration
             metrics[:max_seconds] = [metrics[:max_seconds], duration].max
             metrics[:failures] += 1 if status == :failed
+            record_debug_snapshot_role(
+              profile,
+              stage,
+              details,
+              duration,
+              status
+            )
             if emit && profile[:verbose]
               debug_profile_log(
                 format(
@@ -559,6 +673,38 @@ module ULOL
             tolerance_mm: profile[:tolerance_mm],
             solid: profile
           }
+        end
+
+        def attach_normalization_result_to_debug_profile(profile, result)
+          return unless profile && result.is_a?(Hash)
+
+          snapshot_reuse = result[:snapshot_reuse]
+          profile[:snapshot_reuse] = snapshot_reuse.dup if
+            snapshot_reuse.is_a?(Hash)
+        end
+
+        def debug_current_snapshot_role
+          @local_vertex_normalizer_debug_snapshot_role || :outside_snapshot
+        end
+
+        def debug_snapshot_stage(base, snapshot_role)
+          "#{base}_#{snapshot_role}".to_sym
+        end
+
+        def record_debug_snapshot_role(profile, stage, details, duration, status)
+          return unless stage == :source_brep_snapshot
+
+          role = (details[:snapshot_role] || :unspecified).to_sym
+          metrics = profile[:snapshot_roles][role] ||= {
+            calls: 0,
+            total_seconds: 0.0,
+            max_seconds: 0.0,
+            failures: 0
+          }
+          metrics[:calls] += 1
+          metrics[:total_seconds] += duration
+          metrics[:max_seconds] = [metrics[:max_seconds], duration].max
+          metrics[:failures] += 1 if status == :failed
         end
 
         def debug_collection_size(collection)

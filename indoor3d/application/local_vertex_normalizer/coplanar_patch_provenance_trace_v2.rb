@@ -8,8 +8,7 @@ module ULOL
       class LocalVertexNormalizer
         private
 
-        # Diagnostic-only override. Production behavior is unchanged until a
-        # coplanar patch rebuild raises; only the failing patch is then described.
+        # Detects exact-patch failures once, then rebuilds only their components.
         def retriangulate_exact_coplanar_patches(
           triangle_records,
           forced_source_face_keys: [],
@@ -17,6 +16,25 @@ module ULOL
         )
           forced_keys = Array(forced_source_face_keys).compact.to_h { |key| [key, true] }
           patches = exact_coplanar_triangle_patches(triangle_records)
+          record_indices = triangle_records.each_with_index.to_h do |record, index|
+            [record.object_id, index]
+          end
+          patch_indices = Array.new(triangle_records.length)
+          patches.each_with_index do |patch, patch_index|
+            patch.each do |record|
+              patch_indices[record_indices.fetch(record.object_id)] = patch_index
+            end
+          end
+          failure_set = exact_coplanar_patch_failure_set(
+            triangle_records,
+            patches,
+            patch_indices,
+            forced_keys,
+            force_all
+          )
+          repair_patch_lookup = failure_set[:patch_indices].to_h do |patch_index|
+            [patch_index, true]
+          end
           rebuilt_records = []
           rebuilt_patches = 0
           preserved_patches = 0
@@ -30,7 +48,7 @@ module ULOL
             forced = force_all || patch.any? do |record|
               forced_keys[record[:source_face_key]]
             end
-            required = forced || exact_coplanar_patch_retriangulation_required?(patch)
+            required = repair_patch_lookup[patch_index]
             unless required
               rebuilt_records.concat(patch)
               preserved_patches += 1
@@ -72,9 +90,95 @@ module ULOL
               source_triangles: source_triangle_count,
               rebuilt_triangles: rebuilt_triangle_count,
               boundary_loops: boundary_loop_count,
-              holes: hole_count
+              holes: hole_count,
+              repair_failure_set: failure_set
             }
           ]
+        end
+
+        # Builds the minimal coplanar-component worklist from exact defect probes.
+        def exact_coplanar_patch_failure_set(
+          triangle_records,
+          patches,
+          patch_indices,
+          forced_keys,
+          force_all
+        )
+          failure_set = empty_repair_failure_set
+          record_indices = triangle_records.each_with_index.to_h do |record, index|
+            [record.object_id, index]
+          end
+
+          patches.each_with_index do |patch, patch_index|
+            if force_all
+              add_repair_failure!(
+                failure_set,
+                reason: :forced_all,
+                triangle_indices: patch.map { |record| record_indices.fetch(record.object_id) },
+                source_face_keys: patch.map { |record| record[:source_face_key] },
+                patch_indices: [patch_index]
+              )
+              next
+            end
+
+            patch.each do |record|
+              triangle_index = record_indices.fetch(record.object_id)
+              if forced_keys[record[:source_face_key]]
+                add_repair_failure!(
+                  failure_set,
+                  reason: :forced_source_face,
+                  triangle_indices: [triangle_index],
+                  source_face_keys: [record[:source_face_key]],
+                  patch_indices: [patch_index]
+                )
+              end
+
+              triangle = record[:points].map { |point| grid_indices(point) }
+              source_normal = Array(record[:source_normal]).map(&:to_f)
+              actual_normal = integer_triangle_normal(triangle)
+              if source_normal.length == 3 &&
+                 vector_dot(actual_normal, source_normal).negative?
+                add_repair_failure!(
+                  failure_set,
+                  reason: :reversed_normal,
+                  triangle_indices: [triangle_index],
+                  source_face_keys: [record[:source_face_key]],
+                  patch_indices: [patch_index]
+                )
+              end
+              if exact_triangle_minimum_altitude_mm(triangle) < @tolerance_mm
+                add_repair_failure!(
+                  failure_set,
+                  reason: :sub_grid_altitude,
+                  triangle_indices: [triangle_index],
+                  source_face_keys: [record[:source_face_key]],
+                  patch_indices: [patch_index]
+                )
+              end
+            end
+          end
+
+          triangles = triangle_records.map do |record|
+            record[:points].map { |point| grid_indices(point) }
+          end
+          intersections = collect_triangle_intersection_failures(
+            triangles,
+            partition_ids: patch_indices
+          )
+          intersections[:pairs].each do |first_index, second_index|
+            patch_index = patch_indices.fetch(first_index)
+            records = [triangle_records[first_index], triangle_records[second_index]]
+            add_repair_failure!(
+              failure_set,
+              reason: :triangle_intersection,
+              triangle_indices: [first_index, second_index],
+              source_face_keys: records.map { |record| record[:source_face_key] },
+              patch_indices: [patch_index]
+            )
+          end
+          failure_set = finalize_repair_failure_set(failure_set)
+          failure_set[:intersection_tested_pairs] = intersections[:tested_pairs]
+          failure_set
         end
 
         def emit_exact_coplanar_patch_provenance_trace(

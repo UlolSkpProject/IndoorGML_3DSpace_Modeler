@@ -19,22 +19,43 @@ module ULOL
           triangle_records,
           coordinate_space: :grid
         )
-          return repair_degenerate_source_triangles_before_runtime_regression_v2(
-            triangle_records,
-            coordinate_space: coordinate_space
-          ) unless coordinate_space == :source
-
-          repair_degenerate_source_triangles_before_runtime_regression_v2(
-            triangle_records,
-            coordinate_space: :source
-          )
-        rescue ReconstructionError => error
           degenerate_indices = triangle_records.each_index.select do |index|
             degenerate_triangle_record?(
               triangle_records[index],
-              coordinate_space: :source
+              coordinate_space: coordinate_space
             )
           end
+          failure_set = empty_repair_failure_set
+          if degenerate_indices.empty?
+            return [
+              triangle_records,
+              {
+                repaired_triangles: 0,
+                replaced_pairs: 0,
+                repair_failure_set: finalize_repair_failure_set(failure_set)
+              }
+            ]
+          end
+
+          add_repair_failure!(
+            failure_set,
+            reason: :degenerate_triangle,
+            triangle_indices: degenerate_indices,
+            source_face_keys: degenerate_indices.map do |index|
+              triangle_records[index][:source_face_key]
+            end
+          )
+          failure_set = finalize_repair_failure_set(failure_set)
+
+          repaired, report =
+            repair_degenerate_source_triangles_before_runtime_regression_v2(
+              triangle_records,
+              coordinate_space: coordinate_space
+            )
+          [repaired, report.merge(repair_failure_set: failure_set)]
+        rescue ReconstructionError => error
+          raise unless coordinate_space == :source
+
           forced_face_keys = source_face_keys_with_adjacent_triangles(
             triangle_records,
             degenerate_indices,
@@ -69,7 +90,8 @@ module ULOL
               removed_source_degenerate_triangles:
                 cleanup[:removed_degenerate_triangle_count],
               removed_source_duplicate_triangles:
-                cleanup[:removed_duplicate_triangle_count]
+                cleanup[:removed_duplicate_triangle_count],
+              repair_failure_set: failure_set
             }
           ]
         end

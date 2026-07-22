@@ -37,6 +37,26 @@ module ULOL
           triangle.uniq.length != 3 || integer_zero_vector?(integer_triangle_normal(triangle))
         end
 
+        def empty_repair_failure_set
+          {
+            vertex_keys: [], edge_keys: [], triangle_indices: [],
+            source_face_keys: [], patch_indices: [], reasons: {}
+          }
+        end
+
+        def add_repair_failure!(failure_set, reason:, **provenance)
+          provenance.each do |key, values|
+            failure_set[key].concat(Array(values).compact) if failure_set.key?(key)
+          end
+          failure_set[:reasons][reason] = failure_set[:reasons].fetch(reason, 0) + 1
+        end
+
+        def finalize_repair_failure_set(failure_set)
+          failure_set.transform_values do |value|
+            value.is_a?(Hash) ? value.dup : value.uniq.sort_by(&:inspect)
+          end
+        end
+
         def source_face_keys_with_adjacent_triangles(records, indices, coordinate_space:)
           coordinate_space
           indices.map { |index| records[index][:source_face_key] }.compact.uniq

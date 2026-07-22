@@ -515,6 +515,8 @@ module ULOL
                 after: sum_profile_geometry_counts(solid_profiles, :geometry_after)
               },
               stage_totals: aggregate_profile_stage_timings(solid_profiles),
+              snapshot_role_totals:
+                aggregate_profile_snapshot_role_timings(solid_profiles),
               normalization_summary:
                 compact_normalization_summary(normalization_report),
               solids: solid_profiles
@@ -564,6 +566,28 @@ module ULOL
               end
             end
             totals.sort_by { |_name, metrics| -metrics[:total_seconds] }.to_h
+          end
+
+          def aggregate_profile_snapshot_role_timings(profiles)
+            totals = {}
+            profiles.each do |profile|
+              Hash(profile[:snapshot_roles]).each do |role, metrics|
+                entry = totals[role] ||= {
+                  calls: 0,
+                  total_seconds: 0.0,
+                  max_seconds: 0.0,
+                  failures: 0
+                }
+                entry[:calls] += metrics[:calls].to_i
+                entry[:total_seconds] += metrics[:total_seconds].to_f
+                entry[:max_seconds] = [
+                  entry[:max_seconds],
+                  metrics[:max_seconds].to_f
+                ].max
+                entry[:failures] += metrics[:failures].to_i
+              end
+            end
+            totals.sort_by { |_role, metrics| -metrics[:total_seconds] }.to_h
           end
 
           def compact_normalization_summary(report)

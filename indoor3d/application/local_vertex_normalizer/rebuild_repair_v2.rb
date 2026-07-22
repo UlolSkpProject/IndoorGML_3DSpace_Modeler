@@ -14,6 +14,7 @@ module ULOL
           topology_before = geometry_counts(entities)
           consistency = repair_reverse_faces(entities)
           axis_plane_merge = empty_coplanar_cleanup_report
+          post_cleanup_snapshot = nil
 
           if closed_surface?(geometry_counts(entities))
             backup = validated_triangles.map(&:dup)
@@ -29,15 +30,31 @@ module ULOL
                       "Coplanar cleanup opened rebuilt shell: #{topology.inspect}"
               end
 
-              merged_triangles = normalized_triangle_snapshot(entities)
-              merged_triangles, = repair_degenerate_source_triangles(
+              merged_duplicate_diagnostics = {}
+              merged_triangles = normalized_triangle_snapshot(
+                entities,
+                duplicate_diagnostics: merged_duplicate_diagnostics,
+                snapshot_role: :post_coplanar_cleanup
+              )
+              merged_triangles, merged_degenerate_repair =
+                repair_degenerate_source_triangles(
                 merged_triangles
               )
-              validate_normalized_triangle_mesh!(merged_triangles)
-              verify_normalized_surface_equivalence!(
+              merged_mesh_validation =
+                validate_normalized_triangle_mesh!(merged_triangles)
+              merged_surface_equivalence = verify_normalized_surface_equivalence!(
                 validated_triangles,
                 merged_triangles
               )
+              post_cleanup_snapshot = {
+                validated: true,
+                triangles: merged_triangles,
+                duplicate_diagnostics: merged_duplicate_diagnostics,
+                degenerate_repair: merged_degenerate_repair,
+                mesh_validation: merged_mesh_validation,
+                surface_equivalence: merged_surface_equivalence,
+                topology: topology
+              }
             rescue Error, ArgumentError => error
               erase_source_geometry(entities)
               restored = rebuild_triangles(entities, backup)
@@ -76,7 +93,7 @@ module ULOL
           axis_plane_merge[:merged_faces] = axis_plane_merge[:removed_groups] ||
             axis_plane_merge[:removed_edges]
           axis_plane_merge[:preserved_constrained_edges] = false
-          [orientation, axis_plane_merge]
+          [orientation, axis_plane_merge, post_cleanup_snapshot]
         end
 
         # Step 10. Each repair is bounded and accepted only when it improves the

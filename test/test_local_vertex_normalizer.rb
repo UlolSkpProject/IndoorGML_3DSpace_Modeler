@@ -267,7 +267,14 @@ module ULOL
           instance = normalizer(model: model)
           instance.define_singleton_method(:validate_entity!) { |_entity| true }
           instance.define_singleton_method(:normalize_entity) do |_entity|
-            { manifold: true }
+            {
+              manifold: true,
+              snapshot_reuse: {
+                reused: true,
+                rejection_reasons: [],
+                final_repair_attempted: false
+              }
+            }
           end
 
           output, = capture_io do
@@ -285,6 +292,30 @@ module ULOL
           assert_same profile, LocalVertexNormalizer.last_debug_profile
         ensure
           @debug_result = nil
+        end
+
+        def test_aggregate_only_debug_stage_does_not_append_an_event
+          model = FakeModel.new
+          instance = normalizer(model: model)
+          instance.define_singleton_method(:validate_entity!) { |_entity| true }
+          instance.define_singleton_method(:normalize_entity) do |_entity|
+            measure_debug_stage(
+              :aggregate_only_stage,
+              emit: false,
+              record_event: false
+            ) { true }
+            { manifold: true }
+          end
+
+          result = instance.normalize(Object.new, report: true, write_report: false)
+          profile = result[:debug_profile]
+
+          assert_equal 1, profile.dig(:stages, :aggregate_only_stage, :calls)
+          refute(
+            profile[:events].any? do |event|
+              event[:stage] == :aggregate_only_stage
+            end
+          )
         end
 
         def test_normalize_can_reuse_a_caller_owned_operation
@@ -325,7 +356,14 @@ module ULOL
           instance = normalizer(model: model)
           instance.define_singleton_method(:validate_entity!) { |_entity| true }
           instance.define_singleton_method(:normalize_entity) do |_entity|
-            { manifold: true }
+            {
+              manifold: true,
+              snapshot_reuse: {
+                reused: true,
+                rejection_reasons: [],
+                final_repair_attempted: false
+              }
+            }
           end
           entity = ReportEntity.new
 
@@ -348,6 +386,13 @@ module ULOL
             assert_equal 0, parsed.dig('solid', 'geometry_before', 'faces')
             assert_equal 0, parsed.dig('solid', 'geometry_after', 'vertices')
             assert parsed.dig('solid', 'stages', 'operation_total')
+            assert_equal true, parsed.dig('solid', 'snapshot_reuse', 'reused')
+            assert_equal false,
+                         parsed.dig(
+                           'solid',
+                           'snapshot_reuse',
+                           'final_repair_attempted'
+                         )
             assert_match(/\[LVN REPORT\] SUCCESS/, output)
             refute_match(/\[LVN DEBUG\].*START/, output)
           end
@@ -664,6 +709,41 @@ module ULOL
           refute repaired.any? { |record| instance.send(:degenerate_triangle_record?, record) }
         end
 
+        def test_clean_triangle_worklists_skip_repair_and_collision_sanitize
+          instance = normalizer
+          records = []
+          add_triangle_record(
+            records,
+            mm_point(0, 0, 0),
+            mm_point(10, 0, 0),
+            mm_point(0, 10, 0),
+            :clean
+          )
+
+          repaired, repair_report = instance.send(
+            :repair_degenerate_source_triangles,
+            records
+          )
+          assert_same records, repaired
+          assert_empty repair_report.dig(:repair_failure_set, :triangle_indices)
+
+          instance.define_singleton_method(:sanitize_triangle_records) do |*_args, **_options|
+            raise 'clean collision worklist must not sanitize'
+          end
+          diagnostics = {}
+          normalized, collision_report = instance.send(
+            :normalize_triangle_records_allowing_collisions,
+            records,
+            nil,
+            duplicate_diagnostics: diagnostics
+          )
+
+          assert_equal 1, normalized.length
+          assert_equal 0, collision_report[:collapsed_triangle_count]
+          assert_equal 0, collision_report[:collision_duplicate_triangle_count]
+          assert_equal 0, diagnostics[:duplicate_count]
+        end
+
         def test_source_space_degenerate_triangle_is_repaired_before_grid_rounding
           point_p = mm_point(30_374.309310100576, -5_125.200161758802, -400)
           point_a = mm_point(33_074.02490280663, -5_086.011917351332, -400)
@@ -789,6 +869,127 @@ module ULOL
           assert_includes edges, [point_b_key, point_c_key].sort
         end
 
+        def test_conforming_edge_cache_reverses_points_for_opposite_winding
+          point_a = mm_point(0, 0, 0)
+          point_b = mm_point(3, 0, 0)
+          point_c = mm_point(7, 0, 0)
+          point_d = mm_point(10, 0, 0)
+          off_edge = mm_point(5, 1, 0)
+          candidates = [point_a, point_b, point_c, point_d, off_edge]
+          instance = normalizer
+          cache = {}
+
+          forward = instance.send(
+            :conforming_edge_interior_points,
+            point_a,
+            point_d,
+            candidates,
+            coordinate_space: :source,
+            edge_split_cache: cache
+          )
+          reverse = instance.send(
+            :conforming_edge_interior_points,
+            point_d,
+            point_a,
+            candidates,
+            coordinate_space: :source,
+            edge_split_cache: cache
+          )
+          brute_forward = instance.send(
+            :conforming_edge_interior_points,
+            point_a,
+            point_d,
+            candidates,
+            coordinate_space: :source,
+            edge_split_cache: nil
+          )
+          brute_reverse = instance.send(
+            :conforming_edge_interior_points,
+            point_d,
+            point_a,
+            candidates,
+            coordinate_space: :source,
+            edge_split_cache: nil
+          )
+
+          assert_equal [point_b, point_c], forward
+          assert_equal [point_c, point_b], reverse
+          assert_equal brute_forward, forward
+          assert_equal brute_reverse, reverse
+          assert_equal 1, cache.length
+        end
+
+        def test_conforming_edge_cache_evaluates_shared_edge_candidates_once
+          point_a = mm_point(0, 0, 0)
+          point_b = mm_point(5, 0, 0)
+          point_c = mm_point(10, 0, 0)
+          off_edge = mm_point(5, 1, 0)
+          candidates = [point_a, point_b, point_c, off_edge]
+          instance = normalizer
+          original = instance.method(:point_on_segment_parameter)
+          calls = 0
+          instance.define_singleton_method(:point_on_segment_parameter) do |*arguments|
+            calls += 1
+            original.call(*arguments)
+          end
+          cache = {}
+
+          instance.send(
+            :conforming_edge_interior_points,
+            point_a,
+            point_c,
+            candidates,
+            coordinate_space: :grid,
+            edge_split_cache: cache
+          )
+          first_call_count = calls
+          instance.send(
+            :conforming_edge_interior_points,
+            point_c,
+            point_a,
+            candidates,
+            coordinate_space: :grid,
+            edge_split_cache: cache
+          )
+
+          assert_operator first_call_count, :>, 0
+          assert_equal first_call_count, calls
+        end
+
+        def test_unique_edge_cache_matches_brute_force_conforming_output
+          point_a = mm_point(0, 0, 0)
+          point_b = mm_point(5, 0, 0)
+          point_c = mm_point(10, 0, 0)
+          point_d = mm_point(0, 10, 0)
+          point_e = mm_point(10, -10, 0)
+          point_f = mm_point(20, 20, 0)
+          point_g = mm_point(21, 20, 0)
+          records = []
+          add_triangle_record(records, point_a, point_c, point_d, :forward)
+          add_triangle_record(records, point_c, point_a, point_e, :reverse)
+          add_triangle_record(records, point_b, point_f, point_g, :candidate)
+          instance = normalizer
+
+          [:source, :grid].each do |coordinate_space|
+            expected = brute_force_conforming_snapshot(
+              instance,
+              records,
+              coordinate_space
+            )
+            actual = instance.send(
+              :conforming_triangle_snapshot,
+              records,
+              coordinate_space: coordinate_space
+            )
+
+            assert_equal(
+              conforming_output_signature(instance, expected, coordinate_space),
+              conforming_output_signature(instance, actual, coordinate_space),
+              "coordinate_space=#{coordinate_space}"
+            )
+          end
+        end
+
         def test_face_snapshot_uses_source_boundary_instead_of_overlapping_mesh
           point_a = mm_point(0, 0, 0)
           point_e = mm_point(0.425, -0.000044, 0)
@@ -856,6 +1057,78 @@ module ULOL
           assert records.all? { |record| record[:source_boundary_snapshot] }
         end
 
+        def test_aabb_hybrid_matches_brute_force_overlap_pairs
+          instance = normalizer
+          small = [
+            [[0, 10], [0, 10], [0, 0]],
+            [[10, 20], [5, 15], [0, 0]],
+            [[21, 30], [0, 10], [0, 0]],
+            [[5, 6], [11, 12], [0, 0]],
+            [[4, 7], [4, 7], [1, 2]]
+          ]
+          large = 20.times.map do |index|
+            minimum = index * 4
+            [[minimum, minimum + 5], [0, 10], [0, 0]]
+          end
+
+          [small, large].each do |aabbs|
+            expected = []
+            aabbs.each_index do |index_a|
+              ((index_a + 1)...aabbs.length).each do |index_b|
+                expected << [index_a, index_b] if instance.send(
+                  :integer_aabb_bounds_overlap?,
+                  aabbs[index_a],
+                  aabbs[index_b]
+                )
+              end
+            end
+
+            actual = instance.send(
+              :each_overlapping_integer_aabb_pair,
+              aabbs
+            ).to_a.sort
+
+            assert_equal expected, actual
+          end
+        end
+
+        def test_projected_ear_predicates_match_uncached_projection
+          instance = normalizer
+          polygon = [
+            [0, 0, 0],
+            [8, 0, 0],
+            [8, 8, 0],
+            [4, 3, 0],
+            [0, 8, 0]
+          ]
+          projected = polygon.map do |point|
+            instance.send(:integer_project_2d, point, 2)
+          end
+
+          polygon.each_index do |index|
+            assert_equal(
+              instance.send(:exact_polygon_ear?, polygon, index, 2),
+              instance.send(
+                :exact_polygon_ear?,
+                polygon,
+                index,
+                2,
+                projected: projected
+              )
+            )
+            assert_equal(
+              instance.send(:exact_polygon_ear_quality, polygon, index, 2),
+              instance.send(
+                :exact_polygon_ear_quality,
+                polygon,
+                index,
+                2,
+                projected: projected
+              )
+            )
+          end
+        end
+
         def test_coplanar_cleanup_restores_validated_surface_when_geometry_changes
           instance = normalizer
           entities = Object.new
@@ -888,7 +1161,7 @@ module ULOL
             calls << :cleanup
             { removed_groups: 1, removed_edges: 1 }
           end
-          instance.define_singleton_method(:normalized_triangle_snapshot) do |_entities|
+          instance.define_singleton_method(:normalized_triangle_snapshot) do |_entities, **_options|
             calls << :snapshot
             changed
           end
@@ -910,7 +1183,7 @@ module ULOL
             { added_faces: records.length, skipped_collinear: 0 }
           end
 
-          _orientation, cleanup = instance.send(
+          _orientation, cleanup, snapshot = instance.send(
             :orient_and_merge_rebuilt_surface,
             entities,
             validated
@@ -922,6 +1195,241 @@ module ULOL
           )
           assert_equal 0, cleanup[:removed_edges]
           assert_match(/surface changed/, cleanup[:fallback_reason])
+          assert_nil snapshot
+        end
+
+        def test_coplanar_cleanup_returns_a_validated_reusable_snapshot
+          instance = normalizer
+          entities = Object.new
+          triangles = [
+            { points: [point(0, 0, 0), point(1, 0, 0), point(0, 1, 0)] }
+          ]
+          topology = {
+            faces: 4,
+            edges: 6,
+            vertices: 4,
+            boundary_edges: 0,
+            nonmanifold_edges: 0
+          }
+          consistency = {
+            reversed_faces: 0,
+            consistency_reversed_faces: 0,
+            component_count: 1,
+            outward_reversed_faces: 0,
+            signed_volume_before_in3: 1.0,
+            signed_volume_after_in3: 1.0,
+            error: nil
+          }
+          expected_duplicate_diagnostics = { duplicate_count: 2 }
+          degenerate_repair = { repaired_triangles: 1, replaced_pairs: 1 }
+          mesh_validation = { triangle_count: 1, component_count: 1 }
+          equivalence = { equivalent: true }
+
+          instance.define_singleton_method(:geometry_counts) { |_entities| topology }
+          instance.define_singleton_method(:closed_surface?) { |_counts| true }
+          instance.define_singleton_method(:repair_reverse_faces) do |_entities|
+            consistency
+          end
+          instance.define_singleton_method(:remove_coplanar_shared_edges) do |*_args, **_kwargs|
+            { removed_groups: 1, removed_edges: 1 }
+          end
+          instance.define_singleton_method(:normalized_triangle_snapshot) do |_entities, duplicate_diagnostics:, **_options|
+            duplicate_diagnostics.merge!(expected_duplicate_diagnostics)
+            triangles
+          end
+          instance.define_singleton_method(:repair_degenerate_source_triangles) do |records|
+            [records, degenerate_repair]
+          end
+          instance.define_singleton_method(:validate_normalized_triangle_mesh!) do |_records|
+            mesh_validation
+          end
+          instance.define_singleton_method(:verify_normalized_surface_equivalence!) do |*_records|
+            equivalence
+          end
+
+          _orientation, _cleanup, snapshot = instance.send(
+            :orient_and_merge_rebuilt_surface,
+            entities,
+            triangles
+          )
+
+          assert snapshot[:validated]
+          assert_same triangles, snapshot[:triangles]
+          assert_equal expected_duplicate_diagnostics, snapshot[:duplicate_diagnostics]
+          assert_same degenerate_repair, snapshot[:degenerate_repair]
+          assert_same mesh_validation, snapshot[:mesh_validation]
+          assert_same equivalence, snapshot[:surface_equivalence]
+          assert_same topology, snapshot[:topology]
+        end
+
+        def test_final_mesh_state_reuses_post_cleanup_snapshot_without_repairs
+          instance = normalizer
+          entities = Object.new
+          topology = { faces: 8, edges: 18, vertices: 12 }
+          triangles = [{ points: [point(0, 0, 0), point(1, 0, 0), point(0, 1, 0)] }]
+          degenerate_repair = { repaired_triangles: 0, replaced_pairs: 0 }
+          mesh_validation = { triangle_count: 1 }
+          duplicate_diagnostics = { duplicate_count: 3 }
+          snapshot = {
+            validated: true,
+            triangles: triangles,
+            duplicate_diagnostics: duplicate_diagnostics,
+            degenerate_repair: degenerate_repair,
+            mesh_validation: mesh_validation,
+            surface_equivalence: { equivalent: true },
+            topology: topology
+          }
+          final_repair = {
+            attempted: false,
+            manifold: true,
+            initial_topology: topology,
+            final_topology: topology
+          }
+          final_diagnostics = {}
+          instance.define_singleton_method(:normalized_triangle_snapshot) do |*_args, **_kwargs|
+            raise 'final snapshot should have been reused'
+          end
+
+          result = instance.send(
+            :final_normalized_mesh_state,
+            entities,
+            triangles,
+            final_repair,
+            topology,
+            snapshot,
+            final_diagnostics
+          )
+
+          assert_same triangles, result[0]
+          assert_same degenerate_repair, result[1]
+          assert_same mesh_validation, result[2]
+          assert result[3][:equivalent]
+          assert result[3][:final_snapshot_reused]
+          assert result[4][:reused]
+          assert_empty result[4][:rejection_reasons]
+          assert_equal 3, final_diagnostics[:duplicate_count]
+          assert final_diagnostics[:reused_post_cleanup_snapshot]
+        end
+
+        def test_final_mesh_state_rebuilds_snapshot_when_repair_was_attempted
+          instance = normalizer
+          entities = Object.new
+          topology = { faces: 8, edges: 18, vertices: 12 }
+          expected = [{ points: [point(0, 0, 0), point(1, 0, 0), point(0, 1, 0)] }]
+          fresh = [{ points: [point(0, 0, 0), point(0, 1, 0), point(1, 0, 0)] }]
+          snapshot = {
+            validated: true,
+            triangles: expected,
+            duplicate_diagnostics: {},
+            degenerate_repair: {},
+            mesh_validation: {},
+            surface_equivalence: { equivalent: true },
+            topology: topology
+          }
+          final_repair = {
+            attempted: true,
+            manifold: true,
+            initial_topology: topology,
+            final_topology: topology
+          }
+          calls = []
+          instance.define_singleton_method(:normalized_triangle_snapshot) do |_entities, duplicate_diagnostics:, **_options|
+            calls << :snapshot
+            duplicate_diagnostics[:duplicate_count] = 0
+            fresh
+          end
+          instance.define_singleton_method(:repair_degenerate_source_triangles) do |records|
+            calls << :degenerate
+            [records, { repaired_triangles: 0 }]
+          end
+          instance.define_singleton_method(:validate_normalized_triangle_mesh!) do |_records|
+            calls << :validate
+            { triangle_count: 1 }
+          end
+          instance.define_singleton_method(:verify_normalized_surface_equivalence!) do |*_records|
+            calls << :equivalence
+            { equivalent: true }
+          end
+          final_diagnostics = {}
+
+          result = instance.send(
+            :final_normalized_mesh_state,
+            entities,
+            expected,
+            final_repair,
+            topology,
+            snapshot,
+            final_diagnostics
+          )
+
+          assert_equal [:snapshot, :degenerate, :validate, :equivalence], calls
+          assert_same fresh, result[0]
+          refute result[3][:final_snapshot_reused]
+          refute result[4][:reused]
+          assert_includes result[4][:rejection_reasons], :final_repair_attempted
+          refute final_diagnostics[:reused_post_cleanup_snapshot]
+        end
+
+        def test_post_cleanup_snapshot_is_not_reused_after_topology_changes
+          topology = { faces: 8, edges: 18, vertices: 12 }
+          changed_topology = topology.merge(edges: 19)
+          snapshot = { validated: true, topology: topology }
+          final_repair = {
+            attempted: false,
+            manifold: true,
+            initial_topology: topology,
+            final_topology: topology
+          }
+
+          decision = normalizer.send(
+            :post_cleanup_snapshot_reuse_decision,
+            snapshot,
+            final_repair,
+            changed_topology
+          )
+
+          refute decision[:reused]
+          assert_includes(
+            decision[:rejection_reasons],
+            :post_cleanup_topology_changed
+          )
+        end
+
+        def test_snapshot_roles_are_aggregated_in_debug_profile
+          model = FakeModel.new
+          instance = normalizer(model: model)
+          entities = EmptyReportEntities.new
+          instance.define_singleton_method(:validate_entity!) { |_entity| true }
+          instance.define_singleton_method(:normalize_entity) do |_entity|
+            triangle_snapshot(entities)
+            normalized_triangle_snapshot(
+              entities,
+              snapshot_role: :rebuilt_pre_cleanup
+            )
+            normalized_triangle_snapshot(
+              entities,
+              snapshot_role: :post_coplanar_cleanup
+            )
+            { manifold: true }
+          end
+
+          capture_io do
+            result = instance.normalize(Object.new, debug: true)
+            @snapshot_role_profile = result[:debug_profile]
+          end
+          roles = @snapshot_role_profile[:snapshot_roles]
+
+          assert_equal 1, roles.dig(:source_initial, :calls)
+          assert_equal 1, roles.dig(:rebuilt_pre_cleanup, :calls)
+          assert_equal 1, roles.dig(:post_coplanar_cleanup, :calls)
+          assert_equal 3,
+                       @snapshot_role_profile.dig(
+                         :stages,
+                         :source_brep_snapshot,
+                         :calls
+                       )
+        ensure
+          @snapshot_role_profile = nil
         end
 
         def test_degenerate_repair_report_aggregates_each_mesh_stage
@@ -1129,9 +1637,13 @@ module ULOL
           point_b = mm_point(10, 0, 0)
           point_c = mm_point(10, 10, 0)
           point_d = mm_point(8, 7, 0)
+          point_e = mm_point(20, 0, 0)
+          point_f = mm_point(25, 0, 0)
+          point_g = mm_point(20, 5, 0)
           triangles = []
           add_triangle_record(triangles, point_a, point_b, point_c, :surface)
           add_triangle_record(triangles, point_a, point_c, point_d, :surface)
+          add_triangle_record(triangles, point_e, point_f, point_g, :healthy)
 
           rebuilt, report = instance.send(
             :retriangulate_exact_coplanar_patches,
@@ -1142,15 +1654,43 @@ module ULOL
           end
           expected = [
             [point_a, point_b, point_d],
-            [point_b, point_c, point_d]
+            [point_b, point_c, point_d],
+            [point_e, point_f, point_g]
           ].map do |points|
             points.map { |point| instance.send(:grid_indices, point) }.sort
           end
 
           assert_equal expected.sort, signatures.sort
+          assert_equal 2, report[:detected_patches]
           assert_equal 1, report[:rebuilt_patches]
+          assert_equal 1, report[:preserved_patches]
           assert_equal 1, report[:boundary_loops]
           assert_equal 0, report[:holes]
+          assert_equal [0], report.dig(:repair_failure_set, :patch_indices)
+          assert_equal 1, report.dig(
+            :repair_failure_set,
+            :reasons,
+            :triangle_intersection
+          )
+        end
+
+        def test_intersection_failure_collection_respects_patch_partitions
+          instance = normalizer
+          triangle = [[0, 0, 0], [10, 0, 0], [0, 10, 0]]
+
+          separated = instance.send(
+            :collect_triangle_intersection_failures,
+            [triangle, triangle],
+            partition_ids: [0, 1]
+          )
+          together = instance.send(
+            :collect_triangle_intersection_failures,
+            [triangle, triangle],
+            partition_ids: [0, 0]
+          )
+
+          assert_empty separated[:pairs]
+          assert_equal [[0, 1]], together[:pairs]
         end
 
         def test_exact_coplanar_patch_preserves_a_hole_boundary
@@ -1237,7 +1777,149 @@ module ULOL
           assert_operator minimum_altitude, :>, 0.001
         end
 
+        def test_exact_patch_optimization_is_requested_only_for_sub_grid_ears
+          instance = normalizer
+          healthy = [[0, 0, 0], [10_000, 0, 0], [0, 10_000, 0]]
+          sub_grid = [[-1, -100_000, 0], [0, 0, 0], [0, 150, 0]]
+
+          refute instance.send(
+            :exact_patch_triangulation_requires_optimization?,
+            [healthy]
+          )
+          assert instance.send(
+            :exact_patch_triangulation_requires_optimization?,
+            [healthy, sub_grid]
+          )
+        end
+
+        def test_incremental_exact_patch_optimization_matches_full_recomputation
+          instance = normalizer
+          polygon = [
+            [0, 0, 0],
+            [100_000, 0, 0],
+            [140_000, 30_000, 0],
+            [130_000, 90_000, 0],
+            [80_000, 130_000, 0],
+            [20_000, 120_000, 0],
+            [-20_000, 70_000, 0],
+            [-10_000, 20_000, 0]
+          ]
+          constraints = polygon.each_index.to_h do |index|
+            edge = instance.send(
+              :canonical_edge_key,
+              polygon[index],
+              polygon[(index + 1) % polygon.length]
+            )
+            [edge, true]
+          end
+
+          changed_count = 0
+          polygon.each_index do |root_index|
+            rotated = polygon.rotate(root_index)
+            triangles = (1...(rotated.length - 1)).map do |index|
+              [rotated[0], rotated[index], rotated[index + 1]]
+            end
+            expected = optimize_exact_patch_with_full_recomputation(
+              instance,
+              triangles,
+              constraints,
+              2
+            )
+            actual = instance.send(
+              :optimize_exact_patch_triangulation,
+              triangles,
+              constraints,
+              2
+            )
+
+            changed_count += 1 unless expected == triangles
+            assert_equal expected, actual, "fan root #{root_index}"
+          end
+
+          assert_operator changed_count, :>, 0
+        end
+
         private
+
+        def optimize_exact_patch_with_full_recomputation(
+          instance,
+          triangles,
+          constraints,
+          drop_axis
+        )
+          optimized = triangles.map(&:dup)
+          iteration_limit = [optimized.length * optimized.length * 2, 1].max
+          iterations = 0
+
+          loop do
+            edge_owners = Hash.new { |hash, key| hash[key] = [] }
+            optimized.each_with_index do |triangle, triangle_index|
+              3.times do |edge_index|
+                edge = instance.send(
+                  :canonical_edge_key,
+                  triangle[edge_index],
+                  triangle[(edge_index + 1) % 3]
+                )
+                edge_owners[edge] << triangle_index
+              end
+            end
+
+            candidates = edge_owners.filter_map do |edge, owners|
+              next unless owners.length == 2
+              next if constraints.key?(edge)
+
+              first_index, second_index = owners
+              first = optimized[first_index]
+              second = optimized[second_index]
+              opposite_a = (first - edge).first
+              opposite_b = (second - edge).first
+              next unless opposite_a && opposite_b && opposite_a != opposite_b
+
+              alternate_edge = instance.send(
+                :canonical_edge_key,
+                opposite_a,
+                opposite_b
+              )
+              next if edge_owners.key?(alternate_edge)
+
+              replacement = instance.send(
+                :exact_edge_flip_replacement,
+                edge,
+                opposite_a,
+                opposite_b,
+                drop_axis
+              )
+              next unless replacement
+
+              current_quality = [first, second].map do |triangle|
+                instance.send(:exact_integer_triangle_quality, triangle)
+              end.min
+              replacement_quality = replacement.map do |triangle|
+                instance.send(:exact_integer_triangle_quality, triangle)
+              end.min
+              next unless replacement_quality > current_quality
+
+              [
+                replacement_quality - current_quality,
+                replacement_quality,
+                edge,
+                first_index,
+                second_index,
+                replacement
+              ]
+            end
+            break if candidates.empty?
+
+            candidate = candidates.max_by { |entry| [entry[0], entry[1], entry[2]] }
+            optimized[candidate[3]] = candidate[5][0]
+            optimized[candidate[4]] = candidate[5][1]
+            iterations += 1
+            raise 'reference Lawson optimization exceeded its iteration limit' if
+              iterations > iteration_limit
+          end
+
+          optimized
+        end
 
         def normalizer(model: nil, face_class: FakeFace, edge_class: Sketchup::Edge)
           LocalVertexNormalizer.new(
@@ -1327,6 +2009,66 @@ module ULOL
             source_face_key: source_face_key,
             source_polygon_index: records.length
           }
+        end
+
+        def brute_force_conforming_snapshot(instance, records, coordinate_space)
+          unique_points = {}
+          records.each do |record|
+            record[:points].each do |point|
+              key = instance.send(:triangle_point_key, point, coordinate_space)
+              unique_points[key] ||= point
+            end
+          end
+          candidates = unique_points.values
+          signatures = {}
+
+          records.flat_map do |record|
+            if instance.send(
+              :degenerate_triangle_record?,
+              record,
+              coordinate_space: coordinate_space
+            )
+              next [record] if coordinate_space == :source
+
+              next []
+            end
+
+            boundary = instance.send(
+              :triangle_boundary_with_segment_vertices,
+              record[:points],
+              candidates,
+              coordinate_space: coordinate_space,
+              edge_split_cache: nil
+            )
+            instance.send(
+              :triangulate_convex_boundary,
+              boundary,
+              candidates,
+              coordinate_space: coordinate_space
+            ).map do |points|
+              signature = instance.send(
+                :triangle_signature_for_space,
+                points,
+                coordinate_space
+              )
+              raise "duplicate brute-force triangle: #{signature.inspect}" if
+                signatures.key?(signature)
+
+              signatures[signature] = true
+              record.merge(points: points)
+            end
+          end
+        end
+
+        def conforming_output_signature(instance, records, coordinate_space)
+          records.map do |record|
+            [
+              record[:source_face_key],
+              record[:points].map do |point|
+                instance.send(:triangle_point_key, point, coordinate_space)
+              end
+            ]
+          end
         end
 
         def boundary_edges_for(instance, records)

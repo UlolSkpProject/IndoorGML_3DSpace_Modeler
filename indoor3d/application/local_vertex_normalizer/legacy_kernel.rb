@@ -40,6 +40,10 @@ module ULOL
         SHORT_EDGE_SLIVER_MIN_PATCH_FACES = 2
         SHORT_EDGE_SLIVER_MAX_CLUSTER_DIAMETER_MM = 1.0
 
+        # Small triangle sets are faster with a direct precomputed-AABB loop;
+        # larger sets use sweep-and-prune before the unchanged exact predicate.
+        TRIANGLE_INTERSECTION_SWEEP_THRESHOLD = 16
+
         class Error < StandardError; end
         class ReconstructionError < Error; end
         class DestructiveCoplanarCleanupError < ReconstructionError; end
@@ -884,7 +888,8 @@ module ULOL
         def normalized_triangle_snapshot(
           entities,
           axis_plane_plan = nil,
-          duplicate_diagnostics: nil
+          duplicate_diagnostics: nil,
+          snapshot_role: nil
         )
           normalize_triangle_records(
             triangle_snapshot(entities),
@@ -977,7 +982,11 @@ module ULOL
             }
           end
 
-          validate_source_boundary_retriangulation!(records, loops)
+          validate_source_boundary_retriangulation!(
+            records,
+            loops,
+            triangle_keys: triangle_keys
+          )
           records
         end
 
@@ -990,8 +999,12 @@ module ULOL
           compact
         end
 
-        def validate_source_boundary_retriangulation!(records, loops)
-          triangles = records.map do |record|
+        def validate_source_boundary_retriangulation!(
+          records,
+          loops,
+          triangle_keys: nil
+        )
+          triangles = triangle_keys || records.map do |record|
             record[:points].map { |point| source_precision_indices(point) }
           end
           if triangles.any? do |triangle|
@@ -1233,10 +1246,13 @@ module ULOL
 
         def aggregate_degenerate_repair_reports(stage_reports)
           normalized_stages = stage_reports.transform_values do |report|
-            {
+            normalized = {
               repaired_triangles: report[:repaired_triangles].to_i,
               replaced_pairs: report[:replaced_pairs].to_i
             }
+            normalized[:repair_failure_set] = report[:repair_failure_set] if
+              report[:repair_failure_set]
+            normalized
           end
 
           {
@@ -1342,6 +1358,7 @@ module ULOL
 
           candidates = unique_points.values
           signatures = {}
+          edge_split_cache = {}
 
           source_triangles.flat_map do |record|
             if degenerate_triangle_record?(
@@ -1356,14 +1373,20 @@ module ULOL
             boundary = triangle_boundary_with_segment_vertices(
               record[:points],
               candidates,
-              coordinate_space: coordinate_space
+              coordinate_space: coordinate_space,
+              edge_split_cache: edge_split_cache
             )
 
-            triangulate_convex_boundary(
-              boundary,
-              candidates,
-              coordinate_space: coordinate_space
-            ).map do |points|
+            replacement_triangles = if boundary.length == 3
+                                      [record[:points]]
+                                    else
+                                      triangulate_convex_boundary(
+                                        boundary,
+                                        candidates,
+                                        coordinate_space: coordinate_space
+                                      )
+                                    end
+            replacement_triangles.map do |points|
               signature = triangle_signature_for_space(points, coordinate_space)
               if signatures.key?(signature)
                 raise ReconstructionError,
@@ -1371,7 +1394,7 @@ module ULOL
               end
 
               signatures[signature] = true
-              record.merge(points: points)
+              points.equal?(record[:points]) ? record : record.merge(points: points)
             end
           end
         end
@@ -1709,11 +1732,15 @@ module ULOL
             end
           end).to_h { |edge| [edge, true] }
 
-          optimize_exact_patch_triangulation(
-            triangles,
-            boundary_edges,
-            drop_axis
-          )
+          if exact_patch_triangulation_requires_optimization?(triangles)
+            optimize_exact_patch_triangulation(
+              triangles,
+              boundary_edges,
+              drop_axis
+            )
+          else
+            triangles
+          end
         end
 
         def bridge_exact_hole(polygon, hole, outer_2d, holes_2d, drop_axis)
@@ -1789,16 +1816,29 @@ module ULOL
 
         def triangulate_exact_weak_polygon(points, drop_axis)
           remaining = points.dup
+          projected = remaining.map do |point|
+            integer_project_2d(point, drop_axis)
+          end
           triangles = []
           limit = remaining.length * remaining.length * 2
           attempts = 0
 
           while remaining.length > 3
             ear_indices = remaining.each_index.select do |index|
-              exact_polygon_ear?(remaining, index, drop_axis)
+              exact_polygon_ear?(
+                remaining,
+                index,
+                drop_axis,
+                projected: projected
+              )
             end
             ear_index = ear_indices.max_by do |index|
-              exact_polygon_ear_quality(remaining, index, drop_axis)
+              exact_polygon_ear_quality(
+                remaining,
+                index,
+                drop_axis,
+                projected: projected
+              )
             end
             unless ear_index
               raise ReconstructionError,
@@ -1811,6 +1851,7 @@ module ULOL
             following_point = remaining[(ear_index + 1) % remaining.length]
             triangles << [previous_point, current_point, following_point]
             remaining.delete_at(ear_index)
+            projected.delete_at(ear_index)
             attempts += 1
             if attempts > limit
               raise ReconstructionError,
@@ -1818,7 +1859,7 @@ module ULOL
             end
           end
 
-          final = remaining.map { |point| integer_project_2d(point, drop_axis) }
+          final = projected
           if final.uniq.length != 3 || integer_orientation_2d(*final).zero?
             raise ReconstructionError,
                   "Exact coplanar patch ended with a zero-area triangle: #{remaining.inspect}"
@@ -1831,12 +1872,20 @@ module ULOL
         # squared minimum-altitude proxy (area^2 / longest_edge^2). This keeps a
         # short preserved boundary segment from being paired with a nearly
         # collinear third point merely because that ear appeared first.
-        def exact_polygon_ear_quality(polygon, index, drop_axis)
+        def exact_polygon_ear_quality(
+          polygon,
+          index,
+          drop_axis,
+          projected: nil
+        )
+          projected ||= polygon.map do |point|
+            integer_project_2d(point, drop_axis)
+          end
           points = [
-            polygon[(index - 1) % polygon.length],
-            polygon[index],
-            polygon[(index + 1) % polygon.length]
-          ].map { |point| integer_project_2d(point, drop_axis) }
+            projected[(index - 1) % polygon.length],
+            projected[index],
+            projected[(index + 1) % polygon.length]
+          ]
           area2 = integer_orientation_2d(*points).abs
           longest_edge_squared = 3.times.map do |edge_index|
             vector = integer_subtract_2d(
@@ -1849,6 +1898,23 @@ module ULOL
           Rational(area2 * area2, longest_edge_squared)
         end
 
+        # Requests Lawson repair only when an ear has sub-grid minimum altitude.
+        def exact_patch_triangulation_requires_optimization?(triangles)
+          triangles.any? do |triangle|
+            normal = integer_triangle_normal(triangle)
+            normal_squared = integer_dot(normal, normal)
+            longest_edge_squared = 3.times.map do |edge_index|
+              vector = integer_subtract(
+                triangle[edge_index],
+                triangle[(edge_index + 1) % 3]
+              )
+              integer_dot(vector, vector)
+            end.max
+
+            normal_squared < longest_edge_squared
+          end
+        end
+
         # Improves the ear-clipped mesh with exact, constraint-preserving
         # Lawson flips. Only an interior diagonal shared by two triangles may
         # change. A flip is accepted when the two triangles still cover the
@@ -1858,69 +1924,106 @@ module ULOL
           optimized = triangles.map(&:dup)
           iteration_limit = [optimized.length * optimized.length * 2, 1].max
           iterations = 0
+          edge_owners = Hash.new { |hash, key| hash[key] = [] }
+          triangle_edges = optimized.map.with_index do |triangle, triangle_index|
+            edges = exact_triangle_edge_keys(triangle)
+            edges.each { |edge| edge_owners[edge] << triangle_index }
+            edges
+          end
+          triangle_qualities = optimized.map do |triangle|
+            exact_integer_triangle_quality(triangle)
+          end
+          projected_points = optimized.flatten(1).uniq.to_h do |point|
+            [point, integer_project_2d(point, drop_axis)]
+          end
+          candidates = {}
+          candidate_alternate_edges = {}
+          alternate_dependents = Hash.new { |hash, key| hash[key] = {} }
+
+          refresh_candidate = lambda do |edge|
+            previous_alternate = candidate_alternate_edges.delete(edge)
+            if previous_alternate
+              alternate_dependents[previous_alternate].delete(edge)
+              alternate_dependents.delete(previous_alternate) if
+                alternate_dependents[previous_alternate].empty?
+            end
+
+            candidate, alternate_edge = exact_patch_flip_candidate(
+              edge,
+              edge_owners,
+              optimized,
+              triangle_qualities,
+              constraints,
+              drop_axis,
+              projected_points
+            )
+            candidates.delete(edge)
+            candidates[edge] = candidate if candidate
+            if alternate_edge
+              candidate_alternate_edges[edge] = alternate_edge
+              alternate_dependents[alternate_edge][edge] = true
+            end
+          end
+          edge_owners.each_key { |edge| refresh_candidate.call(edge) }
 
           loop do
-            edge_owners = Hash.new { |hash, key| hash[key] = [] }
-            optimized.each_with_index do |triangle, triangle_index|
-              3.times do |edge_index|
-                edge = canonical_edge_key(
-                  triangle[edge_index],
-                  triangle[(edge_index + 1) % 3]
-                )
-                edge_owners[edge] << triangle_index
-              end
-            end
-
-            candidates = edge_owners.filter_map do |edge, owners|
-              next unless owners.length == 2
-              next if constraints.key?(edge)
-
-              first_index, second_index = owners
-              first = optimized[first_index]
-              second = optimized[second_index]
-              opposite_a = (first - edge).first
-              opposite_b = (second - edge).first
-              next unless opposite_a && opposite_b && opposite_a != opposite_b
-
-              alternate_edge = canonical_edge_key(opposite_a, opposite_b)
-              next if edge_owners.key?(alternate_edge)
-
-              replacement = exact_edge_flip_replacement(
-                edge,
-                opposite_a,
-                opposite_b,
-                drop_axis
-              )
-              next unless replacement
-
-              current_quality = [
-                exact_integer_triangle_quality(first),
-                exact_integer_triangle_quality(second)
-              ].min
-              replacement_quality = replacement.map do |triangle|
-                exact_integer_triangle_quality(triangle)
-              end.min
-              next unless replacement_quality > current_quality
-
-              [
-                replacement_quality - current_quality,
-                replacement_quality,
-                edge,
-                first_index,
-                second_index,
-                replacement
-              ]
-            end
             break if candidates.empty?
 
-            candidate = candidates.max_by do |entry|
+            candidate = candidates.each_value.max_by do |entry|
               [entry[0], entry[1], entry[2]]
             end
             first_index = candidate[3]
             second_index = candidate[4]
             replacement = candidate[5]
+
+            old_edges = (
+              triangle_edges[first_index] + triangle_edges[second_index]
+            ).uniq
+            new_edges = (
+              exact_triangle_edge_keys(replacement[0]) +
+              exact_triangle_edge_keys(replacement[1])
+            ).uniq
+            affected_edges = (old_edges + new_edges).uniq
+            presence_before = affected_edges.to_h do |edge|
+              [edge, edge_owners.key?(edge)]
+            end
+
+            triangle_edges[first_index].each do |edge|
+              edge_owners[edge].delete(first_index)
+              edge_owners.delete(edge) if edge_owners[edge].empty?
+            end
+            triangle_edges[second_index].each do |edge|
+              edge_owners[edge].delete(second_index)
+              edge_owners.delete(edge) if edge_owners[edge].empty?
+            end
             optimized[first_index] = replacement[0]
             optimized[second_index] = replacement[1]
+            triangle_edges[first_index] = exact_triangle_edge_keys(replacement[0])
+            triangle_edges[second_index] = exact_triangle_edge_keys(replacement[1])
+            triangle_edges[first_index].each do |edge|
+              edge_owners[edge] << first_index
+              edge_owners[edge].sort!
+            end
+            triangle_edges[second_index].each do |edge|
+              edge_owners[edge] << second_index
+              edge_owners[edge].sort!
+            end
+            triangle_qualities[first_index] = exact_integer_triangle_quality(
+              replacement[0]
+            )
+            triangle_qualities[second_index] = exact_integer_triangle_quality(
+              replacement[1]
+            )
+
+            presence_changed = affected_edges.select do |edge|
+              presence_before[edge] != edge_owners.key?(edge)
+            end
+            dependent_edges = presence_changed.flat_map do |edge|
+              alternate_dependents.fetch(edge, {}).keys
+            end
+            (affected_edges + dependent_edges).uniq.each do |edge|
+              refresh_candidate.call(edge)
+            end
 
             iterations += 1
             if iterations > iteration_limit
@@ -1932,9 +2035,77 @@ module ULOL
           optimized
         end
 
-        def exact_edge_flip_replacement(edge, opposite_a, opposite_b, drop_axis)
+        # Returns the three canonical physical edges of an exact triangle.
+        def exact_triangle_edge_keys(triangle)
+          3.times.map do |edge_index|
+            canonical_edge_key(
+              triangle[edge_index],
+              triangle[(edge_index + 1) % 3]
+            )
+          end
+        end
+
+        # Recomputes one Lawson flip candidate and its alternate-edge dependency.
+        def exact_patch_flip_candidate(
+          edge,
+          edge_owners,
+          triangles,
+          triangle_qualities,
+          constraints,
+          drop_axis,
+          projected_points
+        )
+          owners = edge_owners.fetch(edge, [])
+          return [nil, nil] unless owners.length == 2
+          return [nil, nil] if constraints.key?(edge)
+
+          first_index, second_index = owners
+          first = triangles[first_index]
+          second = triangles[second_index]
+          opposite_a = (first - edge).first
+          opposite_b = (second - edge).first
+          return [nil, nil] unless opposite_a && opposite_b && opposite_a != opposite_b
+
+          alternate_edge = canonical_edge_key(opposite_a, opposite_b)
+          return [nil, alternate_edge] if edge_owners.key?(alternate_edge)
+
+          replacement = exact_edge_flip_replacement(
+            edge,
+            opposite_a,
+            opposite_b,
+            drop_axis,
+            projected: projected_points
+          )
+          return [nil, alternate_edge] unless replacement
+
+          current_quality = [
+            triangle_qualities[first_index],
+            triangle_qualities[second_index]
+          ].min
+          replacement_quality = replacement.map do |triangle|
+            exact_integer_triangle_quality(triangle)
+          end.min
+          return [nil, alternate_edge] unless replacement_quality > current_quality
+
+          [[
+            replacement_quality - current_quality,
+            replacement_quality,
+            edge,
+            first_index,
+            second_index,
+            replacement
+          ], alternate_edge]
+        end
+
+        def exact_edge_flip_replacement(
+          edge,
+          opposite_a,
+          opposite_b,
+          drop_axis,
+          projected: nil
+        )
           edge_a, edge_b = edge
-          projected = [edge_a, edge_b, opposite_a, opposite_b].to_h do |point|
+          projected ||= [edge_a, edge_b, opposite_a, opposite_b].to_h do |point|
             [point, integer_project_2d(point, drop_axis)]
           end
 
@@ -2007,18 +2178,21 @@ module ULOL
           Rational(normal_squared, longest_edge_squared)
         end
 
-        def exact_polygon_ear?(polygon, index, drop_axis)
+        def exact_polygon_ear?(polygon, index, drop_axis, projected: nil)
+          projected ||= polygon.map do |point|
+            integer_project_2d(point, drop_axis)
+          end
           previous_index = (index - 1) % polygon.length
           following_index = (index + 1) % polygon.length
-          point_a = integer_project_2d(polygon[previous_index], drop_axis)
-          point_b = integer_project_2d(polygon[index], drop_axis)
-          point_c = integer_project_2d(polygon[following_index], drop_axis)
+          point_a = projected[previous_index]
+          point_b = projected[index]
+          point_c = projected[following_index]
           return false unless integer_orientation_2d(point_a, point_b, point_c).positive?
 
           polygon.each_index do |candidate_index|
             next if [previous_index, index, following_index].include?(candidate_index)
 
-            candidate = integer_project_2d(polygon[candidate_index], drop_axis)
+            candidate = projected[candidate_index]
             next if candidate == point_a || candidate == point_b || candidate == point_c
             return false if integer_point_in_triangle_2d?(
               candidate,
@@ -2033,8 +2207,8 @@ module ULOL
             next if [previous_index, index].include?(edge_index)
             next if [previous_index, following_index].include?(edge_following)
 
-            edge_a = integer_project_2d(polygon[edge_index], drop_axis)
-            edge_b = integer_project_2d(polygon[edge_following], drop_axis)
+            edge_a = projected[edge_index]
+            edge_b = projected[edge_following]
             next if edge_a == point_a || edge_b == point_a ||
                     edge_a == point_c || edge_b == point_c
             return false if integer_segments_intersect_2d?(
@@ -2377,24 +2551,102 @@ module ULOL
         end
 
         def validate_triangle_intersections!(triangles)
-          tested_pairs = 0
-
-          triangles.each_with_index do |triangle_a, index_a|
-            ((index_a + 1)...triangles.length).each do |index_b|
-              triangle_b = triangles[index_b]
-              next unless integer_aabbs_overlap?(triangle_a, triangle_b)
-
-              tested_pairs += 1
-              next if exact_triangle_intersection_allowed?(triangle_a, triangle_b)
-
-              raise TopologyChangedError,
-                    "Normalized triangles intersect outside their shared simplex: " \
-                    "triangles=#{[index_a, index_b].inspect} " \
-                    "a=#{triangle_a.inspect} b=#{triangle_b.inspect}"
-            end
+          failures = collect_triangle_intersection_failures(triangles)
+          unless failures[:pairs].empty?
+            index_a, index_b = failures[:pairs].first
+            raise TopologyChangedError,
+                  "Normalized triangles intersect outside their shared simplex: " \
+                  "triangles=#{[index_a, index_b].inspect} " \
+                  "a=#{triangles[index_a].inspect} b=#{triangles[index_b].inspect}"
           end
 
-          tested_pairs
+          failures[:tested_pairs]
+        end
+
+        # Collects invalid triangle pairs, optionally within matching partitions.
+        def collect_triangle_intersection_failures(triangles, partition_ids: nil)
+          if partition_ids
+            tested_pairs = 0
+            invalid_pairs = []
+            partition_ids.each_index.group_by { |index| partition_ids[index] }
+                         .each_value do |indices|
+              local = collect_triangle_intersection_failures(
+                indices.map { |index| triangles[index] }
+              )
+              tested_pairs += local[:tested_pairs]
+              local[:pairs].each do |first, second|
+                invalid_pairs << [indices[first], indices[second]]
+              end
+            end
+            return { tested_pairs: tested_pairs, pairs: invalid_pairs }
+          end
+
+          tested_pairs = 0
+          invalid_pairs = []
+          aabbs = triangles.map { |triangle| integer_triangle_aabb(triangle) }
+
+          each_overlapping_integer_aabb_pair(aabbs) do |index_a, index_b|
+            tested_pairs += 1
+            next if exact_triangle_intersection_allowed?(
+              triangles[index_a],
+              triangles[index_b]
+            )
+
+            invalid_pairs << [index_a, index_b]
+          end
+
+          {
+            tested_pairs: tested_pairs,
+            pairs: invalid_pairs
+          }
+        end
+
+        # Conservative sweep-and-prune broad phase. It only removes pairs whose
+        # integer AABBs are disjoint; every remaining pair still passes through
+        # the unchanged exact triangle-intersection predicate.
+        def each_overlapping_integer_aabb_pair(aabbs)
+          return enum_for(__method__, aabbs) unless block_given?
+          return if aabbs.length < 2
+
+          if aabbs.length <= TRIANGLE_INTERSECTION_SWEEP_THRESHOLD
+            aabbs.each_index do |index_a|
+              ((index_a + 1)...aabbs.length).each do |index_b|
+                next unless integer_aabb_bounds_overlap?(
+                  aabbs[index_a],
+                  aabbs[index_b]
+                )
+
+                yield [index_a, index_b]
+              end
+            end
+            return
+          end
+
+          sweep_axis = 3.times.max_by do |axis|
+            minimum = aabbs.map { |aabb| aabb[axis][0] }.min
+            maximum = aabbs.map { |aabb| aabb[axis][1] }.max
+            maximum - minimum
+          end
+          order = aabbs.each_index.sort_by do |index|
+            range = aabbs[index][sweep_axis]
+            [range[0], range[1], index]
+          end
+          active = []
+
+          order.each do |index|
+            current = aabbs[index]
+            current_minimum = current[sweep_axis][0]
+            active.reject! do |candidate_index|
+              aabbs[candidate_index][sweep_axis][1] < current_minimum
+            end
+            active.each do |candidate_index|
+              candidate = aabbs[candidate_index]
+              next unless integer_aabb_bounds_overlap?(candidate, current)
+
+              yield [candidate_index, index].sort
+            end
+            active << index
+          end
         end
 
         def exact_triangle_intersection_allowed?(triangle_a, triangle_b)
@@ -2623,9 +2875,22 @@ module ULOL
         end
 
         def integer_aabbs_overlap?(triangle_a, triangle_b)
+          integer_aabb_bounds_overlap?(
+            integer_triangle_aabb(triangle_a),
+            integer_triangle_aabb(triangle_b)
+          )
+        end
+
+        def integer_triangle_aabb(triangle)
+          3.times.map do |axis|
+            triangle.map { |point| point[axis] }.minmax
+          end
+        end
+
+        def integer_aabb_bounds_overlap?(aabb_a, aabb_b)
           3.times.all? do |axis|
-            range_a = triangle_a.map { |point| point[axis] }.minmax
-            range_b = triangle_b.map { |point| point[axis] }.minmax
+            range_a = aabb_a[axis]
+            range_b = aabb_b[axis]
             range_a[0] <= range_b[1] && range_b[0] <= range_a[1]
           end
         end
@@ -2678,7 +2943,8 @@ module ULOL
         def triangle_boundary_with_segment_vertices(
           points,
           candidates,
-          coordinate_space: :grid
+          coordinate_space: :grid,
+          edge_split_cache: nil
         )
           boundary = []
 
@@ -2687,24 +2953,80 @@ module ULOL
             end_point = points[(index + 1) % 3]
             boundary << start_point
 
-            inserted = candidates.filter_map do |candidate|
-              candidate_key = triangle_point_key(candidate, coordinate_space)
-              next if candidate_key == triangle_point_key(start_point, coordinate_space)
-              next if candidate_key == triangle_point_key(end_point, coordinate_space)
-
-              parameter = point_on_segment_parameter(
-                candidate,
+            boundary.concat(
+              conforming_edge_interior_points(
                 start_point,
                 end_point,
-                GRID_EPSILON_MM
+                candidates,
+                coordinate_space: coordinate_space,
+                edge_split_cache: edge_split_cache
               )
-              [parameter, candidate] if parameter
-            end
-
-            boundary.concat(inserted.sort_by(&:first).map(&:last))
+            )
           end
 
           remove_consecutive_duplicate_points(boundary)
+        end
+
+        # Computes a physical edge once in canonical endpoint order. A triangle
+        # that traverses the same edge in the opposite direction reuses the
+        # cached points in reverse order so its boundary winding is unchanged.
+        def conforming_edge_interior_points(
+          start_point,
+          end_point,
+          candidates,
+          coordinate_space:,
+          edge_split_cache:
+        )
+          unless edge_split_cache
+            return conforming_edge_interior_points_in_direction(
+              start_point,
+              end_point,
+              candidates,
+              coordinate_space
+            )
+          end
+
+          start_key = triangle_point_key(start_point, coordinate_space)
+          end_key = triangle_point_key(end_point, coordinate_space)
+          forward = (start_key <=> end_key) <= 0
+          edge_key = forward ? [start_key, end_key] : [end_key, start_key]
+
+          canonical_points = edge_split_cache[edge_key]
+          unless canonical_points
+            canonical_start = forward ? start_point : end_point
+            canonical_end = forward ? end_point : start_point
+            canonical_points = conforming_edge_interior_points_in_direction(
+              canonical_start,
+              canonical_end,
+              candidates,
+              coordinate_space
+            )
+            edge_split_cache[edge_key] = canonical_points
+          end
+
+          forward ? canonical_points : canonical_points.reverse
+        end
+
+        def conforming_edge_interior_points_in_direction(
+          start_point,
+          end_point,
+          candidates,
+          coordinate_space
+        )
+          start_key = triangle_point_key(start_point, coordinate_space)
+          end_key = triangle_point_key(end_point, coordinate_space)
+          candidates.filter_map do |candidate|
+            candidate_key = triangle_point_key(candidate, coordinate_space)
+            next if candidate_key == start_key || candidate_key == end_key
+
+            parameter = point_on_segment_parameter(
+              candidate,
+              start_point,
+              end_point,
+              GRID_EPSILON_MM
+            )
+            [parameter, candidate] if parameter
+          end.sort_by(&:first).map(&:last)
         end
 
         # The boundary is an original triangle with optional collinear points

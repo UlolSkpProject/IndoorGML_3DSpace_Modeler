@@ -162,6 +162,18 @@ module ULOL
                 max_seconds: 2.5,
                 failures: 0
               }
+            },
+            snapshot_roles: {
+              source_initial: {
+                calls: 1,
+                total_seconds: 1.5,
+                max_seconds: 1.5,
+                failures: 0
+              }
+            },
+            snapshot_reuse: {
+              reused: true,
+              rejection_reasons: []
             }
           }
           timing = {
@@ -189,6 +201,14 @@ module ULOL
             assert_equal 5, parsed.dig('geometry_totals', 'after', 'vertices')
             assert_equal 2.5,
                          parsed.dig('stage_totals', 'source_brep_snapshot', 'total_seconds')
+            assert_equal 1.5,
+                         parsed.dig(
+                           'snapshot_role_totals',
+                           'source_initial',
+                           'total_seconds'
+                         )
+            assert_equal true,
+                         parsed.dig('solids', 0, 'snapshot_reuse', 'reused')
             assert_equal 1, parsed['solids'].length
           end
         end

@@ -160,8 +160,12 @@ module ULOL
               short_edge_sliver_plan,
               baseline_mesh_inventory
             )
-          conforming_triangles, post_sliver_cleanup =
-            sanitize_triangle_records(conforming_triangles)
+          if short_edge_sliver_repair[:repairable]
+            conforming_triangles, post_sliver_cleanup =
+              sanitize_triangle_records(conforming_triangles)
+          else
+            post_sliver_cleanup = empty_triangle_cleanup_report
+          end
           merge_triangle_cleanup_reports!(
             short_edge_sliver_repair,
             post_sliver_cleanup
@@ -179,8 +183,12 @@ module ULOL
               conforming_triangles,
               forced_source_face_keys: forced_retriangulation[:source_face_keys]
             )
-          conforming_triangles, post_retriangulation_cleanup =
-            sanitize_triangle_records(conforming_triangles)
+          if planar_patch_retriangulation[:rebuilt_patches].to_i.positive?
+            conforming_triangles, post_retriangulation_cleanup =
+              sanitize_triangle_records(conforming_triangles)
+          else
+            post_retriangulation_cleanup = empty_triangle_cleanup_report
+          end
 
           # Step 7 is the hard pre-mutation gate. All target collisions, local
           # repairs, sliver changes, and forced patch rebuilds must form one exact
@@ -212,7 +220,8 @@ module ULOL
           begin
             rebuilt_triangles = normalized_triangle_snapshot(
               entities,
-              duplicate_diagnostics: rebuilt_duplicate_diagnostics
+              duplicate_diagnostics: rebuilt_duplicate_diagnostics,
+              snapshot_role: :rebuilt_pre_cleanup
             )
             rebuilt_triangles, rebuilt_degenerate_repair =
               repair_degenerate_source_triangles(rebuilt_triangles)
@@ -233,7 +242,7 @@ module ULOL
             }
           end
 
-          orientation, axis_plane_merge =
+          orientation, axis_plane_merge, post_cleanup_snapshot =
             orient_and_merge_rebuilt_surface(entities, conforming_triangles)
 
           final_repair = repair_rebuilt_entity_before_rollback(entity, entities)
@@ -249,17 +258,19 @@ module ULOL
           end
 
           final_duplicate_diagnostics = {}
-          final_triangles = normalized_triangle_snapshot(
+          final_state = final_normalized_mesh_state(
             entities,
-            duplicate_diagnostics: final_duplicate_diagnostics
-          )
-          final_triangles, final_degenerate_repair =
-            repair_degenerate_source_triangles(final_triangles)
-          final_mesh_validation = validate_normalized_triangle_mesh!(final_triangles)
-          final_surface_equivalence = verify_normalized_surface_equivalence!(
             conforming_triangles,
-            final_triangles
+            final_repair,
+            topology_after,
+            post_cleanup_snapshot,
+            final_duplicate_diagnostics
           )
+          final_triangles,
+            final_degenerate_repair,
+            final_mesh_validation,
+            final_surface_equivalence,
+            snapshot_reuse = final_state
 
           degenerate_repair = aggregate_degenerate_repair_reports(
             pre_normalization: pre_normalization_degenerate_repair,
@@ -307,7 +318,133 @@ module ULOL
             final_surface_equivalence: final_surface_equivalence,
             final_repair: final_repair
           )
+          report[:snapshot_reuse] = snapshot_reuse
           report
+        end
+
+        # Returns the unchanged-result report for a skipped triangle cleanup.
+        def empty_triangle_cleanup_report
+          {
+            removed_coincident_triangle_count: 0,
+            removed_collinear_triangle_count: 0,
+            removed_duplicate_triangle_count: 0,
+            affected_source_face_keys: [],
+            skipped: true
+          }
+        end
+
+        def final_normalized_mesh_state(
+          entities,
+          expected_triangles,
+          final_repair,
+          topology_after,
+          post_cleanup_snapshot,
+          duplicate_diagnostics
+        )
+          reuse_decision = post_cleanup_snapshot_reuse_decision(
+            post_cleanup_snapshot,
+            final_repair,
+            topology_after
+          )
+          if reuse_decision[:reused]
+            duplicate_diagnostics.merge!(
+              post_cleanup_snapshot.fetch(:duplicate_diagnostics)
+            )
+            duplicate_diagnostics[:reused_post_cleanup_snapshot] = true
+            equivalence = post_cleanup_snapshot.fetch(:surface_equivalence).dup
+            equivalence[:final_snapshot_reused] = true
+            return [
+              post_cleanup_snapshot.fetch(:triangles),
+              post_cleanup_snapshot.fetch(:degenerate_repair),
+              post_cleanup_snapshot.fetch(:mesh_validation),
+              equivalence,
+              reuse_decision
+            ]
+          end
+
+          duplicate_diagnostics[:reused_post_cleanup_snapshot] = false
+          final_triangles = normalized_triangle_snapshot(
+            entities,
+            duplicate_diagnostics: duplicate_diagnostics,
+            snapshot_role: :final_fallback
+          )
+          final_triangles, final_degenerate_repair =
+            repair_degenerate_source_triangles(final_triangles)
+          final_mesh_validation =
+            validate_normalized_triangle_mesh!(final_triangles)
+          final_surface_equivalence = verify_normalized_surface_equivalence!(
+            expected_triangles,
+            final_triangles
+          )
+          final_surface_equivalence = final_surface_equivalence.dup
+          final_surface_equivalence[:final_snapshot_reused] = false
+          [
+            final_triangles,
+            final_degenerate_repair,
+            final_mesh_validation,
+            final_surface_equivalence,
+            reuse_decision
+          ]
+        end
+
+        def reusable_post_cleanup_snapshot?(
+          snapshot,
+          final_repair,
+          topology_after
+        )
+          post_cleanup_snapshot_reuse_decision(
+            snapshot,
+            final_repair,
+            topology_after
+          )[:reused]
+        end
+
+        def post_cleanup_snapshot_reuse_decision(
+          snapshot,
+          final_repair,
+          topology_after
+        )
+          snapshot_available = snapshot.is_a?(Hash)
+          snapshot_validated = snapshot_available && snapshot[:validated] == true
+          final_repair_available = final_repair.is_a?(Hash)
+          final_repair_attempted = final_repair_available ? final_repair[:attempted] : nil
+          final_repair_manifold = final_repair_available ? final_repair[:manifold] : nil
+          repair_topology_same = if final_repair_available
+                                   final_repair[:initial_topology] ==
+                                     final_repair[:final_topology]
+                                 end
+          post_cleanup_topology_same_as_final = if snapshot_available
+                                                  snapshot[:topology] == topology_after
+                                                end
+
+          rejection_reasons = []
+          rejection_reasons << :post_cleanup_snapshot_missing unless snapshot_available
+          rejection_reasons << :post_cleanup_snapshot_not_validated if
+            snapshot_available && !snapshot_validated
+          rejection_reasons << :final_repair_report_missing unless final_repair_available
+          if final_repair_available
+            rejection_reasons << :final_repair_attempted unless
+              final_repair_attempted == false
+            rejection_reasons << :final_entity_not_manifold unless
+              final_repair_manifold == true
+            rejection_reasons << :final_repair_topology_changed unless
+              repair_topology_same
+          end
+          rejection_reasons << :post_cleanup_topology_changed if
+            snapshot_available && !post_cleanup_topology_same_as_final
+
+          {
+            reused: rejection_reasons.empty?,
+            rejection_reasons: rejection_reasons,
+            post_cleanup_snapshot_available: snapshot_available,
+            post_cleanup_snapshot_validated: snapshot_validated,
+            final_repair_report_available: final_repair_available,
+            final_repair_attempted: final_repair_attempted,
+            final_repair_manifold: final_repair_manifold,
+            repair_topology_same: repair_topology_same,
+            post_cleanup_topology_same_as_final:
+              post_cleanup_topology_same_as_final
+          }
         end
 
         def collect_forced_retriangulation_keys(*reports)
