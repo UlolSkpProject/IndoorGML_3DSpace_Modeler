@@ -7,14 +7,30 @@ module ULOL
         module SceneGroups
           STATE_FIXED_HEIGHT_OFFSET = 1000.mm unless const_defined?(:STATE_FIXED_HEIGHT_OFFSET, false)
           # Temporary feature flag. When enabled, CellSpace local-center
-          # calculation first aligns local X/Y to the horizontal OBB. Local Z
-          # remains equal to world Z and the world-space geometry is preserved.
-          ALIGN_CELL_SPACE_LOCAL_CENTER_TO_HORIZONTAL_OBB = true unless const_defined?(
-            :ALIGN_CELL_SPACE_LOCAL_CENTER_TO_HORIZONTAL_OBB,
+          # calculation aligns local X to the dominant vertical-wall normal.
+          # Local Z remains world Z; the horizontal OBB is only a fallback.
+          ALIGN_CELL_SPACE_LOCAL_CENTER_TO_DOMINANT_WALLS = true unless const_defined?(
+            :ALIGN_CELL_SPACE_LOCAL_CENTER_TO_DOMINANT_WALLS,
             false
           )
 
           HORIZONTAL_OBB_EPSILON = 1.0e-12 unless const_defined?(:HORIZONTAL_OBB_EPSILON, false)
+          VERTICAL_FACE_ANGLE_TOLERANCE_DEG = 1.0 unless const_defined?(
+            :VERTICAL_FACE_ANGLE_TOLERANCE_DEG,
+            false
+          )
+          WALL_NORMAL_CLUSTER_ANGLE_TOLERANCE_DEG = 1.0 unless const_defined?(
+            :WALL_NORMAL_CLUSTER_ANGLE_TOLERANCE_DEG,
+            false
+          )
+          WALL_PATCH_COPLANAR_ANGLE_TOLERANCE_DEG = 0.01 unless const_defined?(
+            :WALL_PATCH_COPLANAR_ANGLE_TOLERANCE_DEG,
+            false
+          )
+          WALL_PATCH_COPLANAR_TOLERANCE = 0.01.mm unless const_defined?(
+            :WALL_PATCH_COPLANAR_TOLERANCE,
+            false
+          )
 
           private
 
@@ -89,7 +105,7 @@ module ULOL
             cell_space_entity
           end
 
-          def align_cell_space_local_axes_to_horizontal_obb(cell_space_entity)
+          def align_cell_space_local_axes_to_dominant_walls(cell_space_entity)
             return cell_space_entity unless cell_space_entity&.valid?
             return cell_space_entity unless @primal_group&.valid?
             return cell_space_entity unless cell_space_entity.respond_to?(:definition)
@@ -98,8 +114,13 @@ module ULOL
 
             root_world = Utils::Transformation.root_transformation_in_model(@primal_group)
             old_world = root_world * cell_space_entity.transformation
-            world_points = cell_space_world_vertex_points(cell_space_entity, old_world)
-            axes = horizontal_obb_axes(world_points)
+            axes = dominant_vertical_face_axes(cell_space_entity, old_world)
+            source = :dominant_vertical_face_normal
+            unless axes
+              world_points = cell_space_world_vertex_points(cell_space_entity, old_world)
+              axes = horizontal_obb_axes(world_points)
+              source = :horizontal_obb
+            end
             return cell_space_entity unless axes
 
             desired_world = Geom::Transformation.axes(
@@ -120,10 +141,274 @@ module ULOL
             )
 
             IndoorCore::Logger.puts(
-              '[IndoorGML] CellSpace local-center axes aligned to horizontal OBB: ' \
-              "entity_id=#{cell_space_entity.entityID} angle_deg=#{format('%.9f', axes[:angle] * 180.0 / Math::PI)}"
+              '[IndoorGML] CellSpace local-center axes aligned: ' \
+              "entity_id=#{cell_space_entity.entityID} source=#{source} " \
+              "angle_deg=#{format('%.9f', axes[:angle] * 180.0 / Math::PI)}"
             )
             cell_space_entity
+          end
+
+          def dominant_vertical_face_axes(cell_space_entity, world_transformation)
+            samples = cell_space_entity.definition.entities
+                                       .grep(Sketchup::Face)
+                                       .filter_map do |face|
+              normal = world_face_normal(face, world_transformation)
+              next unless normal
+
+              {
+                face: face,
+                normal: normal,
+                area: world_face_area(face, world_transformation),
+                point: world_face_reference_point(face, world_transformation)
+              }
+            end
+            assign_connected_wall_patch_keys!(samples)
+            dominant_vertical_face_axes_from_samples(samples)
+          end
+
+          def dominant_vertical_face_axes_from_samples(samples)
+            vertical_limit = Math.sin(
+              VERTICAL_FACE_ANGLE_TOLERANCE_DEG * Math::PI / 180.0
+            )
+            candidates = Array(samples).each_with_index.filter_map do |sample, index|
+              normal = Array(sample[:normal]).map(&:to_f)
+              next unless normal.length == 3
+
+              length = Math.sqrt(normal.sum { |component| component * component })
+              next if length <= HORIZONTAL_OBB_EPSILON
+              next if (normal[2] / length).abs > vertical_limit
+
+              horizontal_length = Math.sqrt(
+                (normal[0] * normal[0]) + (normal[1] * normal[1])
+              )
+              next if horizontal_length <= HORIZONTAL_OBB_EPSILON
+
+              axis = canonical_horizontal_axis([
+                normal[0] / horizontal_length,
+                normal[1] / horizontal_length,
+                0.0
+              ])
+              angle = Math.atan2(axis[1], axis[0]) % Math::PI
+              {
+                angle: angle,
+                area: [sample[:area].to_f.abs, 0.0].max,
+                frequency_key: sample.fetch(:frequency_key, index)
+              }
+            end
+            return nil if candidates.empty?
+
+            clusters = cluster_unoriented_horizontal_normals(candidates)
+            ranked = clusters.map { |cluster| wall_normal_cluster_summary(cluster) }
+            selected = ranked.max_by do |cluster|
+              [
+                cluster[:count],
+                cluster[:max_face_area],
+                cluster[:total_area],
+                cluster[:x][0].abs,
+                cluster[:x][1]
+              ]
+            end
+            selected.merge(source: :dominant_vertical_face_normal)
+          end
+
+          # Angles describe unoriented axes in [0, PI). Rotate the sorted list
+          # after its largest empty arc so nearly identical directions around
+          # the 0/PI seam are clustered together deterministically.
+          def cluster_unoriented_horizontal_normals(candidates)
+            ordered = candidates.sort_by { |candidate| [candidate[:angle], candidate[:area]] }
+            return [ordered] if ordered.length == 1
+
+            gaps = ordered.each_index.map do |index|
+              following = ordered[(index + 1) % ordered.length][:angle]
+              following += Math::PI if index == ordered.length - 1
+              [following - ordered[index][:angle], index]
+            end
+            split_after = gaps.max_by { |gap, index| [gap, -index] }[1]
+            rotated = ordered.rotate(split_after + 1)
+            start_angle = rotated.first[:angle]
+            unwrapped = rotated.map do |candidate|
+              angle = candidate[:angle]
+              angle += Math::PI if angle < start_angle
+              candidate.merge(unwrapped_angle: angle)
+            end
+
+            tolerance = WALL_NORMAL_CLUSTER_ANGLE_TOLERANCE_DEG * Math::PI / 180.0
+            clusters = []
+            unwrapped.each do |candidate|
+              current = clusters.last
+              if current.nil? ||
+                 candidate[:unwrapped_angle] - current.first[:unwrapped_angle] > tolerance
+                clusters << [candidate]
+              else
+                current << candidate
+              end
+            end
+            clusters
+          end
+
+          def wall_normal_cluster_summary(cluster)
+            cosine = cluster.sum { |candidate| Math.cos(2.0 * candidate[:angle]) }
+            sine = cluster.sum { |candidate| Math.sin(2.0 * candidate[:angle]) }
+            angle = 0.5 * Math.atan2(sine, cosine)
+            axis = canonical_horizontal_axis([
+              Math.cos(angle),
+              Math.sin(angle),
+              0.0
+            ])
+            {
+              count: cluster.map { |candidate| candidate[:frequency_key] }.uniq.length,
+              face_count: cluster.length,
+              max_face_area: cluster.map { |candidate| candidate[:area] }.max,
+              total_area: cluster.sum { |candidate| candidate[:area] },
+              angle: Math.atan2(axis[1], axis[0]),
+              x: axis,
+              y: [-axis[1], axis[0], 0.0]
+            }
+          end
+
+          def canonical_horizontal_axis(axis)
+            if axis[0] < -HORIZONTAL_OBB_EPSILON ||
+               (axis[0].abs <= HORIZONTAL_OBB_EPSILON && axis[1] < 0.0)
+              [-axis[0], -axis[1], 0.0]
+            else
+              [axis[0], axis[1], 0.0]
+            end
+          end
+
+          def world_face_normal(face, world_transformation)
+            loop = face.respond_to?(:outer_loop) ? face.outer_loop : nil
+            vertices = loop ? loop.vertices : face.vertices
+            points = vertices.map do |vertex|
+              vertex.position.transform(world_transformation)
+            end
+            return nil if points.length < 3
+
+            origin = points.first
+            (1...(points.length - 1)).each do |first_index|
+              ((first_index + 1)...points.length).each do |second_index|
+                first = world_point_delta(origin, points[first_index])
+                second = world_point_delta(origin, points[second_index])
+                normal = world_vector_cross(first, second)
+                length = Math.sqrt(normal.sum { |component| component * component })
+                next if length <= HORIZONTAL_OBB_EPSILON
+
+                return normal.map { |component| component / length }
+              end
+            end
+            nil
+          rescue StandardError
+            nil
+          end
+
+          def world_face_area(face, world_transformation)
+            face.area(world_transformation).to_f.abs
+          rescue ArgumentError, TypeError
+            face.area.to_f.abs
+          rescue StandardError
+            0.0
+          end
+
+          def world_face_reference_point(face, world_transformation)
+            loop = face.respond_to?(:outer_loop) ? face.outer_loop : nil
+            vertex = loop ? loop.vertices.first : face.vertices.first
+            point = vertex.position.transform(world_transformation)
+            [point.x.to_f, point.y.to_f, point.z.to_f]
+          rescue StandardError
+            nil
+          end
+
+          # One wall split by internal SketchUp edges counts once, while
+          # disconnected parallel walls remain separate frequency units.
+          def assign_connected_wall_patch_keys!(samples)
+            indexed_faces = {}
+            samples.each_with_index do |sample, index|
+              face = sample[:face]
+              indexed_faces[face.object_id] = index if face
+            end
+            visited = Array.new(samples.length, false)
+            patch_key = 0
+
+            samples.each_index do |seed|
+              next if visited[seed]
+
+              visited[seed] = true
+              queue = [seed]
+              until queue.empty?
+                index = queue.shift
+                sample = samples[index]
+                sample[:frequency_key] = patch_key
+                face = sample[:face]
+                next unless face&.respond_to?(:edges)
+
+                face.edges.each do |edge|
+                  next unless edge.respond_to?(:faces)
+
+                  edge.faces.each do |neighbor|
+                    neighbor_index = indexed_faces[neighbor.object_id]
+                    next unless neighbor_index
+                    next if visited[neighbor_index]
+                    next unless coplanar_wall_samples?(
+                      sample,
+                      samples[neighbor_index]
+                    )
+
+                    visited[neighbor_index] = true
+                    queue << neighbor_index
+                  end
+                end
+              end
+              patch_key += 1
+            end
+            samples
+          end
+
+          def coplanar_wall_samples?(first, second)
+            first_normal = first[:normal]
+            second_normal = second[:normal]
+            first_point = first[:point]
+            second_point = second[:point]
+            return false unless first_normal && second_normal &&
+                                first_point && second_point
+
+            cosine = world_vector_dot(first_normal, second_normal).abs
+            angular_limit = Math.cos(
+              WALL_PATCH_COPLANAR_ANGLE_TOLERANCE_DEG * Math::PI / 180.0
+            )
+            return false if cosine < angular_limit
+
+            offset = world_point_delta_components(first_point, second_point)
+            world_vector_dot(first_normal, offset).abs <=
+              WALL_PATCH_COPLANAR_TOLERANCE
+          end
+
+          def world_point_delta(origin, point)
+            [
+              point.x.to_f - origin.x.to_f,
+              point.y.to_f - origin.y.to_f,
+              point.z.to_f - origin.z.to_f
+            ]
+          end
+
+          def world_vector_cross(first, second)
+            [
+              (first[1] * second[2]) - (first[2] * second[1]),
+              (first[2] * second[0]) - (first[0] * second[2]),
+              (first[0] * second[1]) - (first[1] * second[0])
+            ]
+          end
+
+          def world_vector_dot(first, second)
+            (first[0] * second[0]) +
+              (first[1] * second[1]) +
+              (first[2] * second[2])
+          end
+
+          def world_point_delta_components(origin, point)
+            [
+              point[0] - origin[0],
+              point[1] - origin[1],
+              point[2] - origin[2]
+            ]
           end
 
           def cell_space_world_vertex_points(cell_space_entity, world_transformation)
@@ -219,8 +504,8 @@ module ULOL
 
           def recenter_cell_space_geometry(cell_space_entity, fixed_z_offset_from_bottom: nil)
             with_indoor_model_operation('IndoorGML Recenter CellSpace Geometry', transparent: true) do
-              if ALIGN_CELL_SPACE_LOCAL_CENTER_TO_HORIZONTAL_OBB
-                align_cell_space_local_axes_to_horizontal_obb(cell_space_entity)
+              if ALIGN_CELL_SPACE_LOCAL_CENTER_TO_DOMINANT_WALLS
+                align_cell_space_local_axes_to_dominant_walls(cell_space_entity)
               end
               fixed_z = fixed_z_offset_from_bottom.nil? ? nil : fixed_local_z_from_world_offset(cell_space_entity, fixed_z_offset_from_bottom)
               center = Utils::Geometry.find_shell_inner_centroid(cell_space_entity, fixed_z: fixed_z)
