@@ -15,46 +15,29 @@ module ULOL
       # which may collapse exported GML rings even when SketchUp still reports a
       # manifold solid.
       class LocalVertexNormalizer
-        # Default spacing of the local-coordinate normalization grid.
         DEFAULT_TOLERANCE_MM = 0.001
 
-        # Numerical equality epsilon; this is not the normalization grid size.
+        # Numerical comparison epsilon. This is not the normalization grid size.
         GRID_EPSILON_MM = 0.000001
 
-        # Maximum plane deviation accepted by strict coplanar operations.
-        STRICT_COPLANAR_TOLERANCE_MM = 0.00005
-        # Maximum normal-angle difference accepted by strict coplanar operations.
+        STRICT_COPLANAR_TOLERANCE_MM = 0.001
         STRICT_COPLANAR_ANGLE_TOLERANCE_DEG = 0.001
 
-        # General coplanar tolerance retained for reporting and broad policy.
         COPLANAR_TOLERANCE_MM = 0.01
-        # General angular tolerance retained for broad coplanar policy.
         COPLANAR_ANGLE_TOLERANCE_DEG = 0.01
-        # Angular tolerance used to recognize local-axis-aligned planes.
         AXIS_PLANE_ANGLE_TOLERANCE_DEG = COPLANAR_ANGLE_TOLERANCE_DEG
 
-        # Squared-area epsilon used to classify collinear triangle points.
         COLLINEAR_CROSS_EPSILON_IN2 = 1.0e-12
-        # Maximum number of iterative surface-border repair attempts.
         MAX_STITCH_REPAIRS = 1_000
-        # Maximum number of iterative coplanar shared-edge cleanup passes.
         MAX_COPLANAR_PASSES = 20
-        # Signed-volume epsilon used when deciding shell orientation.
         SIGNED_VOLUME_EPSILON_IN3 = 1.0e-12
-        # Millimetres represented by one SketchUp internal inch.
         MM_PER_INCH = 25.4
 
-        # Maximum short-edge length considered for supported sliver repair.
         SHORT_EDGE_SLIVER_THRESHOLD_MM = 1.0
-        # Minimum aspect ratio required to classify a face as a sliver.
         SHORT_EDGE_SLIVER_MIN_ASPECT_RATIO = 20.0
-        # Maximum direction difference between paired sliver boundary segments.
         SHORT_EDGE_SLIVER_PARALLEL_ANGLE_DEG = 1.0
-        # Relative length difference allowed between paired sliver segments.
         SHORT_EDGE_SLIVER_LENGTH_RELATIVE_TOLERANCE = 0.05
-        # Minimum connected face count required for a repairable sliver patch.
         SHORT_EDGE_SLIVER_MIN_PATCH_FACES = 2
-        # Maximum spatial diameter allowed for one short-edge sliver cluster.
         SHORT_EDGE_SLIVER_MAX_CLUSTER_DIAMETER_MM = 1.0
 
         class Error < StandardError; end
@@ -902,24 +885,14 @@ module ULOL
           )
         end
 
-        # Captures each source Face from its B-rep boundary loops. Face#mesh is
-        # only a compatibility fallback for entities without usable loops: its
-        # internal diagonals are not source topology and can overlap when a long
-        # n-gon boundary contains almost-collinear vertices.
+        # Captures SketchUp's mesh triangles without applying the normalization
+        # grid. Degenerate mesh diagonals must be repaired in this coordinate
+        # space first: independently rounding three collinear points can turn a
+        # zero-area triangle into a very thin, non-zero triangle.
         def triangle_snapshot(entities)
           entities.grep(@face_class).flat_map do |face|
-            source_face_key = stable_entity_id(face)
-            if face.respond_to?(:loops)
-              begin
-                next source_boundary_triangle_records(face, source_face_key)
-              rescue Error, ArgumentError
-                # Some legacy SketchUp Faces contain numerically invalid loops
-                # that SketchUp can still mesh. Retain that mesh as input to the
-                # later exact repair gates instead of accepting it silently.
-              end
-            end
-
             mesh = face.mesh(0)
+            source_face_key = stable_entity_id(face)
             mesh.polygons.each_with_index.flat_map do |polygon, polygon_index|
               points = polygon.map { |index| mesh.point_at(index.abs) }
               triangulate_polygon(points).map do |triangle_points|
@@ -934,115 +907,6 @@ module ULOL
                 }
               end
             end
-          end
-        end
-
-        # Rebuild only an invalid Face#mesh result from the Face's boundary
-        # loops. Decisions use a stable 2D projection at GRID_EPSILON_MM
-        # precision; returned records retain the original SketchUp points.
-        def source_boundary_triangle_records(face, source_face_key)
-          source_normal = vector_components(face.normal)
-          drop_axis = source_normal.each_index.max_by do |axis|
-            source_normal[axis].abs
-          end
-          point_by_key = {}
-          loops = face.loops.map do |loop|
-            keys = loop.vertices.map do |vertex|
-              point = vertex.position
-              key = source_precision_indices(point)
-              point_by_key[key] ||= point
-              key
-            end
-            compact_integer_loop(keys)
-          end
-          if loops.empty? || loops.any? { |loop| loop.length < 3 }
-            raise ReconstructionError,
-                  "Source face boundary cannot be triangulated: face=#{source_face_key.inspect}"
-          end
-
-          outer, holes = classify_exact_patch_loops(loops, drop_axis)
-          triangle_keys = triangulate_exact_polygon_with_holes(
-            outer,
-            holes,
-            drop_axis
-          )
-          records = triangle_keys.each_with_index.map do |keys, polygon_index|
-            points = keys.map { |key| point_by_key.fetch(key) }
-            actual_normal = vector_cross(
-              vector_between(points[0], points[1]),
-              vector_between(points[0], points[2])
-            )
-            points = [points[0], points[2], points[1]] if
-              vector_dot(actual_normal, source_normal).negative?
-            {
-              points: points,
-              source_normal: source_normal,
-              material: face.material,
-              back_material: face.back_material,
-              layer: face.layer,
-              source_face_key: source_face_key,
-              source_polygon_index: polygon_index,
-              source_boundary_snapshot: true
-            }
-          end
-
-          validate_source_boundary_retriangulation!(records, loops)
-          records
-        end
-
-        def compact_integer_loop(points)
-          compact = []
-          points.each do |point|
-            compact << point unless compact.last == point
-          end
-          compact.pop if compact.length > 1 && compact.first == compact.last
-          compact
-        end
-
-        def validate_source_boundary_retriangulation!(records, loops)
-          triangles = records.map do |record|
-            record[:points].map { |point| source_precision_indices(point) }
-          end
-          if triangles.any? do |triangle|
-               triangle.uniq.length != 3 ||
-                 integer_zero_vector?(integer_triangle_normal(triangle))
-             end
-            raise ReconstructionError,
-                  'Source boundary retriangulation created a degenerate triangle'
-          end
-          validate_triangle_intersections!(triangles)
-
-          incidence = Hash.new(0)
-          triangles.each do |triangle|
-            3.times do |index|
-              incidence[canonical_edge_key(
-                triangle[index],
-                triangle[(index + 1) % 3]
-              )] += 1
-            end
-          end
-          if incidence.values.any? { |count| count > 2 }
-            raise TopologyChangedError,
-                  'Source boundary retriangulation created an overused edge'
-          end
-
-          expected_boundary = loops.flat_map do |loop|
-            loop.each_index.map do |index|
-              canonical_edge_key(loop[index], loop[(index + 1) % loop.length])
-            end
-          end.sort
-          actual_boundary = incidence.filter_map do |edge, count|
-            edge if count == 1
-          end.sort
-          return true if actual_boundary == expected_boundary
-
-          raise TopologyChangedError,
-                'Source boundary retriangulation did not preserve the Face loops'
-        end
-
-        def source_precision_indices(point)
-          [point.x, point.y, point.z].map do |coordinate|
-            ((coordinate.to_f * MM_PER_INCH) / GRID_EPSILON_MM).round
           end
         end
 
@@ -1341,11 +1205,11 @@ module ULOL
           end
         end
 
-        def conforming_triangle_snapshot(source_triangles, coordinate_space: :grid)
+        def conforming_triangle_snapshot(source_triangles)
           unique_points = {}
           source_triangles.each do |record|
             record[:points].each do |point|
-              unique_points[triangle_point_key(point, coordinate_space)] ||= point
+              unique_points[grid_indices(point)] ||= point
             end
           end
 
@@ -1353,27 +1217,15 @@ module ULOL
           signatures = {}
 
           source_triangles.flat_map do |record|
-            if degenerate_triangle_record?(
-              record,
-              coordinate_space: coordinate_space
-            )
-              next [record] if coordinate_space == :source
-
-              next []
-            end
+            next [] if collinear_triangle?(record[:points])
 
             boundary = triangle_boundary_with_segment_vertices(
               record[:points],
-              candidates,
-              coordinate_space: coordinate_space
+              candidates
             )
 
-            triangulate_convex_boundary(
-              boundary,
-              candidates,
-              coordinate_space: coordinate_space
-            ).map do |points|
-              signature = triangle_signature_for_space(points, coordinate_space)
+            triangulate_convex_boundary(boundary, candidates).map do |points|
+              signature = triangle_signature(points)
               if signatures.key?(signature)
                 raise ReconstructionError,
                       "Duplicate conforming triangle detected: #{signature.inspect}"
@@ -2684,11 +2536,7 @@ module ULOL
           points.map { |point| grid_indices(point) }.sort
         end
 
-        def triangle_boundary_with_segment_vertices(
-          points,
-          candidates,
-          coordinate_space: :grid
-        )
+        def triangle_boundary_with_segment_vertices(points, candidates)
           boundary = []
 
           3.times do |index|
@@ -2697,9 +2545,9 @@ module ULOL
             boundary << start_point
 
             inserted = candidates.filter_map do |candidate|
-              candidate_key = triangle_point_key(candidate, coordinate_space)
-              next if candidate_key == triangle_point_key(start_point, coordinate_space)
-              next if candidate_key == triangle_point_key(end_point, coordinate_space)
+              candidate_key = grid_indices(candidate)
+              next if candidate_key == grid_indices(start_point)
+              next if candidate_key == grid_indices(end_point)
 
               parameter = point_on_segment_parameter(
                 candidate,
@@ -2718,11 +2566,7 @@ module ULOL
 
         # The boundary is an original triangle with optional collinear points
         # inserted on its edges, so it remains convex.
-        def triangulate_convex_boundary(
-          points,
-          candidates = points,
-          coordinate_space: :grid
-        )
+        def triangulate_convex_boundary(points, candidates = points)
           remaining = remove_consecutive_duplicate_points(points)
           return [] if remaining.length < 3
           return [remaining] if remaining.length == 3 && !collinear_triangle?(remaining)
@@ -2739,8 +2583,7 @@ module ULOL
                 !segment_has_interior_candidate?(
                   previous_point,
                   following_point,
-                  candidates,
-                  coordinate_space: coordinate_space
+                  candidates
                 )
             end
 
@@ -2762,17 +2605,12 @@ module ULOL
           triangles
         end
 
-        def segment_has_interior_candidate?(
-          start_point,
-          end_point,
-          candidates,
-          coordinate_space: :grid
-        )
-          start_key = triangle_point_key(start_point, coordinate_space)
-          end_key = triangle_point_key(end_point, coordinate_space)
+        def segment_has_interior_candidate?(start_point, end_point, candidates)
+          start_key = grid_indices(start_point)
+          end_key = grid_indices(end_point)
 
           candidates.any? do |candidate|
-            candidate_key = triangle_point_key(candidate, coordinate_space)
+            candidate_key = grid_indices(candidate)
             next false if candidate_key == start_key || candidate_key == end_key
 
             !point_on_segment_parameter(

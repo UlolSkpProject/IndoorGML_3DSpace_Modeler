@@ -37,14 +37,6 @@ module ULOL
           end
         end
 
-        class GroupNormalizationHarness
-          include IndoorModel::LocalVertexNormalization
-
-          def with_unlocked(_group)
-            yield
-          end
-        end
-
         def test_model_predicate_requires_every_cell_space_to_be_normalized
           first = FakeCellSpace.new('first', Object.new)
           second = FakeCellSpace.new('second', Object.new)
@@ -89,30 +81,6 @@ module ULOL
           assert report[:skipped]
         end
 
-        def test_cell_space_normalization_reuses_the_batch_operation
-          group = Object.new
-          cell_space = FakeCellSpace.new('cell-1', group)
-          calls = []
-
-          result = with_normalize_replacement(
-            lambda do |entity, tolerance, **options|
-              calls << [entity, tolerance, options]
-              { manifold: true }
-            end
-          ) do
-            GroupNormalizationHarness.new.send(
-              :normalize_cell_space_group,
-              cell_space,
-              group,
-              0.001,
-              activate_edit_context: false
-            )
-          end
-
-          assert_equal({ manifold: true }, result)
-          assert_equal [[group, 0.001, { manage_operation: false }]], calls
-        end
-
         private
 
         def with_normalized_predicate(replacement)
@@ -122,15 +90,6 @@ module ULOL
           yield
         ensure
           singleton_class.send(:define_method, :normalized?, original) if singleton_class && original
-        end
-
-        def with_normalize_replacement(replacement)
-          singleton_class = class << LocalVertexNormalizer; self; end
-          original = LocalVertexNormalizer.method(:normalize)
-          singleton_class.send(:define_method, :normalize, &replacement)
-          yield
-        ensure
-          singleton_class.send(:define_method, :normalize, original) if singleton_class && original
         end
       end
     end

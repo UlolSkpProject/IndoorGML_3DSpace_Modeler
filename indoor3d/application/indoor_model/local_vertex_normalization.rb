@@ -180,13 +180,7 @@ module ULOL
           )
             with_unlocked(group) do
               runner = proc do
-                # The surrounding IndoorModel batch owns the single rollback
-                # operation; do not start a nested operation for each CellSpace.
-                LocalVertexNormalizer.normalize(
-                  group,
-                  tolerance_mm,
-                  manage_operation: false
-                )
+                LocalVertexNormalizer.normalize(group, tolerance_mm)
               rescue StandardError => e
                 name = group.respond_to?(:name) ? group.name.inspect : 'n/a'
                 raise e.class,

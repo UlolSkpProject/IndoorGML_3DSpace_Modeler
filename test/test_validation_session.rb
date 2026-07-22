@@ -210,7 +210,6 @@ module ULOL
 
             assert_equal 1, indoor.finish_editing_count
             assert_same indoor, FakeGmlExporter.last_indoor_model
-            assert_equal false, FakeGmlExporter.last_options[:refresh_runtime_data]
             assert_equal "#{UI.savepanel_path}.gml", FakeGmlExporter.last_output_path
           ensure
             FakeGmlExporter.reset
@@ -233,7 +232,6 @@ module ULOL
 
             assert_equal 1, indoor.finish_editing_count
             assert_same indoor, FakeGmlExporter.last_indoor_model
-            assert_equal false, FakeGmlExporter.last_options[:refresh_runtime_data]
             assert_equal "#{UI.savepanel_path}.gml", FakeGmlExporter.last_output_path
             assert_equal "GML exported:\n#{UI.savepanel_path}.gml", progress.result_message
           ensure
@@ -763,18 +761,15 @@ module ULOL
           class FakeGmlExporter
             class << self
               attr_reader :last_indoor_model
-              attr_reader :last_options
               attr_reader :last_output_path
 
-              def new(indoor_model, **options)
+              def new(indoor_model)
                 @last_indoor_model = indoor_model
-                @last_options = options
                 allocate
               end
 
               def reset
                 @last_indoor_model = nil
-                @last_options = nil
                 @last_output_path = nil
               end
 

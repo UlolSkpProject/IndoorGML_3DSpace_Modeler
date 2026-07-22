@@ -28,17 +28,7 @@ module ULOL
                 raise DestructiveCoplanarCleanupError,
                       "Coplanar cleanup opened rebuilt shell: #{topology.inspect}"
               end
-
-              merged_triangles = normalized_triangle_snapshot(entities)
-              merged_triangles, = repair_degenerate_source_triangles(
-                merged_triangles
-              )
-              validate_normalized_triangle_mesh!(merged_triangles)
-              verify_normalized_surface_equivalence!(
-                validated_triangles,
-                merged_triangles
-              )
-            rescue Error, ArgumentError => error
+            rescue DestructiveCoplanarCleanupError, ArgumentError => error
               erase_source_geometry(entities)
               restored = rebuild_triangles(entities, backup)
               unless restored[:added_faces] == backup.length &&

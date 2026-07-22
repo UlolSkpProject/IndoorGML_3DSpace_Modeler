@@ -40,8 +40,7 @@ module ULOL
             return nil
           end
           IndoorGmlConverter::GmlExporter.new(
-            indoor_model,
-            refresh_runtime_data: false
+            indoor_model
           ).export(output_path: path)
           message = "GML exported:\n#{path}"
           progress ? progress.set_result_message(message) : UI.messagebox(message)

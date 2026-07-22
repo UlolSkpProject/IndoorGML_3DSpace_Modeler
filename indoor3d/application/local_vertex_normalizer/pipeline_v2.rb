@@ -9,29 +9,23 @@ module ULOL
     module IndoorCore
       # Pipeline v2 overrides for LocalVertexNormalizer.
       class LocalVertexNormalizer
-        # Tie-break priority for simultaneous Z, Y, and X axis constraints.
         AXIS_CONSTRAINT_PRIORITY = [2, 1, 0].freeze unless const_defined?(:AXIS_CONSTRAINT_PRIORITY, false)
-        # Maximum number of conservative external-face repair attempts.
         MAX_EXTERNAL_FACE_REPAIRS = 1_000 unless const_defined?(:MAX_EXTERNAL_FACE_REPAIRS, false)
 
         class << self
-          # Direct calls own a rollback operation by default. Batch callers may
-          # reuse an already-open operation by setting manage_operation to false.
+          # Production normalization always rolls back on failure. Failed-state
+          # commits remain unavailable through the public API.
           def normalize(
             entity,
             tolerance_mm = DEFAULT_TOLERANCE_MM,
-            commit_on_failure: false,
-            manage_operation: true
+            commit_on_failure: false
           )
             if commit_on_failure
               raise ArgumentError,
                     'commit_on_failure is disabled for LocalVertexNormalizer v2'
             end
 
-            new(tolerance_mm).normalize(
-              entity,
-              manage_operation: manage_operation
-            )
+            new(tolerance_mm).normalize(entity)
           end
 
           def normalized?(entity, tolerance_mm = DEFAULT_TOLERANCE_MM)
@@ -39,19 +33,13 @@ module ULOL
           end
         end
 
-        def normalize(
-          entity,
-          commit_on_failure: false,
-          manage_operation: true
-        )
+        def normalize(entity, commit_on_failure: false)
           if commit_on_failure
             raise ArgumentError,
                   'commit_on_failure is disabled for LocalVertexNormalizer v2'
           end
 
           validate_entity!(entity)
-          return normalize_entity(entity) unless manage_operation
-
           with_normalization_operation(entity, commit_on_failure: false) do
             normalize_entity(entity)
           end
@@ -114,14 +102,6 @@ module ULOL
           )
 
           source_space_triangles = triangle_snapshot(entities)
-          # Preserve source vertex-on-edge incidence before independent grid
-          # rounding can bend a formerly collinear shared boundary. The target
-          # mesh then carries the same A-B/B-C subdivision even when B no longer
-          # lies exactly on the rounded A-C segment.
-          source_space_triangles = conforming_triangle_snapshot(
-            source_space_triangles,
-            coordinate_space: :source
-          )
           source_space_triangles, pre_normalization_degenerate_repair =
             repair_degenerate_source_triangles(
               source_space_triangles,
