@@ -885,14 +885,24 @@ module ULOL
           )
         end
 
-        # Captures SketchUp's mesh triangles without applying the normalization
-        # grid. Degenerate mesh diagonals must be repaired in this coordinate
-        # space first: independently rounding three collinear points can turn a
-        # zero-area triangle into a very thin, non-zero triangle.
+        # Captures each source Face from its B-rep boundary loops. Face#mesh is
+        # only a compatibility fallback for entities without usable loops: its
+        # internal diagonals are not source topology and can overlap when a long
+        # n-gon boundary contains almost-collinear vertices.
         def triangle_snapshot(entities)
           entities.grep(@face_class).flat_map do |face|
-            mesh = face.mesh(0)
             source_face_key = stable_entity_id(face)
+            if face.respond_to?(:loops)
+              begin
+                next source_boundary_triangle_records(face, source_face_key)
+              rescue Error, ArgumentError
+                # Some legacy SketchUp Faces contain numerically invalid loops
+                # that SketchUp can still mesh. Retain that mesh as input to the
+                # later exact repair gates instead of accepting it silently.
+              end
+            end
+
+            mesh = face.mesh(0)
             mesh.polygons.each_with_index.flat_map do |polygon, polygon_index|
               points = polygon.map { |index| mesh.point_at(index.abs) }
               triangulate_polygon(points).map do |triangle_points|
@@ -907,6 +917,115 @@ module ULOL
                 }
               end
             end
+          end
+        end
+
+        # Rebuild a Face snapshot from its boundary loops. Decisions use a stable
+        # 2D projection at GRID_EPSILON_MM precision; returned records retain the
+        # original SketchUp points.
+        def source_boundary_triangle_records(face, source_face_key)
+          source_normal = vector_components(face.normal)
+          drop_axis = source_normal.each_index.max_by do |axis|
+            source_normal[axis].abs
+          end
+          point_by_key = {}
+          loops = face.loops.map do |loop|
+            keys = loop.vertices.map do |vertex|
+              point = vertex.position
+              key = source_precision_indices(point)
+              point_by_key[key] ||= point
+              key
+            end
+            compact_integer_loop(keys)
+          end
+          if loops.empty? || loops.any? { |loop| loop.length < 3 }
+            raise ReconstructionError,
+                  "Source face boundary cannot be triangulated: face=#{source_face_key.inspect}"
+          end
+
+          outer, holes = classify_exact_patch_loops(loops, drop_axis)
+          triangle_keys = triangulate_exact_polygon_with_holes(
+            outer,
+            holes,
+            drop_axis
+          )
+          records = triangle_keys.each_with_index.map do |keys, polygon_index|
+            points = keys.map { |key| point_by_key.fetch(key) }
+            actual_normal = vector_cross(
+              vector_between(points[0], points[1]),
+              vector_between(points[0], points[2])
+            )
+            points = [points[0], points[2], points[1]] if
+              vector_dot(actual_normal, source_normal).negative?
+            {
+              points: points,
+              source_normal: source_normal,
+              material: face.material,
+              back_material: face.back_material,
+              layer: face.layer,
+              source_face_key: source_face_key,
+              source_polygon_index: polygon_index,
+              source_boundary_snapshot: true
+            }
+          end
+
+          validate_source_boundary_retriangulation!(records, loops)
+          records
+        end
+
+        def compact_integer_loop(points)
+          compact = []
+          points.each do |point|
+            compact << point unless compact.last == point
+          end
+          compact.pop if compact.length > 1 && compact.first == compact.last
+          compact
+        end
+
+        def validate_source_boundary_retriangulation!(records, loops)
+          triangles = records.map do |record|
+            record[:points].map { |point| source_precision_indices(point) }
+          end
+          if triangles.any? do |triangle|
+               triangle.uniq.length != 3 ||
+                 integer_zero_vector?(integer_triangle_normal(triangle))
+             end
+            raise ReconstructionError,
+                  'Source boundary retriangulation created a degenerate triangle'
+          end
+          validate_triangle_intersections!(triangles)
+
+          incidence = Hash.new(0)
+          triangles.each do |triangle|
+            3.times do |index|
+              incidence[canonical_edge_key(
+                triangle[index],
+                triangle[(index + 1) % 3]
+              )] += 1
+            end
+          end
+          if incidence.values.any? { |count| count > 2 }
+            raise TopologyChangedError,
+                  'Source boundary retriangulation created an overused edge'
+          end
+
+          expected_boundary = loops.flat_map do |loop|
+            loop.each_index.map do |index|
+              canonical_edge_key(loop[index], loop[(index + 1) % loop.length])
+            end
+          end.sort
+          actual_boundary = incidence.filter_map do |edge, count|
+            edge if count == 1
+          end.sort
+          return true if actual_boundary == expected_boundary
+
+          raise TopologyChangedError,
+                'Source boundary retriangulation did not preserve the Face loops'
+        end
+
+        def source_precision_indices(point)
+          [point.x, point.y, point.z].map do |coordinate|
+            ((coordinate.to_f * MM_PER_INCH) / GRID_EPSILON_MM).round
           end
         end
 

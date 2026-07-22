@@ -82,13 +82,26 @@ module ULOL
           end
         end
 
+        SnapshotVertex = Struct.new(:position)
+        SnapshotLoop = Struct.new(:vertices)
+
+        class BoundarySnapshotFace < SnapshotFace
+          attr_reader :loops
+
+          def initialize(points, polygons, persistent_id, loop_points, normal)
+            super(points, polygons, persistent_id)
+            @loops = [SnapshotLoop.new(loop_points.map { |point| SnapshotVertex.new(point) })]
+            @normal = normal
+          end
+        end
+
         class SnapshotEntities
           def initialize(faces)
             @faces = faces
           end
 
           def grep(klass)
-            klass == SnapshotFace ? @faces : []
+            @faces.select { |face| face.is_a?(klass) }
           end
         end
 
@@ -635,6 +648,73 @@ module ULOL
           refute_includes edges, [point_a_key, point_c_key].sort
           assert_includes edges, [point_a_key, point_b_key].sort
           assert_includes edges, [point_b_key, point_c_key].sort
+        end
+
+        def test_face_snapshot_uses_source_boundary_instead_of_overlapping_mesh
+          point_a = mm_point(0, 0, 0)
+          point_e = mm_point(0.425, -0.000044, 0)
+          point_c = mm_point(5.0, 0.000024, 0)
+          point_d = mm_point(5.425, -0.000020, 0)
+          point_b = mm_point(10, 0, 0)
+          top_b = mm_point(10, 0, 10)
+          top_a = mm_point(0, 0, 10)
+          points = [point_a, point_b, point_c, point_d, point_e]
+          face = BoundarySnapshotFace.new(
+            points,
+            [[1, 2, 3], [3, 2, 4], [1, 3, 5]],
+            704,
+            [top_a, point_a, point_e, point_c, point_d, point_b, top_b],
+            point(0, -1, 0)
+          )
+          instance = normalizer(face_class: BoundarySnapshotFace)
+
+          records = instance.send(
+            :triangle_snapshot,
+            SnapshotEntities.new([face])
+          )
+          triangles = records.map do |record|
+            record[:points].map do |source_point|
+              instance.send(:source_precision_indices, source_point)
+            end
+          end
+
+          assert_equal 5, records.length
+          assert records.all? { |record| record[:source_boundary_snapshot] }
+          assert_operator(
+            instance.send(:validate_triangle_intersections!, triangles),
+            :>=,
+            0
+          )
+          assert instance.send(
+            :validate_source_boundary_retriangulation!,
+            records,
+            [face.loops.first.vertices.map do |vertex|
+              instance.send(:source_precision_indices, vertex.position)
+            end]
+          )
+        end
+
+        def test_face_snapshot_prefers_source_boundary_even_when_mesh_is_valid
+          point_a = mm_point(0, 0, 0)
+          point_b = mm_point(10, 0, 0)
+          point_c = mm_point(10, 10, 0)
+          point_d = mm_point(0, 10, 0)
+          face = BoundarySnapshotFace.new(
+            [point_a, point_b, point_c, point_d],
+            [[1, 2, 3], [1, 3, 4]],
+            705,
+            [point_a, point_b, point_c, point_d],
+            point(0, 0, 1)
+          )
+          instance = normalizer(face_class: BoundarySnapshotFace)
+
+          records = instance.send(
+            :triangle_snapshot,
+            SnapshotEntities.new([face])
+          )
+
+          assert_equal 2, records.length
+          assert records.all? { |record| record[:source_boundary_snapshot] }
         end
 
         def test_degenerate_repair_report_aggregates_each_mesh_stage
