@@ -53,11 +53,11 @@ module ULOL
         end
 
         def valid?
-          @sketchup_group&.valid? == true
+          valid_solid_group?(@sketchup_group)
         end
 
         def valid_sketchup_group
-          return nil unless @sketchup_group&.valid?
+          return nil unless valid_solid_group?(@sketchup_group)
 
           @sketchup_group
         rescue StandardError
@@ -82,9 +82,9 @@ module ULOL
           @navigation_class = normalize_navigation_semantic(navigation_class)
           @navigation_function = normalize_navigation_semantic(navigation_function)
           @navigation_usage = normalize_navigation_semantic(navigation_usage)
-          @navigation_class_code_space = CellSpaceCategory::DEFAULT_CODE_SPACE unless @navigation_class.to_s.empty?
-          @navigation_function_code_space = CellSpaceCategory::DEFAULT_CODE_SPACE unless @navigation_function.to_s.empty?
-          @navigation_usage_code_space = CellSpaceCategory::DEFAULT_CODE_SPACE unless @navigation_usage.to_s.empty?
+          @navigation_class_code_space = nil
+          @navigation_function_code_space = nil
+          @navigation_usage_code_space = nil
           true
         end
 
@@ -116,6 +116,14 @@ module ULOL
 
         private
 
+        def valid_solid_group?(group)
+          group&.valid? == true &&
+            group.respond_to?(:manifold?) &&
+            group.manifold? == true
+        rescue StandardError
+          false
+        end
+
         def initialize_restored(sketchup_group, cell_type, id, name, category_code, navigation_class, navigation_class_code_space, navigation_function, navigation_function_code_space, navigation_usage, navigation_usage_code_space, storey)
           @sketchup_group = sketchup_group
           @sketchup_group_id = sketchup_group.persistent_id
@@ -132,7 +140,7 @@ module ULOL
           @storey = normalize_storey(storey)
           @editable = false
           @duality_state = nil
-          @id = id unless id.to_s.empty?
+          @id = id.to_s.empty? ? self.class.generate_id : id.to_s
           @name = name.to_s
         end
 
@@ -167,6 +175,19 @@ module ULOL
           restored_usage = normalize_navigation_semantic(navigation_usage)
 
           return if restored_class.to_s.empty? && restored_function.to_s.empty? && restored_usage.to_s.empty?
+
+          restored_semantic = NavigationSemantic.new(
+            class_value: restored_class,
+            class_code_space: blank_to_nil(class_code_space),
+            function_value: restored_function,
+            function_code_space: blank_to_nil(function_code_space),
+            usage_value: restored_usage,
+            usage_code_space: blank_to_nil(usage_code_space)
+          )
+          if NavigationSemanticResolver.legacy_default_semantic?(@cell_type, @category_code, restored_semantic)
+            apply_default_navigation_semantics
+            return
+          end
 
           @navigation_class = restored_class
           @navigation_class_code_space = blank_to_nil(class_code_space) unless @navigation_class.to_s.empty?

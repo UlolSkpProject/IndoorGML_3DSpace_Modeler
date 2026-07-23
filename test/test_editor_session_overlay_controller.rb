@@ -107,12 +107,43 @@ module ULOL
           assert_equal true, view.invalidated
         end
 
+        def test_validation_overlay_resolves_selected_row_geometry
+          screen_overlay = fake_overlay(IndoorModeScreenOverlay::OVERLAY_ID)
+          space_overlay = fake_overlay(DualGraphSpaceOverlay::OVERLAY_ID)
+          validation_overlay = fake_overlay('validation.overlay')
+          indoor_model = fake_indoor_model(editing: true, dual_overlay_visible: false)
+          def indoor_model.validation_focus_active?
+            true
+          end
+          geometry = { face_triangles: [[:a, :b, :c]] }
+          resolver = Struct.new(:geometry) do
+            def resolve(_row)
+              geometry
+            end
+          end.new(geometry)
+          controller = EditorSession::OverlayController.new(
+            indoor_model: indoor_model,
+            screen_overlay_factory: proc { screen_overlay },
+            space_overlay_factory: proc { space_overlay },
+            validation_overlay_factory: proc { validation_overlay },
+            validation_geometry_resolver_factory: proc { resolver }
+          )
+
+          controller.ensure_registered(fake_model)
+          resolved = controller.set_validation_geometry(row_id: 'row-1')
+
+          assert_equal true, validation_overlay.enabled
+          assert_equal geometry, resolved
+          assert_equal geometry, validation_overlay.geometry
+        end
+
         private
 
         def fake_overlay(overlay_id)
           Class.new do
             attr_accessor :enabled
             attr_reader :transition_points_invalidated
+            attr_reader :geometry
 
             def initialize(overlay_id)
               @overlay_id = overlay_id
@@ -130,6 +161,15 @@ module ULOL
 
             def invalidate_transition_points
               @transition_points_invalidated = true
+            end
+
+
+            def set_geometry(geometry)
+              @geometry = geometry
+            end
+
+            def clear
+              @geometry = nil
             end
           end.new(overlay_id)
         end

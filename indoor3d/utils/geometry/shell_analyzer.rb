@@ -7,7 +7,7 @@ module ULOL
         def self.find_shell_inner_centroid(cell_space_entity, fixed_z: nil)
           center = cell_space_entity.definition.bounds.center
           faces = local_shell_faces(cell_space_entity)
-          return center if faces.empty?
+          raise ArgumentError, 'CellSpace shell has no analyzable faces' if faces.empty?
 
           tolerance = SHELL_CENTER_TOLERANCE
           if fixed_z
@@ -18,10 +18,9 @@ module ULOL
               return fixed_center
             end
 
-            best_point, best_distance = best_inner_sample(
+            best_point, best_distance, best_divisions = adaptive_inner_sample(
               faces,
               cell_space_entity.definition.bounds,
-              SHELL_CENTER_COARSE_DIVISIONS,
               tolerance,
               fixed_z: fixed_z
             )
@@ -32,7 +31,7 @@ module ULOL
               cell_space_entity.definition.bounds,
               best_point,
               best_distance,
-              SHELL_CENTER_COARSE_DIVISIONS,
+              best_divisions,
               SHELL_CENTER_REFINE_DIVISIONS,
               tolerance,
               fixed_z: fixed_z
@@ -42,27 +41,30 @@ module ULOL
 
           return center if shell_contains_point?(faces, center, tolerance) && shell_distance(faces, center) > tolerance
 
-          best_point, best_distance = best_inner_sample(
+          best_point, best_distance, best_divisions = adaptive_inner_sample(
             faces,
             cell_space_entity.definition.bounds,
-            SHELL_CENTER_COARSE_DIVISIONS,
             tolerance
           )
-          return center unless best_point
+          unless best_point
+            raise ArgumentError, 'Unable to locate a verified point inside the CellSpace shell'
+          end
 
           refined_point = refined_inner_sample(
             faces,
             cell_space_entity.definition.bounds,
             best_point,
             best_distance,
-            SHELL_CENTER_COARSE_DIVISIONS,
+            best_divisions,
             SHELL_CENTER_REFINE_DIVISIONS,
             tolerance
           ).first
-          refined_point || best_point || center
+          refined_point || best_point
         rescue StandardError => e
-          IndoorCore::Logger.puts "[IndoorGML] Shell inner centroid failed: #{e.class}: #{e.message}"
-          center || cell_space_entity.definition.bounds.center
+          if defined?(IndoorCore::Logger)
+            IndoorCore::Logger.puts "[IndoorGML] Shell inner centroid failed: #{e.class}: #{e.message}"
+          end
+          raise
         end
 
         #=============================================================================================================#
@@ -144,6 +146,22 @@ module ULOL
           )
         end
         private_class_method :best_inner_sample
+
+        def self.adaptive_inner_sample(faces, bounds, tolerance, fixed_z: nil)
+          SHELL_CENTER_ADAPTIVE_DIVISIONS.each do |divisions|
+            point, distance = best_inner_sample(
+              faces,
+              bounds,
+              divisions,
+              tolerance,
+              fixed_z: fixed_z
+            )
+            return [point, distance, divisions] if point
+          end
+
+          [nil, nil, nil]
+        end
+        private_class_method :adaptive_inner_sample
 
         def self.refined_inner_sample(faces, bounds, point, distance, coarse_divisions, refine_divisions, tolerance, fixed_z: nil)
           step = shell_sample_step(bounds, coarse_divisions)

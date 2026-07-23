@@ -33,9 +33,11 @@ module ULOL
           private
 
           def start_progress_timer
-            UI.start_timer(0.1, true) do
-              next false unless active?
-              next false if @completed
+            @progress_timer_id = UI.start_timer(0.1, true) do
+              unless active? && !@completed
+                stop_timer(:@progress_timer_id)
+                next false
+              end
 
               @drain_progress.call(@session, @progress, @progress_step)
               true
@@ -43,9 +45,11 @@ module ULOL
           end
 
           def start_completion_timer
-            UI.start_timer(0.2, true) do
-              next false unless active?
-              next false if @completed
+            @completion_timer_id = UI.start_timer(0.2, true) do
+              unless active? && !@completed
+                stop_timer(:@completion_timer_id)
+                next false
+              end
 
               begin
                 finished = @session.finished?
@@ -124,11 +128,24 @@ module ULOL
           end
 
           def cleanup_session
+            stop_timer(:@progress_timer_id)
+            stop_timer(:@completion_timer_id)
             return if @completed
 
             @session.close
             @unregister_session.call(@session)
             @completed = true
+          end
+
+          def stop_timer(variable_name)
+            timer_id = instance_variable_get(variable_name)
+            instance_variable_set(variable_name, nil)
+            return if timer_id.nil?
+            return unless UI.respond_to?(:stop_timer)
+
+            UI.stop_timer(timer_id)
+          rescue StandardError
+            nil
           end
         end
 

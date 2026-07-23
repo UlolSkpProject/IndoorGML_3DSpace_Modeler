@@ -25,26 +25,73 @@ module ULOL
 
             assert_equal %w[cell_1 cell_2], snapshot.cell_spaces.map(&:id)
             assert_equal ['transition_1'], snapshot.transitions.map(&:id)
+            assert_equal ['transition_1'], snapshot.cell_spaces[0].duality_state.transition_ids
+            assert_equal ['transition_1'], snapshot.cell_spaces[1].duality_state.transition_ids
             assert snapshot.cell_spaces.frozen?
             assert snapshot.transitions.frozen?
             refute_same cell_a, snapshot.cell_spaces.first
             refute_same transition_inside, snapshot.transitions.first
           end
 
+          def test_build_sets_empty_transition_ids_for_state_without_exported_transitions
+            cell = fake_cell_space(valid_group: true, state_valid: true)
+            indoor_model = fake_indoor_model(cell_spaces: [cell], transitions: [])
+
+            snapshot = ExportSnapshot.build(indoor_model: indoor_model)
+
+            assert_equal [], snapshot.cell_spaces.first.duality_state.transition_ids
+          end
+
+          def test_build_excludes_transition_ids_not_in_current_export
+            cell_a = fake_cell_space(valid_group: true, state_valid: true)
+            cell_b = fake_cell_space(valid_group: true, state_valid: true)
+            cell_c = fake_cell_space(valid_group: true, state_valid: true)
+            included_transition = fake_transition(cell_a.duality_state, cell_b.duality_state)
+            excluded_transition = fake_transition(cell_a.duality_state, cell_c.duality_state)
+            indoor_model = fake_indoor_model(
+              cell_spaces: [cell_a, cell_b, cell_c],
+              transitions: [included_transition, excluded_transition]
+            )
+
+            snapshot = ExportSnapshot.build(
+              indoor_model: indoor_model,
+              cell_spaces: [cell_a, cell_b],
+              transitions: [included_transition, excluded_transition]
+            )
+
+            assert_equal [included_transition.id], snapshot.transitions.map(&:id)
+            assert_equal [included_transition.id], snapshot.cell_spaces[0].duality_state.transition_ids
+            assert_equal [included_transition.id], snapshot.cell_spaces[1].duality_state.transition_ids
+            refute_includes snapshot.cell_spaces[0].duality_state.transition_ids, excluded_transition.id
+          end
+
           def test_build_uses_requested_sources_when_provided
             model_cell = fake_cell_space(valid_group: true, state_valid: true)
-            requested_cell = fake_cell_space(valid_group: true, state_valid: true)
-            requested_transition = fake_transition(requested_cell.duality_state, requested_cell.duality_state)
+            requested_cell_a = fake_cell_space(valid_group: true, state_valid: true)
+            requested_cell_b = fake_cell_space(valid_group: true, state_valid: true)
+            requested_transition = fake_transition(requested_cell_a.duality_state, requested_cell_b.duality_state)
             indoor_model = fake_indoor_model(cell_spaces: [model_cell], transitions: [])
 
             snapshot = ExportSnapshot.build(
               indoor_model: indoor_model,
-              cell_spaces: [requested_cell],
+              cell_spaces: [requested_cell_a, requested_cell_b],
               transitions: [requested_transition]
             )
 
-            assert_equal [requested_cell.id], snapshot.cell_spaces.map(&:id)
+            assert_equal [requested_cell_a.id, requested_cell_b.id], snapshot.cell_spaces.map(&:id)
             assert_equal [requested_transition.id], snapshot.transitions.map(&:id)
+            assert_equal [requested_transition.id], snapshot.cell_spaces[0].duality_state.transition_ids
+            assert_equal [requested_transition.id], snapshot.cell_spaces[1].duality_state.transition_ids
+          end
+
+          def test_build_deduplicates_transition_ids_for_same_state_transition
+            cell = fake_cell_space(valid_group: true, state_valid: true)
+            transition = fake_transition(cell.duality_state, cell.duality_state)
+            indoor_model = fake_indoor_model(cell_spaces: [cell], transitions: [transition])
+
+            snapshot = ExportSnapshot.build(indoor_model: indoor_model)
+
+            assert_equal [transition.id], snapshot.cell_spaces.first.duality_state.transition_ids
           end
 
           private

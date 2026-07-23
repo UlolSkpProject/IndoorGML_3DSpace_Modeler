@@ -369,10 +369,6 @@ module ULOL
               @aborts = 0
             end
 
-            def active_operation_name
-              ''
-            end
-
             def start_operation(_name, _transparent)
               true
             end

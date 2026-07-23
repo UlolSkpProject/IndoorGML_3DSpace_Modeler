@@ -2,6 +2,7 @@
 
 require 'fileutils'
 require 'json'
+require_relative '../../validity/validation_focus_report_mapper'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -17,7 +18,7 @@ module ULOL
           end
 
           def set_validation_focus_highlight(cell_gml_ids, code = nil, row_id: nil, row_cells: nil, states: nil, transitions: nil)
-            @editor_session.set_validation_focus_highlight(
+            result = @editor_session.set_validation_focus_highlight(
               cell_gml_ids,
               code,
               row_id: row_id,
@@ -25,25 +26,53 @@ module ULOL
               states: states,
               transitions: transitions
             )
+            if result && !row_id.to_s.empty?
+              puts "[IndoorGML] validation focus ref-cells: #{Array(row_cells).inspect}"
+            end
+            result
+          end
+
+          def validation_focus_row(row_id)
+            @editor_session.validation_focus_row(row_id)
           end
 
           def recheck_validation_focus_errors
+            if validation_focus_recheck_running?
+              UI.messagebox('오류 요소 재검사가 이미 실행 중입니다.')
+              return nil
+            end
+
+            state = {
+              session: nil,
+              completed: false,
+              workspace: nil,
+              workspace_cleaned: false
+            }
+            begin_validation_focus_recheck(state)
+            if respond_to?(:validation_focus_topology_dirty?) &&
+               validation_focus_topology_dirty? &&
+               !synchronize_validation_focus_topology_if_dirty
+              state[:completed] = true
+              finish_validation_focus_recheck(state)
+              UI.messagebox('전체 topology 동기화에 실패하여 오류 요소 재검사를 시작할 수 없습니다.')
+              return nil
+            end
+
+            progress = IndoorGmlConverter::ExportProgressDialog.active || IndoorGmlConverter::ExportProgressDialog.new
+            progress.clear_validation_focus_selection if progress.respond_to?(:clear_validation_focus_selection)
+            @editor_session.set_validation_focus_highlight([], '')
+
             focus = @editor_session.validation_focus_elements
             if focus[:cell_spaces].empty?
+              state[:completed] = true
+              finish_validation_focus_recheck(state)
               UI.messagebox('재검사할 오류 CellSpace가 없습니다.')
               return nil
             end
 
-            @editor_session.set_validation_focus_highlight([], '')
-            progress = IndoorGmlConverter::ExportProgressDialog.active || IndoorGmlConverter::ExportProgressDialog.new
-            state = {
-              session: nil,
-              completed: false,
-              workspace: IndoorGmlConverter::ValidationRunWorkspace.create(
-                base_dir: IndoorGmlConverter::GmlExporter.output_root
-              ),
-              workspace_cleaned: false
-            }
+            state[:workspace] = IndoorGmlConverter::ValidationRunWorkspace.create(
+              base_dir: IndoorGmlConverter::GmlExporter.output_root
+            )
             progress.on_create_gml do
               export_full_gml_from_validation_focus_recheck_report(progress)
             end
@@ -59,11 +88,15 @@ module ULOL
               )
             end
             progress.on_request_close do
-              terminate_validation_focus_recheck(state) unless state[:completed]
+              unless state[:completed]
+                terminate_validation_focus_recheck(state)
+                state[:completed] = true
+              end
               cleanup_validation_focus_recheck_workspace(state) if state[:completed]
               :close
             end
             progress.on_ready do
+              next if state[:completed]
               next if state[:started]
 
               state[:started] = true
@@ -72,15 +105,20 @@ module ULOL
             progress.show
             focus
           rescue StandardError => e
-            cleanup_validation_focus_recheck_workspace(state) if defined?(state) && state
+            if defined?(state) && state
+              cleanup_validation_focus_recheck_workspace(state)
+            else
+              finish_validation_focus_recheck(nil)
+            end
             IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck failed: #{e.class}: #{e.message}"
             UI.messagebox("오류 요소 재검사 실패:\n#{e.message}")
             nil
           end
 
           def finish_editing
+            return false if validation_focus_recheck_running?
+
             with_guard_flag(:@finishing_editing) do
-              @editor_session.restore_validation_focus_visibility if @editor_session.validation_focus_active?
               finished = @editor_session.finish()
               if finished
                 normalize_primal_children_for_finish()
@@ -91,12 +129,15 @@ module ULOL
           end
 
           def request_finish_editing
+            return false if validation_focus_recheck_running?
+
             IndoorCore::Logger.puts '[IndoorGML] EditModeDialog#RequestfinishEditing'
             result = UI.messagebox("CellSpace 편집을 종료하시겠습니까?", MB_YESNO)
             return false unless result == IDYES
 
-            finish_editing
-            return true
+            finished = finish_editing
+            UI.messagebox('전체 topology 동기화에 실패하여 편집 모드를 종료하지 못했습니다.') unless finished
+            finished
           end
 
           def editing?
@@ -143,6 +184,10 @@ module ULOL
             @editor_session.validation_focus_active?
           end
 
+          def validation_focus_recheck_running?
+            @validation_focus_recheck_running == true
+          end
+
           def validation_focus_cell_space?(cell_space)
             @editor_session.validation_focus_cell_space?(cell_space)
           end
@@ -171,13 +216,55 @@ module ULOL
             @editor_session.validation_focus_highlight_active?
           end
 
+          def validation_focus_highlight_row_id
+            @editor_session.validation_focus_highlight_row_id
+          end
+
+          def with_validation_focus_mutation_batch
+            return yield if validation_focus_highlight_row_id.to_s.empty?
+            return yield if @validation_focus_mutation_depth.to_i.positive?
+
+            snapshot = @editor_session.validation_focus_snapshot
+            topology_dirty_before = validation_focus_topology_dirty? if respond_to?(:validation_focus_topology_dirty?)
+            @validation_focus_mutation_depth = 1
+            @validation_focus_pending_row_payloads = {}
+            result = yield
+            @validation_focus_mutation_depth = 0
+            flush_validation_focus_mutation_batch
+            result
+          rescue StandardError
+            @validation_focus_mutation_depth = 0
+            discard_validation_focus_row_topology_sync
+            @validation_focus_pending_row_payloads = {}
+            @validation_focus_topology_dirty = topology_dirty_before == true
+            @editor_session.restore_validation_focus_snapshot(snapshot) if snapshot
+            raise
+          ensure
+            @validation_focus_mutation_depth = 0
+          end
+
           def add_validation_focus_highlight_cell(cell_space)
-            update_validation_focus_report_row(@editor_session.add_validation_focus_highlight_cell(cell_space))
+            deferred = @validation_focus_mutation_depth.to_i.positive?
+            payload = if deferred
+                        @editor_session.add_validation_focus_highlight_cell(cell_space, refresh: false)
+                      else
+                        @editor_session.add_validation_focus_highlight_cell(cell_space)
+                      end
+            return nil unless payload
+
+            puts "[IndoorGML] validation focus ref-cells: #{Array(payload[:cells]).inspect}"
+            deferred ? queue_validation_focus_report_row(payload) : update_validation_focus_report_row(payload)
           end
 
           def remove_validation_focus_highlight_cell(cell_space)
-            Array(@editor_session.remove_validation_focus_highlight_cell(cell_space)).each do |payload|
-              update_validation_focus_report_row(payload)
+            deferred = @validation_focus_mutation_depth.to_i.positive?
+            payloads = if deferred
+                         @editor_session.remove_validation_focus_highlight_cell(cell_space, refresh: false)
+                       else
+                         @editor_session.remove_validation_focus_highlight_cell(cell_space)
+                       end
+            Array(payloads).each do |payload|
+              deferred ? queue_validation_focus_report_row(payload) : update_validation_focus_report_row(payload)
             end
           end
 
@@ -300,7 +387,9 @@ module ULOL
             nil
           end
 
-          def convert_selected_solid_groups_to_cell_spaces(selection_value)
+          def convert_selected_solid_groups_to_cell_spaces(selection_value, storey = nil)
+            return false if validation_focus_recheck_running?
+
             begin
               cell_type, category_code = CellSpaceCategory.parse_selection_value(selection_value)
               model = Sketchup.active_model
@@ -309,6 +398,8 @@ module ULOL
               end
               jobs = selected_cell_space_conversion_jobs
               return false if jobs.empty?
+              requested_storey = storey.to_s.strip
+              jobs = CellSpaceConversionJobBuilder.apply_fallback_storey(jobs, requested_storey)
 
               original_active_path = ActivePathController.new(model, logger: IndoorCore::Logger).snapshot
               result = convert_cell_space_jobs_bulk(
@@ -331,6 +422,8 @@ module ULOL
           end
 
           def set_selected_cell_space_type(cell_type_label, category_code = nil)
+            return false if validation_focus_recheck_running?
+
             begin
               cell_spaces = selected_cell_spaces
               cell_spaces = [@editor_session.editing_cell_space].compact if cell_spaces.empty?
@@ -359,11 +452,49 @@ module ULOL
           end
 
           def set_selected_cell_space_classification(selection_value)
+            return false if validation_focus_recheck_running?
+
             cell_type, category_code = CellSpaceCategory.parse_selection_value(selection_value)
             set_selected_cell_space_type(CellSpaceType.label(cell_type), category_code)
           end
 
+          def remove_selected_cell_spaces_indoor_gml_attributes
+            return false if validation_focus_recheck_running?
+            return false if validation_focus_active?
+
+            cell_spaces = selected_cell_spaces.select { |cell_space| cell_space&.valid? }
+            return false if cell_spaces.empty?
+            return false unless confirm_selected_cell_space_demotion(cell_spaces.length)
+
+            runtime_snapshot = bulk_conversion_runtime_snapshot
+            groups = cell_spaces.map(&:sketchup_group)
+            begin
+              with_validation_focus_mutation_batch do
+                with_indoor_model_operation('Remove Selected CellSpace IndoorGML Attributes') do
+                  sync do
+                    cell_spaces.each do |cell_space|
+                      demote_cell_space_to_solid_group(cell_space)
+                    end
+                  end
+                end
+              end
+            rescue StandardError => e
+              restore_bulk_conversion_runtime(runtime_snapshot) if runtime_snapshot
+              IndoorCore::Logger.puts(
+                "[IndoorGML] Selected CellSpace demotion failed: #{e.class}: #{e.message}"
+              )
+              UI.messagebox("IndoorGML 속성 제거 실패:\n#{e.message}")
+              return false
+            end
+
+            untrack_demoted_primal_entities(groups)
+            refresh_after_selected_cell_space_demotion
+            true
+          end
+
           def set_selected_cell_space_storey(storey)
+            return false if validation_focus_recheck_running?
+
             begin
               cell_spaces = selected_cell_spaces
               cell_spaces = [@editor_session.editing_cell_space].compact if cell_spaces.empty?
@@ -424,6 +555,88 @@ module ULOL
 
           private
 
+          def confirm_selected_cell_space_demotion(count)
+            message = if count == 1
+                        '선택한 CellSpace의 IndoorGML 속성을 제거하시겠습니까?'
+                      else
+                        "선택한 CellSpace #{count}개의 IndoorGML 속성을 제거하시겠습니까?"
+                      end
+            message += "\n\n연결된 State와 Transition도 제거되며 형상은 Solid Group으로 유지됩니다."
+            UI.messagebox(message, MB_YESNO) == IDYES
+          end
+
+          def demote_cell_space_to_solid_group(cell_space)
+            group = cell_space&.sketchup_group
+            raise ArgumentError, 'CellSpace group is no longer valid' unless group&.valid?
+
+            erase_cell_space(cell_space, erase_sketchup_group: false)
+            @attribute_serializer.clear_indoor_gml_attributes(group)
+            unless indoor_gml_attribute_dictionary_empty?(group)
+              raise 'IndoorGML AttributeDictionary cleanup was incomplete'
+            end
+            raise 'CellSpace material cleanup failed' unless clear_cell_space_materials(group)
+
+            @scene_group_guard.untrack(group) if @scene_group_guard
+            @cell_space_change_snapshots.delete(entity_observer_key(group)) if @cell_space_change_snapshots
+            unlock_indoor_entity(group)
+            group
+          end
+
+          def indoor_gml_attribute_dictionary_empty?(entity)
+            dictionary = entity.attribute_dictionary(
+              AttributeSerializer::ATTRIBUTE_DICTIONARY_NAME
+            ) if entity.respond_to?(:attribute_dictionary)
+            return true unless dictionary&.respond_to?(:each_pair)
+
+            dictionary.each_pair { |_key, _value| return false }
+            true
+          rescue StandardError
+            false
+          end
+
+          def untrack_demoted_primal_entities(groups)
+            return unless @primal_entities_observer&.respond_to?(:untrack_entity_id)
+
+            Array(groups).each do |group|
+              next unless group&.valid? && group.respond_to?(:entityID)
+
+              @primal_entities_observer.untrack_entity_id(group.entityID)
+            end
+          rescue StandardError => e
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Demoted group observer tracking cleanup failed: #{e.class}: #{e.message}"
+            )
+          end
+
+          def refresh_after_selected_cell_space_demotion
+            @editor_session.refresh_visibility_filter if @editor_session.respond_to?(:refresh_visibility_filter)
+            @editor_session.selection_changed
+            apply_indoor_lock_policy
+            model = Sketchup.active_model
+            model.active_view.invalidate if model&.active_view
+          rescue StandardError => e
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Demoted CellSpace UI refresh failed: #{e.class}: #{e.message}"
+            )
+          end
+
+          def queue_validation_focus_report_row(payload)
+            return nil unless payload
+
+            (@validation_focus_pending_row_payloads ||= {})[payload[:row_id]] = payload
+            payload
+          end
+
+          def flush_validation_focus_mutation_batch
+            flush_validation_focus_row_topology_sync
+            @editor_session.refresh_validation_focus_after_mutation
+            Hash(@validation_focus_pending_row_payloads).each_value do |payload|
+              update_validation_focus_report_row(payload)
+            end
+            @validation_focus_pending_row_payloads = {}
+            true
+          end
+
           def start_validation_focus_recheck(progress, state, focus)
             workspace = state[:workspace]
             output_path = workspace.gml_path
@@ -452,6 +665,7 @@ module ULOL
             )
             state[:session] = runner.start(progress: progress) do |result|
               state[:completed] = true
+              finish_validation_focus_recheck(state)
               handle_validation_focus_recheck_result(progress, state, result)
             end
           rescue StandardError => e
@@ -475,7 +689,14 @@ module ULOL
 
             path = "#{path}.gml" unless File.extname(path).downcase == '.gml'
             FileUtils.mkdir_p(File.dirname(path))
-            IndoorGmlConverter::GmlExporter.new(self).export(output_path: path)
+            if editing? && !finish_editing
+              progress&.set_result_message('GML export failed: topology synchronization failed.')
+              return nil
+            end
+            IndoorGmlConverter::GmlExporter.new(
+              self,
+              refresh_runtime_data: false
+            ).export(output_path: path)
             progress&.set_result_message("GML exported:\n#{path}")
             path
           rescue StandardError => e
@@ -496,6 +717,8 @@ module ULOL
               return
             end
 
+            refresh_validation_focus_report(result.report) unless result.valid?
+
             progress.on_open_report do
               progress.show_report(result.report_html_path)
             end
@@ -515,6 +738,20 @@ module ULOL
             )
           end
 
+          def refresh_validation_focus_report(report)
+            mapper = IndoorGmlConverter::ValidationFocusReportMapper
+            cell_ids = mapper.error_focus_cell_ids(report, self)
+            return false if cell_ids.empty?
+
+            begin_validation_focus_editing(
+              cell_ids,
+              row_states: mapper.focus_row_states(report, self)
+            )
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Validation focus report refresh failed: #{e.class}: #{e.message}"
+            false
+          end
+
           def cleanup_validation_focus_recheck_workspace(state)
             return unless state
             return if state[:workspace_cleaned]
@@ -525,12 +762,20 @@ module ULOL
             end
 
             finalize_validation_focus_recheck_session(state)
+            finish_validation_focus_recheck(state)
 
             workspace = state[:workspace]
-            return unless workspace&.respond_to?(:cleanup)
+            unless workspace&.respond_to?(:cleanup)
+              state[:workspace_cleaned] = true
+              stop_validation_focus_recheck_cleanup_timer(state)
+              return true
+            end
 
             cleaned = workspace.cleanup
-            state[:workspace_cleaned] = true if cleaned
+            if cleaned
+              state[:workspace_cleaned] = true
+              stop_validation_focus_recheck_cleanup_timer(state)
+            end
             cleaned
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck workspace cleanup failed: #{e.class}: #{e.message}"
@@ -566,24 +811,39 @@ module ULOL
             return unless defined?(UI) && UI.respond_to?(:start_timer)
 
             state[:workspace_cleanup_timer_scheduled] = true
-            UI.start_timer(0.2, true) do
+            state[:workspace_cleanup_timer_id] = UI.start_timer(0.2, true) do
               if state[:workspace_cleaned]
+                stop_validation_focus_recheck_cleanup_timer(state)
                 next false
               end
 
               if validation_focus_recheck_process_finished?(state)
                 state[:workspace_cleanup_timer_scheduled] = false
-                next !cleanup_validation_focus_recheck_workspace(state)
+                cleaned = cleanup_validation_focus_recheck_workspace(state)
+                stop_validation_focus_recheck_cleanup_timer(state) if cleaned
+                next !cleaned
               end
 
               true
             rescue StandardError => e
               state[:workspace_cleanup_timer_scheduled] = false
+              stop_validation_focus_recheck_cleanup_timer(state)
               IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck pending cleanup failed: #{e.class}: #{e.message}"
               false
             end
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck cleanup timer failed: #{e.class}: #{e.message}"
+          end
+
+          def stop_validation_focus_recheck_cleanup_timer(state)
+            timer_id = state.delete(:workspace_cleanup_timer_id)
+            state[:workspace_cleanup_timer_scheduled] = false
+            return if timer_id.nil?
+            return unless defined?(UI) && UI.respond_to?(:stop_timer)
+
+            UI.stop_timer(timer_id)
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck cleanup timer stop failed: #{e.class}: #{e.message}"
           end
 
           def finalize_validation_focus_recheck_session(state)
@@ -594,6 +854,24 @@ module ULOL
             session.close if session.respond_to?(:close)
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck session finalize failed: #{e.class}: #{e.message}"
+          end
+
+          def begin_validation_focus_recheck(state)
+            @validation_focus_recheck_state = state
+            @validation_focus_recheck_running = true
+            @editor_session.selection_changed if @editor_session.respond_to?(:selection_changed)
+            true
+          end
+
+          def finish_validation_focus_recheck(state)
+            return false unless validation_focus_recheck_running?
+            return false if state && @validation_focus_recheck_state && !@validation_focus_recheck_state.equal?(state)
+
+            @validation_focus_recheck_running = false
+            @validation_focus_recheck_state = nil
+            state[:operation_finished] = true if state
+            @editor_session.selection_changed if @editor_session.respond_to?(:selection_changed)
+            true
           end
 
           def validation_focus_recheck_summary(focus)

@@ -15,6 +15,14 @@ module ULOL
       end unless const_defined?(:Logger)
 
       class Indoor3DGmlModelObserver < Sketchup::ModelObserver
+        def initialize(on_delete_model: nil, **_options)
+          @on_delete_model = on_delete_model
+        end
+
+        def onDeleteModel(model)
+          @on_delete_model&.call(model)
+        end
+
         def forget_model(_model); end
       end unless const_defined?(:Indoor3DGmlModelObserver)
 
@@ -24,6 +32,7 @@ module ULOL
 end
 
 require_relative '../indoor3d/validity/validation_session'
+require_relative '../indoor3d/validity/val3dity_runner'
 require_relative '../indoor3d/infrastructure/observers/app_observer'
 
 module ULOL
@@ -32,10 +41,15 @@ module ULOL
       class AppObserverValidationSessionsTest < Minitest::Test
         def setup
           IndoorGmlConverter::ValidationSession.reset!
+          IndoorGmlConverter::Val3dityRunner.instance_variable_set(:@shutting_down, false)
+          IndoorGmlConverter::Val3dityRunner.active_sessions.clear
+          IndoorGmlConverter::Val3dityRunner.session_owner_keys.clear
           @original_for = IndoorModel.method(:for) if IndoorModel.respond_to?(:for)
           @original_release = IndoorModel.method(:release) if IndoorModel.respond_to?(:release)
+          @released_models = []
+          released_models = @released_models
           IndoorModel.define_singleton_method(:for) { |model| model.runtime }
-          IndoorModel.define_singleton_method(:release) { |_model| true }
+          IndoorModel.define_singleton_method(:release) { |model| released_models << model }
         end
 
         def teardown
@@ -57,6 +71,7 @@ module ULOL
           assert_equal 1, progress.close_count
           assert_nil IndoorGmlConverter::ValidationSession.for_model(model)
           assert_equal 1, model.runtime.refreshes
+          assert_equal [true], model.runtime.initial_model_load_flags
         end
 
         def test_open_model_cancels_validation_session_even_when_model_object_is_reused
@@ -72,6 +87,33 @@ module ULOL
           assert_equal 1, progress.close_count
           assert_nil IndoorGmlConverter::ValidationSession.for_model(model)
           assert_equal 1, model.runtime.refreshes
+          assert_equal [true], model.runtime.initial_model_load_flags
+        end
+
+        def test_repeated_open_and_delete_releases_every_model_and_observer_registration
+          observer = Indoor3DGmlAppObserver.new
+          models = 10.times.map { FakeModel.new }
+
+          models.each do |model|
+            observer.onOpenModel(model)
+            model.observers.first.onDeleteModel(model)
+          end
+
+          assert_equal models, @released_models
+          assert_empty observer.instance_variable_get(:@observed_model_ids)
+          assert models.all? { |model| model.observers.empty? }
+        end
+
+        def test_quit_marks_global_shutdown_and_terminates_all_runners
+          observer = Indoor3DGmlAppObserver.new
+          runner_session = FakeRunnerSession.new
+          IndoorGmlConverter::Val3dityRunner.register_session(runner_session)
+
+          observer.onQuit
+
+          assert IndoorGmlConverter::Val3dityRunner.shutting_down?
+          assert_equal [0], runner_session.terminate_waits
+          assert_empty IndoorGmlConverter::Val3dityRunner.active_sessions
         end
 
         private
@@ -97,6 +139,7 @@ module ULOL
 
         class FakeModel
           attr_reader :runtime
+          attr_reader :observers
 
           def initialize
             @runtime = FakeRuntime.new
@@ -116,13 +159,16 @@ module ULOL
 
         class FakeRuntime
           attr_reader :refreshes
+          attr_reader :initial_model_load_flags
 
           def initialize
             @refreshes = 0
+            @initial_model_load_flags = []
           end
 
-          def refresh_runtime_data
+          def refresh_runtime_data(initial_model_load: false)
             @refreshes += 1
+            @initial_model_load_flags << initial_model_load
           end
         end
 
@@ -138,6 +184,18 @@ module ULOL
           end
 
           def clear_callbacks; end
+        end
+
+        class FakeRunnerSession
+          attr_reader :terminate_waits
+
+          def initialize
+            @terminate_waits = []
+          end
+
+          def terminate(wait_ms:)
+            @terminate_waits << wait_ms
+          end
         end
       end
     end

@@ -114,7 +114,7 @@ module ULOL
           @selected_waypoint_normal2 = nil
           capture_reference_ids
           @editable = false
-          @id = id unless id.to_s.empty?
+          @id = id.to_s.empty? ? self.class.generate_id : id.to_s
           @name = name.to_s
         end
 

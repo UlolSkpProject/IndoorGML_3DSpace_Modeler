@@ -21,7 +21,7 @@ module ULOL
         Semantic = Struct.new(:class_value, :class_code_space, :function_value, :function_code_space, :usage_value, :usage_code_space)
 
         def self.resolve(_cell_space)
-          Semantic.new('1000', 'classSpace', 'room', 'functionSpace', 'room', 'usageSpace')
+          Semantic.new('Space', nil, 'Space', nil, 'Space', nil)
         end
       end unless const_defined?(:NavigationSemanticResolver)
     end
@@ -68,8 +68,8 @@ module ULOL
           end
 
           def test_writer_builds_navigable_codes_and_transition_links
-            state1 = fake_state('S1')
-            state2 = fake_state('S2')
+            state1 = fake_state('S1', transition_ids: ['T 1'])
+            state2 = fake_state('S2', transition_ids: ['T 1'])
             cell1 = fake_cell_space('A', CellSpaceType::GENERAL, nil, state1)
             cell2 = fake_cell_space('B', CellSpaceType::GENERAL, nil, state2)
             state1.duality_cell = cell1
@@ -88,6 +88,50 @@ module ULOL
             assert_xpath(doc, '//navi:class')
             assert_xpath(doc, '//core:Transition[@gml:id="transition_T_1"]')
             assert_includes xml, "xlink:href='#transition_T_1'"
+          end
+
+          def test_writer_exports_default_navigation_semantics_as_strings_without_code_space
+            state = fake_state('Stair State')
+            cell = fake_cell_space('Stair Cell', CellSpaceType::TRANSITION, nil, state, category_code: 'Stair')
+            state.duality_cell = cell
+            snapshot = ExportSnapshot.new(cell_spaces: [cell], transitions: [])
+            writer = GmlWriter.new(
+              snapshot: snapshot,
+              coordinate_unit: { unit: 'in', factor: 1.0, srs_name: 'urn:test:in' }
+            )
+
+            xml = writer.to_xml
+            doc = REXML::Document.new(xml)
+            class_element = REXML::XPath.first(doc, '//navi:class', namespaces)
+            function_element = REXML::XPath.first(doc, '//navi:function', namespaces)
+            usage_element = REXML::XPath.first(doc, '//navi:usage', namespaces)
+
+            assert_equal 'Vertical Transition', class_element.text
+            assert_equal 'Stair', function_element.text
+            assert_equal 'Stair', usage_element.text
+            assert_nil class_element.attributes['codeSpace']
+            assert_nil function_element.attributes['codeSpace']
+            assert_nil usage_element.attributes['codeSpace']
+            refute_includes xml, 'urn:ogc:def:nil:OGC::IndoorGML:AnnexD'
+          end
+
+          def test_writer_uses_state_snapshot_transition_ids_for_state_connects
+            state1 = fake_state('S1', transition_ids: ['Raw T'])
+            state2 = fake_state('S2')
+            cell1 = fake_cell_space('A', CellSpaceType::GENERAL, nil, state1)
+            cell2 = fake_cell_space('B', CellSpaceType::GENERAL, nil, state2)
+            state1.duality_cell = cell1
+            state2.duality_cell = cell2
+            transition = fake_transition('Raw T', state1, state2, fake_point(1, 0, 0), fake_point(2, 0, 0))
+            snapshot = ExportSnapshot.new(cell_spaces: [cell1, cell2], transitions: [transition])
+            writer = GmlWriter.new(
+              snapshot: snapshot,
+              coordinate_unit: { unit: 'in', factor: 1.0, srs_name: 'urn:test:in' }
+            )
+
+            xml = writer.to_xml
+
+            assert_includes xml, "xlink:href='#transition_Raw_T'"
           end
 
           def test_writer_exports_geometry_only_cell_space_as_core_cell_space_without_navi_codes
@@ -111,6 +155,34 @@ module ULOL
             assert_xpath(doc, '//core:CellSpace[@gml:id="cell_Window"]/core:duality')
             assert_xpath(doc, '//core:State[@gml:id="state_Window_State"]')
             refute_includes GmlWriter::CELL_SPACE_TAGS.keys, CellSpaceType::GEOMETRY_ONLY
+          end
+
+          def test_writer_allocates_unique_xml_ids_for_duplicate_missing_and_safe_id_collisions
+            states = [fake_state('same'), fake_state('same'), fake_state(nil)]
+            cells = [
+              fake_cell_space('A B', CellSpaceType::GENERAL, nil, states[0]),
+              fake_cell_space('A_B', CellSpaceType::GENERAL, nil, states[1]),
+              fake_cell_space(nil, CellSpaceType::GENERAL, nil, states[2])
+            ]
+            states.each_with_index { |state, index| state.duality_cell = cells[index] }
+            transition1 = fake_transition('T X', states[0], states[1], states[0].position, states[1].position)
+            transition2 = fake_transition('T_X', states[1], states[2], states[1].position, states[2].position)
+            snapshot = ExportSnapshot.new(cell_spaces: cells, transitions: [transition1, transition2])
+
+            doc = REXML::Document.new(GmlWriter.new(
+              snapshot: snapshot,
+              coordinate_unit: { unit: 'in', factor: 1.0, srs_name: 'urn:test:in' }
+            ).to_xml)
+            ids = REXML::XPath.match(doc, '//*[@gml:id]', namespaces).map { |element| element.attributes['gml:id'] }
+            hrefs = REXML::XPath.match(doc, '//*[@xlink:href]', namespaces.merge('xlink' => 'http://www.w3.org/1999/xlink')).map do |element|
+              element.attributes['xlink:href'].to_s.delete_prefix('#')
+            end
+
+            assert_equal ids.length, ids.uniq.length
+            assert hrefs.all? { |href| ids.include?(href) }
+            assert_includes ids, 'cell_A_B'
+            assert_includes ids, 'cell_A_B_2'
+            assert_includes ids, 'transition_T_X_2'
           end
 
           private
@@ -142,8 +214,13 @@ module ULOL
             )
           end
 
-          def fake_state(id)
-            ExportSnapshot::StateSnapshot.new(id: id, duality_cell: nil, position: fake_point(1.0, 2.0, 3.0))
+          def fake_state(id, transition_ids: [])
+            ExportSnapshot::StateSnapshot.new(
+              id: id,
+              duality_cell: nil,
+              position: fake_point(1.0, 2.0, 3.0),
+              transition_ids: transition_ids
+            )
           end
 
           def fake_transition(id, state1, state2, state1_position, state2_position)

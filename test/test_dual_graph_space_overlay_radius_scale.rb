@@ -87,7 +87,7 @@ module ULOL
         def setup
           Sketchup.test_active_model = fake_active_model
           Sketchup.test_defaults = {
-            [UserPreferences::SECTION, DualOverlayPreferences::STATE_RADIUS_SCALE_KEY] => 1.75
+            [UserPreferences::SECTION, DualOverlayPreferences::STATE_SCALE_KEY] => 1.75
           }
         end
 
@@ -107,7 +107,7 @@ module ULOL
           assert_equal [1.75], state_renderer.scales
         end
 
-        def test_get_extents_applies_preference_and_degree_scale_to_bounds
+        def test_get_extents_applies_preference_scale_to_bounds
           state = fake_state(radius: 10.0, transitions: [fake_transition, fake_transition, fake_transition, fake_transition])
           indoor_model = fake_indoor_model(states: [state])
           overlay = DualGraphSpaceOverlay.new(indoor_model)
@@ -115,8 +115,44 @@ module ULOL
           bounds = overlay.getExtents
 
           assert_equal 2, bounds.points.length
-          assert_in_delta(-21.137, bounds.points.first.x, 0.001)
-          assert_in_delta(21.137, bounds.points.last.x, 0.001)
+          assert_in_delta(-17.5, bounds.points.first.x, 0.001)
+          assert_in_delta(17.5, bounds.points.last.x, 0.001)
+        end
+
+        def test_invalidate_transition_points_clears_builder_and_state_renderer_caches
+          overlay = DualGraphSpaceOverlay.new(fake_indoor_model(states: []))
+          curve_builder = Struct.new(:invalidations) do
+            def invalidate
+              self.invalidations += 1
+            end
+          end.new(0)
+          state_renderer = Struct.new(:invalidations) do
+            def clear_cache
+              self.invalidations += 1
+            end
+          end.new(0)
+          overlay.instance_variable_set(:@transition_curve_builder, curve_builder)
+          overlay.instance_variable_set(:@state_renderer, state_renderer)
+
+          overlay.invalidate_transition_points
+
+          assert_equal 1, curve_builder.invalidations
+          assert_equal 1, state_renderer.invalidations
+        end
+
+        def test_draw_keeps_transition_before_state_order
+          events = []
+          overlay = DualGraphSpaceOverlay.new(fake_indoor_model(states: []))
+          overlay.instance_variable_set(:@transition_renderer, Object.new.tap do |renderer|
+            renderer.define_singleton_method(:draw) { |_view| events << :transition }
+          end)
+          overlay.instance_variable_set(:@state_renderer, Object.new.tap do |renderer|
+            renderer.define_singleton_method(:draw) { |_view, state_radius_scale:| events << :state }
+          end)
+
+          overlay.draw(fake_view)
+
+          assert_equal [:transition, :state], events
         end
 
         private

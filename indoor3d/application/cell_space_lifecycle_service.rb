@@ -85,10 +85,11 @@ module ULOL
       end
 
       class CellSpaceLifecycleSourcePreparer
-        def initialize(converted_group:, type_resolver:, geometry_preparer:, storey_resolver: nil, storey_value_resolver: nil)
+        def initialize(converted_group:, type_resolver:, geometry_preparer:, tag_storey_resolver: nil, storey_resolver: nil, storey_value_resolver: nil)
           @converted_group = converted_group
           @type_resolver = type_resolver
           @geometry_preparer = geometry_preparer
+          @tag_storey_resolver = tag_storey_resolver
           @storey_resolver = storey_resolver
           @storey_value_resolver = storey_value_resolver
         end
@@ -106,15 +107,26 @@ module ULOL
         end
 
         def resolve_storey(sketchup_group, cell_type, category_code, default_storey, storey_override = nil)
-          unless storey_override.to_s.empty?
-            return @storey_value_resolver.call(storey_override, cell_type, category_code, default_storey) if @storey_value_resolver
+          tag_storey = @tag_storey_resolver&.call(sketchup_group)
+          unless tag_storey.to_s.empty?
+            return resolve_storey_value(tag_storey, cell_type, category_code, default_storey)
+          end
 
-            return storey_override
+          unless storey_override.to_s.empty?
+            return resolve_storey_value(storey_override, cell_type, category_code, default_storey)
           end
 
           return default_storey unless @storey_resolver
 
           @storey_resolver.call(sketchup_group, cell_type, category_code, default_storey)
+        end
+
+        private
+
+        def resolve_storey_value(storey, cell_type, category_code, default_storey)
+          return storey unless @storey_value_resolver
+
+          @storey_value_resolver.call(storey, cell_type, category_code, default_storey)
         end
       end
 

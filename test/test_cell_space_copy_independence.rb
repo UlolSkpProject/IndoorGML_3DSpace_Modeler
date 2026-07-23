@@ -80,6 +80,7 @@ require_relative '../indoor3d/domain/state'
 require_relative '../indoor3d/domain/transition'
 require_relative '../indoor3d/infrastructure/persistence/attribute_serializer'
 require_relative '../indoor3d/application/feature_registry'
+require_relative '../indoor3d/application/topology_coordinator'
 require_relative '../indoor3d/application/indoor_model/runtime_support'
 require_relative '../indoor3d/application/indoor_model/feature_lifecycle'
 require_relative '../indoor3d/application/indoor_model/observer_routing'
@@ -167,8 +168,6 @@ module ULOL
             @entities_observed_ids = {}
             @cell_space_change_snapshots = {}
             @space_features_change_snapshots = {}
-            @dirty_cell_space_pids = {}
-            @cell_space_sync_scheduled = false
             @syncing = false
             @erasing = false
             @relocating_entity = false
@@ -178,6 +177,10 @@ module ULOL
             @constraining_space_features = false
             @finishing_editing = false
             @adjacency_service = FakeAdjacencyService.new(@feature_registry, fail_during_sync: fail_during_sync)
+            @topology_coordinator = TopologyCoordinator.new(
+              adjacency_service: @adjacency_service,
+              dirty_queue: DirtyTopologyQueue.new
+            )
             @deferred_messages = []
           end
 

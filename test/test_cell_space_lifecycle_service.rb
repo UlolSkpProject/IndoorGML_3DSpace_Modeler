@@ -32,6 +32,7 @@ module ULOL
             :ensure_space_features_groups,
             :place_cell_group,
             :default_storey_name,
+            :tag_cell_space_storey,
             :resolve_cell_space_storey,
             :fixed_state_height_offset,
             :recenter_cell_space_geometry,
@@ -65,6 +66,7 @@ module ULOL
             :ensure_space_features_groups,
             :place_cell_group,
             :default_storey_name,
+            :tag_cell_space_storey,
             :resolve_cell_space_storey,
             :fixed_state_height_offset,
             :recenter_cell_space_geometry,
@@ -150,6 +152,26 @@ module ULOL
           refute_includes calls, :resolve_cell_space_storey
         end
 
+        def test_create_from_group_deferred_always_prefers_source_tag_storey_over_override
+          calls = []
+          source_group = fake_tagged_group('F02F04_MV_RM_02')
+          callbacks = lifecycle_callbacks(calls).merge(tag_resolver_callbacks(calls))
+          service = build_lifecycle_service(callbacks)
+
+          cell_space = service.create_from_group_deferred(
+            source_group,
+            cell_type: CellSpaceType::GENERAL,
+            category_code: 'Room',
+            storey: 'B02~F01'
+          )
+
+          assert_equal CellSpaceType::TRANSITION, cell_space.cell_type
+          assert_equal 'Stair', cell_space.category_code
+          assert_equal 'F02~F04', cell_space.storey
+          assert_includes calls, :tag_cell_space_storey
+          refute_includes calls, :resolve_cell_space_storey
+        end
+
         def test_create_from_group_deferred_trims_propagated_room_range_to_start_floor
           calls = []
           source_group = fake_tagged_group('Untagged')
@@ -220,6 +242,7 @@ module ULOL
             :ensure_space_features_groups,
             :place_cell_group,
             :default_storey_name,
+            :tag_cell_space_storey,
             :resolve_cell_space_storey,
             :fixed_state_height_offset,
             :recenter_cell_space_geometry,
@@ -304,6 +327,7 @@ module ULOL
               converted_group: callbacks.fetch(:converted_group?),
               type_resolver: callbacks.fetch(:resolve_cell_space_type_and_category),
               geometry_preparer: callbacks.fetch(:prepare_cell_space_source_group!),
+              tag_storey_resolver: callbacks.fetch(:tag_cell_space_storey),
               storey_resolver: callbacks.fetch(:resolve_cell_space_storey),
               storey_value_resolver: callbacks.fetch(:resolve_cell_space_storey_value)
             ),
@@ -345,6 +369,7 @@ module ULOL
             ensure_space_features_groups: proc { calls << :ensure_space_features_groups },
             place_cell_group: proc { |_group| calls << :place_cell_group; placed_group },
             default_storey_name: proc { calls << :default_storey_name; 'F01' },
+            tag_cell_space_storey: proc { |_group| calls << :tag_cell_space_storey; nil },
             resolve_cell_space_storey: proc do |_group, _cell_type, _category_code, default_storey|
               calls << :resolve_cell_space_storey
               default_storey
@@ -375,6 +400,10 @@ module ULOL
 
         def tag_resolver_callbacks(calls)
           {
+            tag_cell_space_storey: proc do |group|
+              calls << :tag_cell_space_storey
+              TagCellSpaceAdapter.storey_from_tag(group)
+            end,
             resolve_cell_space_type_and_category: proc do |group, cell_type, category_code|
               calls << :resolve_cell_space_type_and_category
               TagCellSpaceAdapter.resolve_cell_space_type_and_category(group, cell_type, category_code)

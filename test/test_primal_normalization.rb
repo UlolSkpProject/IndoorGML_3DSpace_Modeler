@@ -25,6 +25,10 @@ module ULOL
         def self.root_transformation_in_model(root_group)
           root_group.transformation
         end unless respond_to?(:root_transformation_in_model)
+
+        def self.direct_child_of_root?(_entity, _root_group)
+          true
+        end unless respond_to?(:direct_child_of_root?)
       end
     end
 
@@ -121,6 +125,76 @@ module ULOL
           assert (outer_edges + inner_edges).all?(&:erased?)
         end
 
+        def test_non_solid_cell_space_is_demoted_and_moved_to_root
+          model = FakeModel.new
+          Sketchup.test_active_model = model
+          normalizer = FakeIndoorModel.new(FakePrimalGroup.new(FakeTransformation.new(10, 0, 0)))
+          entity = FakeGroup.new
+          entity.entities.items << Object.new
+          entity.feature = 'CellSpace'
+          entity.manifold = false
+          entity.material = 'cell-space-material'
+          entity.transformation = FakeTransformation.new(1, 2, 3)
+          state = FakeState.new
+          cell_space = FakeCellSpace.new(entity, state)
+          normalizer.cell_space = cell_space
+
+          normalizer.normalize_child(entity)
+
+          assert_nil entity.feature
+          assert_includes normalizer.calls, [:erase_transitions_for_state, state]
+          assert_includes normalizer.calls, [:erase_adjacency_for_cell_space, cell_space]
+          assert_includes normalizer.calls, [:unregister_state, state]
+          assert_includes normalizer.calls, [:unregister_cell_space, cell_space]
+          assert entity.erased?
+          assert_equal 1, model.entities.instances.length
+          assert_nil model.entities.instances.first.material
+        end
+
+        def test_initial_load_normalization_keeps_solid_and_demotes_non_solid_idempotently
+          model = FakeModel.new
+          Sketchup.test_active_model = model
+          solid = FakeGroup.new
+          solid.feature = 'CellSpace'
+          non_solid = FakeGroup.new
+          non_solid.entities.items << Object.new
+          non_solid.feature = 'CellSpace'
+          non_solid.manifold = false
+          non_solid.material = 'cell-space-material'
+          primal = FakePrimalGroup.new(FakeTransformation.new(10, 0, 0), [solid, non_solid])
+          normalizer = FakeIndoorModel.new(primal)
+          normalizer.cell_space = FakeCellSpace.new(non_solid, FakeState.new)
+
+          normalizer.normalize_initial_load
+          normalizer.normalize_initial_load
+
+          assert_equal 'CellSpace', solid.feature
+          assert solid.valid?
+          assert_nil non_solid.feature
+          assert non_solid.erased?
+          assert_equal 1, model.entities.instances.length
+          assert_nil model.entities.instances.first.material
+        end
+
+        def test_initial_load_normalization_continues_after_one_child_fails
+          model = FakeModel.new
+          Sketchup.test_active_model = model
+          broken = Object.new
+          def broken.valid? = true
+          non_solid = FakeGroup.new
+          non_solid.entities.items << Object.new
+          non_solid.feature = 'CellSpace'
+          non_solid.manifold = false
+          primal = FakePrimalGroup.new(FakeTransformation.new(0, 0, 0), [broken, non_solid])
+          normalizer = FakeIndoorModel.new(primal)
+          normalizer.cell_space = FakeCellSpace.new(non_solid, FakeState.new)
+
+          normalizer.normalize_initial_load
+
+          assert non_solid.erased?
+          assert_equal 1, model.entities.instances.length
+        end
+
         private
 
         def point(x, y, z)
@@ -130,20 +204,102 @@ module ULOL
         class FakeIndoorModel
           include IndoorModel::PrimalNormalization
 
+          attr_accessor :cell_space
+          attr_reader :calls
+
           def initialize(primal_group)
             @primal_group = primal_group
+            @attribute_serializer = FakeAttributeSerializer.new
+            @calls = []
           end
 
           def move_raw(entities)
             move_raw_primal_entities_to_root(entities)
           end
+
+          def normalize_child(entity)
+            normalize_primal_child(entity, [])
+          end
+
+          def normalize_initial_load
+            normalize_primal_children_for_initial_load
+          end
+
+          def with_indoor_model_operation(name, **_options)
+            @calls << [:operation, name]
+            yield
+          end
+
+          def with_guard_flag(_flag)
+            yield
+          end
+
+          def indoor_feature(entity)
+            entity.feature
+          end
+
+          def auto_convert_tagged_primal_entity(_entity)
+            false
+          end
+
+          def auto_convert_direct_tagged_children(_container)
+            false
+          end
+
+          def nested_cell_space_entities(_container)
+            []
+          end
+
+          def find_cell_space_for_entity(_entity)
+            @cell_space
+          end
+
+          def erase_transitions_for_state(state)
+            @calls << [:erase_transitions_for_state, state]
+          end
+
+          def erase_adjacency_for_cell_space(cell_space)
+            @calls << [:erase_adjacency_for_cell_space, cell_space]
+          end
+
+          def unregister_state(state)
+            @calls << [:unregister_state, state]
+          end
+
+          def unregister_cell_space(cell_space)
+            @calls << [:unregister_cell_space, cell_space]
+          end
+        end
+
+        class FakeAttributeSerializer
+          def clear_indoor_gml_attributes(entity)
+            entity.feature = nil
+            true
+          end
+        end
+
+        class FakeCellSpace
+          attr_reader :sketchup_group, :duality_state
+
+          def initialize(sketchup_group, duality_state)
+            @sketchup_group = sketchup_group
+            @duality_state = duality_state
+          end
+        end
+
+        class FakeState
         end
 
         class FakeModel
-          attr_reader :entities
+          attr_reader :entities, :active_view
 
           def initialize
             @entities = FakeEntities.new
+            @active_view = Struct.new(:invalidations) do
+              def invalidate
+                self.invalidations += 1
+              end
+            end.new(0)
           end
 
           def active_path
@@ -152,10 +308,12 @@ module ULOL
         end
 
         class FakePrimalGroup
-          attr_reader :transformation
+          attr_reader :transformation, :entities
 
-          def initialize(transformation)
+          def initialize(transformation, entities = [])
             @transformation = transformation
+            @entities = FakeEntities.new
+            @entities.items.concat(entities)
           end
 
           def valid?
@@ -173,6 +331,14 @@ module ULOL
           def apply(point)
             FakePoint.new(point.x + @dx, point.y + @dy, point.z + @dz)
           end
+
+          def *(other)
+            self.class.new(@dx + other.dx, @dy + other.dy, @dz + other.dz)
+          end
+
+          protected
+
+          attr_reader :dx, :dy, :dz
         end
 
         class FakePoint
@@ -258,11 +424,15 @@ module ULOL
         end
 
         class FakeGroup < Sketchup::Group
+          attr_accessor :feature, :manifold, :material, :layer, :visible, :transformation
           attr_accessor :name
-          attr_reader :entities
+          attr_reader :entities, :definition
 
           def initialize
             @entities = FakeEntities.new
+            @definition = self
+            @transformation = FakeTransformation.new(0, 0, 0)
+            @manifold = true
             @valid = true
           end
 
@@ -270,8 +440,24 @@ module ULOL
             @valid == true
           end
 
+          def manifold?
+            @manifold == true
+          end
+
           def erase!
             @valid = false
+          end
+
+          def erased?
+            !valid?
+          end
+
+          def to_group
+            self
+          end
+
+          def make_unique
+            self
           end
         end
 
@@ -297,17 +483,31 @@ module ULOL
 
         class FakeEntities
           attr_reader :created_groups, :faces, :lines, :copied_faces
+          attr_reader :items
 
           def initialize
             @created_groups = []
             @faces = []
             @lines = []
             @copied_faces = []
+            @instances = []
+            @items = []
           end
+
+          attr_reader :instances
 
           def add_group
             group = FakeGroup.new
             @created_groups << group
+            group
+          end
+
+          def add_instance(definition, transformation)
+            group = FakeGroup.new
+            group.instance_variable_set(:@definition, definition)
+            group.material = definition.material if definition.respond_to?(:material)
+            group.transformation = transformation
+            @instances << group
             group
           end
 
@@ -322,7 +522,7 @@ module ULOL
           end
 
           def to_a
-            faces + lines
+            items + faces + lines
           end
         end
       end

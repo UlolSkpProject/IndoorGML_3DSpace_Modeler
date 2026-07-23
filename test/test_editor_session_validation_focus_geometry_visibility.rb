@@ -2,6 +2,20 @@
 
 require 'minitest/autorun'
 
+module Geom
+  Point3d = Struct.new(:x, :y, :z) do
+    def distance(other)
+      Math.sqrt((x - other.x)**2 + (y - other.y)**2 + (z - other.z)**2)
+    end
+  end unless const_defined?(:Point3d)
+
+  Vector3d = Struct.new(:x, :y, :z) do
+    def to_a
+      [x, y, z]
+    end
+  end unless const_defined?(:Vector3d)
+end
+
 module Sketchup
   def self.active_model
     nil
@@ -21,6 +35,9 @@ module ULOL
       module CellSpaceType
         LABELS = {} unless const_defined?(:LABELS)
       end unless const_defined?(:CellSpaceType)
+      module Logger
+        def self.puts(_message); end
+      end unless const_defined?(:Logger)
     end
   end
 end
@@ -108,6 +125,61 @@ module ULOL
             :selection_changed,
             :invalidate_view
           ], calls
+        end
+
+        def test_finish_synchronizes_dirty_validation_focus_topology_before_visibility_restore
+          calls = []
+          indoor_model = Class.new do
+            define_method(:validation_focus_topology_dirty?) { true }
+            define_method(:synchronize_validation_focus_topology_if_dirty) do
+              calls << :sync_all
+              true
+            end
+            define_method(:detach_edit_selection_observer) { |_model| calls << :detach }
+          end.new
+          indoor_model.singleton_class.send(:define_method, :calls) { calls }
+          path_controller = Struct.new(:calls) do
+            def prepare_for_finish(_model); calls << :prepare; end
+            def reset_target; calls << :reset_target; end
+            def close(_model); calls << :close_path; end
+            def clear_previous_path; calls << :clear_path; end
+          end.new(calls)
+          session = EditorSession.allocate
+          session.instance_variable_set(:@editing, true)
+          session.instance_variable_set(:@indoor_model, indoor_model)
+          session.instance_variable_set(:@dialog, Struct.new(:calls) { def close; calls << :close_dialog; end }.new(calls))
+          session.define_singleton_method(:with_active_path_enforcement_suspended) { |&block| block.call }
+          session.define_singleton_method(:active_path_controller) { path_controller }
+          session.define_singleton_method(:restore_validation_focus_visibility) { calls << :restore_visibility }
+          session.define_singleton_method(:normalize_visibility_for_non_edit_mode) { calls << :normalize_visibility }
+          session.define_singleton_method(:reset_edit_mode_visibility_filter) { calls << :reset_filter }
+          session.define_singleton_method(:restore_validation_focus_rendering_options) { calls << :restore_rendering }
+          session.define_singleton_method(:clear_validation_focus) { calls << :clear_focus }
+          session.define_singleton_method(:update_overlay_enabled) { calls << :overlay }
+          session.define_singleton_method(:apply_lock_policy) { calls << :lock }
+          session.define_singleton_method(:apply_geometry_visibility) { calls << :geometry }
+          session.define_singleton_method(:invalidate_view) { |_model| calls << :invalidate }
+
+          assert session.finish
+
+          assert_equal :sync_all, calls.first
+          assert_operator calls.index(:sync_all), :<, calls.index(:restore_visibility)
+          assert_operator calls.index(:sync_all), :<, calls.index(:clear_focus)
+        end
+
+        def test_finish_keeps_edit_mode_active_when_dirty_topology_sync_fails
+          indoor_model = Object.new
+          indoor_model.define_singleton_method(:validation_focus_topology_dirty?) { true }
+          indoor_model.define_singleton_method(:synchronize_validation_focus_topology_if_dirty) { false }
+          session = EditorSession.allocate
+          session.instance_variable_set(:@editing, true)
+          session.instance_variable_set(:@indoor_model, indoor_model)
+          session.define_singleton_method(:restore_validation_focus_visibility) do
+            raise 'visibility must not be restored after failed topology sync'
+          end
+
+          refute session.finish
+          assert session.editing?
         end
 
         def test_begin_validation_focus_editing_rolls_back_when_visibility_apply_fails
@@ -206,6 +278,139 @@ module ULOL
             [:set_highlight, ['cell_A'], '701'],
             :apply_validation_focus_visibility
           ], calls
+        end
+
+        def test_row_selection_applies_visibility_then_top_iso_extents_and_padding_in_order
+          calls = []
+          camera_events = []
+          view = fake_zoom_view(camera_events)
+          cell_a = fake_zoom_cell('A', :bounds_a)
+          cell_b = fake_zoom_cell('B', :bounds_b)
+          controller = EditorSession::ValidationFocusController.new
+          controller.begin(%w[cell_A cell_B])
+          controller.set_focus_rows([{ id: 'row-1', cells: %w[A B], code: '203' }])
+          session = EditorSession.allocate
+          session.instance_variable_set(:@indoor_model, Struct.new(:cell_spaces).new([cell_a, cell_b]))
+          session.instance_variable_set(:@validation_focus_controller, controller)
+          session.define_singleton_method(:apply_validation_focus_visibility) do
+            calls << :visibility
+            camera_events << :visibility
+            true
+          end
+          session.define_singleton_method(:invalidate_overlay_transition_points) { calls << :overlay }
+          session.define_singleton_method(:invalidate_view) { |_model| calls << :invalidate_view }
+
+          with_fake_active_model(Struct.new(:active_view).new(view)) do
+            with_fake_ui_timers do |timers|
+              assert session.set_validation_focus_highlight(
+                %w[cell_A cell_B],
+                '203',
+                row_id: 'row-1',
+                row_cells: %w[A B]
+              )
+              assert_equal [:visibility, :overlay, :invalidate_view], calls
+              assert_equal [[0, false]], timers.map { |delay, repeat, _block| [delay, repeat] }
+
+              timers[0][2].call
+              assert_equal 1, timers.length
+            end
+          end
+
+          assert_equal [:visibility, :top_view, :isometric_view, :zoom_extents, [:zoom, 0.7], :invalidate], camera_events
+          assert_equal [0.7], view.zoom_calls
+          assert_equal true, view.invalidated
+        end
+
+        def test_row_selection_does_not_zoom_without_valid_cell_bounds
+          view = fake_zoom_view
+          controller = EditorSession::ValidationFocusController.new
+          controller.begin(['cell_A'])
+          controller.set_focus_rows([{ id: 'row-1', cells: ['A'], code: '203' }])
+          session = EditorSession.allocate
+          session.instance_variable_set(:@indoor_model, Struct.new(:cell_spaces).new([fake_zoom_cell('A', nil)]))
+          session.instance_variable_set(:@validation_focus_controller, controller)
+          session.define_singleton_method(:apply_validation_focus_visibility) { true }
+          session.define_singleton_method(:invalidate_overlay_transition_points) {}
+          session.define_singleton_method(:invalidate_view) { |_model| }
+
+          with_fake_active_model(Struct.new(:active_view).new(view)) do
+            with_fake_ui_timers do |timers|
+              session.set_validation_focus_highlight(['cell_A'], '203', row_id: 'row-1', row_cells: ['A'])
+              timers.first[2].call
+            end
+          end
+
+          assert_empty view.zoom_calls
+          assert_equal false, view.invalidated
+        end
+
+        def test_highlight_clear_cancels_pending_row_zoom
+          view = fake_zoom_view
+          cell = fake_zoom_cell('A', :bounds_a)
+          controller = EditorSession::ValidationFocusController.new
+          controller.begin(['cell_A'])
+          controller.set_focus_rows([{ id: 'row-1', cells: ['A'], code: '203' }])
+          session = EditorSession.allocate
+          session.instance_variable_set(:@indoor_model, Struct.new(:cell_spaces).new([cell]))
+          session.instance_variable_set(:@validation_focus_controller, controller)
+          session.define_singleton_method(:apply_validation_focus_visibility) { true }
+          session.define_singleton_method(:invalidate_overlay_transition_points) {}
+          session.define_singleton_method(:invalidate_view) { |_model| }
+
+          with_fake_active_model(Struct.new(:active_view).new(view)) do
+            with_fake_ui_timers do |timers|
+              session.set_validation_focus_highlight(['cell_A'], '203', row_id: 'row-1', row_cells: ['A'])
+              session.set_validation_focus_highlight([], '')
+              assert_equal 1, timers.length
+              timers.first[2].call
+            end
+          end
+
+          assert_empty view.zoom_calls
+        end
+
+        def test_row_highlight_clear_resets_selection_then_active_path_to_primal
+          calls = []
+          controller = EditorSession::ValidationFocusController.new
+          controller.begin(['cell_A'])
+          controller.set_focus_rows([{ id: 'row-1', cells: ['A'], code: '203' }])
+          controller.set_highlight(['cell_A'], '203', row_id: 'row-1', row_cells: ['A'])
+          selection = Struct.new(:controller, :calls) do
+            def clear
+              calls << [:selection_clear, controller.highlight_row_id]
+            end
+          end.new(controller, calls)
+          model = Struct.new(:selection).new(selection)
+          primal_group = Struct.new(:valid?).new(true)
+          path_controller = Struct.new(:calls) do
+            def set_target_path(path)
+              calls << [:target_path, path]
+            end
+
+            def set(_model, path)
+              calls << [:active_path, path]
+            end
+          end.new(calls)
+          session = EditorSession.allocate
+          session.instance_variable_set(:@editing, true)
+          session.instance_variable_set(:@indoor_model, Struct.new(:primal_group).new(primal_group))
+          session.instance_variable_set(:@validation_focus_controller, controller)
+          session.instance_variable_set(:@active_path_controller, path_controller)
+          session.define_singleton_method(:selection_changed) { calls << :selection_changed }
+          session.define_singleton_method(:apply_validation_focus_visibility) { calls << :visibility; true }
+          session.define_singleton_method(:update_validation_error_geometry) { |_row_id| calls << :geometry }
+          session.define_singleton_method(:invalidate_overlay_transition_points) { calls << :overlay }
+          session.define_singleton_method(:invalidate_view) { |_model| calls << :invalidate }
+
+          with_fake_active_model(model) do
+            assert session.set_validation_focus_highlight([], '')
+          end
+
+          assert_nil controller.highlight_row_id
+          assert_equal [:selection_clear, nil], calls[0]
+          assert_equal [:target_path, [primal_group]], calls[1]
+          assert_equal [:active_path, [primal_group]], calls[2]
+          assert_equal :selection_changed, calls[3]
         end
 
         def test_set_visibility_filter_is_ignored_in_fix_mode
@@ -307,6 +512,67 @@ module ULOL
               reenter
             end
           end.new(calls)
+        end
+
+        def fake_zoom_cell(id, bounds)
+          group = if bounds
+                    Struct.new(:bounds) do
+                      def valid?
+                        true
+                      end
+                    end.new(bounds)
+                  end
+          Struct.new(:id, :valid_sketchup_group) do
+            def valid?
+              true
+            end
+          end.new(id, group)
+        end
+
+        def fake_zoom_view(events = [])
+          camera = FakeZoomCamera.new(
+            FakeZoomPoint.new(0.0, 0.0, 10.0),
+            FakeZoomPoint.new(0.0, 0.0, 0.0),
+            events,
+            []
+          )
+          Struct.new(:zoom_calls, :invalidated, :events, :camera) do
+            def zoom(value)
+              unless value.is_a?(Array) || value.is_a?(Numeric)
+                raise ArgumentError, 'expected an entity array or numeric zoom factor'
+              end
+
+              zoom_calls << value
+              events << [:zoom, value]
+            end
+
+            def zoom_extents
+              events << :zoom_extents
+            end
+
+            def invalidate
+              self.invalidated = true
+              events << :invalidate
+            end
+          end.new([], false, events, camera)
+        end
+
+        FakeZoomPoint = Geom::Point3d
+
+        FakeZoomCamera = Struct.new(:eye, :target, :events, :set_calls) do
+          def set(next_eye, next_target, up)
+            set_calls << [next_eye, next_target, up]
+            events << (up.to_a == [0.0, 1.0, 0.0] ? :top_view : :isometric_view)
+            true
+          end
+        end
+
+        def with_fake_active_model(model)
+          original = Sketchup.method(:active_model)
+          Sketchup.define_singleton_method(:active_model) { model }
+          yield
+        ensure
+          Sketchup.define_singleton_method(:active_model) { |*args| original.call(*args) }
         end
 
         def with_fake_ui_timers

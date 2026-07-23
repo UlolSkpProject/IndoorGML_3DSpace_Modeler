@@ -94,6 +94,29 @@ module ULOL
             assert_equal 1, report['dataset_errors'].length
           end
 
+          def test_inconclusive_boolean_result_keeps_original_701_error
+            report = sample_report
+            report['features'].first['errors'] = [
+              { 'code' => 701, 'description' => 'overlap cell_A cell_B' }
+            ]
+            report['features'].first['primitives'].first['errors'] = []
+            policy = Val3dityOverlapRecheckPolicy.new(tolerance_mm: 0.25)
+
+            results = policy.apply!(report) do |code, cell1, cell2|
+              policy.recheck_result(
+                code,
+                [cell1, cell2],
+                false,
+                'BOOLEAN_OPERATION_FAILED',
+                status: 'inconclusive'
+              )
+            end
+
+            assert_equal [701], report['features'].first['errors'].map { |error| error['code'] }
+            assert_equal 'inconclusive', results.first['status']
+            assert_equal false, report['validity']
+          end
+
           private
 
           def sample_report

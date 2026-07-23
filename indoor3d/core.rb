@@ -40,6 +40,7 @@ module ULOL
 
     require_relative 'infrastructure/scene/scene_group_guard'
     require_relative 'infrastructure/scene/entity_copy_helper'
+    require_relative 'validity/validation_error_geometry_resolver'
     require_relative 'infrastructure/scene/active_path_controller'
     require_relative 'infrastructure/scene/editor_session'
 
@@ -66,6 +67,7 @@ module ULOL
     require_relative 'ui/commands/conversion_message_formatter'
     require_relative 'ui/overlays/screen_overlay'
     require_relative 'ui/overlays/space_overlay'
+    require_relative 'ui/overlays/validation_error_geometry_overlay'
     require_relative 'ui/overlays/indoor_mode_screen_overlay'
     require_relative 'ui/overlays/builders/transition_curve_builder'
     require_relative 'ui/overlays/renderers/state_overlay_renderer'
@@ -112,7 +114,7 @@ module ULOL
         # Deferred runtime refresh to avoid SketchUp crash on model load.
         UI.start_timer(0.5, false) do
           begin
-            IndoorCore::IndoorModel.current.refresh_runtime_data()
+            IndoorCore::IndoorModel.current.refresh_runtime_data(initial_model_load: true)
           rescue StandardError => e
             IndoorCore::Logger.error(
               "[IndoorGML] Deferred runtime refresh failed: #{e.class}: #{e.message}\n#{e.backtrace&.join("\n")}"
@@ -179,6 +181,8 @@ module ULOL
         dispatcher.change_selected_cell_space_type()
       end
       change_type_command.set_validation_proc do
+        next MF_GRAYED if dispatcher.validation_operation_running?
+
         indoor_model = IndoorCore::IndoorModel.current
         selected_cell_spaces = dispatcher.selected_indoor_gml_entities.select do |entity|
           dispatcher.indoor_feature(entity) == 'CellSpace'
@@ -231,7 +235,7 @@ module ULOL
         dispatcher.open_dual_overlay_scale_dialog()
       end
       @dual_overlay_scale_command.set_validation_proc do
-        dispatcher.validation_operation_running? ? MF_GRAYED : MF_ENABLED
+        MF_ENABLED
       end
       export_command = create_command(
         'Export GML',

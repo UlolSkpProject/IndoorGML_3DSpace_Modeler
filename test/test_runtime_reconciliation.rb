@@ -201,6 +201,58 @@ module ULOL
           assert_equal [cell_group.object_id], indoor.cell_observer_keys
         end
 
+        def test_restore_reissues_and_persists_missing_or_duplicate_feature_ids
+          indoor = FakeIndoorModel.new(@model)
+          primal = @model.create_primal_group
+          first = primal.entities.add_group('first')
+          duplicate = primal.entities.add_group('duplicate')
+          missing = primal.entities.add_group('missing')
+          write_cell_attributes(first, id: 'shared', state_id: 'state_shared')
+          write_cell_attributes(duplicate, id: 'shared', state_id: 'state_shared')
+          write_cell_attributes(missing, id: '', state_id: '')
+
+          indoor.reconcile_runtime_after_transaction(source: :redo, generation: 1)
+
+          ids = indoor.cell_spaces.map(&:id) + indoor.states.map(&:id)
+          assert_equal 6, ids.length
+          assert_equal 6, ids.uniq.length
+          assert ids.all? { |id| !id.to_s.empty? }
+          assert_equal 0, indoor.serializer.write_count
+        end
+
+        def test_normal_refresh_persists_reissued_feature_ids_inside_model_operation
+          indoor = FakeIndoorModel.new(@model)
+          primal = @model.create_primal_group
+          first = primal.entities.add_group('first')
+          duplicate = primal.entities.add_group('duplicate')
+          write_cell_attributes(first, id: 'shared', state_id: 'state_shared')
+          write_cell_attributes(duplicate, id: 'shared', state_id: 'state_shared')
+
+          indoor.refresh_runtime_data
+
+          assert_equal 1, indoor.serializer.write_count
+          assert_equal 1, indoor.operation_count
+        end
+
+        def test_runtime_restore_persists_repaired_ids_after_primal_groups_were_merged
+          indoor = FakeIndoorModel.new(@model)
+          primal = @model.create_primal_group
+          first = primal.entities.add_group('first')
+          duplicate = primal.entities.add_group('duplicate')
+          write_cell_attributes(first, id: 'shared', state_id: 'state_shared')
+          write_cell_attributes(duplicate, id: 'shared', state_id: 'state_shared')
+          indoor.define_singleton_method(:find_existing_space_features_groups) do
+            @primal_group = @model.primal_group
+            true
+          end
+
+          indoor.reconcile_runtime_after_transaction(source: :redo, generation: 1)
+
+          ids = indoor.cell_spaces.map(&:id) + indoor.states.map(&:id)
+          assert_equal ids.length, ids.uniq.length
+          assert_equal 1, indoor.serializer.write_count
+        end
+
         def test_reconciliation_notifies_editor_session_without_refresh_writes
           editor_session = FakeEditorSession.new
           indoor = FakeIndoorModel.new(@model, editor_session: editor_session)
@@ -230,6 +282,17 @@ module ULOL
           assert_equal FakeTransformation::IDENTITY, snapshot[:transformation]
         end
 
+        def test_initial_refresh_applies_cell_space_materials
+          indoor = FakeIndoorModel.new(@model)
+          primal = @model.create_primal_group
+          cell = primal.entities.add_group('Cell')
+          write_cell_attributes(cell, id: 'cell_A', state_id: 'state_A')
+
+          indoor.refresh_runtime_data(initial_model_load: true)
+
+          assert_equal ['cell_A'], indoor.materialized_cell_ids
+        end
+
         private
 
         def write_cell_attributes(group, id:, state_id:)
@@ -245,15 +308,13 @@ module ULOL
           include IndoorModel::RuntimeSupport
           include IndoorModel::Topology
 
-          attr_reader :cell_spaces, :states, :transitions, :primal_group, :serializer, :operation_count, :recenter_count
+          attr_reader :cell_spaces, :states, :transitions, :primal_group, :serializer, :operation_count, :recenter_count, :materialized_cell_ids
 
           def initialize(model, adjacent: false, editor_session: FakeEditorSession.new)
             @model = model
             @feature_registry = FeatureRegistry.new
             @cell_space_change_snapshots = {}
             @space_features_change_snapshots = {}
-            @dirty_cell_space_pids = {}
-            @cell_space_sync_scheduled = false
             @cell_space_observed_ids = {}
             @space_features_observed_ids = {}
             @entities_observed_ids = {}
@@ -264,6 +325,10 @@ module ULOL
             @serializer = SpySerializer.new
             @attribute_serializer = @serializer
             @adjacency_service = FakeAdjacencyService.new(adjacent: adjacent)
+            @topology_coordinator = TopologyCoordinator.new(
+              adjacency_service: @adjacency_service,
+              dirty_queue: DirtyTopologyQueue.new
+            )
             @runtime_restorer = RuntimeRestorer.new(
               registry: @feature_registry,
               serializer: @attribute_serializer,
@@ -274,6 +339,7 @@ module ULOL
             @editor_session = editor_session
             @operation_count = 0
             @recenter_count = 0
+            @materialized_cell_ids = []
             bind_registry_collections
           end
 
@@ -282,11 +348,11 @@ module ULOL
           end
 
           def queue_dirty(pid)
-            @dirty_cell_space_pids[pid] = true
+            dirty_topology_queue.mark(pid)
           end
 
           def dirty_pids
-            @dirty_cell_space_pids.keys
+            dirty_topology_queue.persistent_ids
           end
 
           def cell_observer_keys
@@ -373,6 +439,12 @@ module ULOL
 
           def recenter_runtime_cell_spaces
             @recenter_count += 1
+          end
+
+          def normalize_primal_children_for_initial_load; end
+
+          def apply_cell_space_material(cell_space)
+            @materialized_cell_ids << cell_space.id
           end
 
           def invalidate_overlay_transition_points; end

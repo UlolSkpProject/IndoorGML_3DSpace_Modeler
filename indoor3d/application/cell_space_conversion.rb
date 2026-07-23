@@ -4,6 +4,15 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class CellSpaceConversionJobBuilder
+        def self.apply_fallback_storey(jobs, fallback_storey)
+          fallback_storey = fallback_storey.to_s.strip
+          return Array(jobs) if fallback_storey.empty?
+
+          Array(jobs).map do |job|
+            job[:storey].to_s.empty? ? job.merge(storey: fallback_storey) : job
+          end
+        end
+
         def initialize(entities:, parent_target: active_context_parent_target, parent_storey: active_context_parent_storey, ancestors: active_context_ancestors)
           @entities = Array(entities)
           @parent_target = parent_target
@@ -473,15 +482,17 @@ module ULOL
         end
 
         def call
-          started_at = monotonic_time
+          benchmark_started_at = Time.now
           metrics = {}
           errors = []
+          preflight_started_at = Time.now
           plan, preparation_errors = timed(metrics, :job_preparation) { prepare_plan }
           errors.concat(preparation_errors)
           plan, geometry_errors = timed(metrics, :geometry_validation) { validate_plan_geometry(plan) }
           errors.concat(geometry_errors)
           plan, target_errors = timed(metrics, :adjacency_candidate_generation) { validate_plan_targets(plan) }
           errors.concat(target_errors)
+          metrics[:preflight_duration] = Time.now - preflight_started_at
           converted_count = 0
           apply_metrics = {}
           unless plan.empty?
@@ -489,7 +500,10 @@ module ULOL
             errors.concat(apply_errors)
           end
           metrics.merge!(apply_metrics)
-          metrics[:total_duration] = elapsed_since(started_at)
+          metrics[:cell_space_state_duration] ||= 0.0
+          metrics[:adjacency_transition_duration] ||= 0.0
+          metrics[:total_duration] = Time.now - benchmark_started_at
+          log_benchmark(metrics)
           Result.new(converted_count: converted_count, errors: errors, metrics: metrics)
         end
 
@@ -564,6 +578,7 @@ module ULOL
                 logger: @logger,
                 labeler: @labeler
               )
+              creation_started_at = Time.now
               plan.each do |job|
                 unless source_valid?(job[:source])
                   errors << conversion_error(job, 'Conversion source is no longer valid')
@@ -577,6 +592,7 @@ module ULOL
                   errors.concat(result.errors)
                 end
               end
+              cell_space_state_duration = Time.now - creation_started_at
 
               if converted_count.zero?
                 safely_abort_operation if operation_started
@@ -589,12 +605,16 @@ module ULOL
                   {
                     pair_comparison_count: 0,
                     adjacency_detailed_computation: 0.0,
-                    transition_apply: 0.0
+                    transition_apply: 0.0,
+                    cell_space_state_duration: cell_space_state_duration,
+                    adjacency_transition_duration: 0.0
                   }
                 ]
               end
 
+              adjacency_started_at = Time.now
               adjacency_metrics = @synchronize_all.call || {}
+              adjacency_transition_duration = Time.now - adjacency_started_at
               @apply_lock_policy.call
               @clear_dirty_topology.call
               committed = @model.commit_operation
@@ -608,7 +628,9 @@ module ULOL
                 {
                   pair_comparison_count: adjacency_metrics[:pair_comparison_count].to_i,
                   adjacency_detailed_computation: adjacency_metrics[:adjacency_detailed_computation].to_f,
-                  transition_apply: adjacency_metrics[:total_duration].to_f
+                  transition_apply: adjacency_metrics[:total_duration].to_f,
+                  cell_space_state_duration: cell_space_state_duration,
+                  adjacency_transition_duration: adjacency_transition_duration
                 }
               ]
             rescue StandardError
@@ -699,6 +721,16 @@ module ULOL
 
         def elapsed_since(started_at)
           Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at
+        end
+
+        def log_benchmark(metrics)
+          puts '----------------------------------------'
+          puts 'Create CellSpace 시간 요약'
+          puts format('  시작 전 검사               : %.3f sec', metrics[:preflight_duration].to_f)
+          puts format('  CellSpace/State 생성       : %.3f sec', metrics[:cell_space_state_duration].to_f)
+          puts format('  Adjacency/Transition 생성  : %.3f sec', metrics[:adjacency_transition_duration].to_f)
+          puts format('  전체 시간                  : %.3f sec', metrics[:total_duration].to_f)
+          puts '----------------------------------------'
         end
       end
     end

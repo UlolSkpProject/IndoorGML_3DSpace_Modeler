@@ -33,6 +33,18 @@ module ULOL
             assert_equal File.join(first.root_dir, 'report', 'report.html'), first.report_html_path
           end
 
+          def test_default_export_root_is_under_current_users_temp_directory
+            require_relative '../indoor3d/domain/cell_space_type'
+            require_relative '../indoor3d/domain/cell_space_category'
+            require_relative '../indoor3d/domain/navigation_semantic'
+            require_relative '../indoor3d/export/gml_exporter'
+
+            root = File.expand_path(GmlExporter.output_root)
+            user_temp = File.expand_path(Dir.tmpdir)
+            assert root.start_with?(user_temp + File::SEPARATOR)
+            refute_match(/ProgramData/i, root)
+          end
+
           def test_cleanup_is_idempotent_and_does_not_delete_other_runs
             first = ValidationRunWorkspace.create(base_dir: @base_dir)
             second = ValidationRunWorkspace.create(base_dir: @base_dir)

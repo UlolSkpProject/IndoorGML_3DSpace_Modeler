@@ -46,6 +46,7 @@ module ULOL
               [:join_reader],
               [:drain, :val3dity],
               [:progress_complete, :val3dity],
+              [:stop_timer, true],
               [:close],
               [:unregister, session],
               [:timer, 0.05, false],
@@ -169,6 +170,10 @@ module ULOL
               define_singleton_method(:start_timer) do |interval, repeat, &block|
                 events << [:timer, interval, repeat] if events
                 block.call
+              end
+              define_singleton_method(:stop_timer) do |timer_id|
+                events << [:stop_timer, timer_id] if events
+                true
               end
             end.tap { |ui| ui.events = [] }
           end

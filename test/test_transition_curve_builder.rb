@@ -169,6 +169,52 @@ module ULOL
           assert_equal first_points, second_points
         end
 
+        def test_repeated_draw_returns_same_render_array_without_rebuilding
+          transition = fake_transition(
+            point1: Geom::Point3d.new(0, 0, 0),
+            point2: Geom::Point3d.new(10, 0, 0)
+          )
+          builder = TransitionCurveBuilder.new(
+            indoor_model: fake_indoor_model([transition]),
+            transform_context: identity_transform_context
+          )
+          build_count = 0
+          original_build = builder.method(:build_render_transition_line_points)
+          builder.define_singleton_method(:build_render_transition_line_points) do
+            build_count += 1
+            original_build.call
+          end
+
+          first_points = builder.transition_line_points
+          second_points = builder.transition_line_points
+
+          assert_same first_points, second_points
+          assert_equal 1, build_count
+        end
+
+        def test_invalidate_rebuilds_final_points_and_per_transition_curve_cache
+          transition = fake_transition(
+            point1: Geom::Point3d.new(0, 0, 0),
+            point2: Geom::Point3d.new(10, 0, 0),
+            waypoint: Geom::Point3d.new(5, 5, 0),
+            normal1: Geom::Vector3d.new(0, 1, 0),
+            normal2: Geom::Vector3d.new(0, 1, 0)
+          )
+          builder = TransitionCurveBuilder.new(
+            indoor_model: fake_indoor_model([transition]),
+            transform_context: identity_transform_context
+          )
+
+          first_points = builder.transition_line_points
+          assert_equal 2, Utils::Math::HermiteSpline.calls.length
+          assert_same first_points, builder.transition_line_points
+          assert_equal 2, Utils::Math::HermiteSpline.calls.length
+
+          builder.invalidate
+          refute_same first_points, builder.transition_line_points
+          assert_equal 4, Utils::Math::HermiteSpline.calls.length
+        end
+
         private
 
         def fake_transition(point1:, point2:, waypoint: nil, normal1: nil, normal2: nil)

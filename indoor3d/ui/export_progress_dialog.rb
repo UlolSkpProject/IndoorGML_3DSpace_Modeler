@@ -148,6 +148,15 @@ module ULOL
             IndoorCore::Logger.puts "[IndoorGML] Validation focus row update failed: #{e.class}: #{e.message}"
           end
 
+          def clear_validation_focus_selection
+            execute_or_queue(
+              "if (typeof clearValidationFocusSelection === 'function') " \
+              'clearValidationFocusSelection();'
+            )
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Validation focus selection clear failed: #{e.class}: #{e.message}"
+          end
+
           def on_create_gml(&block)
             @create_gml_callback = block
           end
@@ -235,6 +244,9 @@ module ULOL
               @pending_scripts.clear
               @ready_callback&.call
             end
+            dialog.add_action_callback('reportDomReady') do |_context|
+              handle_report_dom_ready
+            end
             dialog.add_action_callback('fitContentHeight') do |_context, content_height|
               fit_content_height(content_height)
             end
@@ -245,7 +257,7 @@ module ULOL
               @open_report_callback&.call
             end
             dialog.add_action_callback('focusValidationCells') do |_context, cell_ids, code, state_ids, transition_ids, row_id|
-              @validation_focus_callback&.call(Array(cell_ids), code.to_s, Array(state_ids), Array(transition_ids), row_id.to_s)
+              handle_validation_focus_cells(dialog, cell_ids, code, state_ids, transition_ids, row_id)
             end
             dialog.add_action_callback('fixValidationErrors') do |_context|
               @fix_validation_callback&.call
@@ -262,6 +274,35 @@ module ULOL
             dialog
           end
 
+          def handle_validation_focus_cells(dialog, cell_ids, code, state_ids, transition_ids, row_id)
+            deselection = Array(cell_ids).empty? && Array(state_ids).empty? &&
+                          Array(transition_ids).empty? && row_id.to_s.empty?
+            callback_completed = false
+            begin
+              result = @validation_focus_callback&.call(
+                Array(cell_ids),
+                code.to_s,
+                Array(state_ids),
+                Array(transition_ids),
+                row_id.to_s
+              )
+              callback_completed = !result.nil? && result != false
+            ensure
+              if deselection && callback_completed
+                dialog.execute_script(
+                  'if (typeof completeValidationFocusRowDeselection === "function") ' \
+                  'completeValidationFocusRowDeselection();'
+                )
+              end
+            end
+          end
+
+          def handle_report_dom_ready
+            @dom_ready = true
+            @pending_scripts.each { |script| @dialog.execute_script(script) }
+            @pending_scripts.clear
+          end
+
           def handle_window_closed
             if @suppress_close_callback
               @suppress_close_callback = false
@@ -269,8 +310,6 @@ module ULOL
               @dom_ready = false
               return
             end
-
-            IndoorGmlConverter::Val3dityRunner.shutting_down!
 
             if @request_close_callback&.call == :keep_open
               @dialog = nil

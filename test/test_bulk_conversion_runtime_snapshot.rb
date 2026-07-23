@@ -3,6 +3,7 @@
 require 'minitest/autorun'
 
 require_relative '../indoor3d/application/feature_registry'
+require_relative '../indoor3d/application/topology_coordinator'
 require_relative '../indoor3d/infrastructure/scene/scene_group_guard'
 require_relative '../indoor3d/application/indoor_model/runtime_support'
 
@@ -106,8 +107,7 @@ module ULOL
             @feature_registry = FeatureRegistry.new
             @cell_space_change_snapshots = {}
             @space_features_change_snapshots = {}
-            @dirty_cell_space_pids = {}
-            @cell_space_sync_scheduled = false
+            @topology_coordinator = TopologyCoordinator.new(dirty_queue: DirtyTopologyQueue.new)
             @cell_space_observed_ids = {}
             @space_features_observed_ids = {}
             @entities_observed_ids = {}
@@ -127,23 +127,23 @@ module ULOL
           end
 
           def queue_dirty(pid)
-            @dirty_cell_space_pids[pid] = true
+            dirty_topology_queue.mark(pid)
           end
 
           def clear_dirty_queue
-            @dirty_cell_space_pids.clear
+            dirty_topology_queue.clear
           end
 
           def dirty_pids
-            @dirty_cell_space_pids.keys
+            dirty_topology_queue.persistent_ids
           end
 
           def sync_scheduled?
-            @cell_space_sync_scheduled == true
+            dirty_topology_queue.scheduled?
           end
 
           def sync_scheduled=(value)
-            @cell_space_sync_scheduled = value
+            value ? dirty_topology_queue.schedule! : dirty_topology_queue.unschedule!
           end
         end
 

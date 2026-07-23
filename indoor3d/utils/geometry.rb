@@ -5,6 +5,7 @@ module ULOL
     module Utils
       module Geometry
         SHELL_CENTER_COARSE_DIVISIONS = 8 unless const_defined?(:SHELL_CENTER_COARSE_DIVISIONS, false)
+        SHELL_CENTER_ADAPTIVE_DIVISIONS = [SHELL_CENTER_COARSE_DIVISIONS, 12, 16, 24].uniq.freeze unless const_defined?(:SHELL_CENTER_ADAPTIVE_DIVISIONS, false)
         SHELL_CENTER_REFINE_DIVISIONS = 4 unless const_defined?(:SHELL_CENTER_REFINE_DIVISIONS, false)
         # Small model-space epsilon for generic geometry helpers.
         MODEL_TOLERANCE = 0.001 unless const_defined?(:MODEL_TOLERANCE, false)

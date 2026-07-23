@@ -86,9 +86,17 @@ module ULOL
                   .recheck-row[open] summary { border-bottom: 1px solid #33322f; }
                   .recheck-summary-main { display: flex; align-items: center; gap: 7px; min-width: 0; }
                   .recheck-summary-main .cell-name { font-size: 10px; }
+                  .occurrence-badge { flex: 0 0 auto; padding: 2px 6px; border-radius: 999px; background: #353431; color: #b9b6ae; font-size: 9px; font-weight: 700; white-space: nowrap; }
                   .summary-distance { color: #e8e6e0; font-family: Consolas, Monaco, monospace; font-size: 11px; text-align: right; white-space: nowrap; }
                   .summary-distance sup { font-size: 8px; line-height: 0; }
                   .recheck-detail { display: grid; gap: 6px; padding: 8px 9px 9px; }
+                  .error-member { display: grid; gap: 4px; padding: 7px 0; border-top: 1px solid #33322f; }
+                  .error-member:first-child { padding-top: 0; border-top: 0; }
+                  .error-member:last-child { padding-bottom: 0; }
+                  .member-heading { color: #d8d6d0; font-size: 10px; font-weight: 700; }
+                  .member-field { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 7px; font-size: 10px; line-height: 1.4; }
+                  .member-label { color: #85827b; }
+                  .member-value { color: #b9b6ae; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
                   .code-badge { display: inline-flex; align-items: center; padding: 3px 7px; border-radius: 5px; background: #1d355d; color: #8ab4f8; font-family: Consolas, Monaco, monospace; font-size: 11px; font-weight: 700; }
                   .code-badge.c704 { background: #443815; color: #e5c567; }
                   .code-badge.c100 { background: #451a1a; color: #fca5a5; }
@@ -188,7 +196,7 @@ module ULOL
           def report_issue_sections(raw_report)
             [
               report_error_items_section(
-                error_item_rows(raw_report),
+                grouped_error_item_rows(raw_report),
                 title: 'ERROR',
                 raw_report: raw_report
               ),
@@ -254,7 +262,7 @@ module ULOL
           end
 
           def final_error_count(raw_report)
-            error_item_rows(raw_report).length
+            grouped_error_item_rows(raw_report).length
           end
 
           def overlap_recheck_suppressed_count(raw_report)
@@ -376,32 +384,79 @@ module ULOL
           def report_filter_script
             <<~HTML
               <script>
+                var selectedValidationFocusRow = null;
+                var pendingValidationFocusRow = null;
+                var validationFocusDeselectionInProgress = false;
+
+                function activateValidationFocusRow(row) {
+                  if (!row) return;
+
+                  var rowId = row.getAttribute('data-row-id') || '';
+                  var cells = (row.getAttribute('data-cells') || '').split(',').filter(Boolean);
+                  var states = (row.getAttribute('data-states') || '').split(',').filter(Boolean);
+                  var transitions = (row.getAttribute('data-transitions') || '').split(',').filter(Boolean);
+                  var code = row.getAttribute('data-code') || '';
+                  selectedValidationFocusRow = row;
+                  row.classList.add('focused');
+                  row.open = true;
+                  if ((cells.length > 0 || states.length > 0 || transitions.length > 0) && typeof sketchup !== 'undefined' && sketchup.focusValidationCells) {
+                    sketchup.focusValidationCells(cells, code, states, transitions, rowId);
+                  }
+                }
+
+                function requestValidationFocusRowChange(nextRow) {
+                  if (validationFocusDeselectionInProgress) {
+                    pendingValidationFocusRow = nextRow;
+                    return;
+                  }
+                  if (!selectedValidationFocusRow) {
+                    activateValidationFocusRow(nextRow);
+                    return;
+                  }
+
+                  pendingValidationFocusRow = selectedValidationFocusRow === nextRow ? null : nextRow;
+                  validationFocusDeselectionInProgress = true;
+                  selectedValidationFocusRow = null;
+                  if (typeof sketchup !== 'undefined' && sketchup.focusValidationCells) {
+                    sketchup.focusValidationCells([], '', [], [], '');
+                  } else {
+                    window.completeValidationFocusRowDeselection();
+                  }
+                }
+
+                window.completeValidationFocusRowDeselection = function() {
+                  document.querySelectorAll('.validation-error-row.focused').forEach(function(item) {
+                    item.classList.remove('focused');
+                    item.open = false;
+                  });
+                  validationFocusDeselectionInProgress = false;
+                  var nextRow = pendingValidationFocusRow;
+                  pendingValidationFocusRow = null;
+                  activateValidationFocusRow(nextRow);
+                };
+
                 document.querySelectorAll('.validation-error-row').forEach(function(row) {
-                  row.addEventListener('click', function(event) {
+                  var summary = row.querySelector(':scope > summary');
+                  if (!summary) return;
+                  summary.addEventListener('click', function(event) {
+                    event.preventDefault();
                     event.stopPropagation();
-                    var rowId = row.getAttribute('data-row-id') || '';
-                    var cells = (row.getAttribute('data-cells') || '').split(',').filter(Boolean);
-                    var states = (row.getAttribute('data-states') || '').split(',').filter(Boolean);
-                    var transitions = (row.getAttribute('data-transitions') || '').split(',').filter(Boolean);
-                    var code = row.getAttribute('data-code') || '';
-                    document.querySelectorAll('.validation-error-row.focused').forEach(function(item) {
-                      item.classList.remove('focused');
-                    });
-                    row.classList.add('focused');
-                    if ((cells.length > 0 || states.length > 0 || transitions.length > 0) && typeof sketchup !== 'undefined' && sketchup.focusValidationCells) {
-                      sketchup.focusValidationCells(cells, code, states, transitions, rowId);
-                    }
+                    requestValidationFocusRowChange(row);
                   });
                 });
                 document.addEventListener('click', function(event) {
                   if (event.target.closest('.validation-error-row') || event.target.closest('.filter-btn')) return;
+                  requestValidationFocusRowChange(null);
+                });
+                window.clearValidationFocusSelection = function() {
+                  selectedValidationFocusRow = null;
+                  pendingValidationFocusRow = null;
+                  validationFocusDeselectionInProgress = false;
                   document.querySelectorAll('.validation-error-row.focused').forEach(function(item) {
                     item.classList.remove('focused');
+                    item.open = false;
                   });
-                  if (typeof sketchup !== 'undefined' && sketchup.focusValidationCells) {
-                    sketchup.focusValidationCells([], '', [], []);
-                  }
-                });
+                };
                 window.updateValidationFocusRow = function(payload) {
                   if (!payload || !payload.rowId) return;
                   var row = document.querySelector('[data-row-id="' + String(payload.rowId).replace(/"/g, '\\"') + '"]');
@@ -434,7 +489,7 @@ module ULOL
                   });
                 });
                 document.addEventListener('dragstart', function(event) {
-                  if (!event.target.closest('.cell-name')) {
+                  if (!event.target.closest('.cell-name, .member-value')) {
                     event.preventDefault();
                   }
                 });
@@ -454,9 +509,15 @@ module ULOL
                   var focus = selection.focusNode && selection.focusNode.nodeType === Node.ELEMENT_NODE ?
                     selection.focusNode :
                     selection.focusNode && selection.focusNode.parentElement;
-                  if ((anchor && anchor.closest('.cell-name')) && (focus && focus.closest('.cell-name'))) return;
+                  var selectableTextSelector = '.cell-name, .member-value';
+                  if ((anchor && anchor.closest(selectableTextSelector)) && (focus && focus.closest(selectableTextSelector))) return;
 
                   selection.removeAllRanges();
+                });
+                window.addEventListener('load', function() {
+                  if (typeof sketchup !== 'undefined' && sketchup.reportDomReady) {
+                    sketchup.reportDomReady();
+                  }
                 });
               </script>
             HTML
@@ -487,37 +548,76 @@ module ULOL
             text = reason.to_s
             return 'SketchUp Boolean에서 유효한 intersection group 미반환' if text.include?('NO_VALID_INTERSECTION_GROUP_RETURNED')
             return 'SketchUp Boolean에서 유효한 intersection 재현' if text.include?('REPRODUCED_AS_VALID_SKETCHUP_INTERSECTION')
+            return '체적 없이 공유 경계에서만 접촉' if text.include?('BOUNDARY_CONTACT_ONLY')
+            return 'SketchUp Boolean 교차 결과 판정 불가' if text.include?('BOOLEAN_INTERSECTION_INCONCLUSIVE')
             return '공유면 인접 거리 허용 오차 이내' if text.include?('near-coplanar shared-face')
 
             text
           end
 
           def error_item_rows_html(rows, raw_report = nil)
-            sorted = Val3dityReportSchema.sort_error_item_rows(rows)
-            sorted.each_with_index.map { |row, index| error_item_card_html(row, raw_report, Val3dityReportSchema.error_item_row_id(index)) }.join
+            Array(rows).map { |group| error_item_card_html(group, raw_report) }.join
           end
 
-          def error_item_card_html(row, raw_report = nil, row_id = nil)
-            code = row[:code].to_s
-            recheck_row = matching_error_recheck_row(row, raw_report)
+          def error_item_card_html(group, raw_report = nil)
+            code = group[:code].to_s
+            recheck_row = group[:overlap_recheck]
             distance = recheck_row ? format_report_recheck_measure(recheck_row) : ''
-            refs = Val3dityReportSchema.final_error_row_refs(row, raw_report)
-            row_id ||= Val3dityReportSchema.error_item_row_id(0)
+            refs = Val3dityReportSchema.grouped_error_row_refs(group)
+            occurrence = group[:count].to_i > 1 ? "<span class=\"occurrence-badge\">상세 #{group[:count].to_i}건</span>" : ''
             <<~HTML
-              <details class="recheck-row validation-error-row #{error_code_color_class(code)}" data-row-id="#{html_escape(row_id)}" data-code="#{html_escape(code)}" data-cells="#{html_escape(refs[:cells].join(','))}" data-states="#{html_escape(refs[:states].join(','))}" data-transitions="#{html_escape(refs[:transitions].join(','))}">
+              <details class="recheck-row validation-error-row #{error_code_color_class(code)}" data-row-id="#{html_escape(group[:id])}" data-code="#{html_escape(code)}" data-cells="#{html_escape(refs[:cells].join(','))}" data-states="#{html_escape(refs[:states].join(','))}" data-transitions="#{html_escape(refs[:transitions].join(','))}">
                 <summary>
                   <span class="code-badge #{error_code_color_class(code)}">#{html_escape(code)}</span>
                   <span class="recheck-summary-main">
-                    <span class="cell-name" title="#{html_escape(error_item_label(row))}">#{html_escape(error_item_label(row))}</span>
+                    <span class="cell-name" title="#{html_escape(group[:label])}">#{html_escape(group[:label])}</span>
+                    #{occurrence}
                   </span>
                   <span class="summary-distance">#{distance}</span>
                 </summary>
                 <div class="recheck-detail">
-                  <div class="reason">#{html_escape(row[:description])}</div>
-                  #{recheck_row ? "<div class=\"reason\">#{html_escape(compact_overlap_reason(recheck_row['reason']))}</div>" : ''}
+                  #{Array(group[:members]).each_with_index.map { |row, index| error_group_member_html(row, raw_report, index) }.join}
                 </div>
               </details>
             HTML
+          end
+
+          def error_group_member_html(row, raw_report, index)
+            recheck_row = matching_error_recheck_row(row, raw_report)
+            raw_id = row.dig(:raw, 'id') || row.dig(:raw, :id)
+            fields = [
+              ['Description', row[:description]],
+              ['Error ID', raw_id]
+            ]
+            fields.concat(overlap_member_fields(recheck_row)) if recheck_row
+            <<~HTML
+              <div class="error-member">
+                <div class="member-heading">상세 #{index + 1}</div>
+                #{fields.map { |label, value| error_member_field_html(label, value) }.join}
+              </div>
+            HTML
+          end
+
+          def error_member_field_html(label, value)
+            return '' if value.nil? || (value.respond_to?(:empty?) && value.empty?)
+
+            <<~HTML
+              <div class="member-field">
+                <span class="member-label">#{html_escape(label)}</span>
+                <span class="member-value">#{html_escape(value)}</span>
+              </div>
+            HTML
+          end
+
+          def overlap_member_fields(row)
+            [
+              ['Not suppressed reason', compact_overlap_reason(row['reason'])],
+              ['Overlap volume', report_measure_value(row['actual_overlap_volume_mm3'], 'mm³')]
+            ]
+          end
+
+          def report_measure_value(value, unit)
+            value.nil? ? nil : "#{value} #{unit}"
           end
 
           def matching_error_recheck_row(row, raw_report)
@@ -562,6 +662,10 @@ module ULOL
 
           def error_item_rows(raw_report)
             Val3dityReportSchema.error_item_rows(raw_report)
+          end
+
+          def grouped_error_item_rows(raw_report)
+            Val3dityReportSchema.grouped_error_item_rows(raw_report)
           end
 
           def error_item_label(row)

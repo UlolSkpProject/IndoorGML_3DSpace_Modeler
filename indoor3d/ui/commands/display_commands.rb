@@ -107,7 +107,7 @@ module ULOL
             menu.add_item('Edit IndoorGML') { begin_indoor_gml_editing() } unless validation_operation_running?
           end
 
-          if indoor_model.editing?() && cell_space_type_change_available?(selected_cell_spaces)
+          if indoor_model.editing?() && !validation_operation_running? && cell_space_type_change_available?(selected_cell_spaces)
             menu.add_item('Change CellSpace Type') { change_selected_cell_space_type() }
           end
         rescue StandardError => e

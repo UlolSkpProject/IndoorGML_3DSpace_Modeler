@@ -79,14 +79,22 @@ module ULOL
             dialog.execute_script(init_script)
           end
           dialog.add_action_callback('setSelectedCellSpaceClassification') do |_context, selection_value|
+            next if validation_busy?
+
             IndoorCore::Logger.puts "[IndoorGML] EditModeDialog#setSelectedCellSpaceClassification value=#{selection_value}"
             UI.start_timer(0, false) do
+              next if validation_busy?
+
               @indoor_model.set_selected_cell_space_classification(selection_value)
             end
           end
           dialog.add_action_callback('setSelectedCellSpaceStorey') do |_context, storey|
+            next if validation_busy?
+
             IndoorCore::Logger.puts "[IndoorGML] EditModeDialog#setSelectedCellSpaceStorey value=#{storey}"
             UI.start_timer(0, false) do
+              next if validation_busy?
+
               @indoor_model.set_selected_cell_space_storey(storey)
             end
           end
@@ -100,14 +108,34 @@ module ULOL
               @indoor_model.set_edit_mode_visibility_filter(selected_storeys_json, cell_types_json)
             end
           end
-          dialog.add_action_callback('convertSelectedSolidGroups') do |_context, selection_value|
+          dialog.add_action_callback('convertSelectedSolidGroups') do |_context, selection_value, storey|
+            next if validation_busy?
+
             IndoorCore::Logger.puts "[IndoorGML] EditModeDialog#convertSelectedSolidGroups value=#{selection_value}"
             UI.start_timer(0, false) do
-              @indoor_model.convert_selected_solid_groups_to_cell_spaces(selection_value)
+              next if validation_busy?
+
+              @indoor_model.convert_selected_solid_groups_to_cell_spaces(selection_value, storey)
+            end
+          end
+          dialog.add_action_callback('removeSelectedCellSpacesIndoorGmlAttributes') do |_context|
+            next if validation_busy?
+            next if @indoor_model.validation_focus_active?
+
+            IndoorCore::Logger.puts '[IndoorGML] EditModeDialog#removeSelectedCellSpacesIndoorGmlAttributes'
+            UI.start_timer(0, false) do
+              next if validation_busy?
+              next if @indoor_model.validation_focus_active?
+
+              @indoor_model.remove_selected_cell_spaces_indoor_gml_attributes
             end
           end
           dialog.add_action_callback('finishEditing') do |_context|
+            next if validation_busy?
+
             UI.start_timer(0, false) do
+              next if validation_busy?
+
               @indoor_model.request_finish_editing()
             end
           end
@@ -118,8 +146,12 @@ module ULOL
             end
           end
           dialog.add_action_callback('recheckFixModeErrors') do |_context|
+            next if validation_busy?
+
             IndoorCore::Logger.puts '[IndoorGML] EditModeDialog#recheckFixModeErrors'
             UI.start_timer(0, false) do
+              next if validation_busy?
+
               @indoor_model.recheck_validation_focus_errors()
             end
           end
@@ -158,8 +190,14 @@ module ULOL
           options = CellSpaceCategory.selection_options.map do |option|
             "{value: #{js_string(option[:value])}, label: #{js_string(option[:label])}}"
           end.join(', ')
+          range_storey_classifications = CellSpaceCategory.selection_options.filter_map do |option|
+            next unless option[:cell_type] == CellSpaceType::TRANSITION
+            next unless %w[Stair Elevator].include?(option[:category_code].to_s)
 
-          "init({classificationOptions: [#{options}], assetRoot: #{js_string(asset_root)}, overlayColors: #{overlay_colors_script}, fixMode: #{@indoor_model.validation_focus_active? ? 'true' : 'false'}, visibilityFilter: #{visibility_filter_script(@indoor_model.edit_mode_visibility_filter_snapshot)}});"
+            js_string(option[:value])
+          end.join(', ')
+
+          "init({classificationOptions: [#{options}], rangeStoreyClassifications: [#{range_storey_classifications}], assetRoot: #{js_string(asset_root)}, overlayColors: #{overlay_colors_script}, fixMode: #{@indoor_model.validation_focus_active? ? 'true' : 'false'}, validationBusy: #{validation_busy? ? 'true' : 'false'}, visibilityFilter: #{visibility_filter_script(@indoor_model.edit_mode_visibility_filter_snapshot)}});"
         end
 
         def overlay_colors_script
@@ -183,6 +221,7 @@ module ULOL
                 name: #{js_string(snapshot[:name])},
                 classification: #{snapshot[:classification].nil? ? 'null' : js_string(snapshot[:classification])},
                 classificationLocked: #{snapshot[:classification_locked] ? 'true' : 'false'},
+                validationBusy: #{validation_busy? ? 'true' : 'false'},
                 storey: #{js_string(snapshot[:storey])},
                 storeyEditable: #{snapshot[:storey_editable] ? 'true' : 'false'},
                 storeyRangeAllowed: #{snapshot[:storey_range_allowed] ? 'true' : 'false'},
@@ -229,6 +268,10 @@ module ULOL
 
         def js_string(value)
           value.to_s.inspect
+        end
+
+        def validation_busy?
+          @indoor_model.respond_to?(:validation_focus_recheck_running?) && @indoor_model.validation_focus_recheck_running?
         end
       end
     end
