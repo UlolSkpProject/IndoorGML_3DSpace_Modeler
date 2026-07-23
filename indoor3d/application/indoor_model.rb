@@ -21,7 +21,6 @@ module ULOL
         require_relative 'indoor_model/observer_routing.rb'
         require_relative 'indoor_model/entity_relocation.rb'
         require_relative 'indoor_model/primal_normalization.rb'
-        require_relative 'indoor_model/local_vertex_normalization.rb'
         require_relative 'indoor_model/editor_control.rb'
 
         include RuntimeSupport
@@ -31,7 +30,6 @@ module ULOL
         include ObserverRouting
         include EntityRelocation
         include PrimalNormalization
-        include LocalVertexNormalization
         include EditorControl
 
         attr_reader :cell_spaces
