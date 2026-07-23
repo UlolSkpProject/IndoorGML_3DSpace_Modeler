@@ -5,21 +5,19 @@ module ULOL
     module IndoorCore
 
       module CellSpaceCategory
-        DEFAULT_CODE_SPACE = 'urn:ogc:def:nil:OGC::IndoorGML:AnnexD'
-
         DEFAULTS = {
           CellSpaceType::GENERAL => [
-            { code: 'Room', label: 'Room', code_space: DEFAULT_CODE_SPACE, standard: true }
+            { code: 'Room', label: 'Room', code_space: nil, standard: false }
           ],
           CellSpaceType::TRANSITION => [
-            { code: 'Stair',     label: 'Stair',     code_space: DEFAULT_CODE_SPACE, standard: true },
-            { code: 'Elevator',  label: 'Elevator',  code_space: DEFAULT_CODE_SPACE, standard: true },
+            { code: 'Stair',     label: 'Stair',     code_space: nil, standard: false },
+            { code: 'Elevator',  label: 'Elevator',  code_space: nil, standard: false },
           ],
           CellSpaceType::CONNECTION => [
-            { code: 'Door', label: 'Door', code_space: DEFAULT_CODE_SPACE, standard: true }
+            { code: 'Door', label: 'Door', code_space: nil, standard: false }
           ],
           CellSpaceType::ANCHOR => [
-            { code: 'ExteriorDoor', label: 'Exterior Door', code_space: DEFAULT_CODE_SPACE, standard: true }
+            { code: 'ExteriorDoor', label: 'Exterior Door', code_space: nil, standard: false }
           ],
           CellSpaceType::GEOMETRY_ONLY => [
             { code: 'Window', label: 'Window', code_space: nil, standard: false }

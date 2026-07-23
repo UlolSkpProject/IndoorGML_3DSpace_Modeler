@@ -13,6 +13,7 @@ module ULOL
 
         require_relative 'cell_space_lifecycle_service'
         require_relative 'cell_space_conversion'
+        require_relative 'topology_coordinator'
         require_relative 'indoor_model/runtime_support.rb'
         require_relative 'indoor_model/scene_groups.rb'
         require_relative 'indoor_model/feature_lifecycle.rb'
@@ -87,8 +88,6 @@ module ULOL
           @selection_observer = Indoor3DGmlSelectionObserver.new(self)
           @cell_space_observed_ids = {}
           @cell_space_change_snapshots = {}
-          @dirty_cell_space_pids = {}
-          @cell_space_sync_scheduled = false
           @space_features_observed_ids = {}
           @space_features_change_snapshots = {}
           @selection_observed_model_id = nil
@@ -111,6 +110,7 @@ module ULOL
             transition_builder: method(:create_or_update_transition_for_pair),
             transition_eraser: method(:erase_transition_for_pair_key)
           )
+          @topology_coordinator = TopologyCoordinator.new(adjacency_service: @adjacency_service)
           @runtime_restorer = RuntimeRestorer.new(
             registry: @feature_registry,
             serializer: @attribute_serializer,
@@ -123,6 +123,8 @@ module ULOL
           )
           @editor_session = EditorSession.new(self)
           @finishing_editing = false
+          @validation_focus_recheck_running = false
+          @validation_focus_recheck_state = nil
         end
       end
 

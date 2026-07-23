@@ -6,12 +6,16 @@ module ULOL
       class IndoorModel
         module FeatureLifecycle
           def convert_single_group_to_cell_space(sketchup_group, cell_type = CellSpaceType::GENERAL, category_code = nil)
-            with_indoor_model_operation('IndoorGML Convert Group to CellSpace') do
-              cell_space_lifecycle_service.create_from_group(
-                sketchup_group,
-                cell_type: cell_type,
-                category_code: category_code
-              )
+            with_validation_focus_mutation_batch do
+              with_indoor_model_operation('IndoorGML Convert Group to CellSpace') do
+                cell_space = cell_space_lifecycle_service.create_from_group(
+                  sketchup_group,
+                  cell_type: cell_type,
+                  category_code: category_code
+                )
+                flush_validation_focus_row_topology_sync
+                cell_space
+              end
             end
           end
 
@@ -31,7 +35,7 @@ module ULOL
                   storey: storey
                 )
               end,
-              synchronize_all: proc { @adjacency_service.synchronize_all },
+              synchronize_all: proc { synchronize_topology_after_bulk_conversion },
               apply_lock_policy: proc { apply_indoor_lock_policy },
               runtime_snapshot: proc { bulk_conversion_runtime_snapshot },
               runtime_restore: proc { |snapshot| restore_bulk_conversion_runtime(snapshot) },
@@ -44,7 +48,7 @@ module ULOL
               preserve_source: preserve_source,
               operation_name: operation_name
             )
-            service.call
+            with_validation_focus_mutation_batch { service.call }
           end
 
           def change_cell_space_type(sketchup_group, cell_type, category_code = nil)
@@ -129,11 +133,13 @@ module ULOL
           def erase_cell_space(cell_space, erase_sketchup_group: true)
             return if cell_space.nil?
 
-            erase_guard do
-              cell_space_lifecycle_service.erase(
-                cell_space,
-                erase_sketchup_group: erase_sketchup_group
-              )
+            with_validation_focus_mutation_batch do
+              erase_guard do
+                cell_space_lifecycle_service.erase(
+                  cell_space,
+                  erase_sketchup_group: erase_sketchup_group
+                )
+              end
             end
           end
 
@@ -145,6 +151,7 @@ module ULOL
                 converted_group: method(:converted_group?),
                 type_resolver: IndoorCore.method(:resolve_cell_space_type_and_category),
                 geometry_preparer: Utils::Geometry.method(:prepare_cell_space_source_group!),
+                tag_storey_resolver: IndoorCore.method(:tag_cell_space_storey),
                 storey_resolver: IndoorCore.method(:resolve_cell_space_storey),
                 storey_value_resolver: IndoorCore.method(:resolve_cell_space_storey_value)
               ),
@@ -186,8 +193,19 @@ module ULOL
           end
 
           def clear_bulk_dirty_topology
-            @dirty_cell_space_pids.clear
-            @cell_space_sync_scheduled = false
+            dirty_topology_queue.clear
+            dirty_topology_queue.unschedule!
+          end
+
+          def synchronize_topology_after_bulk_conversion
+            if validation_focus_row_local_topology_sync?
+              synchronize_validation_focus_row_topology
+              flush_validation_focus_row_topology_sync || {}
+            else
+              metrics = topology_coordinator.synchronize_all
+              clear_validation_focus_topology_dirty
+              metrics
+            end
           end
 
           def tag_cell_space_type_change_target(cell_space, cell_type, category_code)
@@ -360,8 +378,7 @@ module ULOL
               scene_group_guard: @scene_group_guard.respond_to?(:snapshot) ? @scene_group_guard.snapshot : nil,
               cell_space_change_snapshots: Hash(@cell_space_change_snapshots).dup,
               space_features_change_snapshots: Hash(@space_features_change_snapshots).dup,
-              dirty_cell_space_pids: Hash(@dirty_cell_space_pids).dup,
-              cell_space_sync_scheduled: @cell_space_sync_scheduled,
+              topology: topology_coordinator.snapshot,
               cell_space_observed_ids: Hash(@cell_space_observed_ids).dup,
               space_features_observed_ids: Hash(@space_features_observed_ids).dup,
               entities_observed_ids: Hash(@entities_observed_ids).dup,
@@ -380,8 +397,7 @@ module ULOL
             @scene_group_guard.restore!(snapshot[:scene_group_guard]) if snapshot[:scene_group_guard] && @scene_group_guard.respond_to?(:restore!)
             @cell_space_change_snapshots = Hash(snapshot[:cell_space_change_snapshots]).dup
             @space_features_change_snapshots = Hash(snapshot[:space_features_change_snapshots]).dup
-            @dirty_cell_space_pids = Hash(snapshot[:dirty_cell_space_pids]).dup
-            @cell_space_sync_scheduled = snapshot[:cell_space_sync_scheduled]
+            restore_topology_snapshot(snapshot)
             @cell_space_observed_ids = Hash(snapshot[:cell_space_observed_ids]).dup
             @space_features_observed_ids = Hash(snapshot[:space_features_observed_ids]).dup
             @entities_observed_ids = Hash(snapshot[:entities_observed_ids]).dup
@@ -689,25 +705,38 @@ module ULOL
             group = cell_space.sketchup_group
             material = Utils::Materials.cell_space(cell_space.cell_type, cell_space.category_code)
 
-            group.material = nil if group.respond_to?(:material=)
-            return if material.nil?
-
+            group.material = material if group.respond_to?(:material=)
             group.entities.grep(Sketchup::Face) do |face|
-              apply_cell_space_face_material(face, material)
+              clear_cell_space_face_material(face)
             end
           end
 
-          def apply_cell_space_face_material(face, material)
-            begin
-              face.material = material
-              face.back_material = material if face.respond_to?(:back_material=)
-            rescue StandardError => e
-              IndoorCore::Logger.puts "[IndoorGML] CellSpace face material failed: #{e.class}: #{e.message}"
+          def clear_cell_space_materials(group)
+            return false unless group&.valid?
+
+            group.material = nil if group.respond_to?(:material=)
+            entities = if group.respond_to?(:definition) && group.definition&.valid?
+                         group.definition.entities
+                       elsif group.respond_to?(:entities)
+                         group.entities
+                       end
+            Array(entities&.grep(Sketchup::Face)).each do |face|
+              clear_cell_space_face_material(face)
             end
+            true
+          end
+
+          def clear_cell_space_face_material(face)
+            face.material = nil if face.respond_to?(:material=)
+            face.back_material = nil if face.respond_to?(:back_material=)
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] CellSpace face material cleanup failed: #{e.class}: #{e.message}"
           end
 
           def register_state(state)
-            @feature_registry.add_state(state)
+            result = @feature_registry.add_state(state)
+            invalidate_overlay_transition_points if respond_to?(:invalidate_overlay_transition_points)
+            result
           end
 
           def unregister_cell_space(cell_space)
@@ -721,15 +750,19 @@ module ULOL
           def unregister_state(state)
             return if state.nil?
 
-            @feature_registry.remove_state(state)
+            result = @feature_registry.remove_state(state)
+            invalidate_overlay_transition_points if respond_to?(:invalidate_overlay_transition_points)
+            result
           end
 
           def validation_focus_highlight_tracking_active?
-            respond_to?(:validation_focus_highlight_active?) &&
+            respond_to?(:validation_focus_highlight_row_id) &&
               respond_to?(:add_validation_focus_highlight_cell) &&
               respond_to?(:remove_validation_focus_highlight_cell) &&
-              validation_focus_highlight_active? &&
-              !guard_active?(:@refreshing_runtime)
+              !validation_focus_highlight_row_id.to_s.empty? &&
+              !guard_active?(:@refreshing_runtime) &&
+              !guard_active?(:@transaction_reconciliation) &&
+              !(respond_to?(:transaction_replay_pending?, true) && transaction_replay_pending?)
           rescue StandardError
             false
           end

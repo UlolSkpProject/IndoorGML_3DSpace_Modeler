@@ -4,7 +4,7 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class TransitionOverlayRenderer
-        DUAL_TRANSITION_COLOR = Sketchup::Color.new(255, 255, 255, 220)
+        DUAL_TRANSITION_COLOR = Sketchup::Color.new(255, 255, 255, 125)
         TRANSITION_MIN_LINE_WIDTH_PIXELS = 2
         TRANSITION_LINE_WIDTH_PIXELS = 3
         TRANSITION_MAX_LINE_WIDTH_PIXELS = 4

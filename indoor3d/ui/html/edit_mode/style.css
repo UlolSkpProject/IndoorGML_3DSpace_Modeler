@@ -362,6 +362,10 @@ input[type="number"]:focus {
   border-top: 1px solid var(--border);
 }
 
+.solid-storey-fields {
+  margin-top: 11px;
+}
+
 .storey-range {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 38px 14px minmax(0, 1fr) 38px;
@@ -375,7 +379,9 @@ input[type="number"]:focus {
 
 .storey-fields.is-single-storey .storey-separator,
 .storey-fields.is-single-storey #storeyToKind,
-.storey-fields.is-single-storey #storeyToLevel {
+.storey-fields.is-single-storey #storeyToLevel,
+.storey-fields.is-single-storey #solidStoreyToKind,
+.storey-fields.is-single-storey #solidStoreyToLevel {
   display: none;
 }
 
@@ -490,6 +496,11 @@ button {
   border: 1px solid #7a2e2a;
   background: #351918;
   color: #f97066;
+}
+
+.cell-demote-button {
+  margin-top: 0;
+  margin-bottom: 12px;
 }
 
 .command:hover {

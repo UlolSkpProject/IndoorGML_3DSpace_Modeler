@@ -8,27 +8,57 @@ module ULOL
           private
 
           def normalize_primal_children_for_finish
+            normalize_primal_children(context: :finish)
+          end
+
+          def normalize_primal_children_for_initial_load
+            normalize_primal_children(context: :initial_load)
+          end
+
+          def normalize_primal_children(context:)
             return unless @primal_group&.valid?
 
-            with_indoor_model_operation('IndoorGML Normalize Primal Children On Finish', transparent: true) do
+            operation_name = if context == :initial_load
+                               'IndoorGML Normalize Primal Children On Load'
+                             else
+                               'IndoorGML Normalize Primal Children On Finish'
+                             end
+            with_indoor_model_operation(operation_name, transparent: true) do
               with_guard_flag(:@relocating_entity) do
                 raw_entities = []
                 @primal_group.entities.to_a.each do |entity|
-                  normalize_primal_child_for_finish(entity, raw_entities)
+                  normalize_primal_child_safely(entity, raw_entities, context: context)
                 end
                 move_raw_primal_entities_to_root(raw_entities)
               end
-              # refresh_runtime_data
-              Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
+              model = @model || Sketchup.active_model
+              model.active_view.invalidate if model&.active_view
             end
           rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] Primal children finish normalize failed: #{e.class}: #{e.message}"
+            IndoorCore::Logger.puts "[IndoorGML] Primal children normalize failed context=#{context}: #{e.class}: #{e.message}"
           end
 
-          def normalize_primal_child_for_finish(entity, raw_entities)
+          def normalize_primal_child_safely(entity, raw_entities, context:)
+            normalize_primal_child(entity, raw_entities)
+          rescue StandardError => e
+            entity_id = entity.entityID if entity.respond_to?(:entityID)
+            IndoorCore::Logger.puts "[IndoorGML] Primal child normalize failed context=#{context} entity_id=#{entity_id}: #{e.class}: #{e.message}"
+          end
+
+          def normalize_primal_child(entity, raw_entities)
             return unless entity&.valid?
             return if space_features_origin_point?(entity)
-            return if indoor_feature(entity) == 'CellSpace'
+            if indoor_feature(entity) == 'CellSpace'
+              return if solid_primal_cell_space_entity?(entity)
+
+              demote_non_solid_cell_space_entity(entity)
+              if entity.respond_to?(:definition) && entity.respond_to?(:transformation)
+                normalize_primal_container_without_operation(entity)
+              else
+                raw_entities << entity
+              end
+              return
+            end
             return if auto_convert_tagged_primal_entity(entity)
 
             if entity.respond_to?(:definition) && entity.respond_to?(:transformation)
@@ -36,6 +66,28 @@ module ULOL
             else
               raw_entities << entity
             end
+          end
+
+          def solid_primal_cell_space_entity?(entity)
+            entity.respond_to?(:manifold?) && entity.manifold? == true
+          rescue StandardError
+            false
+          end
+
+          def demote_non_solid_cell_space_entity(entity)
+            cell_space = find_cell_space_for_entity(entity) if respond_to?(:find_cell_space_for_entity, true)
+            if cell_space
+              erase_transitions_for_state(cell_space.duality_state) if respond_to?(:erase_transitions_for_state, true)
+              erase_adjacency_for_cell_space(cell_space) if respond_to?(:erase_adjacency_for_cell_space, true)
+              unregister_state(cell_space.duality_state) if respond_to?(:unregister_state, true)
+              unregister_cell_space(cell_space) if respond_to?(:unregister_cell_space, true)
+            end
+            @attribute_serializer&.clear_indoor_gml_attributes(entity)
+            IndoorCore::Logger.puts "[IndoorGML] Non-solid CellSpace demoted to normal group: entity_id=#{entity.entityID if entity.respond_to?(:entityID)}"
+            true
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Non-solid CellSpace demotion failed: #{e.class}: #{e.message}"
+            false
           end
 
           def normalize_primal_container_without_operation(container)
@@ -98,7 +150,7 @@ module ULOL
             copy = copy.to_group if container.is_a?(Sketchup::Group) && copy.respond_to?(:to_group)
             copy.make_unique if container.is_a?(Sketchup::Group) && copy.respond_to?(:make_unique)
             copy.name = container.name if copy.respond_to?(:name=) && container.respond_to?(:name)
-            copy.material = container.material if copy.respond_to?(:material=) && container.respond_to?(:material)
+            copy.material = nil if copy.respond_to?(:material=)
             copy.layer = container.layer if copy.respond_to?(:layer=) && container.respond_to?(:layer)
             copy.visible = container.visible? if copy.respond_to?(:visible=) && container.respond_to?(:visible?)
             container.erase! if container.valid?

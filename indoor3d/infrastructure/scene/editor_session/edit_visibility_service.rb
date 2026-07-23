@@ -181,10 +181,6 @@ module ULOL
             model = Sketchup.active_model
             return with_visibility_observer_suppression { yield } unless model
 
-            if model.respond_to?(:active_operation_name) && model.active_operation_name.to_s.length.positive?
-              return with_visibility_observer_suppression { yield }
-            end
-
             operation_started = false
             begin
               result = nil

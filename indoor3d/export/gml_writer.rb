@@ -29,6 +29,7 @@ module ULOL
           end
 
           def to_xml
+            reset_gml_id_mapping
             doc = REXML::Document.new
             doc << REXML::XMLDecl.new('1.0', 'UTF-8')
             root = doc.add_element('core:IndoorFeatures')
@@ -126,9 +127,9 @@ module ULOL
               state_element.add_element('gml:name').text = state_export_name(state)
               duality = state_element.add_element('core:duality')
               duality.add_attribute('xlink:href', internal_href(cell_gml_id(cell_space)))
-              state_connected_transition_ids(state).each do |transition_id|
+              transitions_for_state(state).each do |transition|
                 connects = state_element.add_element('core:connects')
-                connects.add_attribute('xlink:href', internal_href(transition_id))
+                connects.add_attribute('xlink:href', internal_href(transition_gml_id(transition)))
               end
               geometry = state_element.add_element('core:geometry')
               point = geometry.add_element('gml:Point')
@@ -207,15 +208,15 @@ module ULOL
           end
 
           def cell_gml_id(cell_space)
-            "cell_#{safe_id(cell_space.id)}"
+            mapped_feature_gml_id(:cell, cell_space, 'cell')
           end
 
           def state_gml_id(state)
-            "state_#{safe_id(state.id)}"
+            mapped_feature_gml_id(:state, state, 'state')
           end
 
           def transition_gml_id(transition)
-            "transition_#{safe_id(transition.id)}"
+            mapped_feature_gml_id(:transition, transition, 'transition')
           end
 
           def internal_href(gml_id)
@@ -224,6 +225,34 @@ module ULOL
 
           def safe_id(value)
             value.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')
+          end
+
+          def reset_gml_id_mapping
+            @feature_gml_ids = {}
+            @used_feature_gml_ids = {}
+          end
+
+          def mapped_feature_gml_id(kind, feature, prefix)
+            key = [kind, feature&.object_id]
+            return @feature_gml_ids[key] if @feature_gml_ids.key?(key)
+
+            normalized = safe_id(feature&.id)
+            normalized = 'missing' if normalized.empty?
+            base = "#{prefix}_#{normalized}"
+            candidate = base
+            suffix = 2
+            while @used_feature_gml_ids[candidate]
+              candidate = "#{base}_#{suffix}"
+              suffix += 1
+            end
+            @used_feature_gml_ids[candidate] = true
+            @feature_gml_ids[key] = candidate
+          end
+
+          def transitions_for_state(state)
+            Array(@snapshot.transitions).select do |transition|
+              transition.state1.equal?(state) || transition.state2.equal?(state)
+            end
           end
 
           def cell_space_export_name(cell_space)
@@ -267,13 +296,6 @@ module ULOL
             element.text = value.to_s
           end
 
-          def state_connected_transition_ids(state)
-            @snapshot.transitions.filter_map do |transition|
-              next unless transition.state1 == state || transition.state2 == state
-
-              transition_gml_id(transition)
-            end
-          end
         end
       end
     end

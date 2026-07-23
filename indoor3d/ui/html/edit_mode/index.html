@@ -58,6 +58,42 @@
       <label class="field-label" for="solidClassification">CellSpace 타입</label>
       <select id="solidClassification"></select>
 
+      <div id="solidStoreyFields" class="storey-fields solid-storey-fields">
+        <div class="field-label">층 범위</div>
+
+        <div class="storey-range">
+          <select id="solidStoreyFromKind" aria-label="생성 시작 층 구분">
+            <option value="F">지상</option>
+            <option value="B">지하</option>
+          </select>
+          <input
+            id="solidStoreyFromLevel"
+            class="storey-number"
+            type="number"
+            min="1"
+            max="99"
+            value="1"
+            aria-label="생성 시작 층"
+          >
+
+          <span class="storey-separator">~</span>
+
+          <select id="solidStoreyToKind" aria-label="생성 종료 층 구분">
+            <option value="F">지상</option>
+            <option value="B">지하</option>
+          </select>
+          <input
+            id="solidStoreyToLevel"
+            class="storey-number"
+            type="number"
+            min="1"
+            max="99"
+            value="1"
+            aria-label="생성 종료 층"
+          >
+        </div>
+      </div>
+
       <button id="convertSelected" class="command" type="button">
         <img id="convertIcon" alt="">
         <span>선택한 Solid Group을 CellSpace로 변환</span>
@@ -144,6 +180,10 @@
             </button>
           </div>
         </section>
+
+        <button id="removeIndoorGmlAttributes" class="danger cell-demote-button" type="button">
+          선택한 CellSpace의 IndoorGML 속성 제거
+        </button>
       </div>
     </section>
 

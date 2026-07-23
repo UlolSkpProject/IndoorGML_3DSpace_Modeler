@@ -15,6 +15,7 @@ module ULOL
           MULTI_FOCUS_RENDERING_OPTION_KEYS = %w[HideRestOfModel].freeze
 
           def initialize
+            @active = false
             @cell_ids = nil
             @focus_rows = {}
             @highlight_cell_ids = nil
@@ -26,11 +27,16 @@ module ULOL
           attr_reader :highlight_code
           attr_reader :highlight_row_id
 
+          def highlighted_row_id
+            @highlight_row_id
+          end
+
           def begin(cell_gml_ids)
             ids = normalize_ids(cell_gml_ids)
             return false if ids.empty?
 
             @cell_ids = id_hash(ids)
+            @active = true
             true
           end
 
@@ -46,7 +52,8 @@ module ULOL
                 states: Array(row[:states]).map(&:to_s),
                 transitions: Array(row[:transitions]).map(&:to_s),
                 focus_ids: focus_ids,
-                code: row[:code].to_s
+                code: row[:code].to_s,
+                geometry_refs: duplicate_geometry_refs(row[:geometry_refs])
               }
             end
             rebuild_focus_ids_from_rows if active? && !@focus_rows.empty?
@@ -54,7 +61,7 @@ module ULOL
           end
 
           def active?
-            @cell_ids.is_a?(Hash) && !@cell_ids.empty?
+            @active == true
           end
 
           def focus_id_count
@@ -80,7 +87,7 @@ module ULOL
             []
           end
 
-          def set_highlight(cell_gml_ids, code = nil, row_id: nil, row_cells: nil, states: nil, transitions: nil)
+          def set_highlight(cell_gml_ids, code = nil, row_id: nil, row_cells: nil, states: nil, transitions: nil, geometry_refs: nil)
             ids = normalize_ids(cell_gml_ids)
             @highlight_cell_ids = ids.empty? ? nil : id_hash(ids)
             @highlight_code = code.to_s
@@ -91,7 +98,8 @@ module ULOL
               states: states,
               transitions: transitions,
               focus_ids: ids,
-              code: code
+              code: code,
+              geometry_refs: geometry_refs
             ) if @highlight_row_id
             true
           end
@@ -119,6 +127,25 @@ module ULOL
 
               row[:cells] = cells.reject { |cell| cell == remove_id }
               row[:focus_ids] = normalize_ids(row[:cells])
+              payloads << focus_row_payload(row_id, row)
+            end
+            sync_highlight_ids_from_row
+            rebuild_focus_ids_from_rows
+            payloads
+          end
+
+          def reconcile_cells(valid_cell_ids)
+            valid_ids = normalize_cell_refs(valid_cell_ids).each_with_object({}) do |cell_id, ids|
+              ids[cell_id] = true
+            end
+            payloads = []
+            @focus_rows.each do |row_id, row|
+              cells = Array(row[:cells])
+              retained = cells.select { |cell_id| valid_ids[cell_id] }
+              next if retained == cells
+
+              row[:cells] = retained
+              row[:focus_ids] = normalize_ids(retained)
               payloads << focus_row_payload(row_id, row)
             end
             sync_highlight_ids_from_row
@@ -170,6 +197,7 @@ module ULOL
           end
 
           def clear
+            @active = false
             @cell_ids = nil
             @focus_rows = {}
             @highlight_cell_ids = nil
@@ -223,6 +251,49 @@ module ULOL
             cell_gml_ids(cell_space).first
           end
 
+          def focus_row(row_id)
+            normalized_row_id = row_id.to_s
+            return nil if normalized_row_id.empty?
+
+            row = @focus_rows && @focus_rows[normalized_row_id]
+            row ? focus_row_payload(normalized_row_id, row) : nil
+          end
+
+          def highlighted_row_cells
+            row = focus_row(@highlight_row_id)
+            row ? row[:cells] : []
+          end
+
+          def highlighted_row_focus_ids
+            row = focus_row(@highlight_row_id)
+            row ? row[:focus_ids] : []
+          end
+
+          def highlighted_row_include_cell?(cell_id)
+            highlighted_row_cells.include?(normalize_cell_ref(cell_id))
+          end
+
+          def snapshot
+            {
+              active: @active == true,
+              cell_ids: duplicate_hash(@cell_ids),
+              focus_rows: duplicate_focus_rows(@focus_rows),
+              highlight_cell_ids: duplicate_hash(@highlight_cell_ids),
+              highlight_code: @highlight_code,
+              highlight_row_id: @highlight_row_id
+            }
+          end
+
+          def restore!(snapshot)
+            @active = snapshot.key?(:active) ? snapshot[:active] == true : !snapshot[:cell_ids].nil?
+            @cell_ids = duplicate_hash(snapshot[:cell_ids])
+            @focus_rows = duplicate_focus_rows(snapshot[:focus_rows])
+            @highlight_cell_ids = duplicate_hash(snapshot[:highlight_cell_ids])
+            @highlight_code = snapshot[:highlight_code]
+            @highlight_row_id = snapshot[:highlight_row_id]
+            true
+          end
+
           private
 
           def normalize_ids(values)
@@ -259,7 +330,7 @@ module ULOL
             safe_id.start_with?('cell_') ? safe_id.sub(/\Acell_/, '') : safe_id
           end
 
-          def upsert_focus_row(row_id, cells: nil, states: nil, transitions: nil, focus_ids: nil, code: nil)
+          def upsert_focus_row(row_id, cells: nil, states: nil, transitions: nil, focus_ids: nil, code: nil, geometry_refs: nil)
             return false if row_id.to_s.empty?
 
             row = (@focus_rows ||= {})[row_id] ||= {
@@ -267,19 +338,21 @@ module ULOL
               states: [],
               transitions: [],
               focus_ids: [],
-              code: ''
+              code: '',
+              geometry_refs: { faces: [] }
             }
             row[:cells] = normalize_cell_refs(cells) unless cells.nil?
             row[:states] = Array(states).map(&:to_s) unless states.nil?
             row[:transitions] = Array(transitions).map(&:to_s) unless transitions.nil?
             row[:focus_ids] = normalize_ids(focus_ids || row[:cells])
             row[:code] = code.to_s unless code.nil?
+            row[:geometry_refs] = duplicate_geometry_refs(geometry_refs) unless geometry_refs.nil?
             rebuild_focus_ids_from_rows
             true
           end
 
           def update_highlight_row_cells(add: nil, remove: nil)
-            return nil unless active? && @highlight_row_id
+            return nil unless @highlight_row_id
 
             row = @focus_rows && @focus_rows[@highlight_row_id]
             return nil unless row
@@ -315,6 +388,54 @@ module ULOL
             true
           end
 
+          def duplicate_hash(value)
+            value.is_a?(Hash) ? value.dup : value
+          end
+
+          def duplicate_geometry_refs(value)
+            refs = value.is_a?(Hash) ? value : {}
+            faces = refs[:faces] || refs['faces']
+            overlap = refs[:overlap_recheck] || refs['overlap_recheck']
+            {
+              faces: Array(faces).filter_map do |face|
+                next unless face.is_a?(Hash)
+
+                cell_id = face[:cell_id] || face['cell_id']
+                face_index = face[:face_index] || face['face_index']
+                next if cell_id.to_s.empty? || face_index.nil?
+
+                { cell_id: cell_id.to_s, face_index: face_index.to_i }
+              end,
+              overlap_recheck: duplicate_overlap_recheck(overlap)
+            }
+          end
+
+          def duplicate_overlap_recheck(value)
+            return nil unless value.is_a?(Hash)
+
+            {
+              cells: Array(value[:cells] || value['cells']).map(&:to_s),
+              tolerated: value[:tolerated] == true || value['tolerated'] == true,
+              status: (value[:status] || value['status']).to_s,
+              reason: (value[:reason] || value['reason']).to_s,
+              actual_overlap_volume_mm3: value[:actual_overlap_volume_mm3] ||
+                value['actual_overlap_volume_mm3']
+            }
+          end
+
+          def duplicate_focus_rows(rows)
+            Hash(rows).each_with_object({}) do |(row_id, row), copy|
+              copy[row_id] = {
+                cells: Array(row[:cells]).dup,
+                states: Array(row[:states]).dup,
+                transitions: Array(row[:transitions]).dup,
+                focus_ids: Array(row[:focus_ids]).dup,
+                code: row[:code].to_s,
+                geometry_refs: duplicate_geometry_refs(row[:geometry_refs])
+              }
+            end
+          end
+
           def focus_row_payload(row_id, row)
             cells = Array(row[:cells]).dup
             {
@@ -324,6 +445,7 @@ module ULOL
               transitions: Array(row[:transitions]).dup,
               focus_ids: Array(row[:focus_ids]).dup,
               code: row[:code].to_s,
+              geometry_refs: duplicate_geometry_refs(row[:geometry_refs]),
               label: focus_row_label(cells)
             }
           end

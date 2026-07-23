@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 require 'fileutils'
+require 'tmpdir'
 
+require_relative 'atomic_file_writer'
 require_relative 'export_snapshot'
 require_relative 'gml_writer'
 
@@ -35,7 +37,7 @@ module ULOL
               output_path = File.expand_path(output_path)
               FileUtils.mkdir_p(File.dirname(output_path))
               xml = measure_export_step('build XML document') { document }
-              measure_export_step('write GML file') { File.write(output_path, xml) }
+              measure_export_step('write GML file') { AtomicFileWriter.write(output_path, xml) }
               @export_total_elapsed = monotonic_time - export_started_at
               log_export_timing_summary
               output_path
@@ -43,11 +45,11 @@ module ULOL
           end
 
           def self.output_root
-            File.expand_path('../../../../tmp/indoorgml', __dir__)
+            File.join(Dir.tmpdir, 'ulol', 'indoorgml')
           end
 
           def self.default_temp_gml_path
-            File.join(output_root, 'temp.gml')
+            File.join(output_root, "temp-#{$$}.gml")
           end
 
           private

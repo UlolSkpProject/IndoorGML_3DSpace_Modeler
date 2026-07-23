@@ -8,7 +8,6 @@ require_relative 'val3dity_process_adapter'
 require_relative 'val3dity_report_schema'
 require_relative 'val3dity_report_renderer'
 require_relative 'val3dity_overlap_recheck_policy'
-require_relative 'val3dity_exported_solid_snapshot_reader'
 require_relative 'val3dity_overlap_geometry_rechecker'
 require_relative 'val3dity_run_orchestration'
 
@@ -25,7 +24,6 @@ module ULOL
           STRICT_OVERLAP_TOL     = -1
           OVERLAP_RECHECK_TOLERANCE = Utils::Geometry::VALIDATION_TOLERANCE
           OVERLAP_RECHECK_TOLERANCE_MM = OVERLAP_RECHECK_TOLERANCE * 25.4
-          OVERLAP_RECHECK_NUMERIC_EPSILON = OVERLAP_RECHECK_TOLERANCE * 0.01
 
           attr_reader :report_json_path, :report_html_path
 
@@ -522,7 +520,7 @@ module ULOL
               return {
                 tolerated: true,
                 status: 'suppressed',
-                reason: 'NO_VALID_INTERSECTION_GROUP_RETURNED',
+                reason: intersection[:reason] || 'NO_VALID_INTERSECTION_GROUP_RETURNED',
                 candidate: overlap_geometry_rechecker.best_candidate(analysis[:adjacency_candidates], 701),
                 actual_overlap_volume: 0.0,
                 intersection_component_count: 0,
@@ -563,12 +561,10 @@ module ULOL
           end
 
           def overlap_geometry_rechecker
+            indoor_model = @indoor_model || IndoorModel.current
             @overlap_geometry_rechecker ||= Val3dityOverlapGeometryRechecker.new(
-              snapshot_reader: Val3dityExportedSolidSnapshotReader.new(
-                @gml_path,
-                numeric_epsilon: OVERLAP_RECHECK_NUMERIC_EPSILON
-              ),
-              model: @model,
+              indoor_model: indoor_model,
+              model: @model || indoor_model&.model,
               tolerance: OVERLAP_RECHECK_TOLERANCE,
               logger: IndoorCore::Logger
             )

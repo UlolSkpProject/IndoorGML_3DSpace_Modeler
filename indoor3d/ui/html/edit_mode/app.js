@@ -17,6 +17,11 @@ var recheckErrorsButton = document.getElementById('recheckErrors');
 var solidCount = document.getElementById('solidCount');
 var solidClassification = document.getElementById('solidClassification');
 var convertSelectedButton = document.getElementById('convertSelected');
+var solidStoreyFields = document.getElementById('solidStoreyFields');
+var solidStoreyFromKind = document.getElementById('solidStoreyFromKind');
+var solidStoreyFromLevel = document.getElementById('solidStoreyFromLevel');
+var solidStoreyToKind = document.getElementById('solidStoreyToKind');
+var solidStoreyToLevel = document.getElementById('solidStoreyToLevel');
 
 var singleCellInfo = document.getElementById('singleCellInfo');
 var multiCellInfo = document.getElementById('multiCellInfo');
@@ -34,6 +39,7 @@ var storeyToLevel = document.getElementById('storeyToLevel');
 
 var selectedClassification = document.getElementById('selectedClassification');
 var changeTypeButton = document.getElementById('changeType');
+var removeIndoorGmlAttributesButton = document.getElementById('removeIndoorGmlAttributes');
 
 var cellTypeCounts = document.getElementById('cellTypeCounts');
 var stateCount = document.getElementById('stateCount');
@@ -42,7 +48,10 @@ var totalTransitionCount = document.getElementById('totalTransitionCount');
 var currentMode = null;
 var currentSelectionKey = null;
 var fixMode = false;
+var validationBusy = false;
 var currentStoreyRangeAllowed = false;
+var currentSolidStoreyRangeAllowed = false;
+var rangeStoreyClassifications = [];
 var suppressFilterEvents = false;
 var currentVisibilityFilter = {
   storeyOptions: [],
@@ -390,9 +399,45 @@ function setStorey(value, rangeAllowed) {
   storeyFromLevel.value = parsed.from.level;
   storeyToKind.value = currentStoreyRangeAllowed ? parsed.to.kind : parsed.from.kind;
   storeyToLevel.value = currentStoreyRangeAllowed ? parsed.to.level : parsed.from.level;
-  setControlLocked([storeyToKind, storeyToLevel], !currentStoreyRangeAllowed);
+  setControlLocked([storeyFromKind, storeyFromLevel], validationBusy);
+  setControlLocked([storeyToKind, storeyToLevel], validationBusy || !currentStoreyRangeAllowed);
   storeyFields.classList.toggle('is-single-storey', !currentStoreyRangeAllowed);
   show(storeyFields);
+}
+
+function composeSolidStorey() {
+  clampStoreyLevel(solidStoreyFromLevel);
+  clampStoreyLevel(solidStoreyToLevel);
+
+  var from = solidStoreyFromKind.value + padLevel(solidStoreyFromLevel.value);
+  if (!currentSolidStoreyRangeAllowed) {
+    solidStoreyToKind.value = solidStoreyFromKind.value;
+    solidStoreyToLevel.value = solidStoreyFromLevel.value;
+    return from;
+  }
+
+  var to = solidStoreyToKind.value + padLevel(solidStoreyToLevel.value);
+  return from === to ? from : from + '~' + to;
+}
+
+function setSolidStorey(value, rangeAllowed) {
+  var parsed = parseStorey(value);
+
+  currentSolidStoreyRangeAllowed = Boolean(rangeAllowed);
+  solidStoreyFromKind.value = parsed.from.kind;
+  solidStoreyFromLevel.value = parsed.from.level;
+  solidStoreyToKind.value = currentSolidStoreyRangeAllowed ? parsed.to.kind : parsed.from.kind;
+  solidStoreyToLevel.value = currentSolidStoreyRangeAllowed ? parsed.to.level : parsed.from.level;
+  setControlLocked([solidStoreyFromKind, solidStoreyFromLevel], validationBusy);
+  setControlLocked(
+    [solidStoreyToKind, solidStoreyToLevel],
+    validationBusy || !currentSolidStoreyRangeAllowed
+  );
+  solidStoreyFields.classList.toggle('is-single-storey', !currentSolidStoreyRangeAllowed);
+}
+
+function classificationAllowsStoreyRange(value) {
+  return rangeStoreyClassifications.indexOf(String(value || '')) >= 0;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -401,6 +446,8 @@ function setStorey(value, rangeAllowed) {
 function init(config) {
   config = config || {};
   fixMode = Boolean(config.fixMode);
+  validationBusy = Boolean(config.validationBusy);
+  rangeStoreyClassifications = normalizeArray(config.rangeStoreyClassifications);
 
   modeTitle.textContent = fixMode ? '수정 모드' : '편집 모드';
   finishButton.textContent = fixMode ? '수정 완료' : '편집 완료';
@@ -415,6 +462,11 @@ function init(config) {
   applyFilterDisabled();
 
   setVisible(recheckErrorsButton, fixMode);
+  setVisible(removeIndoorGmlAttributesButton, !fixMode);
+  setControlLocked(
+    [finishButton, recheckErrorsButton, removeIndoorGmlAttributesButton],
+    validationBusy
+  );
   updateSelection(null);
   fitDialogToContent();
 }
@@ -424,6 +476,9 @@ function init(config) {
 // ────────────────────────────────────────────────────────────────
 function updateSelection(snapshot) {
   var nextMode = snapshot && snapshot.mode ? snapshot.mode : 'empty';
+  if (snapshot && Object.prototype.hasOwnProperty.call(snapshot, 'validationBusy')) {
+    validationBusy = Boolean(snapshot.validationBusy);
+  }
   var nextKey = selectionKey(snapshot);
 
   if (nextKey === currentSelectionKey) {
@@ -436,6 +491,10 @@ function updateSelection(snapshot) {
   setVisible(filterPanel, true);
   setVisible(clearAllButton, !fixMode && nextMode === 'empty');
   setVisible(recheckErrorsButton, fixMode);
+  setControlLocked(
+    [finishButton, recheckErrorsButton, removeIndoorGmlAttributesButton],
+    validationBusy
+  );
   renderVisibilityFilter((snapshot || {}).visibilityFilter || currentVisibilityFilter);
 
   if (nextMode === 'solid_groups') {
@@ -468,6 +527,7 @@ function selectionKey(snapshot) {
     snapshot.name || '',
     snapshot.classification || '',
     snapshot.classificationLocked ? 'locked' : 'unlocked',
+    snapshot.validationBusy ? 'validation-busy' : 'validation-idle',
     snapshot.storey || '',
     snapshot.storeyEditable ? 'storey-editable' : 'storey-readonly',
     snapshot.storeyRangeAllowed ? 'storey-range' : 'storey-single',
@@ -535,10 +595,14 @@ function renderCountRows(container, counts) {
 function renderSolidGroups(snapshot) {
   solidCount.textContent = snapshot.solidGroupCount || 0;
   solidClassification.value = snapshot.classification || 'GeneralSpace|Room';
+  setSolidStorey(
+    snapshot.storey || 'F01',
+    classificationAllowsStoreyRange(solidClassification.value)
+  );
 
   setControlLocked(
     [solidClassification, convertSelectedButton],
-    snapshot.classificationLocked
+    validationBusy || snapshot.classificationLocked
   );
 }
 
@@ -557,7 +621,7 @@ function renderCellSpaces(snapshot) {
 
   setControlLocked(
     [selectedClassification, changeTypeButton],
-    snapshot.classificationLocked
+    validationBusy || snapshot.classificationLocked
   );
 }
 
@@ -574,7 +638,7 @@ function renderCellSpace(snapshot) {
 
   setControlLocked(
     [selectedClassification, changeTypeButton],
-    snapshot.classificationLocked
+    validationBusy || snapshot.classificationLocked
   );
 }
 
@@ -612,14 +676,50 @@ storeyToLevel.addEventListener('keydown', function (event) {
   if (event.key === 'Enter') storeyToLevel.blur();
 });
 
+solidClassification.addEventListener('change', function () {
+  setSolidStorey(
+    composeSolidStorey(),
+    classificationAllowsStoreyRange(solidClassification.value)
+  );
+});
+
+solidStoreyFromKind.addEventListener('change', function () {
+  if (!currentSolidStoreyRangeAllowed) setSolidStorey(composeSolidStorey(), false);
+});
+
+solidStoreyToKind.addEventListener('change', function () {
+  composeSolidStorey();
+});
+
+solidStoreyFromLevel.addEventListener('blur', function () {
+  clampStoreyLevel(solidStoreyFromLevel);
+  if (!currentSolidStoreyRangeAllowed) setSolidStorey(composeSolidStorey(), false);
+});
+
+solidStoreyToLevel.addEventListener('blur', function () {
+  clampStoreyLevel(solidStoreyToLevel);
+});
+
+solidStoreyFromLevel.addEventListener('keydown', function (event) {
+  if (event.key === 'Enter') solidStoreyFromLevel.blur();
+});
+
+solidStoreyToLevel.addEventListener('keydown', function (event) {
+  if (event.key === 'Enter') solidStoreyToLevel.blur();
+});
+
 filterToggle.addEventListener('click', toggleFilterPanel);
 
 changeTypeButton.addEventListener('click', function () {
   invokeSketchup('setSelectedCellSpaceClassification', [selectedClassification.value]);
 });
 
+removeIndoorGmlAttributesButton.addEventListener('click', function () {
+  invokeSketchup('removeSelectedCellSpacesIndoorGmlAttributes');
+});
+
 convertSelectedButton.addEventListener('click', function () {
-  invokeSketchup('convertSelectedSolidGroups', [solidClassification.value]);
+  invokeSketchup('convertSelectedSolidGroups', [solidClassification.value, composeSolidStorey()]);
 });
 
 finishButton.addEventListener('click', function () {

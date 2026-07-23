@@ -16,9 +16,12 @@ module ULOL
 
           def self.create(base_dir: GmlExporter.output_root)
             parent = File.join(base_dir, 'validation-runs')
-            FileUtils.mkdir_p(parent)
+            FileUtils.mkdir_p(parent, mode: 0o700)
+            File.chmod(0o700, parent) unless Gem.win_platform?
             token_prefix = "run-#{Time.now.strftime('%Y%m%d-%H%M%S')}-#{$$}-"
-            new(Dir.mktmpdir(token_prefix, parent))
+            root = Dir.mktmpdir(token_prefix, parent)
+            File.chmod(0o700, root) unless Gem.win_platform?
+            new(root)
           end
 
           def initialize(root_dir)

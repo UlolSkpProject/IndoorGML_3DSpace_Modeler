@@ -4,45 +4,68 @@ require 'fileutils'
 require_relative '../../validity/validation_run_workspace'
 require_relative '../../validity/validation_session'
 require_relative '../../validity/val3dity_report_schema'
+require_relative '../../validity/validation_focus_report_mapper'
 
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       module ExportCommands
         def validation_operation_running?
-          @validation_session&.running? == true || @validation_operation_running == true
+          return true if @validation_session&.running? == true || @validation_operation_running == true
+
+          indoor_model = IndoorModel.current
+          indoor_model.respond_to?(:validation_focus_recheck_running?) && indoor_model.validation_focus_recheck_running?
+        rescue StandardError
+          false
         end
 
         def export_gml
           return if validation_operation_running?
 
+          export_runtime_gml(IndoorModel.current)
+        end
+
+        def export_runtime_gml(indoor_model, progress = nil)
           path = UI.savepanel('Export GML', '~', 'IndoorGML Files|*.gml;||')
-          return if path.to_s.empty?
+          if path.to_s.empty?
+            progress&.set_result_message('GML export canceled.')
+            return nil
+          end
 
           path = "#{path}.gml" unless File.extname(path).downcase == '.gml'
           FileUtils.mkdir_p(File.dirname(path))
+          if indoor_model.editing? && !indoor_model.finish_editing
+            message = 'GML export failed: topology synchronization failed.'
+            progress ? progress.set_result_message(message) : UI.messagebox(message)
+            return nil
+          end
           IndoorGmlConverter::GmlExporter.new(
-            IndoorModel.current
+            indoor_model,
+            refresh_runtime_data: false
           ).export(output_path: path)
-          UI.messagebox("GML exported:\n#{path}")
+          message = "GML exported:\n#{path}"
+          progress ? progress.set_result_message(message) : UI.messagebox(message)
+          path
         rescue StandardError => e
-          UI.messagebox("GML export failed:\n#{e.message}")
+          message = "GML export failed:\n#{e.message}"
+          progress ? progress.set_result_message(message) : UI.messagebox(message)
+          nil
         end
 
         def check_validity
           return if validation_operation_running?
+          return unless close_previous_validation_result
 
           workspace = nil
           session = nil
           progress = nil
-          if validation_dialog_visible?
-            @validation_progress_dialog.bring_to_front
-            return
-          end
 
           captured_model = Sketchup.active_model
           captured_indoor_model = IndoorModel.for(captured_model)
-          captured_indoor_model.finish_editing if captured_indoor_model.editing?
+          if captured_indoor_model.editing? && !captured_indoor_model.finish_editing
+            UI.messagebox('Validity check failed: topology synchronization failed.')
+            return
+          end
           @validation_operation_running = true
           workspace = IndoorGmlConverter::ValidationRunWorkspace.create(
             base_dir: IndoorGmlConverter::GmlExporter.output_root
@@ -267,12 +290,12 @@ module ULOL
           end
         end
 
-        def handle_validation_result(session, result, temp_path)
+        def handle_validation_result(session, result, _temp_path)
           progress = session.progress
           progress&.on_create_gml do
             next unless session.guard_report_action
 
-            create_gml_from_temp(temp_path, progress)
+            export_runtime_gml(session.indoor_model, progress)
           end
           progress&.on_open_report do
             next unless session.guard_report_action
@@ -286,30 +309,46 @@ module ULOL
           progress&.on_validation_focus_cells do |cell_ids, code, state_ids, transition_ids, row_id|
             next unless session.guard_report_action
 
-            refs = { cells: cell_ids, states: state_ids, transitions: transition_ids }
+            incoming_refs = { cells: cell_ids, states: state_ids, transitions: transition_ids }
             indoor_model = session.indoor_model
+            row = if indoor_model.validation_focus_active? && !row_id.to_s.empty? && indoor_model.respond_to?(:validation_focus_row)
+                    indoor_model.validation_focus_row(row_id)
+                  end
+            refs = row || incoming_refs
             row_cell_ids = validation_focus_cell_ids_for_refs(refs, indoor_model)
             if row_cell_ids.empty?
-              indoor_model.set_validation_focus_highlight([], code) if indoor_model.validation_focus_active?
-            else
-              unless indoor_model.validation_focus_active?
-                report_cell_ids = validation_report_error_focus_cell_ids(result.report, indoor_model)
-                next if report_cell_ids.empty?
+              next true unless indoor_model.validation_focus_active?
 
-                next unless indoor_model.begin_validation_focus_editing(
-                  report_cell_ids,
-                  row_states: validation_report_focus_row_states(result.report, indoor_model)
-                )
-              end
-              indoor_model.set_validation_focus_highlight(
-                row_cell_ids,
-                code,
-                row_id: row_id,
-                row_cells: cell_ids,
-                states: state_ids,
-                transitions: transition_ids
+              next indoor_model.set_validation_focus_highlight([], code)
+            end
+
+            unless indoor_model.validation_focus_active?
+              report_cell_ids = validation_report_error_focus_cell_ids(result.report, indoor_model)
+              next if report_cell_ids.empty?
+
+              next unless indoor_model.begin_validation_focus_editing(
+                report_cell_ids,
+                row_states: validation_report_focus_row_states(result.report, indoor_model)
               )
             end
+
+            row ||= if !row_id.to_s.empty? && indoor_model.respond_to?(:validation_focus_row)
+                    indoor_model.validation_focus_row(row_id)
+                  end
+            refs = row || incoming_refs
+            row_cell_ids = validation_focus_cell_ids_for_refs(refs, indoor_model)
+            if row_cell_ids.empty?
+              next indoor_model.set_validation_focus_highlight([], row ? row[:code] : code)
+            end
+
+            indoor_model.set_validation_focus_highlight(
+              row_cell_ids,
+              row ? row[:code] : code,
+              row_id: row_id,
+              row_cells: refs[:cells],
+              states: refs[:states],
+              transitions: refs[:transitions]
+            )
           end
           progress&.on_fix_validation_errors do
             next unless session.guard_report_action
@@ -354,24 +393,24 @@ module ULOL
           )
         end
 
-        def create_gml_from_temp(temp_path, progress)
-          path = UI.savepanel('Export GML', '~', 'IndoorGML Files|*.gml;||')
-          if path.to_s.empty?
-            progress&.set_result_message('GML export canceled.')
-            return
+        def close_previous_validation_result
+          session = @validation_session
+          progress = @validation_progress_dialog
+          return false if session&.running?
+          return true unless session&.result_ready? || progress&.visible?
+
+          progress.close if progress&.respond_to?(:close)
+          if session&.result_ready?
+            session.complete(reason: :restarted)
+          else
+            progress.clear_callbacks if progress&.respond_to?(:clear_callbacks)
           end
-
-          path = "#{path}.gml" unless File.extname(path).downcase == '.gml'
-          FileUtils.mkdir_p(File.dirname(path))
-          FileUtils.cp(temp_path, path)
-          progress&.set_result_message("GML exported:\n#{path}")
+          @validation_session = nil if @validation_session.equal?(session)
+          @validation_progress_dialog = nil if @validation_progress_dialog.equal?(progress)
+          true
         rescue StandardError => e
-          progress&.set_result_message("GML export failed:\n#{e.message}")
-        end
-
-        def validation_dialog_visible?
-          @validation_progress_dialog&.visible?
-        rescue StandardError
+          Logger.puts "[IndoorGML] Previous validation result close failed: #{e.class}: #{e.message}"
+          UI.messagebox("Previous validation result could not be closed:\n#{e.message}")
           false
         end
 
@@ -422,8 +461,7 @@ module ULOL
         end
 
         def validation_report_error_focus_cell_ids(report, indoor_model = IndoorModel.current)
-          refs = validation_report_error_refs(report)
-          validation_focus_cell_ids_for_refs(refs, indoor_model)
+          IndoorGmlConverter::ValidationFocusReportMapper.error_focus_cell_ids(report, indoor_model)
         end
 
         def validation_report_error_refs(report)
@@ -431,42 +469,11 @@ module ULOL
         end
 
         def validation_report_focus_row_states(report, indoor_model = IndoorModel.current)
-          schema = IndoorGmlConverter::Val3dityReportSchema
-          schema.sorted_error_item_rows(report || {}).each_with_index.map do |row, index|
-            refs = schema.final_error_row_refs(row, report || {})
-            {
-              id: schema.error_item_row_id(index),
-              code: row[:code].to_s,
-              cells: Array(refs[:cells]).map(&:to_s),
-              states: Array(refs[:states]).map(&:to_s),
-              transitions: Array(refs[:transitions]).map(&:to_s),
-              focus_ids: validation_focus_cell_ids_for_refs(refs, indoor_model)
-            }
-          end
+          IndoorGmlConverter::ValidationFocusReportMapper.focus_row_states(report, indoor_model)
         end
 
         def validation_focus_cell_ids_for_refs(refs, indoor_model = IndoorModel.current)
-          model = indoor_model
-          cell_ids = Array(refs[:cells]).flat_map { |cell_id| validation_cell_ref_ids(cell_id) }
-
-          model.states.each do |state|
-            next unless state&.valid?
-            next unless validation_state_gml_ids(state).any? { |id| Array(refs[:states]).include?(id) }
-
-            cell = state.duality_cell
-            cell_ids.concat(validation_cell_gml_ids(cell)) if cell&.valid?
-          end
-
-          model.transitions.each do |transition|
-            next unless transition&.valid?
-            next unless validation_transition_gml_ids(transition).any? { |id| Array(refs[:transitions]).include?(id) }
-
-            [transition.state1&.duality_cell, transition.state2&.duality_cell].each do |cell|
-              cell_ids.concat(validation_cell_gml_ids(cell)) if cell&.valid?
-            end
-          end
-
-          cell_ids.compact.uniq
+          IndoorGmlConverter::ValidationFocusReportMapper.cell_ids_for_refs(refs, indoor_model)
         end
 
         def validation_cell_ref_ids(value)

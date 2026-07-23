@@ -277,7 +277,9 @@ window.addEventListener('load', function () {
   fitDialogToContent();
 });
 document.addEventListener('dragstart', function (event) {
-  event.preventDefault();
+  if (!event.target.closest('.result-title, .result-message')) {
+    event.preventDefault();
+  }
 });
 document.addEventListener('keydown', function (event) {
   if ((event.ctrlKey || event.metaKey) && String(event.key).toLowerCase() === 'a') {

@@ -7,9 +7,13 @@ module ULOL
         attr_reader :name
         attr_reader :id
 
+        def self.generate_id
+          rand(36**8).to_s(36)
+        end
+
         def initialize
           @name = ''
-          @id = rand(36**8).to_s(36)
+          @id = self.class.generate_id
         end
       end
     end

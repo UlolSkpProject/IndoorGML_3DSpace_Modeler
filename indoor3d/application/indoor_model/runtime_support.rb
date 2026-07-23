@@ -1,18 +1,22 @@
 # frozen_string_literal: true
 
+require_relative '../topology_coordinator'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class IndoorModel
         module RuntimeSupport
-          def refresh_runtime_data
+          def refresh_runtime_data(initial_model_load: false)
             with_indoor_model_operation('IndoorGML Refresh Runtime Data', transparent: true) do
               next true if guard_active?(:@refreshing_runtime)
 
               with_guard_flag(:@refreshing_runtime) do
                 sync do
-                  restore_runtime_from_current_model
+                  prepare_primal_children_for_initial_load if initial_model_load
+                  restore_runtime_from_current_model(persist_repaired_ids: true)
                   recenter_runtime_cell_spaces
+                  apply_initial_cell_space_materials if initial_model_load
                   rebuild_runtime_transitions_from_cell_adjacency
                 end
                 invalidate_overlay_transition_points
@@ -36,6 +40,11 @@ module ULOL
                 prune_runtime_observer_tracking
                 rebuild_scene_group_guard_tracking
               end
+              if @editor_session&.respond_to?(:reconcile_validation_focus_cells)
+                Array(@editor_session.reconcile_validation_focus_cells(@cell_spaces)).each do |payload|
+                  update_validation_focus_report_row(payload) if respond_to?(:update_validation_focus_report_row)
+                end
+              end
               @editor_session.reconcile_after_transaction(@model, source: source) if @editor_session&.respond_to?(:reconcile_after_transaction)
               metrics = {
                 source: source,
@@ -43,7 +52,7 @@ module ULOL
                 cell_spaces: diagnostic_count(@cell_spaces),
                 states: diagnostic_count(@states),
                 transitions: diagnostic_count(@transitions),
-                pair_comparison_count: @adjacency_service&.last_metrics&.fetch(:pair_comparison_count, 0).to_i,
+                pair_comparison_count: topology_coordinator.last_metrics.fetch(:pair_comparison_count, 0).to_i,
                 total_duration: Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at
               }
             end
@@ -92,8 +101,8 @@ module ULOL
               editing: @editor_session&.editing? == true,
               cell_space_geometry_editing: @editor_session&.cell_space_geometry_editing? == true,
               active_path: current_active_path_kind,
-              dirty_topology_count: @dirty_cell_space_pids&.length.to_i,
-              topology_sync_scheduled: @cell_space_sync_scheduled == true,
+              dirty_topology_count: dirty_topology_queue.persistent_ids.length,
+              topology_sync_scheduled: dirty_topology_queue.scheduled?,
               guards: {
                 syncing: @syncing == true,
                 erasing: @erasing == true,
@@ -115,6 +124,12 @@ module ULOL
           end
 
           private
+
+          def prepare_primal_children_for_initial_load
+            @model ||= Sketchup.active_model
+            find_existing_space_features_groups
+            normalize_primal_children_for_initial_load
+          end
 
           def diagnostic_count(features)
             Array(features).count do |feature|
@@ -147,14 +162,14 @@ module ULOL
           end
 
           def with_indoor_model_operation(name, transparent: false)
+            # 이미 with_indoor_model_operation에서 operation을 시작했다면 다음 동작으로 새 operation을 만들지 않도록 한다.
+            # 중첩 호출된 동작을 하나의 operation으로 묶기 위함이다.
             return yield if @indoor_operation_depth.to_i.positive?
+            # 동작 처리 중 observer가 들어오는 경우 불필요한 operation을 중첩하여 생성하지 않도록 하기 위함이다.
             return yield if indoor_operation_suppressed?
 
             model = @model || Sketchup.active_model
             return yield unless model
-            if model.respond_to?(:active_operation_name) && model.active_operation_name.to_s.length.positive?
-              return yield
-            end
 
             operation_started = false
             @indoor_operation_depth = @indoor_operation_depth.to_i + 1
@@ -165,7 +180,10 @@ module ULOL
               operation_started = false
               result
             rescue StandardError
-              model.abort_operation if operation_started
+              # FIXME : 이 rescue에 도달했다면 현재 helper가 실제 operation을 시작한 owner다.
+              # transparent operation은 abort할 경우 연결된 사용자 operation까지
+              # 취소될 수 있으므로, 예외 발생 전까지의 변경을 commit하고 닫는다.
+              transparent ? model.commit_operation : model.abort_operation
               raise
             ensure
               @indoor_operation_depth = [@indoor_operation_depth.to_i - 1, 0].max
@@ -184,20 +202,24 @@ module ULOL
             @transitions = @feature_registry.transitions
           end
 
-          def restore_runtime_from_current_model
+          def restore_runtime_from_current_model(persist_repaired_ids: false)
             @model ||= Sketchup.active_model
-            find_existing_space_features_groups
+            primal_groups_merged = find_existing_space_features_groups
             reset_runtime_collections
             attach_existing_space_features_observers
-            @runtime_restorer.restore(primal_group: @primal_group)
+            @runtime_restorer.restore(
+              primal_group: @primal_group,
+              persist_repaired_ids: persist_repaired_ids || primal_groups_merged == true
+            )
           end
 
           def reset_runtime_collections
             @feature_registry.reset!
             @cell_space_change_snapshots.clear
             @space_features_change_snapshots.clear
-            @dirty_cell_space_pids.clear
-            @cell_space_sync_scheduled = false
+            dirty_topology_queue.clear
+            dirty_topology_queue.unschedule!
+            clear_validation_focus_topology_dirty if respond_to?(:clear_validation_focus_topology_dirty)
             bind_registry_collections
           end
 
@@ -242,13 +264,13 @@ module ULOL
               scene_group_guard: @scene_group_guard.snapshot,
               cell_space_change_snapshots: @cell_space_change_snapshots.dup,
               space_features_change_snapshots: @space_features_change_snapshots.dup,
-              dirty_cell_space_pids: @dirty_cell_space_pids.dup,
-              cell_space_sync_scheduled: @cell_space_sync_scheduled,
+              topology: topology_coordinator.snapshot,
               cell_space_observed_ids: @cell_space_observed_ids.dup,
               space_features_observed_ids: @space_features_observed_ids.dup,
               entities_observed_ids: @entities_observed_ids.dup,
               state_instances: mutable_instance_snapshot(@states),
-              transition_instances: mutable_instance_snapshot(@transitions)
+              transition_instances: mutable_instance_snapshot(@transitions),
+              validation_focus: @editor_session.respond_to?(:validation_focus_snapshot) ? @editor_session.validation_focus_snapshot : nil
             }
           end
 
@@ -261,11 +283,11 @@ module ULOL
             @scene_group_guard.restore!(snapshot[:scene_group_guard])
             @cell_space_change_snapshots = snapshot[:cell_space_change_snapshots].dup
             @space_features_change_snapshots = snapshot[:space_features_change_snapshots].dup
-            @dirty_cell_space_pids = snapshot[:dirty_cell_space_pids].dup
-            @cell_space_sync_scheduled = snapshot[:cell_space_sync_scheduled]
+            restore_topology_snapshot(snapshot)
             @cell_space_observed_ids = snapshot[:cell_space_observed_ids].dup
             @space_features_observed_ids = snapshot[:space_features_observed_ids].dup
             @entities_observed_ids = snapshot[:entities_observed_ids].dup
+            @editor_session.restore_validation_focus_snapshot(snapshot[:validation_focus], refresh: false) if snapshot[:validation_focus]
           end
 
           def mutable_instance_snapshot(objects)
@@ -301,6 +323,43 @@ module ULOL
             end
           end
 
+          def topology_coordinator
+            @topology_coordinator ||= TopologyCoordinator.new(
+              adjacency_service: @adjacency_service,
+              dirty_queue: legacy_dirty_topology_queue
+            )
+          end
+
+          def dirty_topology_queue
+            topology_coordinator.dirty_queue
+          end
+
+          def legacy_dirty_topology_queue
+            queue = DirtyTopologyQueue.new
+            return queue unless instance_variable_defined?(:@dirty_cell_space_pids) ||
+                                instance_variable_defined?(:@cell_space_sync_scheduled) ||
+                                instance_variable_defined?(:@dirty_cell_space_sync_generation)
+
+            queue.restore!(
+              persistent_ids: Hash(@dirty_cell_space_pids),
+              scheduled: @cell_space_sync_scheduled == true,
+              generation: @dirty_cell_space_sync_generation.to_i
+            )
+            queue
+          end
+
+          def restore_topology_snapshot(snapshot)
+            if snapshot[:topology]
+              topology_coordinator.restore!(snapshot[:topology])
+            else
+              dirty_topology_queue.restore!(
+                persistent_ids: Hash(snapshot[:dirty_cell_space_pids]),
+                scheduled: snapshot[:cell_space_sync_scheduled] == true,
+                generation: snapshot[:dirty_cell_space_sync_generation].to_i
+              )
+            end
+          end
+
           def recenter_runtime_cell_spaces
             @cell_spaces.each do |cell_space|
               next unless cell_space&.valid?
@@ -309,6 +368,16 @@ module ULOL
               write_cell_space_attributes(cell_space)
             rescue StandardError => e
               IndoorCore::Logger.puts "[IndoorGML] Runtime CellSpace recenter skipped: cell=#{cell_space&.id} #{e.class}: #{e.message}"
+            end
+          end
+
+          def apply_initial_cell_space_materials
+            @cell_spaces.each do |cell_space|
+              next unless cell_space&.valid?
+
+              apply_cell_space_material(cell_space)
+            rescue StandardError => e
+              IndoorCore::Logger.puts "[IndoorGML] Initial CellSpace material apply skipped: cell=#{cell_space&.id} #{e.class}: #{e.message}"
             end
           end
 

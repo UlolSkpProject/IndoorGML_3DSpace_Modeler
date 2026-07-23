@@ -54,8 +54,7 @@ module ULOL
           false
         end
 
-        public :camera_billboard_axes,
-               :overlay_render_context_cache_key,
+        public :overlay_render_context_cache_key,
                :overlay_render_point,
                :overlay_render_vector,
                :overlay_state_root_local_point,
