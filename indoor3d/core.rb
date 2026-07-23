@@ -235,7 +235,7 @@ module ULOL
         dispatcher.open_dual_overlay_scale_dialog()
       end
       @dual_overlay_scale_command.set_validation_proc do
-        dispatcher.validation_operation_running? ? MF_GRAYED : MF_ENABLED
+        MF_ENABLED
       end
       export_command = create_command(
         'Export GML',

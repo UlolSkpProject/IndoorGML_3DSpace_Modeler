@@ -118,6 +118,18 @@ module ULOL
               @indoor_model.convert_selected_solid_groups_to_cell_spaces(selection_value, storey)
             end
           end
+          dialog.add_action_callback('removeSelectedCellSpacesIndoorGmlAttributes') do |_context|
+            next if validation_busy?
+            next if @indoor_model.validation_focus_active?
+
+            IndoorCore::Logger.puts '[IndoorGML] EditModeDialog#removeSelectedCellSpacesIndoorGmlAttributes'
+            UI.start_timer(0, false) do
+              next if validation_busy?
+              next if @indoor_model.validation_focus_active?
+
+              @indoor_model.remove_selected_cell_spaces_indoor_gml_attributes
+            end
+          end
           dialog.add_action_callback('finishEditing') do |_context|
             next if validation_busy?
 

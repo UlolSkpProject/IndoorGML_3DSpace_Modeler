@@ -50,8 +50,7 @@ module ULOL
             cell2 = model_cell_geometry(cell_id2)
             return inconclusive(cell_id1, cell_id2, cell2[:reason]) unless cell2[:status] == :ok
 
-            adjacency_candidates = shared_face_candidates(cell1[:faces], cell2[:faces], mode: :adjacency)
-            overlap_candidates = shared_face_candidates(cell1[:faces], cell2[:faces], mode: :overlap)
+            adjacency_candidates = shared_face_candidates(cell1[:faces], cell2[:faces])
             intersection = model_solid_intersection_for_pair(
               cell1[:entity],
               cell2[:entity],
@@ -66,7 +65,6 @@ module ULOL
               cell1: cell1,
               cell2: cell2,
               adjacency_candidates: adjacency_candidates,
-              overlap_candidates: overlap_candidates,
               intersection: intersection
             }
           rescue StandardError => e
@@ -139,7 +137,7 @@ module ULOL
             Utils::Geometry.entity_faces_in_parent_space(entity)
           end
 
-          def shared_face_candidates(faces1, faces2, mode:)
+          def shared_face_candidates(faces1, faces2)
             candidates = []
             faces1.each_with_index do |face1, index1|
               faces2.each_with_index do |face2, index2|
@@ -147,7 +145,6 @@ module ULOL
 
                 distance = face_pair_signed_distance(face1, face2)
                 next unless distance.abs <= @tolerance
-                next if mode == :overlap && !distance.negative?
 
                 overlap = coplanar_overlap_polygons(face1, face2, @tolerance)
                 next unless overlap[:area] > Utils::Geometry.area_tolerance(@tolerance)
