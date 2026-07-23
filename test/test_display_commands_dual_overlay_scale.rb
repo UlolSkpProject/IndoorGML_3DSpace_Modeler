@@ -51,6 +51,22 @@ module ULOL
           assert_equal true, dialog.shown
         end
 
+        def test_open_dual_overlay_scale_dialog_during_validation
+          dispatcher = Class.new do
+            include DisplayCommands
+
+            def validation_operation_running?
+              true
+            end
+          end.new
+
+          dispatcher.open_dual_overlay_scale_dialog
+
+          dialog = dispatcher.instance_variable_get(:@dual_overlay_scale_dialog)
+          assert_instance_of DualOverlayScaleDialog, dialog
+          assert_equal true, dialog.shown
+        end
+
         def test_open_dual_overlay_scale_dialog_reports_failures
           IndoorCore.send(:remove_const, :DualOverlayScaleDialog)
           IndoorCore.const_set(:DualOverlayScaleDialog, failing_dialog_class)

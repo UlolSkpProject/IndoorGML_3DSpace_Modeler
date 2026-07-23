@@ -4,16 +4,20 @@
 
 ![IndoorGML 3D Modeler](docs/images/preview.png)
 
-![Version](https://img.shields.io/badge/version-1.0.4-blue)
+![Version](https://img.shields.io/badge/version-1.0.5-blue)
 ![SketchUp](https://img.shields.io/badge/SketchUp-2026-brightgreen)
 ![IndoorGML](https://img.shields.io/badge/IndoorGML-1.0.3-orange)
 ![val3dity](https://img.shields.io/badge/val3dity-2.2.0-lightgrey)
 
-## v1.0.4 주요 변경사항
+## v1.0.5 주요 변경사항
 
 - val3dity 701/704 재검사 시 GML solid를 다시 만들지 않고 report의 CellSpace ID로 현재 SketchUp 모델의 원본 CellSpace를 찾습니다. 면 분석은 원본 geometry를 사용하고, 파괴적인 Boolean 연산만 독립 복제본에서 수행합니다.
 - CellSpace 생성 시 층 정보는 `직접 TAG → 상위 컨테이너 TAG → 사용자가 선택한 층 → 기본층` 순서로 결정됩니다.
 - Validation report의 row-card를 선택하면 visibility 적용 후 upright isometric camera, zoom extents, `0.7` padding zoom 순서로 focus하며 중간 camera frame은 그리지 않습니다.
+- Validation error geometry overlay와 horizontal OBB 기반 focus를 추가하고 report/fix-mode 상호작용을 개선했습니다.
+- Edit Mode에서 선택한 CellSpace의 IndoorGML 속성, 연결된 State/Transition, 재질을 제거하고 형상은 Solid Group으로 유지할 수 있습니다.
+- 완료된 validity dialog나 report가 열린 상태에서 Check Validity를 다시 실행하면 기존 결과를 정리한 뒤 새 검사를 시작합니다.
+- validity 실행 중에도 geometry/dual overlay visibility와 State/Link Overlay Scale을 조정할 수 있습니다.
 
 ## Overview
 
@@ -60,7 +64,7 @@ IndoorGML 3D Modeler는 SketchUp 모델 안의 manifold solid group을 IndoorGML
 | 항목 | 값 | 정의 |
 | --- | --- | --- |
 | Extension/storage version | `1.0.3` | `Definition::INDOOR_GML_VERSION` |
-| Extension package version | `1.0.4` | `Indoor3DGmlModeler::EXTENSION_VERSION` |
+| Extension package version | `1.0.5` | `Indoor3DGmlModeler::EXTENSION_VERSION` |
 | IndoorGML XML schema version | `1.0` | `Definition::INDOOR_GML_SCHEMA_VERSION` |
 | Validator runtime | `val3dity-windows-x64-v2.2.0` | `Val3dityRunner::VENDOR_ROOT` |
 

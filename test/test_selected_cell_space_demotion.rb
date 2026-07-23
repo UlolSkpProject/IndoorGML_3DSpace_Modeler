@@ -85,8 +85,7 @@ module ULOL
           include IndoorModel::FeatureLifecycle
           include IndoorModel::EditorControl
 
-          attr_reader :erased, :change_snapshots,
-                      :editor_session, :lock_policy_count, :restored_snapshot
+          attr_reader :erased, :editor_session, :lock_policy_count, :restored_snapshot
 
           def scene_group_guard
             @scene_group_guard
@@ -102,7 +101,6 @@ module ULOL
 
           def initialize(cell_space, clear_attributes: true)
             @selected_cell_spaces = [cell_space]
-            @clear_attributes = clear_attributes
             @attribute_serializer = FakeSerializer.new(clear_attributes)
             @scene_group_guard = FakeSceneGuard.new
             @primal_entities_observer = FakePrimalObserver.new
@@ -245,7 +243,6 @@ module ULOL
           attr_reader :attributes, :entityID
 
           def initialize(face)
-            @valid = true
             @material = 'cell-space-material'
             @attributes = { 'feature' => 'CellSpace', 'id' => 'cell-1' }
             @entityID = 101
@@ -253,7 +250,7 @@ module ULOL
           end
 
           def valid?
-            @valid
+            true
           end
 
           def definition

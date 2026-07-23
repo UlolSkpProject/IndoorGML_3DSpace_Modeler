@@ -191,7 +191,7 @@ module ULOL
         selected_cell_spaces = dispatcher.selected_indoor_gml_entities.select do |entity|
           dispatcher.indoor_feature(entity) == 'CellSpace'
         end
-
+      
         indoor_model.editing? && dispatcher.cell_space_type_change_available?(selected_cell_spaces) ? MF_ENABLED : MF_GRAYED
       end
       @edit_property_command = create_command(
@@ -239,7 +239,7 @@ module ULOL
         dispatcher.open_dual_overlay_scale_dialog()
       end
       @dual_overlay_scale_command.set_validation_proc do
-        dispatcher.validation_operation_running? ? MF_GRAYED : MF_ENABLED
+        MF_ENABLED
       end
       export_command = create_command(
         'Export GML',

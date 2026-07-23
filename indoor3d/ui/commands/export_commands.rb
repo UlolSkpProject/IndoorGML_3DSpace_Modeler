@@ -40,7 +40,8 @@ module ULOL
             return nil
           end
           IndoorGmlConverter::GmlExporter.new(
-            indoor_model
+            indoor_model,
+            refresh_runtime_data: false
           ).export(output_path: path)
           message = "GML exported:\n#{path}"
           progress ? progress.set_result_message(message) : UI.messagebox(message)
@@ -53,14 +54,11 @@ module ULOL
 
         def check_validity
           return if validation_operation_running?
+          return unless close_previous_validation_result
 
           workspace = nil
           session = nil
           progress = nil
-          if validation_dialog_visible?
-            @validation_progress_dialog.bring_to_front
-            return
-          end
 
           captured_model = Sketchup.active_model
           captured_indoor_model = IndoorModel.for(captured_model)
@@ -395,9 +393,24 @@ module ULOL
           )
         end
 
-        def validation_dialog_visible?
-          @validation_progress_dialog&.visible?
-        rescue StandardError
+        def close_previous_validation_result
+          session = @validation_session
+          progress = @validation_progress_dialog
+          return false if session&.running?
+          return true unless session&.result_ready? || progress&.visible?
+
+          progress.close if progress&.respond_to?(:close)
+          if session&.result_ready?
+            session.complete(reason: :restarted)
+          else
+            progress.clear_callbacks if progress&.respond_to?(:clear_callbacks)
+          end
+          @validation_session = nil if @validation_session.equal?(session)
+          @validation_progress_dialog = nil if @validation_progress_dialog.equal?(progress)
+          true
+        rescue StandardError => e
+          Logger.puts "[IndoorGML] Previous validation result close failed: #{e.class}: #{e.message}"
+          UI.messagebox("Previous validation result could not be closed:\n#{e.message}")
           false
         end
 
