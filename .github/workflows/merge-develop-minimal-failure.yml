@@ -1,4 +1,4 @@
-name: Merge develop into minimal-failure baseline
+name: Finalize minimal-failure baseline
 
 on:
   push:
@@ -11,54 +11,31 @@ permissions:
   contents: write
 
 jobs:
-  merge:
+  finalize:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout baseline branch
+      - name: Checkout merged branch
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Merge origin/develop with normalizer preservation
+      - name: Restore e706e1d normalizer tests and retag
         shell: bash
         run: |
           set -euo pipefail
 
           TARGET_BRANCH="feature/local-normalizer-minimal-failure"
-          SOURCE_BRANCH="develop"
+          BASE_SHA="e706e1d869897eb9f0d3a6575ead4bf75775e01c"
           TAG_NAME="최소실패-지점"
-          BASE_SHA="$(git rev-parse HEAD)"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin "${SOURCE_BRANCH}"
 
-          set +e
-          git merge --no-ff --no-commit "origin/${SOURCE_BRANCH}"
-          MERGE_STATUS=$?
-          set -e
-
-          if [ ! -f .git/MERGE_HEAD ]; then
-            echo "Merge did not start successfully. status=${MERGE_STATUS}" >&2
-            exit 1
-          fi
-
-          # Resolve every conflicted path from develop first.
-          while IFS= read -r path; do
-            [ -n "$path" ] || continue
-            if git cat-file -e "origin/${SOURCE_BRANCH}:${path}" 2>/dev/null; then
-              git checkout "origin/${SOURCE_BRANCH}" -- "$path"
-            else
-              git rm -f --ignore-unmatch -- "$path"
-            fi
-          done < <(git diff --name-only --diff-filter=U)
-
-          # Preserve every normalizer implementation/integration/test file from e706e1d.
           while IFS= read -r path; do
             [ -n "$path" ] || continue
             case "$path" in
               test/test_gml_exporter_local_vertex_normalization.rb)
-                # Export behavior follows develop: no automatic normalization.
+                # Export behavior intentionally follows develop.
                 git rm -f --ignore-unmatch -- "$path"
                 ;;
               *)
@@ -67,65 +44,17 @@ jobs:
             esac
           done < <(
             git ls-tree -r --name-only "$BASE_SHA" |
-              grep -E '(^|/)(local_vertex_normalizer|local_vertex_normalization)' || true
+              grep -E '(local_vertex_normalizer|local_vertex_normalization)' || true
           )
 
-          # Develop is the base for shared loader files; reattach only the current normalizer.
-          git checkout "origin/${SOURCE_BRANCH}" -- indoor3d/core.rb indoor3d/application/indoor_model.rb
-
-          python3 <<'PY'
-          from pathlib import Path
-
-          indoor_model = Path('indoor3d/application/indoor_model.rb')
-          text = indoor_model.read_text(encoding='utf-8')
-          require_anchor = "        require_relative 'indoor_model/primal_normalization.rb'\n"
-          include_anchor = "        include PrimalNormalization\n"
-          require_line = "        require_relative 'indoor_model/local_vertex_normalization.rb'\n"
-          include_line = "        include LocalVertexNormalization\n"
-          if require_line not in text:
-              if require_anchor not in text:
-                  raise SystemExit('IndoorModel normalizer require anchor not found')
-              text = text.replace(require_anchor, require_anchor + require_line, 1)
-          if include_line not in text:
-              if include_anchor not in text:
-                  raise SystemExit('IndoorModel normalizer include anchor not found')
-              text = text.replace(include_anchor, include_anchor + include_line, 1)
-          indoor_model.write_text(text, encoding='utf-8')
-
-          core = Path('indoor3d/core.rb')
-          text = core.read_text(encoding='utf-8')
-          storey_anchor = "    require_relative 'application/storey_filter'\n"
-          normalizer_loaders = (
-              "    require_relative 'application/local_vertex_normalizer'\n"
-              "    require_relative 'application/local_vertex_normalizer/coplanar_shared_edge_groups'\n"
-              "    require_relative 'application/local_vertex_normalizer/pipeline_v2'\n"
-          )
-          indoor_anchor = "    require_relative 'application/indoor_model/primal_normalization'\n"
-          indoor_loader = "    require_relative 'application/indoor_model/local_vertex_normalization'\n"
-          if "require_relative 'application/local_vertex_normalizer'" not in text:
-              if storey_anchor not in text:
-                  raise SystemExit('Core normalizer loader anchor not found')
-              text = text.replace(storey_anchor, storey_anchor + normalizer_loaders, 1)
-          if indoor_loader not in text:
-              if indoor_anchor not in text:
-                  raise SystemExit('Core IndoorModel normalization anchor not found')
-              text = text.replace(indoor_anchor, indoor_anchor + indoor_loader, 1)
-          core.write_text(text, encoding='utf-8')
-          PY
-
+          git rm -f -- .github/workflows/merge-develop-minimal-failure.yml
           git add -A
+          git commit -m "e706e1d normalizer 회귀 테스트 복구 및 최소실패 기준 확정"
+          FINAL_SHA="$(git rev-parse HEAD)"
 
-          if git diff --cached --quiet; then
-            echo "No merge changes were staged." >&2
-            exit 1
-          fi
-
-          git commit -m "Merge origin/develop into e706e1d minimal-failure baseline"
-          MERGE_SHA="$(git rev-parse HEAD)"
-
-          git tag -f -a "$TAG_NAME" -m "최소실패 지점" "$MERGE_SHA"
+          git tag -f -a "$TAG_NAME" -m "최소실패 지점" "$FINAL_SHA"
           git push origin "HEAD:${TARGET_BRANCH}"
           git push origin "refs/tags/${TAG_NAME}" --force
 
-          echo "Merged commit: ${MERGE_SHA}"
+          echo "Final commit: ${FINAL_SHA}"
           echo "Tag: ${TAG_NAME}"
