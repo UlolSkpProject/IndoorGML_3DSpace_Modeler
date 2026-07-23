@@ -39,6 +39,7 @@ var storeyToLevel = document.getElementById('storeyToLevel');
 
 var selectedClassification = document.getElementById('selectedClassification');
 var changeTypeButton = document.getElementById('changeType');
+var removeIndoorGmlAttributesButton = document.getElementById('removeIndoorGmlAttributes');
 
 var cellTypeCounts = document.getElementById('cellTypeCounts');
 var stateCount = document.getElementById('stateCount');
@@ -461,7 +462,11 @@ function init(config) {
   applyFilterDisabled();
 
   setVisible(recheckErrorsButton, fixMode);
-  setControlLocked([finishButton, recheckErrorsButton], validationBusy);
+  setVisible(removeIndoorGmlAttributesButton, !fixMode);
+  setControlLocked(
+    [finishButton, recheckErrorsButton, removeIndoorGmlAttributesButton],
+    validationBusy
+  );
   updateSelection(null);
   fitDialogToContent();
 }
@@ -486,7 +491,10 @@ function updateSelection(snapshot) {
   setVisible(filterPanel, true);
   setVisible(clearAllButton, !fixMode && nextMode === 'empty');
   setVisible(recheckErrorsButton, fixMode);
-  setControlLocked([finishButton, recheckErrorsButton], validationBusy);
+  setControlLocked(
+    [finishButton, recheckErrorsButton, removeIndoorGmlAttributesButton],
+    validationBusy
+  );
   renderVisibilityFilter((snapshot || {}).visibilityFilter || currentVisibilityFilter);
 
   if (nextMode === 'solid_groups') {
@@ -704,6 +712,10 @@ filterToggle.addEventListener('click', toggleFilterPanel);
 
 changeTypeButton.addEventListener('click', function () {
   invokeSketchup('setSelectedCellSpaceClassification', [selectedClassification.value]);
+});
+
+removeIndoorGmlAttributesButton.addEventListener('click', function () {
+  invokeSketchup('removeSelectedCellSpacesIndoorGmlAttributes');
 });
 
 convertSelectedButton.addEventListener('click', function () {

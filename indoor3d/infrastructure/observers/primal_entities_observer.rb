@@ -42,8 +42,6 @@ module ULOL
           @indoor_entity_ids.clear
         end
 
-        private
-
         def untrack_entity_id(entity_id)
           @indoor_entity_ids.delete(entity_id)
         end

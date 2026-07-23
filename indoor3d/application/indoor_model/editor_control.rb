@@ -458,6 +458,40 @@ module ULOL
             set_selected_cell_space_type(CellSpaceType.label(cell_type), category_code)
           end
 
+          def remove_selected_cell_spaces_indoor_gml_attributes
+            return false if validation_focus_recheck_running?
+            return false if validation_focus_active?
+
+            cell_spaces = selected_cell_spaces.select { |cell_space| cell_space&.valid? }
+            return false if cell_spaces.empty?
+            return false unless confirm_selected_cell_space_demotion(cell_spaces.length)
+
+            runtime_snapshot = bulk_conversion_runtime_snapshot
+            groups = cell_spaces.map(&:sketchup_group)
+            begin
+              with_validation_focus_mutation_batch do
+                with_indoor_model_operation('Remove Selected CellSpace IndoorGML Attributes') do
+                  sync do
+                    cell_spaces.each do |cell_space|
+                      demote_cell_space_to_solid_group(cell_space)
+                    end
+                  end
+                end
+              end
+            rescue StandardError => e
+              restore_bulk_conversion_runtime(runtime_snapshot) if runtime_snapshot
+              IndoorCore::Logger.puts(
+                "[IndoorGML] Selected CellSpace demotion failed: #{e.class}: #{e.message}"
+              )
+              UI.messagebox("IndoorGML 속성 제거 실패:\n#{e.message}")
+              return false
+            end
+
+            untrack_demoted_primal_entities(groups)
+            refresh_after_selected_cell_space_demotion
+            true
+          end
+
           def set_selected_cell_space_storey(storey)
             return false if validation_focus_recheck_running?
 
@@ -520,6 +554,71 @@ module ULOL
           end
 
           private
+
+          def confirm_selected_cell_space_demotion(count)
+            message = if count == 1
+                        '선택한 CellSpace의 IndoorGML 속성을 제거하시겠습니까?'
+                      else
+                        "선택한 CellSpace #{count}개의 IndoorGML 속성을 제거하시겠습니까?"
+                      end
+            message += "\n\n연결된 State와 Transition도 제거되며 형상은 Solid Group으로 유지됩니다."
+            UI.messagebox(message, MB_YESNO) == IDYES
+          end
+
+          def demote_cell_space_to_solid_group(cell_space)
+            group = cell_space&.sketchup_group
+            raise ArgumentError, 'CellSpace group is no longer valid' unless group&.valid?
+
+            erase_cell_space(cell_space, erase_sketchup_group: false)
+            @attribute_serializer.clear_indoor_gml_attributes(group)
+            unless indoor_gml_attribute_dictionary_empty?(group)
+              raise 'IndoorGML AttributeDictionary cleanup was incomplete'
+            end
+            raise 'CellSpace material cleanup failed' unless clear_cell_space_materials(group)
+
+            @scene_group_guard.untrack(group) if @scene_group_guard
+            @cell_space_change_snapshots.delete(entity_observer_key(group)) if @cell_space_change_snapshots
+            unlock_indoor_entity(group)
+            group
+          end
+
+          def indoor_gml_attribute_dictionary_empty?(entity)
+            dictionary = entity.attribute_dictionary(
+              AttributeSerializer::ATTRIBUTE_DICTIONARY_NAME
+            ) if entity.respond_to?(:attribute_dictionary)
+            return true unless dictionary&.respond_to?(:each_pair)
+
+            dictionary.each_pair { |_key, _value| return false }
+            true
+          rescue StandardError
+            false
+          end
+
+          def untrack_demoted_primal_entities(groups)
+            return unless @primal_entities_observer&.respond_to?(:untrack_entity_id)
+
+            Array(groups).each do |group|
+              next unless group&.valid? && group.respond_to?(:entityID)
+
+              @primal_entities_observer.untrack_entity_id(group.entityID)
+            end
+          rescue StandardError => e
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Demoted group observer tracking cleanup failed: #{e.class}: #{e.message}"
+            )
+          end
+
+          def refresh_after_selected_cell_space_demotion
+            @editor_session.refresh_visibility_filter if @editor_session.respond_to?(:refresh_visibility_filter)
+            @editor_session.selection_changed
+            apply_indoor_lock_policy
+            model = Sketchup.active_model
+            model.active_view.invalidate if model&.active_view
+          rescue StandardError => e
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Demoted CellSpace UI refresh failed: #{e.class}: #{e.message}"
+            )
+          end
 
           def queue_validation_focus_report_row(payload)
             return nil unless payload

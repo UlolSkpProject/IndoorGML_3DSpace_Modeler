@@ -14,6 +14,19 @@ module ULOL
           TERMINATE_WAIT_MS = 200 unless const_defined?(:TERMINATE_WAIT_MS)
         end unless const_defined?(:Val3dityRunner)
       end
+
+      class DualOverlayScaleDialog
+        attr_reader :show_count
+
+        def initialize
+          @show_count = 0
+        end
+
+        def show
+          @show_count += 1
+          nil
+        end
+      end unless const_defined?(:DualOverlayScaleDialog, false)
     end
   end
 end
@@ -253,6 +266,7 @@ module ULOL
             dispatcher.toggle_dual_overlay
             assert_equal 1, indoor_model.geometry_toggle_count
             assert_equal 1, indoor_model.overlay_toggle_count
+            assert_equal 1, dispatcher.instance_variable_get(:@dual_overlay_scale_dialog).show_count
           end
         end
 

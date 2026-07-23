@@ -498,6 +498,11 @@ button {
   color: #f97066;
 }
 
+.cell-demote-button {
+  margin-top: 0;
+  margin-bottom: 12px;
+}
+
 .command:hover {
   border-color: #6a6760;
 }

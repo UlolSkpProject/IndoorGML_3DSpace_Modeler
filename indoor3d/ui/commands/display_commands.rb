@@ -84,8 +84,6 @@ module ULOL
         end
 
         def open_dual_overlay_scale_dialog
-          return if respond_to?(:validation_operation_running?) && validation_operation_running?
-
           @dual_overlay_scale_dialog ||= DualOverlayScaleDialog.new
           @dual_overlay_scale_dialog.show
         rescue StandardError => e
