@@ -131,32 +131,6 @@ module ULOL
           ]
         end
 
-        unless private_method_defined?(:normalize_triangle_records_allowing_collisions_before_runtime_regression_v2)
-          alias_method :normalize_triangle_records_allowing_collisions_before_runtime_regression_v2,
-                       :normalize_triangle_records_allowing_collisions
-        end
-
-        # Propagate source-space fallback markers into the report consumed by
-        # collect_forced_retriangulation_keys.
-        def normalize_triangle_records_allowing_collisions(
-          triangle_records,
-          axis_plane_plan = nil,
-          duplicate_diagnostics: nil
-        )
-          forced_face_keys = triangle_records.filter_map do |record|
-            record[:source_face_key] if record[:force_retriangulation]
-          end
-          records, cleanup =
-            normalize_triangle_records_allowing_collisions_before_runtime_regression_v2(
-              triangle_records,
-              axis_plane_plan,
-              duplicate_diagnostics: duplicate_diagnostics
-            )
-          cleanup[:forced_source_face_keys] = (
-            Array(cleanup[:forced_source_face_keys]) + forced_face_keys
-          ).compact.uniq
-          [records, cleanup]
-        end
       end
     end
   end

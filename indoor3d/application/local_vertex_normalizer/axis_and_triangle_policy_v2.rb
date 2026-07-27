@@ -552,9 +552,9 @@ module ULOL
           }
         end
 
-        # Target collisions are allowed, but every collapsed or newly duplicated
-        # triangle marks its source face and adjacent source faces for forced
-        # coplanar-patch reconstruction before the hard mesh-validation gate.
+        # Target collisions are allowed. Collapsed and newly duplicated
+        # triangles are deleted; the hard mesh gate decides whether the
+        # resulting surface is still a valid closed shell.
         def normalize_triangle_records_allowing_collisions(
           triangle_records,
           axis_plane_plan = nil,
@@ -607,7 +607,6 @@ module ULOL
                 removed_collinear_triangle_count: 0,
                 removed_duplicate_triangle_count: 0,
                 affected_source_face_keys: [],
-                forced_source_face_keys: [],
                 collapsed_triangle_count: 0,
                 collision_duplicate_triangle_count: 0,
                 repair_failure_set:
@@ -616,18 +615,11 @@ module ULOL
             ]
           end
 
-          forced_face_keys = source_face_keys_with_adjacent_triangles(
-            triangle_records,
-            affected_indices,
-            coordinate_space: :source
-          )
-
           sanitized, cleanup = sanitize_triangle_records(
             normalized_records,
             duplicate_diagnostics: duplicate_diagnostics,
             remove_collinear: false
           )
-          cleanup[:forced_source_face_keys] = forced_face_keys
           cleanup[:collapsed_triangle_count] = collapsed_indices.length
           cleanup[:collision_duplicate_triangle_count] = duplicate_indices.length
           cleanup[:repair_failure_set] = finalize_repair_failure_set(failure_set)
@@ -738,7 +730,8 @@ module ULOL
         def sanitize_triangle_records(
           triangle_records,
           duplicate_diagnostics: nil,
-          remove_collinear: true
+          remove_collinear: true,
+          coordinate_space: :grid
         )
           diagnostics = duplicate_diagnostics || {}
           diagnostics[:duplicate_count] ||= 0
@@ -750,13 +743,20 @@ module ULOL
           affected_source_face_keys = []
 
           records = triangle_records.filter_map do |record|
-            triangle = record[:points].map { |point| grid_indices(point) }
+            triangle = record[:points].map do |point|
+              triangle_point_key(point, coordinate_space)
+            end
             if triangle.uniq.length != 3
               removed_coincident += 1
               affected_source_face_keys << record[:source_face_key]
               next
             end
-            if remove_collinear && integer_zero_vector?(integer_triangle_normal(triangle))
+            collapsed = if coordinate_space == :source
+                          source_triangle_collapsed_to_edge?(record[:points])
+                        else
+                          integer_zero_vector?(integer_triangle_normal(triangle))
+                        end
+            if remove_collinear && collapsed
               removed_collinear += 1
               affected_source_face_keys << record[:source_face_key]
               next
@@ -791,6 +791,33 @@ module ULOL
               affected_source_face_keys: affected_source_face_keys.compact.uniq
             }
           ]
+        end
+
+        # A collapsed triangle is a deletion result, not a repair candidate.
+        # This stage never moves vertices, flips a diagonal, or creates faces.
+        # It only removes coincident/zero-area triangles and exact duplicates
+        # produced by an earlier geometry transformation.
+        def discard_collapsed_triangle_records(
+          triangle_records,
+          coordinate_space: :grid,
+          duplicate_diagnostics: nil
+        )
+          records, report = sanitize_triangle_records(
+            triangle_records,
+            duplicate_diagnostics: duplicate_diagnostics,
+            remove_collinear: true,
+            coordinate_space: coordinate_space
+          )
+          removed_count =
+            report[:removed_coincident_triangle_count].to_i +
+            report[:removed_collinear_triangle_count].to_i +
+            report[:removed_duplicate_triangle_count].to_i
+          report[:coordinate_space] = coordinate_space
+          report[:input_triangle_count] = triangle_records.length
+          report[:output_triangle_count] = records.length
+          report[:removed_triangle_count] = removed_count
+          report[:skipped] = removed_count.zero?
+          [records, report]
         end
 
         def triangle_mesh_inventory(triangle_records)

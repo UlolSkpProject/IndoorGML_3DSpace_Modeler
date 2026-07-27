@@ -8,6 +8,8 @@
 # profiler layer remains dormant unless debug or report timing is requested.
 require_relative 'local_vertex_normalizer/legacy_kernel'
 require_relative 'local_vertex_normalizer/coplanar_shared_edge_groups'
+require_relative 'local_vertex_normalizer/source_boundary_normalization_v2'
+require_relative 'local_vertex_normalizer/source_altitude_sliver_collapse_v2'
 require_relative 'local_vertex_normalizer/pipeline_v2'
 require_relative 'local_vertex_normalizer/runtime_regression_fixes_v2'
 require_relative 'local_vertex_normalizer/coplanar_patch_provenance_trace_v2'

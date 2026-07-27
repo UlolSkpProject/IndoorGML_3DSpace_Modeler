@@ -36,10 +36,8 @@ module ULOL
                 duplicate_diagnostics: merged_duplicate_diagnostics,
                 snapshot_role: :post_coplanar_cleanup
               )
-              merged_triangles, merged_degenerate_repair =
-                repair_degenerate_source_triangles(
-                merged_triangles
-              )
+              merged_triangles, merged_triangle_cleanup =
+                discard_collapsed_triangle_records(merged_triangles)
               merged_mesh_validation =
                 validate_normalized_triangle_mesh!(merged_triangles)
               merged_surface_equivalence = verify_normalized_surface_equivalence!(
@@ -50,7 +48,7 @@ module ULOL
                 validated: true,
                 triangles: merged_triangles,
                 duplicate_diagnostics: merged_duplicate_diagnostics,
-                degenerate_repair: merged_degenerate_repair,
+                degenerate_repair: merged_triangle_cleanup,
                 mesh_validation: merged_mesh_validation,
                 surface_equivalence: merged_surface_equivalence,
                 topology: topology

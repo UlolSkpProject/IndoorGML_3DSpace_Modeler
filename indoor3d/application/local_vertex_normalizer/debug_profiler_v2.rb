@@ -226,6 +226,15 @@ module ULOL
           end
         end
 
+        def collapse_source_altitude_sliver_triangles(triangle_records)
+          measure_debug_stage(
+            :source_altitude_sliver_collapse,
+            triangle_count: triangle_records.length
+          ) do
+            super
+          end
+        end
+
         def repair_degenerate_source_triangles(triangle_records, coordinate_space: :grid)
           measure_debug_stage(
             "degenerate_repair_#{coordinate_space}".to_sym,
@@ -288,15 +297,6 @@ module ULOL
           measure_debug_stage(
             :triangle_record_sanitize,
             triangle_count: triangle_records.length
-          ) do
-            super
-          end
-        end
-
-        def collect_forced_retriangulation_keys(*reports)
-          measure_debug_stage(
-            :forced_retriangulation_collection,
-            report_count: reports.length
           ) do
             super
           end

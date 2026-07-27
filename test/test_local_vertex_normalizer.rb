@@ -95,6 +95,17 @@ module ULOL
           end
         end
 
+        class MultiLoopBoundarySnapshotFace < SnapshotFace
+          attr_reader :loops
+
+          def initialize(loop_vertices, persistent_id, normal)
+            points = loop_vertices.flatten.map(&:position)
+            super(points, [(1..points.length).to_a], persistent_id)
+            @loops = loop_vertices.map { |vertices| SnapshotLoop.new(vertices) }
+            @normal = normal
+          end
+        end
+
         class SnapshotEntities
           def initialize(faces)
             @faces = faces
@@ -744,6 +755,70 @@ module ULOL
           assert_equal 0, diagnostics[:duplicate_count]
         end
 
+        def test_source_cleanup_discards_collinear_triangle_without_repair
+          records = []
+          add_triangle_record(
+            records,
+            mm_point(0, 0, 0),
+            mm_point(5, 0, 0),
+            mm_point(10, 0, 0),
+            :collapsed
+          )
+          add_triangle_record(
+            records,
+            mm_point(0, 0, 0),
+            mm_point(10, 0, 0),
+            mm_point(0, 10, 0),
+            :surface
+          )
+
+          cleaned, report = normalizer.send(
+            :discard_collapsed_triangle_records,
+            records,
+            coordinate_space: :source
+          )
+
+          assert_equal 1, cleaned.length
+          assert_equal :surface, cleaned.first[:source_face_key]
+          assert_equal 1, report[:removed_collinear_triangle_count]
+          assert_equal 0, report[:removed_coincident_triangle_count]
+          assert_equal 0, report[:removed_duplicate_triangle_count]
+          assert_equal 1, report[:removed_triangle_count]
+          assert_equal :source, report[:coordinate_space]
+        end
+
+        def test_grid_cleanup_discards_collapsed_and_duplicate_triangles
+          records = []
+          add_triangle_record(
+            records,
+            mm_point(0, 0, 0),
+            mm_point(0, 0, 0),
+            mm_point(0, 10, 0),
+            :coincident
+          )
+          2.times do |index|
+            add_triangle_record(
+              records,
+              mm_point(0, 0, 0),
+              mm_point(10, 0, 0),
+              mm_point(0, 10, 0),
+              :"surface_#{index}"
+            )
+          end
+
+          cleaned, report = normalizer.send(
+            :discard_collapsed_triangle_records,
+            records
+          )
+
+          assert_equal 1, cleaned.length
+          assert_equal 1, report[:removed_coincident_triangle_count]
+          assert_equal 0, report[:removed_collinear_triangle_count]
+          assert_equal 1, report[:removed_duplicate_triangle_count]
+          assert_equal 2, report[:removed_triangle_count]
+          assert_equal :grid, report[:coordinate_space]
+        end
+
         def test_source_space_degenerate_triangle_is_repaired_before_grid_rounding
           point_p = mm_point(30_374.309310100576, -5_125.200161758802, -400)
           point_a = mm_point(33_074.02490280663, -5_086.011917351332, -400)
@@ -1025,13 +1100,17 @@ module ULOL
             :>=,
             0
           )
-          assert instance.send(
-            :validate_source_boundary_retriangulation!,
-            records,
-            [face.loops.first.vertices.map do |vertex|
-              instance.send(:source_precision_indices, vertex.position)
-            end]
-          )
+          face.loops.first.vertices.each do |vertex|
+            assert records.any? do |record|
+              record[:points].any? do |candidate|
+                instance.send(
+                  :point_distance_mm,
+                  candidate,
+                  vertex.position
+                ) <= 0.001
+              end
+            end
+          end
         end
 
         def test_face_snapshot_prefers_source_boundary_even_when_mesh_is_valid
@@ -1055,6 +1134,453 @@ module ULOL
 
           assert_equal 2, records.length
           assert records.all? { |record| record[:source_boundary_snapshot] }
+        end
+
+        def test_source_boundary_normalization_reinserts_exact_collinear_split
+          vertices = [
+            SnapshotVertex.new(mm_point(0, 0, 0)),
+            SnapshotVertex.new(mm_point(5, 0, 0)),
+            SnapshotVertex.new(mm_point(10, 0, 0)),
+            SnapshotVertex.new(mm_point(10, 10, 0)),
+            SnapshotVertex.new(mm_point(0, 10, 0))
+          ]
+          face = MultiLoopBoundarySnapshotFace.new(
+            [vertices],
+            706,
+            point(0, 0, 1)
+          )
+          instance = normalizer(face_class: MultiLoopBoundarySnapshotFace)
+
+          records = instance.send(
+            :triangle_snapshot,
+            SnapshotEntities.new([face])
+          )
+
+          assert_equal 3, records.length
+          assert records.all? { |record| record[:source_boundary_normalized] }
+          assert_source_boundary_vertex_present(instance, records, mm_point(5, 0, 0))
+          assert instance.send(
+            :validate_source_boundary_retriangulation!,
+            records,
+            [vertices.map do |vertex|
+              instance.send(:source_precision_indices, vertex.position)
+            end]
+          )
+        end
+
+        def test_source_boundary_normalization_projects_sub_tolerance_needle
+          vertices = [
+            SnapshotVertex.new(mm_point(0, 0, 0)),
+            SnapshotVertex.new(mm_point(5, 0.0005, 0)),
+            SnapshotVertex.new(mm_point(10, 0, 0)),
+            SnapshotVertex.new(mm_point(10, 10, 0)),
+            SnapshotVertex.new(mm_point(0, 10, 0))
+          ]
+          face = MultiLoopBoundarySnapshotFace.new(
+            [vertices],
+            707,
+            point(0, 0, 1)
+          )
+          instance = normalizer(face_class: MultiLoopBoundarySnapshotFace)
+
+          records = instance.send(
+            :triangle_snapshot,
+            SnapshotEntities.new([face])
+          )
+          projected = records.flat_map { |record| record[:points] }.find do |candidate|
+            (candidate.x.to_f - mm_point(5, 0, 0).x.to_f).abs < 1.0e-12
+          end
+
+          refute_nil projected
+          assert_in_delta 0.0, projected.y.to_f * 25.4, 1.0e-9
+          assert records.all? { |record| record[:source_boundary_normalized] }
+          assert_operator source_triangle_minimum_altitude_mm(records), :>, 0.001
+          stats = instance.instance_variable_get(
+            :@source_boundary_normalization_stats_v2
+          )
+          assert_equal 1, stats[:normalized_vertex_count]
+          assert_equal records.length, stats[:source_triangle_count]
+          assert_equal 0, stats[:low_altitude_sliver_count]
+        end
+
+        def test_source_boundary_normalization_uses_actual_tolerance_boundary
+          inside = source_boundary_plan_for_offset(0.000999, 708)
+          outside = source_boundary_plan_for_offset(0.001001, 709)
+
+          assert_equal 1, inside[:targets].length
+          assert_empty outside[:targets]
+        end
+
+        def test_source_boundary_normalization_preserves_clear_offset
+          plan = source_boundary_plan_for_offset(0.01, 710)
+
+          assert_empty plan[:targets]
+          assert_empty plan[:occurrences]
+        end
+
+        def test_source_boundary_normalization_keeps_shared_vertex_conforming
+          shared = SnapshotVertex.new(mm_point(5, 0.0005, 0))
+          first_vertices = [
+            SnapshotVertex.new(mm_point(0, 0, 0)),
+            shared,
+            SnapshotVertex.new(mm_point(10, 0, 0)),
+            SnapshotVertex.new(mm_point(10, 10, 0)),
+            SnapshotVertex.new(mm_point(0, 10, 0))
+          ]
+          second_vertices = [
+            shared,
+            SnapshotVertex.new(mm_point(5, 5, 0)),
+            SnapshotVertex.new(mm_point(5, 5, 5)),
+            SnapshotVertex.new(mm_point(5, 0, 5))
+          ]
+          faces = [
+            MultiLoopBoundarySnapshotFace.new(
+              [first_vertices],
+              711,
+              point(0, 0, 1)
+            ),
+            MultiLoopBoundarySnapshotFace.new(
+              [second_vertices],
+              712,
+              point(1, 0, 0)
+            )
+          ]
+          instance = normalizer(face_class: MultiLoopBoundarySnapshotFace)
+
+          records = instance.send(
+            :triangle_snapshot,
+            SnapshotEntities.new(faces)
+          )
+          shared_uses = records.flat_map { |record| record[:points] }.select do |candidate|
+            (candidate.x.to_f - shared.position.x.to_f).abs < 1.0e-12 &&
+              (candidate.z.to_f - shared.position.z.to_f).abs < 1.0e-12 &&
+              ((candidate.y.to_f - shared.position.y.to_f).abs * 25.4) < 0.01
+          end
+
+          refute_empty shared_uses
+          assert shared_uses.all? { |candidate| (candidate.y.to_f * 25.4).abs < 1.0e-9 }
+          assert records.any? do |record|
+            record[:source_face_key] == 712 &&
+              record[:points].any? { |candidate| shared_uses.include?(candidate) }
+          end
+        end
+
+        def test_source_boundary_normalization_handles_hole_loop
+          outer = [
+            SnapshotVertex.new(mm_point(0, 0, 0)),
+            SnapshotVertex.new(mm_point(20, 0, 0)),
+            SnapshotVertex.new(mm_point(20, 20, 0)),
+            SnapshotVertex.new(mm_point(0, 20, 0))
+          ]
+          hole = [
+            SnapshotVertex.new(mm_point(5, 5, 0)),
+            SnapshotVertex.new(mm_point(5, 15, 0)),
+            SnapshotVertex.new(mm_point(10, 15.0005, 0)),
+            SnapshotVertex.new(mm_point(15, 15, 0)),
+            SnapshotVertex.new(mm_point(15, 5, 0))
+          ]
+          face = MultiLoopBoundarySnapshotFace.new(
+            [outer, hole],
+            713,
+            point(0, 0, 1)
+          )
+          instance = normalizer(face_class: MultiLoopBoundarySnapshotFace)
+
+          records = instance.send(
+            :triangle_snapshot,
+            SnapshotEntities.new([face])
+          )
+
+          assert records.all? { |record| record[:source_boundary_normalized] }
+          assert_source_boundary_vertex_present(
+            instance,
+            records,
+            mm_point(10, 15, 0)
+          )
+          assert_operator source_triangle_minimum_altitude_mm(records), :>, 0.001
+        end
+
+        def test_source_boundary_normalization_preserves_small_sharp_feature
+          plan = source_boundary_plan_for_points(
+            [
+              mm_point(0, 0, 0),
+              mm_point(0.0005, 0.0005, 0),
+              mm_point(0.001, 0, 0),
+              mm_point(10, 0, 0),
+              mm_point(10, 10, 0),
+              mm_point(0, 10, 0)
+            ],
+            714
+          )
+
+          assert_empty plan[:targets]
+        end
+
+        def test_source_boundary_normalization_handles_consecutive_candidates
+          points = [
+            mm_point(0, 0, 0),
+            mm_point(3, 0.0004, 0),
+            mm_point(7, -0.0004, 0),
+            mm_point(10, 0, 0),
+            mm_point(10, 10, 0),
+            mm_point(0, 10, 0)
+          ]
+          vertices = points.map { |source_point| SnapshotVertex.new(source_point) }
+          face = MultiLoopBoundarySnapshotFace.new(
+            [vertices],
+            715,
+            point(0, 0, 1)
+          )
+          instance = normalizer(face_class: MultiLoopBoundarySnapshotFace)
+
+          records = instance.send(
+            :triangle_snapshot,
+            SnapshotEntities.new([face])
+          )
+
+          assert_source_boundary_vertex_present(instance, records, mm_point(3, 0, 0))
+          assert_source_boundary_vertex_present(instance, records, mm_point(7, 0, 0))
+          assert_operator source_triangle_minimum_altitude_mm(records), :>, 0.001
+        end
+
+        def test_source_boundary_normalization_rejects_unsafe_loop_targets
+          vertices = [
+            SnapshotVertex.new(mm_point(0, 0, 0)),
+            SnapshotVertex.new(mm_point(10, 10, 0)),
+            SnapshotVertex.new(mm_point(0, 10, 0)),
+            SnapshotVertex.new(mm_point(10, 0, 0))
+          ]
+          face = MultiLoopBoundarySnapshotFace.new(
+            [vertices],
+            716,
+            point(0, 0, 1)
+          )
+          instance = normalizer(face_class: MultiLoopBoundarySnapshotFace)
+          unsafe = { vertices.first.object_id => mm_point(5, 5, 0) }
+
+          accepted = instance.send(
+            :reject_unsafe_source_boundary_targets_v2,
+            [face],
+            unsafe
+          )
+
+          assert_empty accepted
+        end
+
+        def test_source_boundary_fallback_preserves_legacy_error_type
+          vertices = [
+            SnapshotVertex.new(mm_point(0, 0, 0)),
+            SnapshotVertex.new(mm_point(10, 10, 0)),
+            SnapshotVertex.new(mm_point(0, 10, 0)),
+            SnapshotVertex.new(mm_point(10, 0, 0))
+          ]
+          face = MultiLoopBoundarySnapshotFace.new(
+            [vertices],
+            719,
+            point(0, 0, 1)
+          )
+          instance = normalizer(face_class: MultiLoopBoundarySnapshotFace)
+          instance.instance_variable_set(
+            :@source_boundary_normalization_plan_v2,
+            nil
+          )
+
+          error = assert_raises(LocalVertexNormalizer::TopologyChangedError) do
+            instance.send(:source_boundary_triangle_records, face, 719)
+          end
+
+          refute_instance_of(
+            LocalVertexNormalizerSourceBoundaryNormalizationV2::
+              BoundaryNormalizationFallback,
+            error
+          )
+        end
+
+        def test_source_boundary_normalization_preserves_axis_constraint_key
+          points = [
+            mm_point(0, 0, 0),
+            mm_point(5, 0.0005, 0),
+            mm_point(10, 0, 0),
+            mm_point(10, 10, 0),
+            mm_point(0, 10, 0)
+          ]
+          vertices = points.map { |source_point| SnapshotVertex.new(source_point) }
+          face = MultiLoopBoundarySnapshotFace.new(
+            [vertices],
+            717,
+            point(0, 0, 1)
+          )
+          instance = normalizer(face_class: MultiLoopBoundarySnapshotFace)
+          source_key = instance.send(:source_point_key, points[1])
+          axis_plan = { constraints: { source_key => { 1 => 23 } } }
+          instance.instance_variable_set(
+            :@source_boundary_axis_plane_plan_v2,
+            axis_plan
+          )
+
+          plan = instance.send(
+            :source_boundary_normalization_plan_v2,
+            [face]
+          )
+          instance.send(:apply_source_boundary_constraint_aliases_v2!, plan)
+          target = plan[:targets].fetch(vertices[1].object_id)
+          target_key = instance.send(:source_point_key, target)
+
+          assert_equal({ 1 => 23 }, axis_plan[:constraints][target_key])
+        end
+
+        def test_source_boundary_normalization_rejects_constraint_conflict
+          points = [
+            mm_point(0, 0, 0),
+            mm_point(5, 0.0005, 0),
+            mm_point(10, 0, 0),
+            mm_point(10, 10, 0),
+            mm_point(0, 10, 0)
+          ]
+          vertices = points.map { |source_point| SnapshotVertex.new(source_point) }
+          face = MultiLoopBoundarySnapshotFace.new(
+            [vertices],
+            718,
+            point(0, 0, 1)
+          )
+          instance = normalizer(face_class: MultiLoopBoundarySnapshotFace)
+          source_key = instance.send(:source_point_key, points[1])
+          target_key = instance.send(:source_point_key, mm_point(5, 0, 0))
+          instance.instance_variable_set(
+            :@source_boundary_axis_plane_plan_v2,
+            {
+              constraints: {
+                source_key => { 1 => 23 },
+                target_key => { 1 => 24 }
+              }
+            }
+          )
+
+          plan = instance.send(
+            :source_boundary_normalization_plan_v2,
+            [face]
+          )
+
+          assert_empty plan[:targets]
+          assert_empty plan[:occurrences]
+        end
+
+        def test_source_altitude_sliver_collapse_moves_shared_apex_to_longest_edge
+          apex = mm_point(0, 0.1, 0)
+          edge_start = mm_point(-5, 0, 0)
+          edge_end = mm_point(5, 0, 0)
+          upper = mm_point(0, 0, 5)
+          lower = mm_point(0, 0, -5)
+          records = []
+          add_triangle_record(records, apex, edge_start, edge_end, 801)
+          add_triangle_record(records, apex, upper, edge_start, 802)
+          add_triangle_record(records, apex, edge_end, lower, 803)
+          instance = normalizer
+
+          collapsed, report = instance.send(
+            :collapse_source_altitude_sliver_triangles,
+            records
+          )
+          target_key = instance.send(
+            :source_precision_indices,
+            mm_point(0, 0, 0)
+          )
+          apex_key = instance.send(:source_precision_indices, apex)
+          output_keys = collapsed.flat_map do |record|
+            record[:points].map do |point|
+              instance.send(:source_precision_indices, point)
+            end
+          end
+
+          assert_equal 2, collapsed.length
+          assert_equal 1, report[:detected_sliver_count]
+          assert_equal 1, report[:selected_apex_count]
+          assert_equal 1, report[:moved_vertex_count]
+          assert_equal 3, report[:moved_triangle_count]
+          assert_equal 1, report[:removed_collapsed_triangle_count]
+          assert_includes output_keys, target_key
+          refute_includes output_keys, apex_key
+          assert_equal [801, 802, 803], report[:affected_source_face_keys].sort
+        end
+
+        def test_source_altitude_sliver_collapse_leaves_face_collapsed_to_edge
+          apex = mm_point(0, 0.1, 0)
+          edge_start = mm_point(-5, 0, 0)
+          edge_end = mm_point(5, 0, 0)
+          foot = mm_point(0, 0, 0)
+          records = []
+          add_triangle_record(records, apex, edge_start, edge_end, 811)
+          add_triangle_record(records, apex, edge_start, foot, 812)
+          instance = normalizer
+
+          collapsed, report = instance.send(
+            :collapse_source_altitude_sliver_triangles,
+            records
+          )
+
+          assert_empty collapsed
+          assert_equal 2, report[:detected_sliver_count]
+          assert_equal 2, report[:removed_collapsed_triangle_count]
+          assert_equal 0, report[:remaining_sliver_count]
+        end
+
+        def test_source_altitude_sliver_collapse_respects_half_millimeter_threshold
+          apex = mm_point(0, 0.5001, 0)
+          edge_start = mm_point(-5, 0, 0)
+          edge_end = mm_point(5, 0, 0)
+          records = []
+          add_triangle_record(records, apex, edge_start, edge_end, 821)
+          instance = normalizer
+
+          collapsed, report = instance.send(
+            :collapse_source_altitude_sliver_triangles,
+            records
+          )
+
+          assert_same records, collapsed
+          assert_equal 0, report[:detected_sliver_count]
+          assert_equal 1, report[:input_triangle_count]
+          assert_equal 1, report[:output_triangle_count]
+          assert report[:skipped]
+        end
+
+        def test_source_altitude_sliver_collapse_post_conforming_splits_target_edge
+          apex = mm_point(0, 0.1, 0)
+          edge_start = mm_point(-5, 0, 0)
+          edge_end = mm_point(5, 0, 0)
+          upper = mm_point(0, 0, 5)
+          lower = mm_point(0, 0, -5)
+          opposite = mm_point(0, -5, 0)
+          records = []
+          add_triangle_record(records, apex, edge_start, edge_end, 831)
+          add_triangle_record(records, apex, upper, edge_start, 832)
+          add_triangle_record(records, apex, edge_end, lower, 833)
+          add_triangle_record(records, edge_start, opposite, edge_end, 834)
+          instance = normalizer
+
+          collapsed, = instance.send(
+            :collapse_source_altitude_sliver_triangles,
+            records
+          )
+          conforming = instance.send(
+            :conforming_triangle_snapshot,
+            collapsed,
+            coordinate_space: :source
+          )
+          target_key = instance.send(
+            :source_precision_indices,
+            mm_point(0, 0, 0)
+          )
+          split_neighbor = conforming.select do |record|
+            record[:source_face_key] == 834
+          end
+
+          assert_equal 2, split_neighbor.length
+          assert split_neighbor.all? do |record|
+            record[:points].any? do |point|
+              instance.send(:source_precision_indices, point) == target_key
+            end
+          end
         end
 
         def test_aabb_hybrid_matches_brute_force_overlap_pairs
@@ -1221,7 +1747,11 @@ module ULOL
             error: nil
           }
           expected_duplicate_diagnostics = { duplicate_count: 2 }
-          degenerate_repair = { repaired_triangles: 1, replaced_pairs: 1 }
+          triangle_cleanup = {
+            removed_coincident_triangle_count: 0,
+            removed_collinear_triangle_count: 0,
+            removed_duplicate_triangle_count: 0
+          }
           mesh_validation = { triangle_count: 1, component_count: 1 }
           equivalence = { equivalent: true }
 
@@ -1237,8 +1767,8 @@ module ULOL
             duplicate_diagnostics.merge!(expected_duplicate_diagnostics)
             triangles
           end
-          instance.define_singleton_method(:repair_degenerate_source_triangles) do |records|
-            [records, degenerate_repair]
+          instance.define_singleton_method(:discard_collapsed_triangle_records) do |records|
+            [records, triangle_cleanup]
           end
           instance.define_singleton_method(:validate_normalized_triangle_mesh!) do |_records|
             mesh_validation
@@ -1254,9 +1784,9 @@ module ULOL
           )
 
           assert snapshot[:validated]
-          assert_same triangles, snapshot[:triangles]
+          assert_equal triangles, snapshot[:triangles]
           assert_equal expected_duplicate_diagnostics, snapshot[:duplicate_diagnostics]
-          assert_same degenerate_repair, snapshot[:degenerate_repair]
+          assert_same triangle_cleanup, snapshot[:degenerate_repair]
           assert_same mesh_validation, snapshot[:mesh_validation]
           assert_same equivalence, snapshot[:surface_equivalence]
           assert_same topology, snapshot[:topology]
@@ -1338,9 +1868,9 @@ module ULOL
             duplicate_diagnostics[:duplicate_count] = 0
             fresh
           end
-          instance.define_singleton_method(:repair_degenerate_source_triangles) do |records|
-            calls << :degenerate
-            [records, { repaired_triangles: 0 }]
+          instance.define_singleton_method(:discard_collapsed_triangle_records) do |records|
+            calls << :cleanup
+            [records, { removed_triangle_count: 0 }]
           end
           instance.define_singleton_method(:validate_normalized_triangle_mesh!) do |_records|
             calls << :validate
@@ -1362,7 +1892,7 @@ module ULOL
             final_diagnostics
           )
 
-          assert_equal [:snapshot, :degenerate, :validate, :equivalence], calls
+          assert_equal [:snapshot, :cleanup, :validate, :equivalence], calls
           assert_same fresh, result[0]
           refute result[3][:final_snapshot_reused]
           refute result[4][:reused]
@@ -1930,6 +2460,76 @@ module ULOL
             face_class: face_class,
             model: model
           )
+        end
+
+        def source_boundary_plan_for_offset(offset_mm, persistent_id)
+          source_boundary_plan_for_points(
+            [
+              mm_point(0, 0, 0),
+              mm_point(5, offset_mm, 0),
+              mm_point(10, 0, 0),
+              mm_point(10, 10, 0),
+              mm_point(0, 10, 0)
+            ],
+            persistent_id
+          )
+        end
+
+        def source_boundary_plan_for_points(points, persistent_id)
+          vertices = points.map { |source_point| SnapshotVertex.new(source_point) }
+          face = MultiLoopBoundarySnapshotFace.new(
+            [vertices],
+            persistent_id,
+            point(0, 0, 1)
+          )
+          instance = normalizer(face_class: MultiLoopBoundarySnapshotFace)
+          instance.send(:source_boundary_normalization_plan_v2, [face])
+        end
+
+        def assert_source_boundary_vertex_present(instance, records, expected)
+          expected_key = instance.send(:source_precision_indices, expected)
+          actual_keys = records.flat_map do |record|
+            record[:points].map do |source_point|
+              instance.send(:source_precision_indices, source_point)
+            end
+          end
+          assert_includes actual_keys, expected_key
+        end
+
+        def source_triangle_minimum_altitude_mm(records)
+          records.map do |record|
+            points = record[:points]
+            edges = 3.times.map do |index|
+              point_distance_in_mm(points[index], points[(index + 1) % 3])
+            end
+            area2 = triangle_area_twice_in_mm2(points)
+            area2 / edges.max
+          end.min
+        end
+
+        def point_distance_in_mm(point_a, point_b)
+          Math.sqrt(
+            ((point_a.x.to_f - point_b.x.to_f)**2) +
+            ((point_a.y.to_f - point_b.y.to_f)**2) +
+            ((point_a.z.to_f - point_b.z.to_f)**2)
+          ) * 25.4
+        end
+
+        def triangle_area_twice_in_mm2(points)
+          ab = 3.times.map do |axis|
+            [points[1].x, points[1].y, points[1].z][axis].to_f -
+              [points[0].x, points[0].y, points[0].z][axis].to_f
+          end
+          ac = 3.times.map do |axis|
+            [points[2].x, points[2].y, points[2].z][axis].to_f -
+              [points[0].x, points[0].y, points[0].z][axis].to_f
+          end
+          cross = [
+            (ab[1] * ac[2]) - (ab[2] * ac[1]),
+            (ab[2] * ac[0]) - (ab[0] * ac[2]),
+            (ab[0] * ac[1]) - (ab[1] * ac[0])
+          ]
+          Math.sqrt(cross.sum { |value| value * value }) * (25.4**2)
         end
 
         def tetrahedron_faces

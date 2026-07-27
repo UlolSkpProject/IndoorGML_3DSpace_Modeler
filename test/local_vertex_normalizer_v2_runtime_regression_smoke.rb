@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 # Standalone regression smoke test for the two failures observed in the
-# 159-group SketchUp run: unresolved source zero-area triangles and exact-plane
-# false negatives during final surface equivalence.
+# 159-group SketchUp run: source zero-area cleanup and exact-plane false
+# negatives during final surface equivalence.
 
 module ULOL
   module Indoor3DGmlModeler
@@ -205,7 +205,8 @@ _normalized, cleanup = normalizer.send(
   :normalize_triangle_records_allowing_collisions,
   records
 )
-raise 'force marker was not propagated' unless cleanup[:forced_source_face_keys] == [10]
+raise 'removed patch-retriangulation marker leaked into grid cleanup' unless
+  cleanup[:forced_source_face_keys].empty?
 
 missing_plane_triangle = {
   points: [

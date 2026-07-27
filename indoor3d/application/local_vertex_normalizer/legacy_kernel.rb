@@ -199,7 +199,6 @@ module ULOL
           axis_plane_plan:,
           axis_plane_merge:,
           short_edge_sliver_repair:,
-          planar_patch_retriangulation:,
           duplicate_diagnostics:,
           residual_mm:
         )
@@ -251,20 +250,14 @@ module ULOL
                 skipped_patches: short_edge_sliver_repair[:skipped_patches]
               },
               {
-                phase: :degenerate_triangle_retriangulation,
-                repaired_triangles: degenerate_repair[:repaired_triangles],
-                replaced_pairs: degenerate_repair[:replaced_pairs],
+                phase: :collapsed_triangle_cleanup,
+                removed_coincident_triangles:
+                  degenerate_repair[:removed_coincident_triangle_count],
+                removed_collinear_triangles:
+                  degenerate_repair[:removed_collinear_triangle_count],
+                removed_duplicate_triangles:
+                  degenerate_repair[:removed_duplicate_triangle_count],
                 stages: degenerate_repair[:stages]
-              },
-              {
-                phase: :exact_coplanar_patch_retriangulation,
-                detected_patches: planar_patch_retriangulation[:detected_patches],
-                rebuilt_patches: planar_patch_retriangulation[:rebuilt_patches],
-                preserved_patches: planar_patch_retriangulation[:preserved_patches],
-                source_triangles: planar_patch_retriangulation[:source_triangles],
-                rebuilt_triangles: planar_patch_retriangulation[:rebuilt_triangles],
-                boundary_loops: planar_patch_retriangulation[:boundary_loops],
-                holes: planar_patch_retriangulation[:holes]
               },
               {
                 phase: :validated_triangle_rebuild,
@@ -300,8 +293,11 @@ module ULOL
             ],
             source_triangle_count: source_triangles.length,
             conforming_triangle_count: conforming_triangles.length,
-            degenerate_triangle_repair_count: degenerate_repair[:repaired_triangles],
-            degenerate_triangle_replaced_pair_count: degenerate_repair[:replaced_pairs],
+            degenerate_triangle_repair_count: 0,
+            degenerate_triangle_replaced_pair_count: 0,
+            collapsed_triangle_removal_count:
+              degenerate_repair[:removed_coincident_triangle_count].to_i +
+              degenerate_repair[:removed_collinear_triangle_count].to_i,
             added_face_count: build[:added_faces],
             skipped_collinear_triangle_count: build[:skipped_collinear],
             final_triangle_count: final_mesh_validation[:triangle_count],

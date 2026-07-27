@@ -11,11 +11,12 @@ module ULOL
           axis_plane_plan:,
           vertex_metrics:,
           target_collision_cleanup:,
-          post_retriangulation_cleanup:,
+          triangle_cleanup:,
           rebuilt_pre_repair_validation:,
-          forced_retriangulation:,
           final_surface_equivalence:,
-          final_repair:
+          final_repair:,
+          source_boundary_normalization:,
+          source_altitude_sliver_collapse:
         )
           report[:normalization_strategy] = :validated_triangle_rebuild_v2
           report[:axis_constraint_priority] = axis_plane_plan[:axis_priority]
@@ -31,13 +32,14 @@ module ULOL
           report[:merged_target_vertex_count] = vertex_metrics[:merged_target_vertex_count]
           report[:target_collision_samples] = vertex_metrics[:target_collisions]
           report[:target_collision_cleanup] = target_collision_cleanup
-          report[:forced_retriangulation] = forced_retriangulation
-          report[:forced_retriangulation_source_face_count] =
-            forced_retriangulation[:source_face_keys].length
-          report[:post_retriangulation_cleanup] = post_retriangulation_cleanup
+          report[:collapsed_triangle_cleanup] = triangle_cleanup
           report[:rebuilt_pre_repair_validation] = rebuilt_pre_repair_validation
           report[:final_surface_equivalence] = final_surface_equivalence
           report[:final_entity_repair] = final_repair
+          report[:source_boundary_normalization] =
+            source_boundary_normalization
+          report[:source_altitude_sliver_collapse] =
+            source_altitude_sliver_collapse
           report[:surface_border_repair_count] =
             final_repair.dig(:surface_border, :repairs).to_i
           report[:external_face_removal_count] =
