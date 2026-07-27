@@ -26,20 +26,6 @@ module LvnSelectedFailureScan
     selected = model.selection.to_a
     candidates, skipped = selected.partition { |entity| normalizable_entity?(entity) }
 
-    if candidates.empty?
-      puts '[LVN FAILURE SCAN] No selected Group/ComponentInstance candidates.'
-      return {
-        schema: 'ulol.lvn_selected_failure_scan.v1',
-        generated_at: Time.now.iso8601(3),
-        selected_count: selected.length,
-        candidate_count: 0,
-        success_count: 0,
-        failure_count: 0,
-        skipped: skipped.map { |entity| entity_summary(entity) },
-        failures: []
-      }
-    end
-
     result = {
       schema: 'ulol.lvn_selected_failure_scan.v1',
       generated_at: Time.now.iso8601(3),
@@ -52,6 +38,12 @@ module LvnSelectedFailureScan
       failures: []
     }
 
+    if candidates.empty?
+      puts '[LVN FAILURE SCAN] No selected Group/ComponentInstance candidates.'
+      $lvn_selected_failure_scan = result
+      return result
+    end
+
     puts "\n#{'=' * 100}"
     puts '[LVN SELECTED FAILURE SCAN]'
     puts "selected=#{selected.length} candidates=#{candidates.length} skipped=#{skipped.length}"
@@ -60,13 +52,16 @@ module LvnSelectedFailureScan
     puts '=' * 100
 
     candidates.each_with_index do |entity, index|
-      scan_one(model, entity, tolerance_mm, index + 1, candidates.length, result)
+      failure = scan_one(model, entity, tolerance_mm, index + 1, candidates.length)
+      if failure
+        result[:failures] << failure
+      else
+        result[:success_count] += 1
+      end
     end
 
     result[:failure_count] = result[:failures].length
-    result[:success_count] = result[:candidate_count] - result[:failure_count]
 
-    json_path = nil
     if write_json
       json_path = File.join(
         Dir.tmpdir,
@@ -81,9 +76,10 @@ module LvnSelectedFailureScan
     result
   end
 
-  def scan_one(model, entity, tolerance_mm, ordinal, total, result)
+  def scan_one(model, entity, tolerance_mm, ordinal, total)
     info = entity_summary(entity)
     operation_started = false
+    failure = nil
     normalizer = LVN.new(tolerance_mm, model: model)
 
     begin
@@ -93,47 +89,53 @@ module LvnSelectedFailureScan
       )
       raise LVN::OperationError, 'SketchUp refused to start diagnostic operation' unless operation_started
 
-      # Full production normalization path including in-memory hard gate and
-      # SketchUp rebuild. The outer operation is owned by this probe.
+      # Full production normalization path including the exact in-memory hard
+      # gate and SketchUp rebuild. This probe owns the outer operation.
       normalizer.normalize(entity, manage_operation: false)
-
-      result[:success_count] += 1
-      puts format_progress('PASS', ordinal, total, info)
     rescue StandardError => error
       failure = info.merge(
         error_class: error.class.name,
         error_message: error.message.to_s,
         backtrace: Array(error.backtrace).first(12)
       )
-      result[:failures] << failure
-      puts format_progress('FAIL', ordinal, total, info)
     ensure
       if operation_started
         begin
           aborted = model.abort_operation
           if aborted == false
-            rollback_failure = info.merge(
-              error_class: 'LVN_SCAN_ROLLBACK_FAILURE',
-              error_message: 'SketchUp returned false from abort_operation',
-              backtrace: []
-            )
-            result[:failures] << rollback_failure unless result[:failures].any? do |entry|
-              entry[:persistent_id] == info[:persistent_id] &&
-                entry[:error_class] == 'LVN_SCAN_ROLLBACK_FAILURE'
+            rollback_message = 'SketchUp returned false from abort_operation'
+            if failure
+              failure[:rollback_error] = rollback_message
+            else
+              failure = info.merge(
+                error_class: 'LVN_SCAN_ROLLBACK_FAILURE',
+                error_message: rollback_message,
+                backtrace: []
+              )
             end
-            warn "[LVN FAILURE SCAN] rollback returned false: #{target_label(info)}"
           end
         rescue StandardError => abort_error
-          rollback_failure = info.merge(
-            error_class: 'LVN_SCAN_ROLLBACK_FAILURE',
-            error_message: "#{abort_error.class}: #{abort_error.message}",
-            backtrace: Array(abort_error.backtrace).first(12)
-          )
-          result[:failures] << rollback_failure
-          warn "[LVN FAILURE SCAN] rollback raised: #{target_label(info)} #{abort_error.class}: #{abort_error.message}"
+          rollback_message = "#{abort_error.class}: #{abort_error.message}"
+          if failure
+            failure[:rollback_error] = rollback_message
+            failure[:rollback_backtrace] = Array(abort_error.backtrace).first(12)
+          else
+            failure = info.merge(
+              error_class: 'LVN_SCAN_ROLLBACK_FAILURE',
+              error_message: rollback_message,
+              backtrace: Array(abort_error.backtrace).first(12)
+            )
+          end
         end
       end
     end
+
+    if failure
+      puts "\n[FAIL #{ordinal}/#{total}] #{target_label(info)}"
+      puts "  #{failure[:error_class]}: #{failure[:error_message]}"
+      puts "  ROLLBACK ERROR: #{failure[:rollback_error]}" if failure[:rollback_error]
+    end
+    failure
   end
 
   def normalizable_entity?(entity)
@@ -185,10 +187,6 @@ module LvnSelectedFailureScan
     "#{name} PID=#{info[:persistent_id].inspect} EID=#{info[:entity_id].inspect}"
   end
 
-  def format_progress(status, ordinal, total, info)
-    "[#{status}] #{ordinal}/#{total} #{target_label(info)}"
-  end
-
   def print_summary(result)
     puts "\n#{'=' * 100}"
     puts '[LVN FAILURE SCAN RESULT]'
@@ -204,6 +202,7 @@ module LvnSelectedFailureScan
         puts "  definition=#{failure[:definition_name].inspect}"
         puts "  error=#{failure[:error_class]}"
         puts "  message=#{failure[:error_message]}"
+        puts "  rollback_error=#{failure[:rollback_error]}" if failure[:rollback_error]
       end
     end
 
