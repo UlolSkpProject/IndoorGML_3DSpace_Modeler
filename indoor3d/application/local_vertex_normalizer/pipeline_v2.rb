@@ -72,18 +72,20 @@ module ULOL
           vertices = geometry_vertices(entities)
           return false if vertices.empty?
 
-          axis_plane_plan = axis_plane_normalization_plan(entities)
+          # Axis-plane constraints are intentionally disabled. For now the
+          # normalizer only performs independent nearest-grid snapping.
+          # axis_plane_plan = axis_plane_normalization_plan(entities)
           vertices.each do |vertex|
             point = vertex.position
             return false unless point_on_grid?(point)
 
-            target = normalized_target(point, axis_plane_plan)
+            target = normalized_target(point)
             return false if point_distance_mm(point, target) > GRID_EPSILON_MM
           end
 
           return false if short_edge_sliver_collapse_plan(
             entities,
-            axis_plane_plan
+            nil
           )[:repairable]
 
           true
@@ -111,19 +113,18 @@ module ULOL
           volume_before_mm3 = solid_volume_mm3(entity)
           source_vertices = geometry_vertices(entities)
 
-          axis_plane_plan = axis_plane_normalization_plan(entities)
-          vertex_metrics = normalized_vertex_metrics(source_vertices, axis_plane_plan)
+          # Axis-plane constraints are intentionally disabled while grid-snap
+          # intersection handling is developed. Keep an empty report shape so
+          # downstream reporting remains backward compatible.
+          # axis_plane_plan = axis_plane_normalization_plan(entities)
+          axis_plane_plan = disabled_axis_plane_normalization_plan
+          vertex_metrics = normalized_vertex_metrics(source_vertices, nil)
           short_edge_sliver_plan = short_edge_sliver_collapse_plan(
             entities,
-            axis_plane_plan
+            nil
           )
 
-          @source_boundary_axis_plane_plan_v2 = axis_plane_plan
-          begin
-            source_space_triangles = triangle_snapshot(entities)
-          ensure
-            @source_boundary_axis_plane_plan_v2 = nil
-          end
+          source_space_triangles = triangle_snapshot(entities)
           source_boundary_normalization =
             (@source_boundary_normalization_stats_v2 || {}).dup
           source_conforming_duplicate_diagnostics = {}
@@ -155,7 +156,7 @@ module ULOL
           source_triangles, target_collision_cleanup =
             normalize_triangle_records_allowing_collisions(
               source_space_triangles,
-              axis_plane_plan,
+              nil,
               duplicate_diagnostics: source_duplicate_diagnostics
             )
           source_triangles, source_triangle_cleanup =
@@ -324,6 +325,29 @@ module ULOL
           )
           report[:snapshot_reuse] = snapshot_reuse
           report
+        end
+
+        # Report-compatible placeholder used while axis-plane constraints are
+        # disabled. No axis target is calculated or applied.
+        def disabled_axis_plane_normalization_plan
+          {
+            constraints: {},
+            clusters: [],
+            face_count: 0,
+            cluster_count: 0,
+            constrained_vertex_count: 0,
+            constrained_coordinate_count: 0,
+            multi_axis_constrained_vertex_count: 0,
+            max_displacement_mm: 0.0,
+            axis_cluster_counts: {},
+            axis_priority: [],
+            resolved_constraint_conflicts: [],
+            resolved_constraint_conflict_count: 0,
+            discarded_constraint_count: 0,
+            topology_preserving_target_repairs: [],
+            topology_preserving_target_repair_count: 0,
+            disabled: true
+          }
         end
 
         # Returns the unchanged-result report for a skipped triangle cleanup.
