@@ -9,166 +9,74 @@ module ULOL
 
         private
 
-        # Collapses a source-space triangle whose minimum altitude is at most
-        # 0.5 mm. For the longest edge C, the opposite vertex (where A and B
-        # meet) is moved to its clamped perpendicular projection on C. Every
-        # triangle using that source vertex receives the same target. Triangles
-        # reduced to an edge and exact duplicate triangles are then discarded.
+        # Source triangulation is an implementation detail, not source B-rep
+        # topology. A triangle that has already collapsed to zero area may be
+        # discarded as a normal result, provided the later conforming/hard-gate
+        # stages can still form the same closed surface.
         #
-        # All candidates are measured from the same input snapshot and applied
-        # simultaneously. If one vertex is the apex of multiple slivers, the
-        # smallest-altitude candidate wins deterministically.
+        # Do not force a non-zero-area sliver to collapse here. In particular,
+        # do not move its apex onto the longest edge: that mutates the source
+        # surface before grid normalization and can make the following conforming
+        # pass preserve a synthetic split created by the repair itself.
+        #
+        # The 0.5 mm threshold is retained only for diagnostics/reporting so
+        # existing reports can still show low-altitude source triangles.
         def collapse_source_altitude_sliver_triangles(triangle_records)
           candidates = triangle_records.each_with_index.filter_map do |record, index|
             source_altitude_sliver_candidate(record, index)
           end
-          if candidates.empty?
-            return [
-              triangle_records,
-              empty_source_altitude_sliver_collapse_report(
-                triangle_records.length
-              )
-            ]
-          end
 
-          grouped = candidates.group_by { |candidate| candidate[:apex_key] }
-          conflicting_target_count = grouped.count do |_key, vertex_candidates|
-            vertex_candidates.map do |candidate|
-              source_precision_indices(candidate[:target])
-            end.uniq.length > 1
-          end
-
-          affected_source_face_keys = []
-          moved_record_count = 0
-          removed_collapsed = 0
-          removed_duplicates = 0
-          moved_apex_keys = {}
-          selected_apex_keys = {}
-          selected_candidates = []
-          max_displacement_mm = 0.0
-          collapsed = triangle_records
-          iteration_limit = [triangle_records.length, 1].max
-          iterations = 0
-
-          loop do
-            current_candidates = collapsed.each_with_index.filter_map do |record, index|
-              source_altitude_sliver_candidate(record, index)
-            end
-            break if current_candidates.empty?
-
-            candidate = current_candidates.min_by do |entry|
-              [
-                entry[:minimum_altitude_mm],
-                entry[:displacement_mm],
-                entry[:triangle_index],
-                source_point_key(entry[:target])
-              ]
-            end
-            selected_candidates << candidate
-            selected_apex_keys[candidate[:apex_key]] = true
-            if candidate[:displacement_mm] > GRID_EPSILON_MM
-              moved_apex_keys[candidate[:apex_key]] = true
-            end
-            max_displacement_mm = [
-              max_displacement_mm,
-              candidate[:displacement_mm]
-            ].max
-
-            moved_records = collapsed.map do |record|
-              moved = false
-              points = record[:points].map do |point|
-                next point unless
-                  source_point_key(point) == candidate[:apex_key]
-
-                moved = true
-                candidate[:target]
-              end
-              if moved
-                moved_record_count += 1
-                affected_source_face_keys << record[:source_face_key]
-                record.merge(points: points)
-              else
-                record
-              end
-            end
-
-            signatures = {}
-            previous_length = collapsed.length
-            collapsed = moved_records.filter_map do |record|
-              if source_triangle_collapsed_to_edge?(record[:points])
-                removed_collapsed += 1
-                affected_source_face_keys << record[:source_face_key]
-                next
-              end
-
-              signature = record[:points].map do |point|
-                source_precision_indices(point)
-              end.sort
-              if signatures.key?(signature)
-                removed_duplicates += 1
-                affected_source_face_keys << record[:source_face_key]
-                affected_source_face_keys <<
-                  signatures[signature][:source_face_key]
-                next
-              end
-
-              signatures[signature] = record
-              record
-            end
-            unless collapsed.length < previous_length
-              raise ReconstructionError,
-                    'Source altitude sliver collapse made no topological progress'
-            end
-
-            iterations += 1
-            if iterations > iteration_limit
-              raise ReconstructionError,
-                    'Source altitude sliver collapse exceeded its iteration limit'
-            end
-          end
+          collapsed, cleanup = discard_collapsed_triangle_records(
+            triangle_records,
+            coordinate_space: :source
+          )
 
           remaining_slivers = collapsed.each_with_index.count do |record, index|
             !source_altitude_sliver_candidate(record, index).nil?
           end
+          removed_collapsed =
+            cleanup[:removed_coincident_triangle_count].to_i +
+            cleanup[:removed_collinear_triangle_count].to_i
+          removed_duplicates = cleanup[:removed_duplicate_triangle_count].to_i
 
           [
             collapsed,
             {
+              policy: :natural_collapse_only,
               threshold_mm: SOURCE_ALTITUDE_SLIVER_THRESHOLD_MM,
               input_triangle_count: triangle_records.length,
               output_triangle_count: collapsed.length,
               detected_sliver_count: candidates.length,
-              collapse_step_count: iterations,
-              selected_apex_count: selected_apex_keys.length,
-              moved_vertex_count: moved_apex_keys.length,
-              moved_triangle_count: moved_record_count,
-              conflicting_target_count: conflicting_target_count,
+              collapse_step_count: 0,
+              selected_apex_count: 0,
+              moved_vertex_count: 0,
+              moved_triangle_count: 0,
+              conflicting_target_count: 0,
               removed_collapsed_triangle_count: removed_collapsed,
               removed_duplicate_triangle_count: removed_duplicates,
               remaining_sliver_count: remaining_slivers,
-              max_displacement_mm: max_displacement_mm,
+              max_displacement_mm: 0.0,
               affected_source_face_keys:
-                affected_source_face_keys.compact.uniq,
-              candidates: selected_candidates.first(20).map do |candidate|
+                Array(cleanup[:affected_source_face_keys]).compact.uniq,
+              candidates: candidates.first(20).map do |candidate|
                 {
                   triangle_index: candidate[:triangle_index],
                   source_face_key: candidate[:source_face_key],
                   source_polygon_index: candidate[:source_polygon_index],
-                  minimum_altitude_mm:
-                    candidate[:minimum_altitude_mm],
+                  minimum_altitude_mm: candidate[:minimum_altitude_mm],
                   displacement_mm: candidate[:displacement_mm],
-                  projection_parameter:
-                    candidate[:projection_parameter],
+                  projection_parameter: candidate[:projection_parameter],
                   clamped_parameter: candidate[:clamped_parameter]
                 }
               end,
-              skipped: false
+              skipped: cleanup[:removed_triangle_count].to_i.zero?
             }
           ]
         end
 
         def empty_source_altitude_sliver_collapse_report(input_triangle_count = 0)
           {
+            policy: :natural_collapse_only,
             threshold_mm: SOURCE_ALTITUDE_SLIVER_THRESHOLD_MM,
             input_triangle_count: input_triangle_count,
             output_triangle_count: input_triangle_count,
