@@ -944,6 +944,138 @@ module ULOL
           assert_includes edges, [point_b_key, point_c_key].sort
         end
 
+        def test_conforming_canonicalizes_duplicate_created_by_subdivision
+          point_a = mm_point(0, 0, 0)
+          point_b = mm_point(5, 0, 0)
+          point_c = mm_point(10, 0, 0)
+          point_d = mm_point(0, 10, 0)
+          records = []
+          add_triangle_record(records, point_a, point_c, point_d, :subdivided)
+          add_triangle_record(records, point_a, point_b, point_d, :duplicate)
+          diagnostics = {}
+          instance = normalizer
+
+          conforming = instance.send(
+            :conforming_triangle_snapshot,
+            records,
+            coordinate_space: :source,
+            duplicate_diagnostics: diagnostics
+          )
+          duplicate_signature = instance.send(
+            :triangle_signature_for_space,
+            [point_a, point_b, point_d],
+            :source
+          )
+          matching = conforming.select do |record|
+            instance.send(
+              :triangle_signature_for_space,
+              record[:points],
+              :source
+            ) == duplicate_signature
+          end
+
+          assert_equal 2, conforming.length
+          assert_equal 1, matching.length
+          assert_equal :subdivided, matching.first[:source_face_key]
+          assert_equal 1, diagnostics[:duplicate_count]
+          assert_equal(
+            :subdivided,
+            diagnostics.dig(:samples, 0, :kept_source_face_key)
+          )
+          assert_equal(
+            :duplicate,
+            diagnostics.dig(:samples, 0, :duplicate_source_face_key)
+          )
+        end
+
+        def test_grid_conforming_canonicalizes_n_exact_duplicates_to_one
+          point_a = mm_point(0, 0, 0)
+          point_b = mm_point(10, 0, 0)
+          point_c = mm_point(0, 10, 0)
+          records = []
+          4.times do |index|
+            add_triangle_record(records, point_a, point_b, point_c, index)
+          end
+          diagnostics = {}
+          instance = normalizer
+
+          conforming = instance.send(
+            :conforming_triangle_snapshot,
+            records,
+            duplicate_diagnostics: diagnostics
+          )
+
+          assert_equal 1, conforming.length
+          assert_equal 0, conforming.first[:source_face_key]
+          assert_equal 3, diagnostics[:duplicate_count]
+          assert_equal 3, diagnostics[:samples].length
+        end
+
+        def test_conforming_preserves_triangles_with_different_signatures
+          point_a = mm_point(0, 0, 0)
+          point_b = mm_point(10, 0, 0)
+          point_c = mm_point(10, 10, 0)
+          point_d = mm_point(0, 10, 0)
+          records = []
+          add_triangle_record(records, point_a, point_b, point_d, :first)
+          add_triangle_record(records, point_b, point_c, point_d, :second)
+          diagnostics = {}
+          instance = normalizer
+
+          conforming = instance.send(
+            :conforming_triangle_snapshot,
+            records,
+            coordinate_space: :source,
+            duplicate_diagnostics: diagnostics
+          )
+
+          assert_equal 2, conforming.length
+          assert_equal [:first, :second], conforming.map { |record| record[:source_face_key] }
+          assert_equal 0, diagnostics[:duplicate_count]
+        end
+
+        def test_source_conforming_does_not_dedupe_near_duplicate
+          point_a = mm_point(0, 0, 0)
+          point_b = mm_point(10, 0, 0)
+          point_d = mm_point(0, 10, 0)
+          nearby_d = mm_point(0.01, 10, 0)
+          records = []
+          add_triangle_record(records, point_a, point_b, point_d, :exact)
+          add_triangle_record(records, point_a, point_b, nearby_d, :nearby)
+          diagnostics = {}
+          instance = normalizer
+
+          conforming = instance.send(
+            :conforming_triangle_snapshot,
+            records,
+            coordinate_space: :source,
+            duplicate_diagnostics: diagnostics
+          )
+
+          assert_equal 2, conforming.length
+          assert_equal 0, diagnostics[:duplicate_count]
+        end
+
+        def test_conforming_duplicate_cleanup_does_not_bypass_mesh_validation
+          point_a = mm_point(0, 0, 0)
+          point_b = mm_point(5, 0, 0)
+          point_c = mm_point(10, 0, 0)
+          point_d = mm_point(0, 10, 0)
+          records = []
+          add_triangle_record(records, point_a, point_c, point_d, :subdivided)
+          add_triangle_record(records, point_a, point_b, point_d, :duplicate)
+          instance = normalizer
+          conforming = instance.send(
+            :conforming_triangle_snapshot,
+            records,
+            coordinate_space: :source
+          )
+
+          assert_raises(LocalVertexNormalizer::TopologyChangedError) do
+            instance.send(:validate_normalized_triangle_mesh!, conforming)
+          end
+        end
+
         def test_conforming_edge_cache_reverses_points_for_opposite_winding
           point_a = mm_point(0, 0, 0)
           point_b = mm_point(3, 0, 0)

@@ -126,13 +126,15 @@ module ULOL
           end
           source_boundary_normalization =
             (@source_boundary_normalization_stats_v2 || {}).dup
+          source_conforming_duplicate_diagnostics = {}
           # Preserve source vertex-on-edge incidence before independent grid
           # rounding can bend a formerly collinear shared boundary. The target
           # mesh then carries the same A-B/B-C subdivision even when B no longer
           # lies exactly on the rounded A-C segment.
           source_space_triangles = conforming_triangle_snapshot(
             source_space_triangles,
-            coordinate_space: :source
+            coordinate_space: :source,
+            duplicate_diagnostics: source_conforming_duplicate_diagnostics
           )
           source_space_triangles, source_altitude_sliver_collapse =
             collapse_source_altitude_sliver_triangles(
@@ -140,7 +142,8 @@ module ULOL
             )
           source_space_triangles = conforming_triangle_snapshot(
             source_space_triangles,
-            coordinate_space: :source
+            coordinate_space: :source,
+            duplicate_diagnostics: source_conforming_duplicate_diagnostics
           )
           source_space_triangles, pre_normalization_triangle_cleanup =
             discard_collapsed_triangle_records(
@@ -159,7 +162,11 @@ module ULOL
             discard_collapsed_triangle_records(source_triangles)
           validate_normalized_triangle_shapes!(source_triangles)
 
-          conforming_triangles = conforming_triangle_snapshot(source_triangles)
+          grid_conforming_duplicate_diagnostics = {}
+          conforming_triangles = conforming_triangle_snapshot(
+            source_triangles,
+            duplicate_diagnostics: grid_conforming_duplicate_diagnostics
+          )
           conforming_triangles, conforming_triangle_cleanup =
             discard_collapsed_triangle_records(conforming_triangles)
           if conforming_triangles.empty?
@@ -294,6 +301,8 @@ module ULOL
             short_edge_sliver_repair: short_edge_sliver_repair,
             duplicate_diagnostics: {
               source: source_duplicate_diagnostics,
+              source_conforming: source_conforming_duplicate_diagnostics,
+              grid_conforming: grid_conforming_duplicate_diagnostics,
               rebuilt: rebuilt_duplicate_diagnostics,
               final: final_duplicate_diagnostics
             },

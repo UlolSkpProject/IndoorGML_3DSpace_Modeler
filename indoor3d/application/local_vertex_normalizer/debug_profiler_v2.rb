@@ -217,7 +217,11 @@ module ULOL
           end
         end
 
-        def conforming_triangle_snapshot(source_triangles, coordinate_space: :grid)
+        def conforming_triangle_snapshot(
+          source_triangles,
+          coordinate_space: :grid,
+          duplicate_diagnostics: nil
+        )
           measure_debug_stage(
             "conforming_#{coordinate_space}".to_sym,
             triangle_count: source_triangles.length

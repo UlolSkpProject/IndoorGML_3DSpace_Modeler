@@ -278,6 +278,16 @@ module ULOL
               {
                 phase: :exact_duplicate_triangle_canonicalization,
                 source_duplicates: duplicate_diagnostics.dig(:source, :duplicate_count).to_i,
+                source_conforming_duplicates:
+                  duplicate_diagnostics.dig(
+                    :source_conforming,
+                    :duplicate_count
+                  ).to_i,
+                grid_conforming_duplicates:
+                  duplicate_diagnostics.dig(
+                    :grid_conforming,
+                    :duplicate_count
+                  ).to_i,
                 rebuilt_duplicates: duplicate_diagnostics.dig(:rebuilt, :duplicate_count).to_i,
                 final_duplicates: duplicate_diagnostics.dig(:final, :duplicate_count).to_i
               },
@@ -1344,7 +1354,11 @@ module ULOL
           end
         end
 
-        def conforming_triangle_snapshot(source_triangles, coordinate_space: :grid)
+        def conforming_triangle_snapshot(
+          source_triangles,
+          coordinate_space: :grid,
+          duplicate_diagnostics: nil
+        )
           unique_points = {}
           source_triangles.each do |record|
             record[:points].each do |point|
@@ -1355,42 +1369,61 @@ module ULOL
           candidates = unique_points.values
           signatures = {}
           edge_split_cache = {}
+          if duplicate_diagnostics
+            duplicate_diagnostics[:duplicate_count] ||= 0
+            duplicate_diagnostics[:samples] ||= []
+          end
 
-          source_triangles.flat_map do |record|
+          source_triangles.each_with_object([]) do |record, triangles|
             if degenerate_triangle_record?(
               record,
               coordinate_space: coordinate_space
             )
-              next [record] if coordinate_space == :source
+              replacement_triangles =
+                coordinate_space == :source ? [record[:points]] : []
+            else
+              boundary = triangle_boundary_with_segment_vertices(
+                record[:points],
+                candidates,
+                coordinate_space: coordinate_space,
+                edge_split_cache: edge_split_cache
+              )
 
-              next []
+              replacement_triangles = if boundary.length == 3
+                                        [record[:points]]
+                                      else
+                                        triangulate_convex_boundary(
+                                          boundary,
+                                          candidates,
+                                          coordinate_space: coordinate_space
+                                        )
+                                      end
             end
 
-            boundary = triangle_boundary_with_segment_vertices(
-              record[:points],
-              candidates,
-              coordinate_space: coordinate_space,
-              edge_split_cache: edge_split_cache
-            )
-
-            replacement_triangles = if boundary.length == 3
-                                      [record[:points]]
-                                    else
-                                      triangulate_convex_boundary(
-                                        boundary,
-                                        candidates,
-                                        coordinate_space: coordinate_space
-                                      )
-                                    end
-            replacement_triangles.map do |points|
+            replacement_triangles.each do |points|
               signature = triangle_signature_for_space(points, coordinate_space)
               if signatures.key?(signature)
-                raise ReconstructionError,
-                      "Duplicate conforming triangle detected: #{signature.inspect}"
+                if duplicate_diagnostics
+                  kept = signatures.fetch(signature)
+                  duplicate_diagnostics[:duplicate_count] += 1
+                  if duplicate_diagnostics[:samples].length < 10
+                    duplicate_diagnostics[:samples] << {
+                      signature: signature,
+                      kept_source_face_key: kept[:source_face_key],
+                      kept_source_polygon_index: kept[:source_polygon_index],
+                      duplicate_source_face_key: record[:source_face_key],
+                      duplicate_source_polygon_index:
+                        record[:source_polygon_index]
+                    }
+                  end
+                end
+                next
               end
 
-              signatures[signature] = true
-              points.equal?(record[:points]) ? record : record.merge(points: points)
+              canonical_record =
+                points.equal?(record[:points]) ? record : record.merge(points: points)
+              signatures[signature] = canonical_record
+              triangles << canonical_record
             end
           end
         end
