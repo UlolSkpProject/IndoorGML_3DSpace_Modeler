@@ -46,17 +46,6 @@ module ULOL
             ]
           end
 
-          if initial_invalid.empty?
-            report = empty_grid_altitude_sliver_retriangulation_report(
-              triangle_records.length,
-              threshold_mm,
-              :no_invalid_intersections
-            )
-            report[:detected_sliver_count] = input_slivers.length
-            report[:remaining_sliver_count] = input_slivers.length
-            return [triangle_records, report]
-          end
-
           working = triangle_records.dup
           current_invalid = initial_invalid
           attempts = []
@@ -67,7 +56,7 @@ module ULOL
             break if attempted_patch_count >= GRID_ALTITUDE_SLIVER_MAX_PATCH_ATTEMPTS
 
             sliver_indices = grid_altitude_sliver_indices(working, threshold_mm)
-            break if sliver_indices.empty? || current_invalid.empty?
+            break if sliver_indices.empty?
 
             patches = grid_altitude_sliver_patches(working, sliver_indices)
             break if patches.empty?
@@ -118,12 +107,12 @@ module ULOL
                 new_invalid = tentative_invalid - current_invalid
                 removed_invalid = current_invalid - tentative_invalid
 
-                unless new_invalid.empty? && tentative_invalid.length < current_invalid.length
+                unless new_invalid.empty?
                   attempts << {
                     source_face_key: patch_records.first[:source_face_key],
                     patch_triangle_count: patch_records.length,
                     accepted: false,
-                    reason: :invalid_pairs_not_reduced,
+                    reason: :new_invalid_pairs,
                     before_invalid_pair_count: current_invalid.length,
                     after_invalid_pair_count: tentative_invalid.length,
                     new_invalid_pair_count: new_invalid.length,
@@ -153,8 +142,8 @@ module ULOL
                 }
 
                 score = [
-                  removed_invalid.length,
                   before_low_count - after_low_count,
+                  removed_invalid.length,
                   after_min_altitude - before_min_altitude
                 ]
                 best = [score, candidate] if best.nil? || (score <=> best[0]) == 1
@@ -182,7 +171,7 @@ module ULOL
           [
             working,
             {
-              policy: :conflict_driven_exact_coplanar_retriangulation,
+              policy: :altitude_driven_exact_coplanar_retriangulation,
               threshold_mm: threshold_mm,
               input_triangle_count: triangle_records.length,
               output_triangle_count: working.length,
@@ -197,7 +186,8 @@ module ULOL
                 accepted.map { |entry| entry[:source_face_key] }.compact.uniq,
               accepted_patches: accepted.first(20),
               attempts: attempts.first(40),
-              skipped: accepted.empty?
+              skipped: accepted.empty?,
+              skip_reason: accepted.empty? ? :no_safe_improving_patch : nil
             }
           ]
         end
@@ -208,7 +198,7 @@ module ULOL
           reason
         )
           {
-            policy: :conflict_driven_exact_coplanar_retriangulation,
+            policy: :altitude_driven_exact_coplanar_retriangulation,
             threshold_mm: threshold_mm,
             input_triangle_count: input_triangle_count,
             output_triangle_count: input_triangle_count,
