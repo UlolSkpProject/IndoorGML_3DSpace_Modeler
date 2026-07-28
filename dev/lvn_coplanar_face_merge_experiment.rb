@@ -15,18 +15,22 @@
 #   4. Faces containing a vertex outside the plane tolerance are separated out.
 #      Remaining Faces are split again by implicit connectivity and refit
 #      recursively until every accepted patch satisfies the plane tolerance.
-#   5. Remove every internal shared edge of each accepted patch atomically.
+#   5. Snapshot every merge plan before topology mutation.
+#   6. Remove all planned internal edges in one atomic erase_entities call.
 #
 # Triangle, quad and general n-gon Faces are all candidates. Face arity is not
 # used as a filter.
 #
 # The selected solid itself is modified in one SketchUp operation. The whole
-# operation is aborted if any merge damages closed/manifold topology. Use Undo
+# operation is aborted if the merge damages closed/manifold topology. Use Undo
 # to revert a successful test.
 #
 # SketchUp Ruby Console:
 #   load 'C:/ProgramData/SketchUp/SketchUp 2026/SketchUp/Devs/IndoorGML_3DSpace_Modeler/dev/lvn_coplanar_face_merge_experiment.rb'
 #   LvnCoplanarFaceMergeExperiment.run
+#
+# Selected-Face diagnostic only (no geometry change):
+#   LvnCoplanarFaceMergeExperiment.diagnose_selected_faces
 
 Object.send(:remove_const, :LvnCoplanarFaceMergeExperiment) if
   defined?(LvnCoplanarFaceMergeExperiment)
@@ -70,9 +74,7 @@ module LvnCoplanarFaceMergeExperiment
         plane_tolerance_mm: plane_tolerance_mm
       )
 
-      unless manifold?(solid)
-        raise 'Final selected solid is not manifold after coplanar face merge'
-      end
+      raise 'Final selected solid is not manifold after coplanar face merge' unless manifold?(solid)
 
       model.commit_operation
       operation_started = false
@@ -88,14 +90,13 @@ module LvnCoplanarFaceMergeExperiment
     rescue StandardError => error
       model.abort_operation if operation_started
 
-      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at
       report = {
         success: false,
         solid_pid: safe_pid(solid),
         solid_name: entity_name(solid),
         angle_tolerance_deg: angle_tolerance_deg,
         plane_tolerance_mm: plane_tolerance_mm,
-        elapsed_sec: elapsed,
+        elapsed_sec: Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at,
         error: "#{error.class}: #{error.message}"
       }
       $lvn_coplanar_face_merge_experiment = report
@@ -111,12 +112,9 @@ module LvnCoplanarFaceMergeExperiment
     validate_solid!(solid)
     entities = solid.definition.entities
     all_faces = entities.grep(Sketchup::Face).select(&:valid?)
+    source_face_count = all_faces.length
 
-    face_by_id = all_faces.to_h do |face|
-      [stable_entity_id(face), face]
-    end
-
-    # Mark table only; no adjacency graph is materialized.
+    face_by_id = all_faces.to_h { |face| [stable_entity_id(face), face] }
     unvisited = face_by_id.keys.to_h { |face_id| [face_id, true] }
     normal_components = []
 
@@ -133,7 +131,6 @@ module LvnCoplanarFaceMergeExperiment
         allowed_ids: unvisited,
         angle_tolerance_deg: angle_tolerance_deg
       )
-
       component.each { |face| unvisited.delete(stable_entity_id(face)) }
       normal_components << component unless component.empty?
     end
@@ -154,41 +151,43 @@ module LvnCoplanarFaceMergeExperiment
 
     initial_topology = geometry_counts(entities)
     initial_manifold = manifold?(solid)
-    descriptors = merge_groups.map { |group| describe_planar_group(group) }
+    plans = merge_groups.map.with_index do |group, index|
+      prepare_merge_plan(group, ordinal: index + 1, total: merge_groups.length)
+    end
 
     puts '=' * 110
     puts '[COPLANAR FACE MERGE] PLAN'
-    puts "faces=#{all_faces.length}"
+    puts "faces=#{source_face_count}"
     puts "normal_components=#{normal_components.length} planar_groups=#{planar_groups.length} merge_groups=#{merge_groups.length}"
     puts "angle_tolerance=#{angle_tolerance_deg} deg plane_tolerance=#{plane_tolerance_mm} mm"
-    descriptors.each_with_index do |descriptor, index|
+    plans.each do |plan|
       puts format(
-        '  %d/%d faces=%d vertices=%d max_angle=%.9fdeg max_dev=%.9fmm',
-        index + 1,
-        descriptors.length,
-        descriptor[:face_count],
-        descriptor[:vertex_count],
-        descriptor[:max_adjacent_angle_deg],
-        descriptor[:max_vertex_deviation_mm]
+        '  %d/%d faces=%d vertices=%d edges=%d max_angle=%.9fdeg max_dev=%.9fmm',
+        plan[:index],
+        plan[:total],
+        plan[:input_face_count],
+        plan[:input_vertex_count],
+        plan[:internal_edge_count],
+        plan[:max_adjacent_angle_deg],
+        plan[:max_vertex_deviation_mm]
       )
     end
     puts '=' * 110
 
-    merge_results = []
-    merge_groups.each_with_index do |group, index|
-      result = merge_one_group!(
-        solid,
-        group,
-        ordinal: index + 1,
-        total: merge_groups.length
-      )
-      merge_results << result
-      print_merge_result(result)
+    all_internal_edges = plans.flat_map { |plan| plan[:internal_edges] }.uniq.select(&:valid?)
+    expected_face_reduction = plans.sum { |plan| plan[:expected_face_reduction] }
+
+    unless all_internal_edges.empty?
+      entities.erase_entities(all_internal_edges)
     end
 
     final_topology = geometry_counts(entities)
     final_manifold = manifold?(solid)
+    actual_face_reduction = initial_topology[:faces] - final_topology[:faces]
 
+    if actual_face_reduction != expected_face_reduction
+      raise "Merged faces by #{actual_face_reduction}; expected #{expected_face_reduction}"
+    end
     if initial_topology[:closed] && !final_topology[:closed]
       raise 'Coplanar face merge opened a previously closed shell'
     end
@@ -202,22 +201,27 @@ module LvnCoplanarFaceMergeExperiment
       raise 'Coplanar face merge changed a manifold solid into non-manifold geometry'
     end
 
+    plans.each do |plan|
+      print_plan_result(plan)
+    end
+
     {
       angle_tolerance_deg: angle_tolerance_deg,
       plane_tolerance_mm: plane_tolerance_mm,
-      source_face_count: all_faces.length,
+      source_face_count: source_face_count,
       normal_component_count: normal_components.length,
       planar_group_count: planar_groups.length,
       singleton_group_count: planar_groups.count { |group| group.length == 1 },
       merge_group_count: merge_groups.length,
-      merged_input_face_count: merge_results.sum { |entry| entry[:input_face_count] },
-      removed_internal_edge_count: merge_results.sum { |entry| entry[:internal_edge_count] },
+      merged_input_face_count: plans.sum { |plan| plan[:input_face_count] },
+      removed_internal_edge_count: all_internal_edges.length,
+      expected_face_reduction: expected_face_reduction,
+      actual_face_reduction: actual_face_reduction,
       initial_topology: initial_topology,
       final_topology: final_topology,
       initial_manifold: initial_manifold,
       final_manifold: final_manifold,
-      groups: descriptors,
-      merges: merge_results
+      groups: plans.map { |plan| plan.reject { |key, _| key == :internal_edges } }
     }
   end
 
@@ -257,85 +261,10 @@ module LvnCoplanarFaceMergeExperiment
     component
   end
 
-  # Partition one normal-connected component into connected patches whose every
-  # vertex lies within plane_tolerance_mm of that patch's best-fit plane.
-  # Faces rejected by one fit are reconsidered recursively rather than discarded.
-  def refine_component_by_best_fit(
-    faces,
-    angle_tolerance_deg:,
-    plane_tolerance_mm:,
-    depth: 0
-  )
-    faces = faces.select(&:valid?).uniq
-    return [] if faces.empty?
-    return [faces] if faces.length == 1
-
-    metrics = best_fit_component_metrics(faces)
-    return faces.map { |face| [face] } unless metrics
-
-    bad = faces.select do |face|
-      metrics[:face_max_deviation_mm].fetch(
-        stable_entity_id(face),
-        Float::INFINITY
-      ) > plane_tolerance_mm
-    end
-
-    return [faces] if bad.empty?
-
-    keep = faces - bad
-
-    # A broad component can put every Face outside the initial fitted plane.
-    # Peel only the worst Face in that case so recursion always makes progress.
-    if keep.empty?
-      worst = faces.max_by do |face|
-        metrics[:face_max_deviation_mm].fetch(
-          stable_entity_id(face),
-          Float::INFINITY
-        )
-      end
-      bad = [worst]
-      keep = faces - bad
-    end
-
-    result = []
-
-    implicit_subcomponents(
-      keep,
-      angle_tolerance_deg: angle_tolerance_deg
-    ).each do |subcomponent|
-      result.concat(
-        refine_component_by_best_fit(
-          subcomponent,
-          angle_tolerance_deg: angle_tolerance_deg,
-          plane_tolerance_mm: plane_tolerance_mm,
-          depth: depth + 1
-        )
-      )
-    end
-
-    implicit_subcomponents(
-      bad,
-      angle_tolerance_deg: angle_tolerance_deg
-    ).each do |subcomponent|
-      result.concat(
-        refine_component_by_best_fit(
-          subcomponent,
-          angle_tolerance_deg: angle_tolerance_deg,
-          plane_tolerance_mm: plane_tolerance_mm,
-          depth: depth + 1
-        )
-      )
-    end
-
-    result
-  end
-
   def implicit_subcomponents(faces, angle_tolerance_deg:)
-    allowed = faces.select(&:valid?).to_h do |face|
-      [stable_entity_id(face), true]
-    end
-    remaining = allowed.dup
-    face_by_id = faces.to_h { |face| [stable_entity_id(face), face] }
+    valid_faces = faces.select(&:valid?).uniq
+    face_by_id = valid_faces.to_h { |face| [stable_entity_id(face), face] }
+    remaining = face_by_id.keys.to_h { |face_id| [face_id, true] }
     components = []
 
     until remaining.empty?
@@ -358,8 +287,70 @@ module LvnCoplanarFaceMergeExperiment
     components
   end
 
+  # Partition one normal-connected component into connected patches whose every
+  # vertex lies within plane_tolerance_mm of that patch's best-fit plane.
+  def refine_component_by_best_fit(faces, angle_tolerance_deg:, plane_tolerance_mm:, depth: 0)
+    faces = faces.select(&:valid?).uniq
+    return [] if faces.empty?
+    return [faces] if faces.length == 1
+
+    metrics = best_fit_component_metrics(faces)
+    return faces.map { |face| [face] } unless metrics
+
+    bad = faces.select do |face|
+      metrics[:face_max_deviation_mm].fetch(
+        stable_entity_id(face),
+        Float::INFINITY
+      ) > plane_tolerance_mm
+    end
+
+    return [faces] if bad.empty?
+
+    keep = faces - bad
+
+    # If every Face fails the initial broad fit, peel only the worst Face so
+    # recursion can discover smaller valid patches instead of rejecting all.
+    if keep.empty?
+      worst = faces.max_by do |face|
+        metrics[:face_max_deviation_mm].fetch(
+          stable_entity_id(face),
+          Float::INFINITY
+        )
+      end
+      bad = [worst]
+      keep = faces - bad
+    end
+
+    result = []
+
+    implicit_subcomponents(keep, angle_tolerance_deg: angle_tolerance_deg).each do |subcomponent|
+      result.concat(
+        refine_component_by_best_fit(
+          subcomponent,
+          angle_tolerance_deg: angle_tolerance_deg,
+          plane_tolerance_mm: plane_tolerance_mm,
+          depth: depth + 1
+        )
+      )
+    end
+
+    implicit_subcomponents(bad, angle_tolerance_deg: angle_tolerance_deg).each do |subcomponent|
+      result.concat(
+        refine_component_by_best_fit(
+          subcomponent,
+          angle_tolerance_deg: angle_tolerance_deg,
+          plane_tolerance_mm: plane_tolerance_mm,
+          depth: depth + 1
+        )
+      )
+    end
+
+    result
+  end
+
   def best_fit_component_metrics(faces)
-    vertices = faces.flat_map(&:vertices).select(&:valid?).uniq
+    valid_faces = faces.select(&:valid?).uniq
+    vertices = valid_faces.flat_map(&:vertices).select(&:valid?).uniq
     return nil if vertices.length < 3
 
     plane = Geom.fit_plane_to_points(vertices.map(&:position))
@@ -372,7 +363,7 @@ module LvnCoplanarFaceMergeExperiment
     face_max = {}
     max_deviation = 0.0
 
-    faces.each do |face|
+    valid_faces.each do |face|
       deviation = face.vertices.map do |vertex|
         point_plane_distance_mm(vertex.position, [a, b, c, d], norm)
       end.max || 0.0
@@ -419,7 +410,6 @@ module LvnCoplanarFaceMergeExperiment
     return nil unless denominator.positive?
 
     cosine = vector_dot(first, second) / denominator
-    # Opposite-facing surface Faces must never be merged.
     return nil unless cosine.positive?
 
     cosine = [[cosine, -1.0].max, 1.0].min
@@ -428,11 +418,42 @@ module LvnCoplanarFaceMergeExperiment
     nil
   end
 
+  def prepare_merge_plan(faces, ordinal:, total:)
+    current_faces = faces.select(&:valid?).uniq
+    unless current_faces.length == faces.length
+      raise "Merge group #{ordinal}/#{total} changed before planning"
+    end
+
+    descriptor = describe_planar_group(current_faces)
+    face_ids = current_faces.to_h { |face| [stable_entity_id(face), true] }
+    internal_edges = current_faces.flat_map(&:edges).uniq.select do |edge|
+      next false unless edge&.valid? && edge.faces.length == 2
+
+      face_a, face_b = edge.faces
+      face_ids[stable_entity_id(face_a)] && face_ids[stable_entity_id(face_b)]
+    end
+
+    raise "Merge group #{ordinal}/#{total} has no internal shared edges" if internal_edges.empty?
+
+    {
+      index: ordinal,
+      total: total,
+      face_ids: descriptor[:face_ids],
+      input_face_count: current_faces.length,
+      input_vertex_count: descriptor[:vertex_count],
+      internal_edges: internal_edges,
+      internal_edge_count: internal_edges.length,
+      expected_face_reduction: current_faces.length - 1,
+      max_adjacent_angle_deg: descriptor[:max_adjacent_angle_deg],
+      max_vertex_deviation_mm: descriptor[:max_vertex_deviation_mm]
+    }
+  end
+
   def describe_planar_group(faces)
     metrics = best_fit_component_metrics(faces)
     {
-      face_ids: faces.map { |face| stable_entity_id(face) }.sort,
-      face_count: faces.length,
+      face_ids: faces.select(&:valid?).map { |face| stable_entity_id(face) }.sort,
+      face_count: faces.count(&:valid?),
       vertex_count: metrics ? metrics[:vertex_count] : 0,
       max_vertex_deviation_mm:
         metrics ? metrics[:max_vertex_deviation_mm] : Float::INFINITY,
@@ -441,11 +462,12 @@ module LvnCoplanarFaceMergeExperiment
   end
 
   def max_adjacent_angle_deg(faces)
-    allowed = faces.to_h { |face| [stable_entity_id(face), true] }
+    valid_faces = faces.select(&:valid?).uniq
+    allowed = valid_faces.to_h { |face| [stable_entity_id(face), true] }
     seen_edges = {}
     angles = []
 
-    faces.each do |face|
+    valid_faces.each do |face|
       face.edges.each do |edge|
         next unless edge&.valid? && edge.faces.length == 2
 
@@ -453,8 +475,7 @@ module LvnCoplanarFaceMergeExperiment
         next if seen_edges[edge_id]
 
         face_a, face_b = edge.faces
-        next unless allowed[stable_entity_id(face_a)] &&
-                    allowed[stable_entity_id(face_b)]
+        next unless allowed[stable_entity_id(face_a)] && allowed[stable_entity_id(face_b)]
 
         seen_edges[edge_id] = true
         angle = normal_angle_deg(face_a, face_b)
@@ -465,69 +486,99 @@ module LvnCoplanarFaceMergeExperiment
     angles.max || 0.0
   end
 
-  def merge_one_group!(solid, faces, ordinal:, total:)
-    entities = solid.definition.entities
-    current_faces = faces.select(&:valid?)
-    unless current_faces.length == faces.length
-      raise "Merge group #{ordinal}/#{total} changed before merge"
+  def diagnose_selected_faces(
+    angle_tolerance_deg: DEFAULT_ANGLE_TOLERANCE_DEG,
+    plane_tolerance_mm: DEFAULT_PLANE_TOLERANCE_MM
+  )
+    model = Sketchup.active_model
+    faces = model.selection.grep(Sketchup::Face).select(&:valid?).uniq
+    if faces.empty?
+      puts '[COPLANAR FACE DIAG] Select one or more Faces.'
+      return nil
     end
 
-    face_ids = current_faces.to_h do |face|
-      [stable_entity_id(face), true]
+    angle_tolerance_deg = Float(angle_tolerance_deg)
+    plane_tolerance_mm = Float(plane_tolerance_mm)
+    components = implicit_subcomponents(faces, angle_tolerance_deg: angle_tolerance_deg)
+    refined = components.flat_map do |component|
+      refine_component_by_best_fit(
+        component,
+        angle_tolerance_deg: angle_tolerance_deg,
+        plane_tolerance_mm: plane_tolerance_mm
+      )
+    end
+    metrics = best_fit_component_metrics(faces)
+    selected_ids = faces.to_h { |face| [stable_entity_id(face), true] }
+
+    shared_pairs = []
+    seen_edges = {}
+    faces.each do |face|
+      face.edges.each do |edge|
+        next unless edge&.valid? && edge.faces.length == 2
+        edge_id = stable_entity_id(edge)
+        next if seen_edges[edge_id]
+
+        face_a, face_b = edge.faces
+        next unless selected_ids[stable_entity_id(face_a)] && selected_ids[stable_entity_id(face_b)]
+
+        seen_edges[edge_id] = true
+        shared_pairs << [stable_entity_id(face_a), stable_entity_id(face_b), normal_angle_deg(face_a, face_b)]
+      end
     end
 
-    internal_edges = current_faces.flat_map(&:edges).uniq.select do |edge|
-      next false unless edge&.valid? && edge.faces.length == 2
-
-      face_a, face_b = edge.faces
-      face_ids[stable_entity_id(face_a)] && face_ids[stable_entity_id(face_b)]
+    puts '=' * 110
+    puts '[COPLANAR FACE DIAG] SELECTED FACES'
+    puts "faces=#{faces.length} shared_edges=#{shared_pairs.length}"
+    puts "angle_tolerance=#{angle_tolerance_deg} deg plane_tolerance=#{plane_tolerance_mm} mm"
+    if metrics
+      puts format('all_selected_best_fit_max_dev=%.9f mm', metrics[:max_vertex_deviation_mm])
+    else
+      puts 'all_selected_best_fit=FAILED'
     end
-
-    if internal_edges.empty?
-      raise "Merge group #{ordinal}/#{total} has no internal shared edges"
+    puts "normal_components=#{components.length}"
+    components.each_with_index do |component, index|
+      puts "  N#{index + 1}: faces=#{component.length} PIDs=#{component.map { |face| stable_entity_id(face) }.inspect}"
     end
-
-    descriptor = describe_planar_group(current_faces)
-    topology_before = geometry_counts(entities)
-    manifold_before = manifold?(solid)
-    expected_face_reduction = current_faces.length - 1
-
-    entities.erase_entities(internal_edges)
-
-    topology_after = geometry_counts(entities)
-    actual_face_reduction = topology_before[:faces] - topology_after[:faces]
-
-    unless actual_face_reduction == expected_face_reduction
-      raise "Merge group #{ordinal}/#{total} reduced faces by #{actual_face_reduction}; expected #{expected_face_reduction}"
+    puts "refined_groups=#{refined.length}"
+    refined.each_with_index do |group, index|
+      descriptor = describe_planar_group(group)
+      puts format(
+        '  P%d: faces=%d vertices=%d max_angle=%.9fdeg max_dev=%.9fmm PIDs=%s',
+        index + 1,
+        descriptor[:face_count],
+        descriptor[:vertex_count],
+        descriptor[:max_adjacent_angle_deg],
+        descriptor[:max_vertex_deviation_mm],
+        descriptor[:face_ids].inspect
+      )
     end
-    if topology_before[:closed] && !topology_after[:closed]
-      raise "Merge group #{ordinal}/#{total} opened a previously closed shell"
+    unless shared_pairs.empty?
+      puts 'shared-edge pairs:'
+      shared_pairs.each do |face_a_id, face_b_id, angle|
+        puts format(
+          '  F%s <-> F%s angle=%s %s',
+          face_a_id,
+          face_b_id,
+          angle ? format('%.9fdeg', angle) : 'N/A',
+          angle && angle <= angle_tolerance_deg ? 'PASS' : 'FAIL'
+        )
+      end
     end
-    if topology_after[:overused_edges] > topology_before[:overused_edges]
-      raise "Merge group #{ordinal}/#{total} increased overused-edge count"
-    end
-    if topology_after[:boundary_edges] > topology_before[:boundary_edges]
-      raise "Merge group #{ordinal}/#{total} increased boundary-edge count"
-    end
-    if manifold_before && !manifold?(solid)
-      raise "Merge group #{ordinal}/#{total} changed a manifold solid into non-manifold geometry"
-    end
+    puts '=' * 110
 
-    {
-      index: ordinal,
-      total: total,
-      input_face_count: current_faces.length,
-      input_vertex_count: current_faces.flat_map(&:vertices).uniq.length,
-      internal_edge_count: internal_edges.length,
-      expected_face_reduction: expected_face_reduction,
-      actual_face_reduction: actual_face_reduction,
-      max_adjacent_angle_deg: descriptor[:max_adjacent_angle_deg],
-      max_vertex_deviation_mm: descriptor[:max_vertex_deviation_mm],
-      topology_before: topology_before,
-      topology_after: topology_after,
-      manifold_before: manifold_before,
-      manifold_after: manifold?(solid)
+    $lvn_coplanar_face_diagnostic = {
+      faces: faces,
+      components: components,
+      refined_groups: refined,
+      metrics: metrics,
+      shared_pairs: shared_pairs
     }
+    nil
+  rescue StandardError => error
+    puts '[COPLANAR FACE DIAG] FAILED'
+    puts "#{error.class}: #{error.message}"
+    puts Array(error.backtrace).first(20).join("\n")
+    nil
   end
 
   def geometry_counts(entities)
@@ -608,16 +659,16 @@ module LvnCoplanarFaceMergeExperiment
     Math.sqrt(vector_dot(vector, vector))
   end
 
-  def print_merge_result(result)
+  def print_plan_result(plan)
     puts format(
-      '[COPLANAR FACE MERGE] %d/%d OK faces=%d vertices=%d edges=%d angle=%.9fdeg best_fit_dev=%.9fmm',
-      result[:index],
-      result[:total],
-      result[:input_face_count],
-      result[:input_vertex_count],
-      result[:internal_edge_count],
-      result[:max_adjacent_angle_deg],
-      result[:max_vertex_deviation_mm]
+      '[COPLANAR FACE MERGE] %d/%d PLANNED faces=%d vertices=%d edges=%d angle=%.9fdeg best_fit_dev=%.9fmm',
+      plan[:index],
+      plan[:total],
+      plan[:input_face_count],
+      plan[:input_vertex_count],
+      plan[:internal_edge_count],
+      plan[:max_adjacent_angle_deg],
+      plan[:max_vertex_deviation_mm]
     )
   end
 
@@ -630,6 +681,7 @@ module LvnCoplanarFaceMergeExperiment
     puts "source_faces=#{report[:source_face_count]}"
     puts "normal_components=#{report[:normal_component_count]} planar_groups=#{report[:planar_group_count]} singletons=#{report[:singleton_group_count]}"
     puts "merge_groups=#{report[:merge_group_count]} merged_input_faces=#{report[:merged_input_face_count]}"
+    puts "face_reduction=#{report[:actual_face_reduction]} expected=#{report[:expected_face_reduction]}"
     puts "faces=#{report.dig(:initial_topology, :faces)} -> #{report.dig(:final_topology, :faces)}"
     puts "edges=#{report.dig(:initial_topology, :edges)} -> #{report.dig(:final_topology, :edges)}"
     puts "manifold=#{report[:initial_manifold]} -> #{report[:final_manifold]}"
