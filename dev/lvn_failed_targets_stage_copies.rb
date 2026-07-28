@@ -116,50 +116,68 @@ module LvnFailedTargetsStageCopies
       failures = []
 
       records.each_with_index do |record, triangle_index|
-        triangle_group = parent_group.entities.add_group
-        triangle_group.name = triangle_name(record, triangle_index)
-        triangle_group.set_attribute(TRIANGLE_DICTIONARY, 'triangle_index', triangle_index)
-        triangle_group.set_attribute(
-          TRIANGLE_DICTIONARY,
-          'source_face_key',
-          record[:source_face_key]
-        )
-        triangle_group.set_attribute(
-          TRIANGLE_DICTIONARY,
-          'source_polygon_index',
-          record[:source_polygon_index]
-        )
+        triangle_group = nil
+        points = nil
 
-        points = record[:points].map do |point|
-          @point_factory.call(point.x, point.y, point.z)
-        end
+        begin
+          triangle_group = parent_group.entities.add_group
+          triangle_group.name = triangle_name(record, triangle_index)
+          triangle_group.set_attribute(TRIANGLE_DICTIONARY, 'triangle_index', triangle_index)
+          triangle_group.set_attribute(
+            TRIANGLE_DICTIONARY,
+            'source_face_key',
+            record[:source_face_key]
+          )
+          triangle_group.set_attribute(
+            TRIANGLE_DICTIONARY,
+            'source_polygon_index',
+            record[:source_polygon_index]
+          )
 
-        face = triangle_group.entities.add_face(points)
-        if face&.valid?
-          apply_visual_metadata(face, record)
-          added_faces += 1
-        else
-          add_triangle_outline(triangle_group.entities, points)
+          points = record[:points].map do |point|
+            @point_factory.call(point.x, point.y, point.z)
+          end
+
+          face = triangle_group.entities.add_face(points)
+          if face&.valid?
+            apply_visual_metadata(face, record)
+            added_faces += 1
+          else
+            add_triangle_outline(triangle_group.entities, points)
+            outline_only += 1
+            failures << {
+              triangle_index: triangle_index,
+              reason: 'add_face returned nil/invalid',
+              points: points.map { |point| grid_indices(point) }
+            }
+          end
+        rescue StandardError => error
+          # Keep the child group non-empty even when SketchUp refuses the Face.
+          # Otherwise SketchUp may remove the empty group at operation commit,
+          # which makes the exact failing triangle impossible to inspect later.
+          begin
+            add_triangle_outline(triangle_group.entities, points) if
+              triangle_group&.valid? && points&.length == 3 &&
+              triangle_group.entities.grep(Sketchup::Edge).empty?
+          rescue StandardError
+            nil
+          end
+
           outline_only += 1
           failures << {
             triangle_index: triangle_index,
-            reason: 'add_face returned nil/invalid',
-            points: points.map { |point| grid_indices(point) }
+            reason: "#{error.class}: #{error.message}",
+            points: Array(record[:points]).map { |point| grid_indices(point) rescue nil }
           }
-        end
+        ensure
+          next unless triangle_group&.valid?
 
-        triangle_group.entities.grep(Sketchup::Edge).each do |edge|
-          edge.hidden = false if edge.respond_to?(:hidden=)
-          edge.soft = false if edge.respond_to?(:soft=)
-          edge.smooth = false if edge.respond_to?(:smooth=)
+          triangle_group.entities.grep(Sketchup::Edge).each do |edge|
+            edge.hidden = false if edge.respond_to?(:hidden=)
+            edge.soft = false if edge.respond_to?(:soft=)
+            edge.smooth = false if edge.respond_to?(:smooth=)
+          end
         end
-      rescue StandardError => error
-        outline_only += 1
-        failures << {
-          triangle_index: triangle_index,
-          reason: "#{error.class}: #{error.message}",
-          points: Array(record[:points]).map { |point| grid_indices(point) rescue nil }
-        }
       end
 
       {
@@ -265,7 +283,6 @@ module LvnFailedTargetsStageCopies
     end
 
     captures = resolved.map do |target, entity, world_transform|
-      puts "[LVN STAGE COPIES] capture #{target[:label]} PID=#{target[:pid]}"
       [target, entity, world_transform, normalizer.capture(entity)]
     end
 
@@ -315,14 +332,12 @@ module LvnFailedTargetsStageCopies
       created.each { |entry| model.selection.add(entry[:group]) if entry[:group]&.valid? }
       model.active_view.invalidate
 
-      result = {
+      $lvn_failed_targets_stage_copies = {
         generated_at: Time.now.iso8601(3),
         representation: 'one child group per triangle; preserves overlapping triangle soup',
         copies: created.map { |entry| entry.reject { |key, _value| key == :group } }
       }
-      $lvn_failed_targets_stage_copies = result
-      print_summary(result)
-      result
+      nil
     rescue StandardError
       model.abort_operation if started
       raise
@@ -335,11 +350,11 @@ module LvnFailedTargetsStageCopies
     raise 'SketchUp refused to start cleanup operation' unless started
 
     begin
-      removed = erase_generated_copies(model)
+      erase_generated_copies(model)
       model.commit_operation
       started = false
-      puts "[LVN STAGE COPIES] removed=#{removed}"
-      removed
+      model.active_view.invalidate
+      nil
     rescue StandardError
       model.abort_operation if started
       raise
@@ -451,23 +466,6 @@ module LvnFailedTargetsStageCopies
     end
     [nil, nil]
   end
-
-  def print_summary(result)
-    puts "\n#{'=' * 100}"
-    puts '[LVN FAILED TARGET STAGE COPIES]'
-    puts 'representation=triangle soup (one child group per in-memory triangle)'
-    result[:copies].each do |entry|
-      exact = entry[:exact_mesh] || {}
-      puts "#{entry[:label]} #{entry[:stage]}: " \
-           "pid=#{entry[:pid]} triangles=#{entry[:expected_triangle_count]} " \
-           "child_groups=#{entry[:triangle_group_count]} faces=#{entry[:added_face_count]} " \
-           "outline_only=#{entry[:outline_only_count]} " \
-           "boundary=#{exact[:boundary_edge_count]} overused=#{exact[:overused_edge_count]} " \
-           "invalid_pairs=#{exact[:invalid_pair_count]} " \
-           "tag=#{entry[:tag]} offset_x_mm=#{entry[:offset_x_mm].round(3)}"
-    end
-    puts 'Copies are committed and selected. Originals were not modified.'
-    puts 'Topology/invalid counts above are computed from the exact in-memory stage records.'
-    puts '=' * 100
-  end
 end
+
+nil
