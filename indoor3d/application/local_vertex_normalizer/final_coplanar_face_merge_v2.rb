@@ -7,9 +7,9 @@ module ULOL
         # Final post-normalize Face simplification.
         #
         # This is deliberately separate from STRICT_COPLANAR_TOLERANCE_MM, which
-        # is still used by the legacy post-rebuild cleanup and exact surface
-        # descriptor code. The final n-gon cleanup uses a component-level
-        # best-fit plane instead of pairwise Face planes.
+        # remains part of the legacy post-rebuild cleanup and exact surface
+        # descriptor policy. The new final pass uses component-level best-fit
+        # coplanarity and supports Triangle, quad and general n-gon Faces.
         FINAL_COPLANAR_FACE_PLANE_TOLERANCE_MM = 0.0025 unless
           const_defined?(:FINAL_COPLANAR_FACE_PLANE_TOLERANCE_MM, false)
         FINAL_COPLANAR_FACE_ANGLE_TOLERANCE_DEG = 0.01 unless
@@ -22,11 +22,13 @@ module ULOL
                        :normalize_entity
         end
 
-        # Run only after the existing normalize pipeline has completed every
-        # reconstruction/repair/exact-equivalence check. The surrounding
-        # normalization operation still owns rollback, so any failure here rolls
-        # the whole normalization back rather than leaving a partially simplified
-        # solid.
+        # Run after the existing normalize pipeline has already succeeded.
+        #
+        # The final merge is intentionally best-effort: a cleanup failure must not
+        # turn an already-successful normalization into a failure. Before mutation
+        # we snapshot the validated final surface. If the new simplification or
+        # any post-merge hard gate fails, that surface is rebuilt and revalidated.
+        # Only failure to restore the known-good surface is allowed to escape.
         def normalize_entity(entity)
           report = normalize_entity_before_final_coplanar_face_merge_v2(entity)
           entities = entity.definition.entities
@@ -49,50 +51,125 @@ module ULOL
           baseline_mesh_validation =
             validate_normalized_triangle_mesh!(baseline_triangles)
 
-          merge_report = merge_final_coplanar_face_components!(
-            entity,
-            entities,
-            plane_tolerance_mm: FINAL_COPLANAR_FACE_PLANE_TOLERANCE_MM,
-            angle_tolerance_deg: FINAL_COPLANAR_FACE_ANGLE_TOLERANCE_DEG
-          )
+          begin
+            merge_report = merge_final_coplanar_face_components!(
+              entity,
+              entities,
+              plane_tolerance_mm: FINAL_COPLANAR_FACE_PLANE_TOLERANCE_MM,
+              angle_tolerance_deg: FINAL_COPLANAR_FACE_ANGLE_TOLERANCE_DEG
+            )
 
-          topology_after = geometry_counts(entities)
-          validate_rebuilt_entity!(entity, topology_after)
+            topology_after = geometry_counts(entities)
+            validate_rebuilt_entity!(entity, topology_after)
 
-          final_vertices = geometry_vertices(entities)
-          residual_mm = max_grid_residual_mm(final_vertices)
-          if residual_mm > GRID_EPSILON_MM
-            raise TopologyChangedError,
-                  "Final coplanar Face merge moved vertices off the " \
-                  "#{@tolerance_mm} mm grid: residual=#{residual_mm} mm"
+            final_vertices = geometry_vertices(entities)
+            residual_mm = max_grid_residual_mm(final_vertices)
+            if residual_mm > GRID_EPSILON_MM
+              raise TopologyChangedError,
+                    "Final coplanar Face merge moved vertices off the " \
+                    "#{@tolerance_mm} mm grid: residual=#{residual_mm} mm"
+            end
+
+            final_duplicate_diagnostics = {}
+            final_triangles = normalized_triangle_snapshot(
+              entities,
+              duplicate_diagnostics: final_duplicate_diagnostics,
+              snapshot_role: :after_final_coplanar_face_merge
+            )
+            final_triangles, final_cleanup =
+              discard_collapsed_triangle_records(final_triangles)
+            final_mesh_validation =
+              validate_normalized_triangle_mesh!(final_triangles)
+            surface_equivalence = verify_normalized_surface_equivalence!(
+              baseline_triangles,
+              final_triangles
+            )
+
+            merge_report[:applied] = merge_report[:merge_group_count].to_i.positive?
+            merge_report[:restored] = false
+            merge_report[:fallback_reason] = nil
+            merge_report[:baseline_triangle_cleanup] = baseline_cleanup
+            merge_report[:final_triangle_cleanup] = final_cleanup
+            merge_report[:baseline_mesh_validation] = baseline_mesh_validation
+            merge_report[:final_mesh_validation] = final_mesh_validation
+            merge_report[:surface_equivalence] = surface_equivalence
+            merge_report[:baseline_duplicate_diagnostics] =
+              baseline_duplicate_diagnostics
+            merge_report[:final_duplicate_diagnostics] =
+              final_duplicate_diagnostics
+            merge_report[:grid_residual_mm] = residual_mm
+
+            report[:final_coplanar_face_merge] = merge_report if report.is_a?(Hash)
+          rescue StandardError => error
+            restored = restore_final_coplanar_baseline!(
+              entity,
+              entities,
+              baseline_triangles
+            )
+
+            if report.is_a?(Hash)
+              report[:final_coplanar_face_merge] = {
+                applied: false,
+                restored: true,
+                fallback_reason: "#{error.class}: #{error.message}",
+                plane_tolerance_mm: FINAL_COPLANAR_FACE_PLANE_TOLERANCE_MM,
+                angle_tolerance_deg: FINAL_COPLANAR_FACE_ANGLE_TOLERANCE_DEG,
+                topology_before: topology_before,
+                topology_after: restored[:topology],
+                restored_surface_equivalence: restored[:surface_equivalence],
+                restored_mesh_validation: restored[:mesh_validation],
+                restored_triangle_cleanup: restored[:triangle_cleanup],
+                restored_duplicate_diagnostics: restored[:duplicate_diagnostics],
+                grid_residual_mm: restored[:grid_residual_mm]
+              }
+            end
           end
 
-          final_duplicate_diagnostics = {}
-          final_triangles = normalized_triangle_snapshot(
+          report
+        end
+
+        def restore_final_coplanar_baseline!(entity, entities, baseline_triangles)
+          erase_source_geometry(entities)
+          restored = rebuild_triangles(entities, baseline_triangles)
+          unless restored[:added_faces] == baseline_triangles.length &&
+                 restored[:skipped_collinear].zero?
+            raise ReconstructionError,
+                  "Could not restore normalized surface after final coplanar " \
+                  "Face merge failure: #{restored.inspect}"
+          end
+
+          repair_reverse_faces(entities)
+          topology = geometry_counts(entities)
+          validate_rebuilt_entity!(entity, topology)
+
+          residual_mm = max_grid_residual_mm(geometry_vertices(entities))
+          if residual_mm > GRID_EPSILON_MM
+            raise TopologyChangedError,
+                  "Restored normalized surface is off the #{@tolerance_mm} mm " \
+                  "grid: residual=#{residual_mm} mm"
+          end
+
+          duplicate_diagnostics = {}
+          triangles = normalized_triangle_snapshot(
             entities,
-            duplicate_diagnostics: final_duplicate_diagnostics,
-            snapshot_role: :after_final_coplanar_face_merge
+            duplicate_diagnostics: duplicate_diagnostics,
+            snapshot_role: :restored_after_final_coplanar_face_merge_failure
           )
-          final_triangles, final_cleanup =
-            discard_collapsed_triangle_records(final_triangles)
-          final_mesh_validation =
-            validate_normalized_triangle_mesh!(final_triangles)
+          triangles, triangle_cleanup = discard_collapsed_triangle_records(triangles)
+          mesh_validation = validate_normalized_triangle_mesh!(triangles)
           surface_equivalence = verify_normalized_surface_equivalence!(
             baseline_triangles,
-            final_triangles
+            triangles
           )
 
-          merge_report[:baseline_triangle_cleanup] = baseline_cleanup
-          merge_report[:final_triangle_cleanup] = final_cleanup
-          merge_report[:baseline_mesh_validation] = baseline_mesh_validation
-          merge_report[:final_mesh_validation] = final_mesh_validation
-          merge_report[:surface_equivalence] = surface_equivalence
-          merge_report[:baseline_duplicate_diagnostics] = baseline_duplicate_diagnostics
-          merge_report[:final_duplicate_diagnostics] = final_duplicate_diagnostics
-          merge_report[:grid_residual_mm] = residual_mm
-
-          report[:final_coplanar_face_merge] = merge_report if report.is_a?(Hash)
-          report
+          {
+            topology: topology,
+            grid_residual_mm: residual_mm,
+            duplicate_diagnostics: duplicate_diagnostics,
+            triangle_cleanup: triangle_cleanup,
+            mesh_validation: mesh_validation,
+            surface_equivalence: surface_equivalence
+          }
         end
 
         # No explicit adjacency graph is materialized. SketchUp's own topology is
@@ -155,9 +232,9 @@ module ULOL
             )
           end
 
-          # Important: all Face-derived data is snapshotted before mutation.
-          # Deleting one internal edge can invalidate several original Face
-          # references when SketchUp replaces them with an n-gon.
+          # Snapshot every Face-derived value before topology mutation. Removing
+          # one internal edge can invalidate several original Face references when
+          # SketchUp replaces them with a larger n-gon.
           internal_edges = plans.flat_map { |plan| plan[:internal_edges] }
                                 .uniq
                                 .select(&:valid?)
