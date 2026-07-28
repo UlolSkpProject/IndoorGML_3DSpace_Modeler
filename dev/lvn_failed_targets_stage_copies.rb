@@ -6,8 +6,12 @@
 #   2) GRID_CONFORMING  - after grid conforming + cleanup, immediately before the
 #                         short-edge sliver stage / hard gate.
 #
-# The original entities are never modified. Unlike the normal diagnostic probes,
-# the generated stage copies are intentionally COMMITTED and remain in the model.
+# IMPORTANT:
+# The stage mesh can contain exact-invalid overlapping triangles. SketchUp merges
+# points inside one Entities drawing context, so fill_from_mesh/add_face on one
+# shared context can omit or rewrite such triangles. For faithful inspection,
+# every triangle is therefore materialized in its own child group (triangle soup).
+# The parent stage group is committed and remains in the model.
 #
 # SketchUp Ruby Console:
 # load 'C:/ProgramData/SketchUp/SketchUp 2026/SketchUp/Devs/IndoorGML_3DSpace_Modeler/dev/lvn_failed_targets_stage_copies.rb'
@@ -44,6 +48,7 @@ module LvnFailedTargetsStageCopies
   ].freeze
 
   DIAGNOSTIC_DICTIONARY = 'ULOL_LVN_STAGE_COPY'
+  TRIANGLE_DICTIONARY = 'ULOL_LVN_STAGE_TRIANGLE'
   TAG_GRID_NORMALIZED = 'LVN_VIS_GRID_NORMALIZED'
   TAG_GRID_CONFORMING = 'LVN_VIS_GRID_CONFORMING'
   CLEARANCE_MM = 2_000.0
@@ -87,6 +92,7 @@ module LvnFailedTargetsStageCopies
       )
       conforming_records, conforming_cleanup =
         discard_collapsed_triangle_records(conforming_records)
+      validate_normalized_triangle_shapes!(conforming_records)
 
       {
         grid_normalized: clone_records(grid_records),
@@ -101,12 +107,105 @@ module LvnFailedTargetsStageCopies
       }
     end
 
-    def materialize(entities, records)
-      rebuild_triangles(entities, records)
+    # Materialize each triangle in its own SketchUp drawing context. This is
+    # intentionally NOT production rebuild logic. It is a diagnostic visualization
+    # that must preserve overlapping triangles instead of letting SketchUp merge them.
+    def materialize_triangle_soup(parent_group, records)
+      added_faces = 0
+      outline_only = 0
+      failures = []
+
+      records.each_with_index do |record, triangle_index|
+        triangle_group = parent_group.entities.add_group
+        triangle_group.name = triangle_name(record, triangle_index)
+        triangle_group.set_attribute(TRIANGLE_DICTIONARY, 'triangle_index', triangle_index)
+        triangle_group.set_attribute(
+          TRIANGLE_DICTIONARY,
+          'source_face_key',
+          record[:source_face_key]
+        )
+        triangle_group.set_attribute(
+          TRIANGLE_DICTIONARY,
+          'source_polygon_index',
+          record[:source_polygon_index]
+        )
+
+        points = record[:points].map do |point|
+          @point_factory.call(point.x, point.y, point.z)
+        end
+
+        face = triangle_group.entities.add_face(points)
+        if face&.valid?
+          apply_visual_metadata(face, record)
+          added_faces += 1
+        else
+          add_triangle_outline(triangle_group.entities, points)
+          outline_only += 1
+          failures << {
+            triangle_index: triangle_index,
+            reason: 'add_face returned nil/invalid',
+            points: points.map { |point| grid_indices(point) }
+          }
+        end
+
+        triangle_group.entities.grep(Sketchup::Edge).each do |edge|
+          edge.hidden = false if edge.respond_to?(:hidden=)
+          edge.soft = false if edge.respond_to?(:soft=)
+          edge.smooth = false if edge.respond_to?(:smooth=)
+        end
+      rescue StandardError => error
+        outline_only += 1
+        failures << {
+          triangle_index: triangle_index,
+          reason: "#{error.class}: #{error.message}",
+          points: Array(record[:points]).map { |point| grid_indices(point) rescue nil }
+        }
+      end
+
+      {
+        triangle_group_count: parent_group.entities.grep(Sketchup::Group).length,
+        added_faces: added_faces,
+        outline_only: outline_only,
+        failures: failures
+      }
     end
 
-    def topology(entities)
-      geometry_counts(entities)
+    # Analyze the exact in-memory triangle complex, not the nested visualization.
+    def analyze_records(records)
+      triangles = records.map do |record|
+        record[:points].map { |point| grid_indices(point) }
+      end
+
+      edge_incidence = Hash.new { |hash, key| hash[key] = [] }
+      vertices = {}
+      triangles.each_with_index do |triangle, triangle_index|
+        triangle.each { |point| vertices[point] = true }
+        3.times do |edge_index|
+          edge = canonical_edge_key(
+            triangle[edge_index],
+            triangle[(edge_index + 1) % 3]
+          )
+          edge_incidence[edge] << triangle_index
+        end
+      end
+
+      bad_edges = edge_incidence.select { |_edge, owners| owners.length != 2 }
+      intersections = collect_triangle_intersection_failures(triangles)
+
+      {
+        triangle_count: triangles.length,
+        vertex_count: vertices.length,
+        edge_count: edge_incidence.length,
+        bad_edge_count: bad_edges.length,
+        boundary_edge_count: bad_edges.count { |_edge, owners| owners.length == 1 },
+        overused_edge_count: bad_edges.count { |_edge, owners| owners.length > 2 },
+        bad_edge_samples: bad_edges.first(10).map do |edge, owners|
+          { edge: edge, incidence: owners.length, triangles: owners }
+        end,
+        invalid_pair_count: intersections[:pairs].length,
+        invalid_pairs: intersections[:pairs],
+        tested_pairs: intersections[:tested_pairs]
+      }
     end
 
     private
@@ -119,6 +218,35 @@ module LvnFailedTargetsStageCopies
         end
         cloned
       end
+    end
+
+    def triangle_name(record, triangle_index)
+      "T#{triangle_index} sf=#{record[:source_face_key]} p=#{record[:source_polygon_index]}"
+    end
+
+    def apply_visual_metadata(face, record)
+      face.material = record[:material] if valid_metadata_entity?(record[:material])
+      if face.respond_to?(:back_material=) && valid_metadata_entity?(record[:back_material])
+        face.back_material = record[:back_material]
+      end
+    rescue StandardError
+      # Visualization must survive stale/non-paintable metadata.
+      nil
+    end
+
+    def valid_metadata_entity?(value)
+      return false if value.nil?
+      return value.valid? if value.respond_to?(:valid?)
+
+      true
+    rescue StandardError
+      false
+    end
+
+    def add_triangle_outline(entities, points)
+      entities.add_line(points[0], points[1])
+      entities.add_line(points[1], points[2])
+      entities.add_line(points[2], points[0])
     end
   end
 
@@ -189,6 +317,7 @@ module LvnFailedTargetsStageCopies
 
       result = {
         generated_at: Time.now.iso8601(3),
+        representation: 'one child group per triangle; preserves overlapping triangle soup',
         copies: created.map { |entry| entry.reject { |key, _value| key == :group } }
       }
       $lvn_failed_targets_stage_copies = result
@@ -232,15 +361,8 @@ module LvnFailedTargetsStageCopies
     group.name = "#{target[:expected_name]} [LVN #{stage.to_s.upcase}]"
     group.layer = tag
 
-    build = normalizer.materialize(group.entities, records)
-    topology = normalizer.topology(group.entities)
-
-    # Keep every generated triangle edge visible for direct triangulation inspection.
-    group.entities.grep(Sketchup::Edge).each do |edge|
-      edge.hidden = false if edge.respond_to?(:hidden=)
-      edge.soft = false if edge.respond_to?(:soft=)
-      edge.smooth = false if edge.respond_to?(:smooth=)
-    end
+    exact = normalizer.analyze_records(records)
+    build = normalizer.materialize_triangle_soup(group, records)
 
     placement = Geom::Transformation.translation([offset_x_inches, 0, 0]) * world_transform
     group.transformation = placement
@@ -250,16 +372,14 @@ module LvnFailedTargetsStageCopies
     group.set_attribute(DIAGNOSTIC_DICTIONARY, 'source_name', source_entity.name.to_s)
     group.set_attribute(DIAGNOSTIC_DICTIONARY, 'stage', stage.to_s)
     group.set_attribute(DIAGNOSTIC_DICTIONARY, 'expected_triangle_count', records.length)
-    group.set_attribute(DIAGNOSTIC_DICTIONARY, 'added_face_count', build[:added_faces].to_i)
+    group.set_attribute(DIAGNOSTIC_DICTIONARY, 'triangle_group_count', build[:triangle_group_count])
+    group.set_attribute(DIAGNOSTIC_DICTIONARY, 'invalid_pair_count', exact[:invalid_pair_count])
+    group.set_attribute(DIAGNOSTIC_DICTIONARY, 'overused_edge_count', exact[:overused_edge_count])
 
-    exact_rebuild = build[:added_faces].to_i == records.length &&
-      build[:skipped_collinear].to_i.zero?
-
-    unless exact_rebuild
+    unless build[:failures].empty?
       warn "[LVN STAGE COPIES] WARNING #{target[:label]} #{stage}: " \
-           "SketchUp rebuild differs from in-memory stage " \
-           "expected=#{records.length} added=#{build[:added_faces]} " \
-           "skipped_collinear=#{build[:skipped_collinear]}"
+           "triangle materialization failures=#{build[:failures].length} " \
+           "samples=#{build[:failures].first(3).inspect}"
     end
 
     {
@@ -270,10 +390,11 @@ module LvnFailedTargetsStageCopies
       stage: stage,
       name: group.name,
       expected_triangle_count: records.length,
-      added_face_count: build[:added_faces].to_i,
-      skipped_collinear: build[:skipped_collinear].to_i,
-      exact_rebuild: exact_rebuild,
-      sketchup_topology: topology,
+      triangle_group_count: build[:triangle_group_count],
+      added_face_count: build[:added_faces],
+      outline_only_count: build[:outline_only],
+      materialization_failure_count: build[:failures].length,
+      exact_mesh: exact,
       offset_x_mm: offset_x_inches * LVN::MM_PER_INCH,
       tag: tag.name
     }
@@ -334,15 +455,19 @@ module LvnFailedTargetsStageCopies
   def print_summary(result)
     puts "\n#{'=' * 100}"
     puts '[LVN FAILED TARGET STAGE COPIES]'
+    puts 'representation=triangle soup (one child group per in-memory triangle)'
     result[:copies].each do |entry|
-      topology = entry[:sketchup_topology] || {}
+      exact = entry[:exact_mesh] || {}
       puts "#{entry[:label]} #{entry[:stage]}: " \
            "pid=#{entry[:pid]} triangles=#{entry[:expected_triangle_count]} " \
-           "faces=#{entry[:added_face_count]} exact_rebuild=#{entry[:exact_rebuild]} " \
-           "boundary=#{topology[:boundary_edges]} overused=#{topology[:overused_edges]} " \
+           "child_groups=#{entry[:triangle_group_count]} faces=#{entry[:added_face_count]} " \
+           "outline_only=#{entry[:outline_only_count]} " \
+           "boundary=#{exact[:boundary_edge_count]} overused=#{exact[:overused_edge_count]} " \
+           "invalid_pairs=#{exact[:invalid_pair_count]} " \
            "tag=#{entry[:tag]} offset_x_mm=#{entry[:offset_x_mm].round(3)}"
     end
     puts 'Copies are committed and selected. Originals were not modified.'
+    puts 'Topology/invalid counts above are computed from the exact in-memory stage records.'
     puts '=' * 100
   end
 end
