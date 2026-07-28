@@ -157,7 +157,7 @@ module ULOL
                   before_low_count - after_low_count,
                   after_min_altitude - before_min_altitude
                 ]
-                best = [score, candidate] if best.nil? || score > best[0]
+                best = [score, candidate] if best.nil? || (score <=> best[0]) == 1
               rescue Error, ArgumentError => error
                 attempts << {
                   source_face_key: patch_records.first[:source_face_key],
