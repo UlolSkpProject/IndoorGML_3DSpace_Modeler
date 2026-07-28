@@ -38,8 +38,10 @@ module ULOL
           report[:final_entity_repair] = final_repair
           report[:source_boundary_normalization] =
             source_boundary_normalization
-          report[:source_altitude_sliver_collapse] =
+          report[:source_collapsed_sliver_cleanup] =
             source_altitude_sliver_collapse
+          report[:grid_altitude_sliver_retriangulation] =
+            (@grid_altitude_sliver_retriangulation_stats_v2 || {}).dup
           report[:surface_border_repair_count] =
             final_repair.dig(:surface_border, :repairs).to_i
           report[:external_face_removal_count] =
