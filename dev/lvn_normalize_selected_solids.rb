@@ -53,6 +53,9 @@ module LvnNormalizeSelectedSolids
         normalizer = LVN.new(tolerance_mm, model: model)
         report = normalizer.normalize(entity, manage_operation: true)
         after = geometry_counts(entity)
+        final_coplanar = compact_final_coplanar_report(
+          report_value(report, :final_coplanar_face_merge)
+        )
 
         result[:success_count] += 1
         result[:successes] << identity.merge(
@@ -65,7 +68,8 @@ module LvnNormalizeSelectedSolids
           grid_altitude_sliver_retriangulation: compact_report(
             report_value(report, :grid_altitude_sliver_retriangulation) ||
               normalizer.instance_variable_get(:@grid_altitude_sliver_retriangulation_stats_v2)
-          )
+          ),
+          final_coplanar_face_merge: final_coplanar
         )
 
         puts format(
@@ -75,6 +79,7 @@ module LvnNormalizeSelectedSolids
           identity[:name],
           identity[:pid]
         )
+        print_final_coplanar_result(final_coplanar)
       rescue StandardError => error
         result[:failure_count] += 1
         result[:failures] << identity.merge(
@@ -208,6 +213,65 @@ module LvnNormalizeSelectedSolids
       compact[symbol] = value if keys.include?(symbol)
     end
   rescue StandardError
+    nil
+  end
+
+  def compact_final_coplanar_report(report)
+    return nil unless report.is_a?(Hash)
+
+    keys = [
+      :applied,
+      :restored,
+      :fallback_reason,
+      :plane_tolerance_mm,
+      :angle_tolerance_deg,
+      :source_face_count,
+      :normal_component_count,
+      :planar_group_count,
+      :singleton_group_count,
+      :merge_group_count,
+      :merged_input_face_count,
+      :removed_internal_edge_count,
+      :expected_face_reduction,
+      :actual_face_reduction,
+      :grid_residual_mm
+    ]
+
+    report.each_with_object({}) do |(key, value), compact|
+      symbol = key.respond_to?(:to_sym) ? key.to_sym : key
+      compact[symbol] = value if keys.include?(symbol)
+    end
+  rescue StandardError => error
+    { compact_error: "#{error.class}: #{error.message}" }
+  end
+
+  def print_final_coplanar_result(report)
+    unless report.is_a?(Hash)
+      puts '[LVN FINAL COPLANAR] report=missing'
+      return nil
+    end
+
+    if report[:restored] == true
+      puts format(
+        '[LVN FINAL COPLANAR] RESTORED applied=false tol=%s angle=%s | %s',
+        report[:plane_tolerance_mm],
+        report[:angle_tolerance_deg],
+        report[:fallback_reason]
+      )
+      return nil
+    end
+
+    puts format(
+      '[LVN FINAL COPLANAR] applied=%s groups=%s faces=%s edges=%s reduction=%s/%s tol=%s angle=%s',
+      report[:applied],
+      report[:merge_group_count],
+      report[:merged_input_face_count],
+      report[:removed_internal_edge_count],
+      report[:actual_face_reduction],
+      report[:expected_face_reduction],
+      report[:plane_tolerance_mm],
+      report[:angle_tolerance_deg]
+    )
     nil
   end
 
