@@ -6,6 +6,8 @@ module ULOL
       class LocalVertexNormalizer
         SOURCE_COLLAPSED_SLIVER_DIAGNOSTIC_THRESHOLD_MM = 0.5 unless
           const_defined?(:SOURCE_COLLAPSED_SLIVER_DIAGNOSTIC_THRESHOLD_MM, false)
+        SOURCE_ALTITUDE_SLIVER_THRESHOLD_MM = SOURCE_COLLAPSED_SLIVER_DIAGNOSTIC_THRESHOLD_MM unless
+          const_defined?(:SOURCE_ALTITUDE_SLIVER_THRESHOLD_MM, false)
 
         private
 
@@ -38,13 +40,20 @@ module ULOL
           report = {
             policy: :natural_collapse_only,
             diagnostic_threshold_mm: SOURCE_COLLAPSED_SLIVER_DIAGNOSTIC_THRESHOLD_MM,
+            threshold_mm: SOURCE_COLLAPSED_SLIVER_DIAGNOSTIC_THRESHOLD_MM,
             input_triangle_count: triangle_records.length,
             output_triangle_count: collapsed.length,
             detected_low_altitude_count: candidates.length,
+            detected_sliver_count: candidates.length,
             removed_collapsed_triangle_count: removed_collapsed,
             removed_duplicate_triangle_count: removed_duplicates,
             remaining_low_altitude_count: remaining_slivers,
+            remaining_sliver_count: remaining_slivers,
+            collapse_step_count: 0,
+            selected_apex_count: 0,
             moved_vertex_count: 0,
+            moved_triangle_count: 0,
+            conflicting_target_count: 0,
             max_displacement_mm: 0.0,
             affected_source_face_keys:
               Array(cleanup[:affected_source_face_keys]).compact.uniq,
@@ -69,13 +78,20 @@ module ULOL
           {
             policy: :natural_collapse_only,
             diagnostic_threshold_mm: SOURCE_COLLAPSED_SLIVER_DIAGNOSTIC_THRESHOLD_MM,
+            threshold_mm: SOURCE_COLLAPSED_SLIVER_DIAGNOSTIC_THRESHOLD_MM,
             input_triangle_count: input_triangle_count,
             output_triangle_count: input_triangle_count,
             detected_low_altitude_count: 0,
+            detected_sliver_count: 0,
             removed_collapsed_triangle_count: 0,
             removed_duplicate_triangle_count: 0,
             remaining_low_altitude_count: 0,
+            remaining_sliver_count: 0,
+            collapse_step_count: 0,
+            selected_apex_count: 0,
             moved_vertex_count: 0,
+            moved_triangle_count: 0,
+            conflicting_target_count: 0,
             max_displacement_mm: 0.0,
             affected_source_face_keys: [],
             candidates: [],
