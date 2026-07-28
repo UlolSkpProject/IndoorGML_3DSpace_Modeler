@@ -4,7 +4,8 @@
 #
 # Default target is the current o6rz6ds0 materialization failure T420.
 # The stage mesh itself is re-captured from the source entity, so this script can
-# restore the exact triangle outline even when SketchUp refused to create its Face.
+# restore the exact triangle outline even when SketchUp refused to create its Face
+# or removed the empty per-triangle child group at operation commit.
 #
 # Ruby Console:
 # load 'C:/ProgramData/SketchUp/SketchUp 2026/SketchUp/Devs/IndoorGML_3DSpace_Modeler/dev/lvn_stage_problem_face_visualizer.rb'
@@ -66,7 +67,7 @@ module LvnStageProblemFaceVisualizer
 
         remove_stage_markers(stage_group, triangle_index)
         triangle_group = find_triangle_group(stage_group, triangle_index)
-        raise "Triangle group not found: stage=#{stage} T#{triangle_index}" unless triangle_group
+        triangle_group ||= create_triangle_group(stage_group, record, triangle_index)
 
         points = record[:points].map { |point| Geom::Point3d.new(point.x, point.y, point.z) }
         ensure_triangle_outline(triangle_group, points)
@@ -134,11 +135,38 @@ module LvnStageProblemFaceVisualizer
 
   def find_triangle_group(stage_group, triangle_index)
     stage_group.entities.grep(Sketchup::Group).find do |group|
-      group.get_attribute(
+      value = group.get_attribute(
         StageCopies::TRIANGLE_DICTIONARY,
         'triangle_index'
-      ).to_i == triangle_index.to_i
+      )
+      !value.nil? && value.to_i == triangle_index.to_i
     end
+  end
+
+  # A failed add_face can leave an empty triangle child group. SketchUp may remove
+  # that empty group when the stage-copy operation commits. Recreate it here from
+  # the authoritative in-memory stage record instead of depending on visualization
+  # leftovers.
+  def create_triangle_group(stage_group, record, triangle_index)
+    group = stage_group.entities.add_group
+    group.name = "T#{triangle_index} sf=#{record[:source_face_key]} p=#{record[:source_polygon_index]} [VIS]"
+    group.set_attribute(
+      StageCopies::TRIANGLE_DICTIONARY,
+      'triangle_index',
+      triangle_index
+    )
+    group.set_attribute(
+      StageCopies::TRIANGLE_DICTIONARY,
+      'source_face_key',
+      record[:source_face_key]
+    )
+    group.set_attribute(
+      StageCopies::TRIANGLE_DICTIONARY,
+      'source_polygon_index',
+      record[:source_polygon_index]
+    )
+    group.set_attribute(VIS_DICTIONARY, 'recreated_triangle_group', true)
+    group
   end
 
   def ensure_triangle_outline(triangle_group, points)
