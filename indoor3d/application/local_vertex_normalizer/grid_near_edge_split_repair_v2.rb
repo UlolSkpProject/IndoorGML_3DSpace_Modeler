@@ -56,10 +56,9 @@ module ULOL
               Array(near_report[:affected_source_face_keys]) +
               Array(source_report[:affected_source_face_keys])
             ).compact.uniq,
-            # Compatibility with the caller in grid_altitude_sliver_retriangulation_v2:
-            # that caller currently uses accepted_face_count only as an "any repair"
-            # signal. Count accepted near-edge repairs here as well while retaining
-            # accepted_near_edge_split_count separately for diagnostics.
+            # Compatibility with grid_altitude_sliver_retriangulation_v2: its
+            # caller currently uses accepted_face_count only as an "any repair"
+            # signal. Keep the old key while reporting near-edge repairs separately.
             accepted_face_count: source_count + near_count,
             skipped: !any_repair,
             skip_reason: any_repair ? nil : :no_safe_near_edge_or_source_face_repair
@@ -70,14 +69,16 @@ module ULOL
 
         def repair_grid_invalid_near_edge_splits(triangle_records)
           initial_invalid = grid_invalid_pair_signatures(triangle_records)
-          return [
-            triangle_records,
-            empty_grid_near_edge_split_report(
-              triangle_records.length,
-              initial_invalid.length,
-              :no_invalid_pairs
-            )
-          ] if initial_invalid.empty?
+          if initial_invalid.empty?
+            return [
+              triangle_records,
+              empty_grid_near_edge_split_report(
+                triangle_records.length,
+                0,
+                :no_invalid_pairs
+              )
+            ]
+          end
 
           working = triangle_records.dup
           current_invalid = initial_invalid
@@ -142,7 +143,8 @@ module ULOL
                   after_invalid_pair_count: tentative_invalid.length,
                   removed_invalid_pair_count: removed_invalid.length,
                   owner_count: details[:owner_count],
-                  replacement_triangle_count: details[:replacement_triangle_count]
+                  replacement_triangle_count: details[:replacement_triangle_count],
+                  affected_source_face_keys: details[:affected_source_face_keys]
                 )
                 score = [
                   removed_invalid.length,
@@ -235,6 +237,7 @@ module ULOL
             first = records[first_index]
             second = records[second_index]
             grid_near_edge_candidates_between_records(
+              records,
               first,
               second,
               first_index,
@@ -243,6 +246,7 @@ module ULOL
               candidates
             )
             grid_near_edge_candidates_between_records(
+              records,
               second,
               first,
               second_index,
@@ -263,6 +267,7 @@ module ULOL
         end
 
         def grid_near_edge_candidates_between_records(
+          records,
           point_record,
           edge_record,
           point_record_index,
@@ -286,7 +291,7 @@ module ULOL
               next if projection[:distance_mm] > @tolerance_mm
 
               # Avoid replacing one near-endpoint condition with a sub-tolerance
-              # edge/sliver. The projection must be strictly interior and both new
+              # edge/sliver. The projection is strictly interior, and both new
               # physical edges must remain longer than the normalization tolerance.
               next if point_distance_mm(point, edge_start) <= @tolerance_mm
               next if point_distance_mm(point, edge_end) <= @tolerance_mm
@@ -295,34 +300,31 @@ module ULOL
               owner_indices = Array(edge_owners[edge_key]).uniq.sort
               next if owner_indices.empty? || owner_indices.length > 2
               next if owner_indices.any? do |owner_index|
-                records_keys = nil
-                owner = nil
-                begin
-                  owner = edge_record_index == owner_index ? edge_record : nil
-                  owner ||= nil
-                rescue StandardError
-                  owner = nil
+                records.fetch(owner_index)[:points].any? do |owner_point|
+                  grid_indices(owner_point) == point_key
                 end
-                owner && owner[:points].any? { |owner_point| grid_indices(owner_point) == point_key }
               end
 
+              affected_source_face_keys = owner_indices.filter_map do |owner_index|
+                records.fetch(owner_index)[:source_face_key]
+              end.uniq
               key = [edge_key, point_key]
-              existing = candidates[key]
               trigger = [point_record_index, edge_record_index]
+              existing = candidates[key]
               if existing
-                existing[:trigger_pairs] << trigger unless existing[:trigger_pairs].include?(trigger)
+                existing[:trigger_pairs] << trigger unless
+                  existing[:trigger_pairs].include?(trigger)
                 next
               end
 
               candidates[key] = {
                 point: point,
                 point_key: point_key,
-                edge_start: edge_start,
-                edge_end: edge_end,
                 edge_key: edge_key,
                 parameter: projection[:parameter],
                 distance_mm: projection[:distance_mm],
                 owner_indices: owner_indices,
+                affected_source_face_keys: affected_source_face_keys,
                 trigger_pairs: [trigger]
               }
             end
@@ -369,11 +371,13 @@ module ULOL
             endpoint_indices = edge_key.map { |key| keys.index(key) }
             if endpoint_indices.any?(&:nil?)
               raise ReconstructionError,
-                    "Near-edge split owner no longer contains host edge: edge=#{edge_key.inspect} owner=#{owner_index}"
+                    "Near-edge split owner no longer contains host edge: " \
+                    "edge=#{edge_key.inspect} owner=#{owner_index}"
             end
             if keys.include?(point_key)
               raise ReconstructionError,
-                    "Near-edge split point already belongs to host triangle: point=#{point_key.inspect} owner=#{owner_index}"
+                    "Near-edge split point already belongs to host triangle: " \
+                    "point=#{point_key.inspect} owner=#{owner_index}"
             end
 
             first_index, second_index = endpoint_indices
@@ -402,7 +406,8 @@ module ULOL
             ]
             if split_records.any? { |entry| degenerate_triangle_record?(entry) }
               raise ReconstructionError,
-                    "Near-edge split produced a degenerate triangle: edge=#{edge_key.inspect} point=#{point_key.inspect}"
+                    "Near-edge split produced a degenerate triangle: " \
+                    "edge=#{edge_key.inspect} point=#{point_key.inspect}"
             end
 
             replacements.concat(split_records)
@@ -421,13 +426,6 @@ module ULOL
         end
 
         def near_edge_split_attempt_report(candidate, **details)
-          owner_face_keys = candidate[:owner_indices].filter_map do |owner_index|
-            begin
-              nil
-            rescue StandardError
-              nil
-            end
-          end
           {
             edge: candidate[:edge_key],
             point: candidate[:point_key],
@@ -435,7 +433,8 @@ module ULOL
             parameter: candidate[:parameter],
             trigger_pairs: candidate[:trigger_pairs],
             owner_count: candidate[:owner_indices].length,
-            affected_source_face_keys: owner_face_keys
+            affected_source_face_keys:
+              Array(candidate[:affected_source_face_keys]).compact.uniq
           }.merge(details)
         end
       end
