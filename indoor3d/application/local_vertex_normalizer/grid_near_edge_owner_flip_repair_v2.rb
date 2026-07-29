@@ -22,12 +22,14 @@ module ULOL
         #   new: (A,P,X) + (P,B,X)
         #
         # This is a local diagonal flip. It keeps every existing grid vertex fixed
-        # and preserves the exact boundary of the two-triangle cavity. We only try
-        # it when the two current owners themselves form an exact invalid pair,
-        # both belong to the same source Face and exact plane, and P lies within the
-        # normalization tolerance of A-B. The final candidate still has to preserve
-        # the complete closed 2-manifold topology, create no new invalid pair, and
-        # remove at least one existing invalid pair.
+        # and preserves the exact boundary of the two-triangle cavity. The trigger
+        # is an exact invalid pair exposing P near A-B; the two A-B owners do not
+        # themselves have to be the invalid pair. We only proceed when A-B has two
+        # owners, exactly one owner already contains P, both owners belong to the
+        # same source Face and exact plane, and P lies within the normalization
+        # tolerance of A-B. The final candidate still has to preserve the complete
+        # closed 2-manifold topology, create no new invalid pair, and remove at
+        # least one existing invalid pair.
         def repair_grid_invalid_near_edge_splits(triangle_records)
           flipped, flip_report = repair_grid_invalid_near_edge_owner_flips(
             triangle_records
@@ -226,11 +228,7 @@ module ULOL
             end
           end
 
-          invalid_lookup = invalid_pairs.each_with_object({}) do |pair, lookup|
-            lookup[pair.sort] = true
-          end
           candidates = {}
-
           invalid_pairs.each do |first_index, second_index|
             grid_near_edge_owner_flip_candidates_between_records(
               records,
@@ -239,7 +237,6 @@ module ULOL
               first_index,
               second_index,
               edge_owners,
-              invalid_lookup,
               candidates
             )
             grid_near_edge_owner_flip_candidates_between_records(
@@ -249,7 +246,6 @@ module ULOL
               second_index,
               first_index,
               edge_owners,
-              invalid_lookup,
               candidates
             )
           end
@@ -270,7 +266,6 @@ module ULOL
           point_record_index,
           edge_record_index,
           edge_owners,
-          invalid_lookup,
           candidates
         )
           edge_points = edge_record[:points]
@@ -294,7 +289,7 @@ module ULOL
               edge_key = canonical_edge_key(start_key, end_key)
               owner_indices = Array(edge_owners[edge_key]).uniq.sort
               next unless owner_indices.length == 2
-              next unless invalid_lookup[owner_indices.sort]
+              next unless owner_indices.include?(edge_record_index)
 
               containing = owner_indices.select do |owner_index|
                 records.fetch(owner_index)[:points].any? do |owner_point|
