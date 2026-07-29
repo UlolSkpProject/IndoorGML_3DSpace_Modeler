@@ -18,17 +18,18 @@ module ULOL
                        :collapse_short_edge_sliver_triangles
         end
 
-        # The earlier grid-altitude pass runs before the final exact grid-conforming
-        # snapshot. A closed, non-self-intersecting mesh can therefore still contain
-        # a non-degenerate triangle whose minimum altitude is below the normalization
-        # tolerance and which SketchUp cannot reliably preserve during rebuild.
+        # The earlier altitude repair is not a blanket deletion pass: a non-zero-area
+        # triangle can survive when its original patch has no safe improving
+        # retriangulation. After exact grid conforming and the established
+        # intersection repairs, try those remaining sub-tolerance triangles again as
+        # bounded same-source cavities.
         #
-        # Run one bounded repair pass after all established short-edge and
-        # post-conforming invalid-intersection repairs. Only same-source local
-        # cavities are retriangulated; no vertex is moved and the exact cavity
-        # boundary is preserved by retriangulate_grid_source_face_patch. A candidate
-        # is accepted only when it reduces the global sub-tolerance sliver count,
-        # preserves a closed 2-manifold, and creates no new exact invalid pair.
+        # This stage never moves a vertex and never relaxes the exact hard gate.
+        # retriangulate_grid_source_face_patch preserves each candidate cavity's exact
+        # boundary. A candidate is accepted only when:
+        # - the global count of triangles below @tolerance_mm decreases,
+        # - the complete mesh remains a closed 2-manifold,
+        # - no new exact invalid intersection is introduced.
         def collapse_short_edge_sliver_triangles(
           triangle_records,
           plan,
@@ -56,10 +57,7 @@ module ULOL
 
         def repair_post_conforming_grid_altitude_slivers(triangle_records)
           threshold_mm = @tolerance_mm
-          initial_slivers = grid_altitude_sliver_indices(
-            triangle_records,
-            threshold_mm
-          )
+          initial_slivers = grid_altitude_sliver_indices(triangle_records, threshold_mm)
           if initial_slivers.empty?
             return [
               triangle_records,
@@ -137,18 +135,12 @@ module ULOL
                     after_low_altitude_count: after_low_count,
                     before_minimum_altitude_mm: before_minimum,
                     after_minimum_altitude_mm: after_minimum,
-                    replacement_triangle_count: replacements.length,
-                    boundary_loops: details[:boundary_loops],
-                    holes: details[:holes]
+                    replacement_triangle_count: replacements.length
                   )
                   next
                 end
 
-                tentative = replace_grid_patch(
-                  working,
-                  patch_indices,
-                  replacements
-                )
+                tentative = replace_grid_patch(working, patch_indices, replacements)
                 validate_normalized_triangle_topology!(tentative)
 
                 tentative_invalid = grid_invalid_pair_signatures(tentative)
@@ -170,19 +162,17 @@ module ULOL
                   next
                 end
 
-                tentative_slivers = grid_altitude_sliver_indices(
+                tentative_sliver_count = grid_altitude_sliver_indices(
                   tentative,
                   threshold_mm
-                )
-                unless tentative_slivers.length < current_sliver_count
+                ).length
+                unless tentative_sliver_count < current_sliver_count
                   attempts << post_conforming_grid_sliver_attempt_report(
                     candidate,
                     accepted: false,
                     reason: :global_sliver_count_not_reduced,
                     before_sliver_count: current_sliver_count,
-                    after_sliver_count: tentative_slivers.length,
-                    before_low_altitude_count: before_low_count,
-                    after_low_altitude_count: after_low_count,
+                    after_sliver_count: tentative_sliver_count,
                     replacement_triangle_count: replacements.length
                   )
                   next
@@ -192,7 +182,7 @@ module ULOL
                   candidate,
                   accepted: true,
                   before_sliver_count: current_sliver_count,
-                  after_sliver_count: tentative_slivers.length,
+                  after_sliver_count: tentative_sliver_count,
                   before_invalid_pair_count: current_invalid.length,
                   after_invalid_pair_count: tentative_invalid.length,
                   new_invalid_pair_count: 0,
@@ -206,7 +196,7 @@ module ULOL
                   holes: details[:holes]
                 )
                 score = [
-                  current_sliver_count - tentative_slivers.length,
+                  current_sliver_count - tentative_sliver_count,
                   removed_invalid.length,
                   after_minimum.to_f - before_minimum.to_f,
                   -patch_indices.length,
@@ -217,7 +207,7 @@ module ULOL
                     score,
                     tentative,
                     tentative_invalid,
-                    tentative_slivers.length,
+                    tentative_sliver_count,
                     report
                   ]
                 end
@@ -243,10 +233,6 @@ module ULOL
           end
 
           remaining_slivers = grid_altitude_sliver_indices(working, threshold_mm)
-          affected_face_keys = accepted.map do |entry|
-            entry[:source_face_key]
-          end.compact.uniq
-
           [
             working,
             {
@@ -262,7 +248,8 @@ module ULOL
               final_invalid_pair_count: current_invalid.length,
               attempted_cavity_count: attempted,
               accepted_cavity_count: accepted.length,
-              affected_source_face_keys: affected_face_keys,
+              affected_source_face_keys:
+                accepted.filter_map { |entry| entry[:source_face_key] }.uniq,
               accepted_cavities: accepted.first(20),
               attempts: attempts.first(60),
               skipped: accepted.empty?,
@@ -297,58 +284,44 @@ module ULOL
           }
         end
 
+        # Start from each residual sliver independently and grow through exact
+        # shared-edge adjacency inside the same source Face. Independent seeds keep
+        # the repair local; if two slivers need one cavity, their grown candidates
+        # naturally converge to the same patch and are deduplicated.
         def post_conforming_grid_sliver_cavity_candidates(records, threshold_mm)
           sliver_indices = grid_altitude_sliver_indices(records, threshold_mm)
-          seeds_by_face = Hash.new { |hash, key| hash[key] = [] }
-          sliver_indices.each do |index|
-            record = records.fetch(index)
-            next if degenerate_triangle_record?(record)
+          candidates = {}
 
-            source_face_key = record[:source_face_key]
+          sliver_indices.each do |seed_index|
+            seed_record = records.fetch(seed_index)
+            source_face_key = seed_record[:source_face_key]
             next if source_face_key.nil?
 
-            seeds_by_face[source_face_key] << index
-          end
-
-          candidates = {}
-          seeds_by_face.each do |source_face_key, seed_indices|
-            seed_indices = seed_indices.uniq.sort
             adjacency = post_conforming_grid_same_source_adjacency(
               records,
               source_face_key
             )
-            seed_groups = seed_indices.map { |index| [index] }
-            connected = post_conforming_grid_seed_components(
-              seed_indices,
-              adjacency
-            )
-            connected.each do |component|
-              seed_groups << component if component.length > 1
-            end
+            1.upto(GRID_POST_CONFORMING_SLIVER_MAX_RING) do |ring|
+              patch_indices = post_conforming_grid_grow_cavity(
+                [seed_index],
+                adjacency,
+                ring
+              )
+              next if patch_indices.length < 2
+              next if patch_indices.length > GRID_POST_CONFORMING_SLIVER_MAX_TRIANGLES
 
-            seed_groups.uniq.each do |seed_group|
-              0.upto(GRID_POST_CONFORMING_SLIVER_MAX_RING) do |ring|
-                patch_indices = post_conforming_grid_grow_cavity(
-                  seed_group,
-                  adjacency,
-                  ring
-                )
-                next if patch_indices.length < 2
-                next if patch_indices.length > GRID_POST_CONFORMING_SLIVER_MAX_TRIANGLES
-
-                key = patch_indices
-                candidate = {
+              key = patch_indices
+              existing = candidates[key]
+              if existing
+                existing[:seed_indices] |= [seed_index]
+                existing[:ring] = [existing[:ring], ring].min
+              else
+                candidates[key] = {
                   source_face_key: source_face_key,
-                  seed_indices: seed_group,
+                  seed_indices: [seed_index],
                   patch_indices: patch_indices,
                   ring: ring
                 }
-                existing = candidates[key]
-                if existing.nil? ||
-                   [seed_group.length, -ring] >
-                     [existing[:seed_indices].length, -existing[:ring]]
-                  candidates[key] = candidate
-                end
               end
             end
           end
@@ -357,7 +330,6 @@ module ULOL
             [
               candidate[:patch_indices].length,
               candidate[:ring],
-              -candidate[:seed_indices].length,
               candidate[:source_face_key].to_s,
               candidate[:patch_indices]
             ]
@@ -388,32 +360,6 @@ module ULOL
           adjacency.each_value(&:uniq!)
           adjacency.each_value(&:sort!)
           adjacency
-        end
-
-        def post_conforming_grid_seed_components(seed_indices, adjacency)
-          unseen = seed_indices.to_h { |index| [index, true] }
-          components = []
-
-          until unseen.empty?
-            start = unseen.keys.min
-            unseen.delete(start)
-            queue = [start]
-            component = []
-
-            until queue.empty?
-              current = queue.shift
-              component << current
-              Array(adjacency[current]).each do |neighbor|
-                next unless unseen.key?(neighbor)
-
-                unseen.delete(neighbor)
-                queue << neighbor
-              end
-            end
-            components << component.sort
-          end
-
-          components
         end
 
         def post_conforming_grid_grow_cavity(seed_indices, adjacency, ring)
