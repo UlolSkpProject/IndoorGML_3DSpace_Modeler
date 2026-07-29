@@ -36,13 +36,16 @@ module ULOL
               diagnostics.length,
               candidates.length
             )
+            near_edge_failure_probe_print_invalid_pairs(records, invalid_pairs)
             diagnostics.first(12).each_with_index do |entry, index|
               puts format(
-                '[LVN NEAR EDGE PROBE] relation=%d pair=%s point=%s edge=%s d=%.9fmm owners=%s containing=%s source_faces=%s same_source=%s same_plane=%s',
+                '[LVN NEAR EDGE PROBE] relation=%d pair=%s point=%s point_face=%s edge=%s edge_face=%s d=%.9fmm owners=%s containing=%s owner_faces=%s same_source=%s same_plane=%s',
                 index + 1,
                 entry[:invalid_pair].inspect,
                 entry[:point_key].inspect,
+                entry[:point_source_face_key].inspect,
                 entry[:edge_key].inspect,
+                entry[:edge_source_face_key].inspect,
                 entry[:distance_mm],
                 entry[:owner_indices].inspect,
                 entry[:containing_owner_indices].inspect,
@@ -53,13 +56,14 @@ module ULOL
             end
             candidates.first(8).each_with_index do |candidate, index|
               puts format(
-                '[LVN NEAR EDGE PROBE] flip_candidate=%d point=%s edge=%s d=%.9fmm owners=%s source_face=%s',
+                '[LVN NEAR EDGE PROBE] flip_candidate=%d point=%s edge=%s d=%.9fmm owners=%s source_face=%s triggers=%s',
                 index + 1,
                 candidate[:point_key].inspect,
                 candidate[:edge_key].inspect,
                 candidate[:distance_mm],
                 candidate[:owner_indices].inspect,
-                candidate[:source_face_key].inspect
+                candidate[:source_face_key].inspect,
+                Array(candidate[:trigger_pairs]).inspect
               )
             end
             candidates
@@ -81,12 +85,14 @@ module ULOL
             )
             candidates.first(8).each_with_index do |candidate, index|
               puts format(
-                '[LVN NEAR EDGE PROBE] split_candidate=%d point=%s edge=%s d=%.9fmm owners=%s',
+                '[LVN NEAR EDGE PROBE] split_candidate=%d point=%s edge=%s d=%.9fmm owners=%s affected_faces=%s triggers=%s',
                 index + 1,
                 candidate[:point_key].inspect,
                 candidate[:edge_key].inspect,
                 candidate[:distance_mm],
-                candidate[:owner_indices].inspect
+                candidate[:owner_indices].inspect,
+                Array(candidate[:affected_source_face_keys]).inspect,
+                Array(candidate[:trigger_pairs]).inspect
               )
             end
             candidates
@@ -115,16 +121,54 @@ module ULOL
             )
             Array(flip[:attempts]).first(8).each_with_index do |attempt, index|
               puts format(
-                '[LVN NEAR EDGE PROBE] flip_attempt=%d accepted=%s reason=%s edge=%s point=%s error=%s',
+                '[LVN NEAR EDGE PROBE] flip_attempt=%d accepted=%s reason=%s edge=%s point=%s invalid=%s->%s new=%s removed=%s error=%s',
                 index + 1,
                 attempt[:accepted],
                 attempt[:reason],
                 attempt[:edge].inspect,
                 attempt[:point].inspect,
+                attempt[:before_invalid_pair_count],
+                attempt[:after_invalid_pair_count],
+                attempt[:new_invalid_pair_count],
+                attempt[:removed_invalid_pair_count],
+                attempt[:error]
+              )
+            end
+            Array(report[:attempts]).first(12).each_with_index do |attempt, index|
+              puts format(
+                '[LVN NEAR EDGE PROBE] split_attempt=%d accepted=%s reason=%s edge=%s point=%s owners=%s invalid=%s->%s new=%s removed=%s error=%s',
+                index + 1,
+                attempt[:accepted],
+                attempt[:reason],
+                attempt[:edge].inspect,
+                attempt[:point].inspect,
+                attempt[:owner_count],
+                attempt[:before_invalid_pair_count],
+                attempt[:after_invalid_pair_count],
+                attempt[:new_invalid_pair_count],
+                attempt[:removed_invalid_pair_count],
                 attempt[:error]
               )
             end
             [repaired, report]
+          end
+        end
+
+        def near_edge_failure_probe_print_invalid_pairs(records, invalid_pairs)
+          invalid_pairs.first(12).each_with_index do |pair, index|
+            first_index, second_index = pair
+            first = records.fetch(first_index)
+            second = records.fetch(second_index)
+            first_triangle = first[:points].map { |point| grid_indices(point) }
+            second_triangle = second[:points].map { |point| grid_indices(point) }
+            puts format(
+              '[LVN NEAR EDGE PROBE] invalid_pair=%d pair=%s faces=%s polygons=%s shared=%s',
+              index + 1,
+              pair.inspect,
+              [first[:source_face_key], second[:source_face_key]].inspect,
+              [first[:source_polygon_index], second[:source_polygon_index]].inspect,
+              (first_triangle & second_triangle).inspect
+            )
           end
         end
 
@@ -177,6 +221,8 @@ module ULOL
                     invalid_pair: [first_index, second_index],
                     point_record_index: point_index,
                     edge_record_index: edge_index,
+                    point_source_face_key: point_record[:source_face_key],
+                    edge_source_face_key: edge_record[:source_face_key],
                     point_key: point_key,
                     edge_key: edge_key,
                     distance_mm: projection[:distance_mm],
