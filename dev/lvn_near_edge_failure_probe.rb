@@ -154,6 +154,45 @@ module ULOL
           end
         end
 
+        unless private_method_defined?(:repair_post_conforming_grid_invalids_before_failure_probe_v2)
+          alias_method :repair_post_conforming_grid_invalids_before_failure_probe_v2,
+                       :repair_post_conforming_grid_invalids
+
+          def repair_post_conforming_grid_invalids(triangle_records)
+            repaired, report = repair_post_conforming_grid_invalids_before_failure_probe_v2(
+              triangle_records
+            )
+            source = report[:source_face_retriangulation] || {}
+            puts format(
+              '[LVN NEAR EDGE PROBE] post_conforming invalid=%s->%s source_faces=%s/%s near=%s skipped=%s reason=%s',
+              report[:initial_invalid_pair_count],
+              report[:final_invalid_pair_count],
+              source[:accepted_face_count],
+              source[:attempted_face_count],
+              report[:accepted_near_edge_count],
+              report[:skipped],
+              report[:skip_reason]
+            )
+            Array(source[:attempts]).first(16).each_with_index do |attempt, index|
+              puts format(
+                '[LVN NEAR EDGE PROBE] source_attempt=%d face=%s triangles=%s accepted=%s reason=%s invalid=%s->%s new=%s removed=%s replacement=%s error=%s',
+                index + 1,
+                attempt[:source_face_key],
+                attempt[:patch_triangle_count],
+                attempt[:accepted],
+                attempt[:reason],
+                attempt[:before_invalid_pair_count],
+                attempt[:after_invalid_pair_count],
+                attempt[:new_invalid_pair_count],
+                attempt[:removed_invalid_pair_count],
+                attempt[:replacement_triangle_count],
+                attempt[:error]
+              )
+            end
+            [repaired, report]
+          end
+        end
+
         def near_edge_failure_probe_print_invalid_pairs(records, invalid_pairs)
           invalid_pairs.first(12).each_with_index do |pair, index|
             first_index, second_index = pair
