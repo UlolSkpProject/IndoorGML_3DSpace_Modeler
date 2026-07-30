@@ -168,3 +168,8 @@ module ULOL
     end
   end
 end
+
+# Register the dispatcher while the extension is loading, before any long-running
+# CellSpace operation can enter the fragile post-bulk UI context. Re-loading this
+# file in development is safe because start_dispatcher is idempotent.
+ULOL::Indoor3DGmlModeler::IndoorCore::UiFeedback.start_dispatcher if defined?(UI)
