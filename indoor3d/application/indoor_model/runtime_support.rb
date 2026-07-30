@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../topology_coordinator'
+require_relative '../../ui/ui_feedback'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -428,9 +429,7 @@ module ULOL
           end
 
           def defer_ui_message(message)
-            UI.start_timer(0, false) do
-              UI.messagebox(message)
-            end
+            UiFeedback.defer_modal(message)
           end
 
           def write_space_features_attributes(group, feature)
