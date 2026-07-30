@@ -14,6 +14,13 @@ class UiFeedbackPolicyTest < Minitest::Test
     refute_includes source, 'UI.start_timer(0.5'
   end
 
+  def test_notification_retention_does_not_attach_dismiss_button
+    source = File.read(File.join(ROOT, 'indoor3d/ui/ui_feedback.rb'))
+
+    assert_includes source, '@last_notification = notification'
+    refute_match(/notification\.on_dismiss\s*(?:do|\{)/, source)
+  end
+
   def test_cell_space_commands_do_not_show_modal_success_results_immediately
     source = File.read(File.join(ROOT, 'indoor3d/ui/commands/cell_space_commands.rb'))
 
