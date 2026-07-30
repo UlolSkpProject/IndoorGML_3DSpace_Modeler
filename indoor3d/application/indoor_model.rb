@@ -24,6 +24,7 @@ module ULOL
         require_relative 'indoor_model/local_vertex_normalization.rb'
         require_relative 'indoor_model/local_grid_coordinate_v2.rb'
         require_relative 'indoor_model/local_grid_geometry_close_v2.rb'
+        require_relative 'indoor_model/local_grid_runtime_dispatch_v2.rb'
         require_relative 'indoor_model/editor_control.rb'
 
         include RuntimeSupport
