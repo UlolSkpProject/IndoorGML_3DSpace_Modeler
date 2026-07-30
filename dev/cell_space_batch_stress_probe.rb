@@ -34,6 +34,49 @@ module IndoorGMLCellSpaceBatchStressProbe
     nil
   end
 
+  def runtime_diagnostics(model, indoor_model, label)
+    definitions = model.respond_to?(:definitions) ? model.definitions : nil
+    definition_count = definitions&.length.to_i
+    unused_definition_count = if definitions
+                                definitions.count do |definition|
+                                  definition.respond_to?(:instances) && definition.instances.empty?
+                                rescue StandardError
+                                  false
+                                end
+                              else
+                                0
+                              end
+    materials_count = model.respond_to?(:materials) ? model.materials.length : 0
+    tags_count = if model.respond_to?(:layers)
+                   model.layers.length
+                 else
+                   0
+                 end
+    pages_count = model.respond_to?(:pages) ? model.pages.length : 0
+    cached_models = begin
+      instances = ULOL::Indoor3DGmlModeler::IndoorCore::IndoorModel.instance_variable_get(:@instances)
+      instances.respond_to?(:length) ? instances.length : 0
+    rescue StandardError
+      -1
+    end
+    gc = GC.stat
+
+    log(
+      "RUNTIME DIAGNOSTICS #{label} " \
+      "root_entities=#{model.entities.length} definitions=#{definition_count} " \
+      "unused_definitions=#{unused_definition_count} materials=#{materials_count} " \
+      "tags=#{tags_count} pages=#{pages_count} cached_models=#{cached_models} " \
+      "runtime_cells=#{Array(indoor_model.cell_spaces).length} " \
+      "runtime_states=#{Array(indoor_model.states).length} " \
+      "runtime_transitions=#{Array(indoor_model.transitions).length} " \
+      "gc_heap_live_slots=#{gc[:heap_live_slots]} " \
+      "gc_heap_allocated_pages=#{gc[:heap_allocated_pages]} " \
+      "gc_total_allocated_objects=#{gc[:total_allocated_objects]}"
+    )
+  rescue StandardError => e
+    log("RUNTIME DIAGNOSTICS ERROR #{label} #{e.class}: #{e.message}")
+  end
+
   def random_range(rng, min_value, max_value)
     min_value + rng.rand * (max_value - min_value)
   end
@@ -258,8 +301,10 @@ module IndoorGMLCellSpaceBatchStressProbe
 
     log("BATCH STRESS START count=#{COUNT} seed=#{SEED}")
     log("LOG PATH: #{LOG_PATH}")
+    runtime_diagnostics(model, indoor_model, 'BEFORE_SOURCE_GENERATION')
 
     groups = generate_sources(model)
+    runtime_diagnostics(model, indoor_model, 'AFTER_SOURCE_GENERATION')
     jobs = build_jobs(groups)
     log("JOBS BUILT count=#{jobs.length}")
 
@@ -305,6 +350,7 @@ module IndoorGMLCellSpaceBatchStressProbe
     counters.each do |key, count|
       log(format('CALL %-45s count=%d time=%.3fs', key, count, times[key]))
     end
+    runtime_diagnostics(model, indoor_model, 'AFTER_BULK')
 
     passed = verify_runtime(indoor_model, result, counters)
     log("BATCH STRESS #{passed ? 'PASS' : 'FAIL'}")
