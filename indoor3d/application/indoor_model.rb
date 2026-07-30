@@ -100,21 +100,48 @@ module ULOL
           @root_entities_observer = Indoor3DGmlRootEntitiesObserver.new(self)
           @primal_entities_observer = Indoor3DGmlPrimalEntitiesObserver.new(self)
           @selection_observer = Indoor3DGmlSelectionObserver.new(self)
-          @scene_group_guard = SceneGroupGuard.new
-          @cell_space_change_snapshots = {}
-          @space_features_change_snapshots = {}
           @cell_space_observed_ids = {}
+          @cell_space_change_snapshots = {}
           @space_features_observed_ids = {}
-          @entities_observed_ids = {}
+          @space_features_change_snapshots = {}
           @selection_observed_model_id = nil
-          @attribute_serializer = AttributeSerializer.new
-          @runtime_restorer = RuntimeRestorer.new(self)
-          @adjacency_service = AdjacencyService.new(self)
-          @editor_session = EditorSession.new(self)
+          @entities_observed_ids = {}
+          @syncing = false
+          @erasing = false
+          @relocating_entity = false
+          @refreshing_runtime = false
+          @transaction_replay_pending = false
+          @transaction_replay_source = nil
+          @transaction_replay_generation = nil
+          @constraining_space_features = false
           @primal_group = nil
-          attach_edit_selection_observer(@model)
+          @attribute_serializer = AttributeSerializer.new(
+            dictionary_name: ATTRIBUTE_DICTIONARY_NAME,
+            indoor_gml_version: Definition::INDOOR_GML_VERSION
+          )
+          @adjacency_service = AdjacencyService.new(
+            @feature_registry,
+            transition_builder: method(:create_or_update_transition_for_pair),
+            transition_eraser: method(:erase_transition_for_pair_key)
+          )
+          @topology_coordinator = TopologyCoordinator.new(adjacency_service: @adjacency_service)
+          @runtime_restorer = RuntimeRestorer.new(
+            registry: @feature_registry,
+            serializer: @attribute_serializer,
+            cell_space_registrar: method(:register_cell_space),
+            state_registrar: method(:register_state)
+          )
+          @scene_group_guard = SceneGroupGuard.new(
+            with_unlocked: method(:with_unlocked),
+            notifier: method(:defer_ui_message)
+          )
+          @editor_session = EditorSession.new(self)
+          @finishing_editing = false
+          @validation_focus_recheck_running = false
+          @validation_focus_recheck_state = nil
         end
       end
+
     end
   end
 end
