@@ -124,6 +124,8 @@ module ULOL
           end
 
           def confirm_selected_cell_space_demotion(_count)
+            return yield(true) if block_given?
+
             true
           end
 
