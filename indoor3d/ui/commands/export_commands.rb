@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'fileutils'
+require_relative '../ui_feedback'
 require_relative '../../validity/validation_run_workspace'
 require_relative '../../validity/validation_session'
 require_relative '../../validity/val3dity_report_schema'
@@ -36,18 +37,18 @@ module ULOL
           FileUtils.mkdir_p(File.dirname(path))
           if indoor_model.editing? && !indoor_model.finish_editing
             message = 'GML export failed: topology synchronization failed.'
-            progress ? progress.set_result_message(message) : UI.messagebox(message)
+            progress ? progress.set_result_message(message) : UiFeedback.defer_modal(message)
             return nil
           end
           IndoorGmlConverter::GmlExporter.new(
             indoor_model
           ).export(output_path: path)
           message = "GML exported:\n#{path}"
-          progress ? progress.set_result_message(message) : UI.messagebox(message)
+          progress ? progress.set_result_message(message) : UiFeedback.defer_modal(message)
           path
         rescue StandardError => e
           message = "GML export failed:\n#{e.message}"
-          progress ? progress.set_result_message(message) : UI.messagebox(message)
+          progress ? progress.set_result_message(message) : UiFeedback.defer_modal(message)
           nil
         end
 
@@ -65,7 +66,7 @@ module ULOL
           captured_model = Sketchup.active_model
           captured_indoor_model = IndoorModel.for(captured_model)
           if captured_indoor_model.editing? && !captured_indoor_model.finish_editing
-            UI.messagebox('Validity check failed: topology synchronization failed.')
+            UiFeedback.defer_modal('Validity check failed: topology synchronization failed.')
             return
           end
           @validation_operation_running = true
@@ -172,6 +173,7 @@ module ULOL
             started: false,
             completed: false,
             cancelled: false,
+            cancel_confirmation_pending: false,
             overlap_tol: IndoorGmlConverter::Val3dityRunner::STRICT_OVERLAP_TOL
           }
         end
@@ -242,13 +244,21 @@ module ULOL
                 @validation_operation_running = false
                 session.cancel(reason: :user_cancelled, close_dialog: false, terminate_process: true)
                 :close
-              elsif UI.messagebox("Validation is still running.\nCancel validation?", MB_YESNO) == IDYES
-                state[:cancelled] = true
-                state[:val_running] = false
-                @validation_operation_running = false
-                session.cancel(reason: :user_cancelled, close_dialog: false, terminate_process: true)
-                :close
               else
+                unless state[:cancel_confirmation_pending]
+                  state[:cancel_confirmation_pending] = true
+                  UiFeedback.confirm("Validation is still running.\nCancel validation?", MB_YESNO) do |result|
+                    state[:cancel_confirmation_pending] = false
+                    next unless result == IDYES
+                    next unless state[:val_running] && !state[:completed]
+
+                    state[:cancelled] = true
+                    state[:val_running] = false
+                    @validation_operation_running = false
+                    session.cancel(reason: :user_cancelled, close_dialog: false, terminate_process: true)
+                    progress.close
+                  end
+                end
                 :keep_open
               end
             else
