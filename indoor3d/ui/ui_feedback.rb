@@ -61,14 +61,11 @@ module ULOL
             UI::Notification.new(namespace.const_get(:EXTENSION, false), message)
           end
 
+          # Keep the currently displayed notification alive. Do not attach
+          # on_dismiss here: UI::Notification#on_dismiss requires a visible button
+          # title and is not invoked for automatic timeout dismissal.
           def retain_notification(notification)
             @last_notification = notification
-            return notification unless notification.respond_to?(:on_dismiss)
-
-            notification.on_dismiss do
-              @last_notification = nil if @last_notification.equal?(notification)
-            end
-            notification
           end
 
           def log_failure(label, error)
