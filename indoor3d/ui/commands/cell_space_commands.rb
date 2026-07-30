@@ -52,6 +52,56 @@ module ULOL
           end
         end
 
+        # Experimental opt-in command. It intentionally is not connected to the
+        # existing menu command so the current CellSpace creation path stays intact.
+        def convert_selected_solid_groups_to_cell_spaces_local_grid_v2
+          return if respond_to?(:validation_operation_running?) && validation_operation_running?
+
+          begin
+            model = Sketchup.active_model()
+            indoor_model = IndoorModel.current
+            unless indoor_model.prepare_cell_space_creation_active_context(model)
+              raise 'Failed to prepare active context for CellSpace conversion'
+            end
+            original_active_path = active_path_snapshot(model)
+            groups = model.selection().to_a.select { |entity| convertible_container?(entity) }
+            conversion_jobs = CellSpaceConversionJobBuilder.new(entities: groups).build
+
+            if conversion_jobs.empty?
+              UI.messagebox('Select one or more solid groups to convert to CellSpace.')
+              return
+            end
+
+            targets = conversion_jobs.map { |job| job[:target] }.compact.uniq
+            storeys = conversion_jobs.map { |job| job[:storey].to_s }.reject(&:empty?).uniq
+            creation_options = prompt_cell_space_creation_options(
+              'Convert Solid Groups to CellSpace Local Grid V2',
+              default_target: targets.length == 1 ? targets.first : nil,
+              default_storey: storeys.length == 1 ? storeys.first : CellSpace::DEFAULT_STOREY
+            )
+            return unless creation_options
+
+            cell_type, category_code, storey = creation_options
+            conversion_jobs = CellSpaceConversionJobBuilder.apply_fallback_storey(conversion_jobs, storey)
+
+            result = indoor_model.convert_cell_space_jobs_bulk_local_grid_v2(
+              conversion_jobs,
+              fallback_target: [cell_type, category_code],
+              original_active_path: original_active_path,
+              operation_name: 'Convert Solid Groups to CellSpace Local Grid V2',
+              activate_root_context: true
+            )
+            UI.messagebox(ConversionMessageFormatter.result_message(result.converted_count, result.errors))
+          rescue StandardError => e
+            if model && defined?(original_active_path) && original_active_path
+              IndoorModel.current.with_active_path_enforcement_suspended do
+                restore_active_path(model, original_active_path)
+              end
+            end
+            UI.messagebox("CellSpace Local Grid V2 conversion failed:\n#{e.message}")
+          end
+        end
+
         def change_selected_cell_space_type
           return if respond_to?(:validation_operation_running?) && validation_operation_running?
 
