@@ -6,9 +6,9 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class IndoorModel
-        # IndoorModel-facing UI policy. The model mutation completes first; success
-        # feedback is non-modal, while error/result dialogs that still require a
-        # modal surface are deferred to the next SketchUp event-loop turn.
+        # IndoorModel-facing UI policy. Model mutations complete first and their
+        # result is reported non-modally. This avoids registering a new timer from
+        # the fragile post-bulk callback context.
         module UiFeedbackIntegration
           def convert_selected_solid_groups_to_cell_spaces(selection_value, storey = nil)
             return false if validation_focus_recheck_running?
@@ -42,7 +42,7 @@ module ULOL
             IndoorCore::Logger.puts(
               "[IndoorGML] Selected solid group conversion failed: #{e.class}: #{e.message}"
             )
-            UiFeedback.defer_modal("CellSpace conversion failed:\n#{e.message}")
+            UiFeedback.notify("CellSpace conversion failed:\n#{e.message}")
             false
           end
 
@@ -57,7 +57,7 @@ module ULOL
           end
 
           def defer_ui_message(message)
-            UiFeedback.defer_modal(message)
+            UiFeedback.notify(message)
           end
         end
       end
