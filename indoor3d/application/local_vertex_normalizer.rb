@@ -2,10 +2,10 @@
 
 # The geometry kernel is kept separate from the v2 orchestration policy. Loading
 # this file installs the complete LocalVertexNormalizer implementation in the
-# required order: legacy geometric primitives, safe coplanar edge grouping, the
-# v2 normalization pipeline, grid-space/runtime regression layers, then the final
-# connected n-gon coplanar simplification. The profiler remains the outermost
-# optional wrapper so the final simplification is included in timing.
+# required order: base geometry/correctness layers first, then alias-based
+# orchestration wrappers, then semantics-neutral performance acceleration layers.
+# Profilers remain outermost so final simplification and performance wrappers are
+# included in timing and workload diagnostics.
 require_relative 'local_vertex_normalizer/legacy_kernel'
 require_relative 'local_vertex_normalizer/coplanar_shared_edge_groups'
 require_relative 'local_vertex_normalizer/source_boundary_normalization_v2'
@@ -13,6 +13,8 @@ require_relative 'local_vertex_normalizer/source_collapsed_sliver_cleanup_v2'
 require_relative 'local_vertex_normalizer/pipeline_v2'
 require_relative 'local_vertex_normalizer/grid_altitude_sliver_retriangulation_v2'
 require_relative 'local_vertex_normalizer/runtime_regression_fixes_v2'
+
+# Correctness repair chain.
 require_relative 'local_vertex_normalizer/grid_near_edge_split_repair_v2'
 require_relative 'local_vertex_normalizer/grid_near_edge_owner_flip_repair_v2'
 require_relative 'local_vertex_normalizer/grid_post_conforming_invalid_repair_v2'
@@ -22,5 +24,21 @@ require_relative 'local_vertex_normalizer/grid_post_conforming_altitude_sliver_r
 require_relative 'local_vertex_normalizer/rebuild_omission_vertex_collapse_v2'
 require_relative 'local_vertex_normalizer/surface_descriptor_boundary_graph_v2'
 require_relative 'local_vertex_normalizer/coplanar_patch_provenance_trace_v2'
+
+# Alias-based normalize_entity wrappers. Fast-path must capture the completed
+# correctness pipeline, and final merge must remain outside the fast-path.
+require_relative 'local_vertex_normalizer/normalized_input_fast_path_v2'
 require_relative 'local_vertex_normalizer/final_coplanar_face_merge_v2'
+
+# Semantics-neutral performance layers from refactor/lvn-performance@0654aab.
+require_relative 'local_vertex_normalizer/exact_polygon_triangulation_cache_v2'
+require_relative 'local_vertex_normalizer/exact_polygon_ear_broad_phase_v2'
+require_relative 'local_vertex_normalizer/conforming_candidate_broad_phase_v2'
+require_relative 'local_vertex_normalizer/surface_descriptor_segment_broad_phase_v2'
+require_relative 'local_vertex_normalizer/triangle_intersection_geometry_cache_v2'
+require_relative 'local_vertex_normalizer/coplanar_shared_edge_intersection_fast_path_v2'
+require_relative 'local_vertex_normalizer/triangle_intersection_clean_cache_v2'
+require_relative 'local_vertex_normalizer/grid_patch_incremental_intersection_v2'
+
+require_relative 'local_vertex_normalizer/performance_workload_profiler_v2'
 require_relative 'local_vertex_normalizer/debug_profiler_v2'
