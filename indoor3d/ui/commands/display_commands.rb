@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../ui_feedback'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -10,22 +12,22 @@ module ULOL
           begin
             indoor_model = IndoorModel.current
             if indoor_model.editing?()
-              UI.messagebox('IndoorGML editing is already active.')
+              UiFeedback.defer_modal('IndoorGML editing is already active.')
             elsif !indoor_model.begin_editing()
-              UI.messagebox('IndoorGML PrimalSpaceFeatures group was not found.')
+              UiFeedback.defer_modal('IndoorGML PrimalSpaceFeatures group was not found.')
             end
           rescue StandardError => e
-            UI.messagebox("IndoorGML editing failed:\n#{e.message}")
+            UiFeedback.defer_modal("IndoorGML editing failed:\n#{e.message}")
           end
         end
 
         def finish_indoor_gml_editing
           begin
             unless IndoorModel.current.finish_editing()
-              UI.messagebox('IndoorGML editing is not active.')
+              UiFeedback.defer_modal('IndoorGML editing is not active.')
             end
           rescue StandardError => e
-            UI.messagebox("IndoorGML editing finish failed:\n#{e.message}")
+            UiFeedback.defer_modal("IndoorGML editing finish failed:\n#{e.message}")
           end
         end
 
@@ -40,7 +42,7 @@ module ULOL
               begin_indoor_gml_editing()
             end
           rescue StandardError => e
-            UI.messagebox("IndoorGML editing toggle failed:\n#{e.message}")
+            UiFeedback.defer_modal("IndoorGML editing toggle failed:\n#{e.message}")
           end
         end
 
@@ -80,7 +82,7 @@ module ULOL
           IndoorModel.current.toggle_dual_overlay_visible()
           update_dual_overlay_command()
         rescue StandardError => e
-          UI.messagebox("State/Link overlay toggle failed:\n#{e.message}")
+          UiFeedback.defer_modal("State/Link overlay toggle failed:\n#{e.message}")
         end
 
         def open_dual_overlay_scale_dialog
@@ -90,14 +92,14 @@ module ULOL
           @dual_overlay_scale_dialog.show
         rescue StandardError => e
           Logger.puts "[IndoorGML] Dual overlay scale dialog failed: #{e.class}: #{e.message}"
-          UI.messagebox("State/Link overlay scale dialog failed:\n#{e.message}")
+          UiFeedback.defer_modal("State/Link overlay scale dialog failed:\n#{e.message}")
         end
 
         def toggle_geometry
           IndoorModel.current.toggle_geometry_visible()
           update_geometry_command()
         rescue StandardError => e
-          UI.messagebox("Geometry toggle failed:\n#{e.message}")
+          UiFeedback.defer_modal("Geometry toggle failed:\n#{e.message}")
         end
 
         def add_context_menu_items(menu)
