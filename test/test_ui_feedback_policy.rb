@@ -25,6 +25,12 @@ class UiFeedbackPolicyTest < Minitest::Test
     assert_includes source, 'return false if @dispatcher_tick <= item[:ready_after_tick].to_i'
   end
 
+  def test_cell_space_conversion_result_queues_dispatcher_modal
+    source = File.read(File.join(ROOT, 'indoor3d/ui/ui_feedback.rb'))
+
+    assert_match(/def publish_result\(message, errors: nil\)\s+defer_modal\(message\)/m, source)
+  end
+
   def test_repeating_dispatcher_guards_modal_reentry
     source = File.read(File.join(ROOT, 'indoor3d/ui/ui_feedback.rb'))
 
@@ -40,7 +46,7 @@ class UiFeedbackPolicyTest < Minitest::Test
     assert_includes source, 'Sketchup.status_text = message'
   end
 
-  def test_cell_space_commands_never_create_post_bulk_timers_or_messageboxes
+  def test_cell_space_commands_never_create_post_bulk_timers_or_inline_messageboxes
     source = File.read(File.join(ROOT, 'indoor3d/ui/commands/cell_space_commands.rb'))
 
     refute_includes source, 'UI.messagebox('
