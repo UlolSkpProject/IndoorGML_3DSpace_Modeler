@@ -18,19 +18,35 @@ module ULOL
           key = ::ULOL::Indoor3DGmlModeler::IndoorCore::CellSpaceType.label(cell_type)
           return nil unless MATERIAL_DEFINITIONS.key?(key)
 
-          fetch_solid(key)
+          ensure_keys([key])[key]
         end
 
         def self.ensure_all
-          MATERIAL_DEFINITIONS.each_key { |key| fetch_solid(key) }
+          ensure_keys(MATERIAL_DEFINITIONS.keys)
+        end
+
+        # Ensures each requested material exactly once and returns a stable map
+        # keyed by the CellSpace type label. Callers performing batch work can
+        # resolve a material once per type and reuse it for every CellSpace.
+        def self.ensure_keys(keys)
+          Array(keys).map(&:to_s).uniq.each_with_object({}) do |key, materials|
+            next unless MATERIAL_DEFINITIONS.key?(key)
+
+            materials[key] = fetch_solid(key)
+          end
         end
 
         def self.fetch_solid(key)
           name, color, alpha = MATERIAL_DEFINITIONS.fetch(key)
           material = find_material(name) || Sketchup.active_model.materials.add(name)
-          material.texture = nil if material.respond_to?(:texture=)
-          material.color = color
-          material.alpha = alpha if alpha && material.respond_to?(:alpha=)
+
+          if material.respond_to?(:texture) && material.respond_to?(:texture=) && !material.texture.nil?
+            material.texture = nil
+          end
+          material.color = color if material.respond_to?(:color=) && material.color != color
+          if alpha && material.respond_to?(:alpha=) && material.alpha.to_f != alpha.to_f
+            material.alpha = alpha
+          end
           material
         end
         private_class_method :fetch_solid
