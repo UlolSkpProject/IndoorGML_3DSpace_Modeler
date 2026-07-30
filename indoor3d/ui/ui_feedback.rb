@@ -47,8 +47,11 @@ module ULOL
             enqueue_feedback(:notification, message)
           end
 
+          # CellSpace conversion results are intentionally modal. The modal itself
+          # is not opened inline after the model mutation; it is queued for the
+          # persistent dispatcher that already existed before the mutation started.
           def publish_result(message, errors: nil)
-            notify(message)
+            defer_modal(message)
           end
 
           # Queue a modal for the persistent dispatcher. This method intentionally
