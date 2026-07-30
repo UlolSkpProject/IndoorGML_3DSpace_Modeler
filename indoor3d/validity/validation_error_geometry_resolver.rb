@@ -234,46 +234,41 @@ module ULOL
             model = @model || Sketchup.active_model
             return { status: :failed } unless model
 
-            operation_started = false
             copy1 = nil
             copy2 = nil
             result = nil
             begin
-              operation_started = model.start_operation(
+              @indoor_model.with_indoor_model_operation(
                 'Build IndoorGML validation overlap overlay',
-                true
-              )
-              return { status: :failed } unless operation_started
+                rollback: true
+              ) do
+                copy1 = build_geometry_only_boolean_group(group1)
+                copy2 = build_geometry_only_boolean_group(group2)
+                next({ status: :failed }) unless valid_manifold_group?(copy1) &&
+                                                valid_manifold_group?(copy2)
+                next({ status: :failed }) unless copy1.respond_to?(:intersect)
 
-              copy1 = build_geometry_only_boolean_group(group1)
-              copy2 = build_geometry_only_boolean_group(group2)
-              return { status: :failed } unless valid_manifold_group?(copy1) &&
-                                                    valid_manifold_group?(copy2)
-              return { status: :failed } unless copy1.respond_to?(:intersect)
+                result = copy1.intersect(copy2)
+                next({ status: :empty }) unless result&.valid?
+                next({ status: :empty }) unless valid_manifold_group?(result)
 
-              result = copy1.intersect(copy2)
-              return { status: :empty } unless result&.valid?
-              return { status: :empty } unless valid_manifold_group?(result)
+                volume = result.volume.to_f.abs
+                next({ status: :empty }) unless volume.positive?
 
-              volume = result.volume.to_f.abs
-              return { status: :empty } unless volume.positive?
+                transform = result.transformation
+                snapshot = group_geometry(result, transform)
+                next({ status: :empty }) if snapshot[:triangles].empty?
 
-              transform = result.transformation
-              snapshot = group_geometry(result, transform)
-              return { status: :empty } if snapshot[:triangles].empty?
-
-              snapshot.merge(status: :ready, volume_in3: volume)
+                snapshot.merge(status: :ready, volume_in3: volume)
+              end
             rescue StandardError => e
               log("Validation overlap overlay Boolean failed: #{e.class}: #{e.message}")
               { status: :failed, reason: "#{e.class}: #{e.message}" }
             ensure
-              aborted = operation_started && model.abort_operation
-              unless aborted
-                [result, copy1, copy2].compact.each do |entity|
-                  entity.erase! if entity.respond_to?(:valid?) && entity.valid?
-                rescue StandardError
-                  nil
-                end
+              [result, copy1, copy2].compact.each do |entity|
+                entity.erase! if entity.respond_to?(:valid?) && entity.valid?
+              rescue StandardError
+                nil
               end
             end
           end

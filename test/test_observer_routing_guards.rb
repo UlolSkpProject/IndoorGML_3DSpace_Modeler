@@ -97,6 +97,49 @@ module ULOL
           assert_equal 0, model.sketchup_model.commit_count
         end
 
+        def test_forced_owner_can_start_while_observers_are_suppressed
+          model = FakeOperationModel.new(syncing: true)
+
+          result = model.run_forced_operation
+
+          assert_equal :ran, result
+          assert_equal 1, model.sketchup_model.start_count
+          assert_equal 1, model.sketchup_model.commit_count
+        end
+
+        def test_forced_nested_operation_still_reuses_its_caller_operation
+          model = FakeOperationModel.new
+
+          result = model.run_nested_forced_operation
+
+          assert_equal :ran, result
+          assert_equal 1, model.sketchup_model.start_count
+          assert_equal 1, model.sketchup_model.commit_count
+          assert_equal 0, model.sketchup_model.abort_count
+        end
+
+        def test_rollback_operation_aborts_when_it_owns_the_operation
+          model = FakeOperationModel.new
+
+          result = model.run_rollback_operation
+
+          assert_equal :ran, result
+          assert_equal 1, model.sketchup_model.start_count
+          assert_equal 0, model.sketchup_model.commit_count
+          assert_equal 1, model.sketchup_model.abort_count
+        end
+
+        def test_nested_rollback_operation_does_not_abort_its_owner
+          model = FakeOperationModel.new
+
+          result = model.run_nested_rollback_operation
+
+          assert_equal :ran, result
+          assert_equal 1, model.sketchup_model.start_count
+          assert_equal 1, model.sketchup_model.commit_count
+          assert_equal 0, model.sketchup_model.abort_count
+        end
+
         def test_replay_pending_suppresses_cell_space_lifecycle_observer_routes
           model = FakeLifecycleModel.new(replay_pending: true)
 
@@ -361,6 +404,42 @@ module ULOL
 
           def run_operation
             send(:with_indoor_model_operation, 'Nested Observer Operation') { :ran }
+          end
+
+          def run_rollback_operation
+            send(
+              :with_indoor_model_operation,
+              'Rollback Operation',
+              rollback: true
+            ) { :ran }
+          end
+
+          def run_forced_operation
+            send(
+              :with_indoor_model_operation,
+              'Forced Owner Operation',
+              force: true
+            ) { :ran }
+          end
+
+          def run_nested_forced_operation
+            send(:with_indoor_model_operation, 'Outer Operation') do
+              send(
+                :with_indoor_model_operation,
+                'Nested Forced Operation',
+                force: true
+              ) { :ran }
+            end
+          end
+
+          def run_nested_rollback_operation
+            send(:with_indoor_model_operation, 'Outer Operation') do
+              send(
+                :with_indoor_model_operation,
+                'Nested Rollback Operation',
+                rollback: true
+              ) { :ran }
+            end
           end
 
           def observer_routing_suppressed?

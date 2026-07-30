@@ -131,23 +131,22 @@ module ULOL
           changed_count = 0
           errors = []
 
-          model.start_operation('Change CellSpace Type', true)
-          cell_space_groups.each do |group|
-            begin
-              indoor_model.change_cell_space_type(group, cell_type, category_code)
-              changed_count += 1
-            rescue StandardError => e
-              Logger.puts "[IndoorGML] CellSpace type change failed: #{e.class}: #{e.message}"
-              errors << "#{group.name}: #{e.message}"
+          indoor_model.with_indoor_model_operation('Change CellSpace Type') do
+            cell_space_groups.each do |group|
+              begin
+                indoor_model.change_cell_space_type(group, cell_type, category_code)
+                changed_count += 1
+              rescue StandardError => e
+                Logger.puts "[IndoorGML] CellSpace type change failed: #{e.class}: #{e.message}"
+                errors << "#{group.name}: #{e.message}"
+              end
             end
           end
-          model.commit_operation
 
           message = "Changed #{changed_count} CellSpace type(s)."
           message += "\nFailed #{errors.length} group(s):\n#{errors.join("\n")}" if errors.any?
           UI.messagebox(message)
         rescue StandardError => e
-          model.abort_operation if model
           UI.messagebox("CellSpace type change failed:\n#{e.message}")
         end
 

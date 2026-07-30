@@ -40,6 +40,9 @@ module ULOL
               runtime_snapshot: proc { bulk_conversion_runtime_snapshot },
               runtime_restore: proc { |snapshot| restore_bulk_conversion_runtime(snapshot) },
               apply_guards: proc { |&block| with_bulk_cell_space_conversion(&block) },
+              operation_runner: proc do |name, **options, &block|
+                with_indoor_model_operation(name, **options, &block)
+              end,
               restore_active_path: proc { active_path.restore(original_active_path, close_when_nil: true) },
               activate_root_context: activate_root_context ? proc { active_path.close_to_root } : nil,
               clear_dirty_topology: proc { clear_bulk_dirty_topology },
@@ -182,11 +185,7 @@ module ULOL
             with_active_path_enforcement_suspended do
               with_runtime_observer_suppression do
                 with_guard_flag(:@bulk_cell_space_conversion) do
-                  previous_depth = @indoor_operation_depth.to_i
-                  @indoor_operation_depth = previous_depth + 1
                   yield
-                ensure
-                  @indoor_operation_depth = previous_depth
                 end
               end
             end

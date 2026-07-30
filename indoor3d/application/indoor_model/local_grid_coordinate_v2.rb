@@ -76,6 +76,9 @@ module ULOL
               runtime_snapshot: proc { bulk_conversion_runtime_snapshot },
               runtime_restore: proc { |snapshot| restore_bulk_conversion_runtime(snapshot) },
               apply_guards: proc { |&block| with_bulk_cell_space_conversion(&block) },
+              operation_runner: proc do |name, **options, &block|
+                with_indoor_model_operation(name, **options, &block)
+              end,
               restore_active_path: proc { active_path.restore(original_active_path, close_when_nil: true) },
               activate_root_context: activate_root_context ? proc { active_path.close_to_root } : nil,
               clear_dirty_topology: proc { clear_bulk_dirty_topology },
@@ -228,11 +231,10 @@ module ULOL
           end
 
           def normalize_cell_space_local_grid_v2!(group, reason:)
-            report = LocalVertexNormalizer.normalize(
+            report = normalize_local_vertex_group_with_operation(
               group,
               LOCAL_GRID_V2_TOLERANCE_MM,
-              debug: false,
-              manage_operation: false
+              debug: false
             )
             IndoorCore::Logger.puts(
               "[IndoorGML] CellSpace Local Grid V2 LVN: " \

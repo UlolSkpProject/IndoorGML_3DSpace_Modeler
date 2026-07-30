@@ -222,49 +222,60 @@ module ULOL
             model = @model || Sketchup.active_model
             return { status: :inconclusive, reason: 'BOOLEAN_OPERATION_FAILED' } unless model
 
-            started = false
             copy1 = nil
             copy2 = nil
             result = nil
 
-            model.start_operation('IndoorGML overlap recheck', true)
-            started = true
+            @indoor_model.with_indoor_model_operation(
+              'IndoorGML overlap recheck',
+              rollback: true
+            ) do
+              next({ status: :inconclusive, reason: 'INPUT_NOT_MANIFOLD' }) unless
+                valid_manifold_group?(group1) && valid_manifold_group?(group2)
 
-            return { status: :inconclusive, reason: 'INPUT_NOT_MANIFOLD' } unless valid_manifold_group?(group1) && valid_manifold_group?(group2)
-            copy1 = build_boolean_copy(group1)
-            copy2 = build_boolean_copy(group2)
-            return { status: :inconclusive, reason: 'BOOLEAN_COPY_FAILED' } unless copy1 && copy2
-            return { status: :inconclusive, reason: 'BOOLEAN_COPY_NOT_MANIFOLD' } unless valid_manifold_group?(copy1) && valid_manifold_group?(copy2)
-            return { status: :inconclusive, reason: 'BOOLEAN_OPERATION_FAILED' } unless copy1.respond_to?(:intersect)
+              copy1 = build_boolean_copy(group1)
+              copy2 = build_boolean_copy(group2)
+              next({ status: :inconclusive, reason: 'BOOLEAN_COPY_FAILED' }) unless copy1 && copy2
+              next({ status: :inconclusive, reason: 'BOOLEAN_COPY_NOT_MANIFOLD' }) unless
+                valid_manifold_group?(copy1) && valid_manifold_group?(copy2)
+              next({ status: :inconclusive, reason: 'BOOLEAN_OPERATION_FAILED' }) unless
+                copy1.respond_to?(:intersect)
 
-            result = copy1.intersect(copy2)
-            return { status: :inconclusive, reason: 'BOOLEAN_OPERATION_FAILED' } if result.nil?
+              result = copy1.intersect(copy2)
+              next({ status: :inconclusive, reason: 'BOOLEAN_OPERATION_FAILED' }) if result.nil?
 
-            faces = result.definition.entities.grep(Sketchup::Face).select(&:valid?)
-            edges = result.definition.entities.grep(Sketchup::Edge).select(&:valid?)
-            return { status: :not_reproduced, reason: 'NO_VALID_INTERSECTION_GROUP_RETURNED', volume: 0.0, component_count: 0 } if faces.empty? && edges.empty?
-            return non_solid_intersection_result(result, faces, edges) unless valid_manifold_group?(result)
+              faces = result.definition.entities.grep(Sketchup::Face).select(&:valid?)
+              edges = result.definition.entities.grep(Sketchup::Edge).select(&:valid?)
+              if faces.empty? && edges.empty?
+                next({
+                  status: :not_reproduced,
+                  reason: 'NO_VALID_INTERSECTION_GROUP_RETURNED',
+                  volume: 0.0,
+                  component_count: 0
+                })
+              end
+              next non_solid_intersection_result(result, faces, edges) unless valid_manifold_group?(result)
 
-            volume = solid_group_volume(result)
-            return non_solid_intersection_result(result, faces, edges) if volume.nil? || volume <= 0.0
+              volume = solid_group_volume(result)
+              next non_solid_intersection_result(result, faces, edges) if volume.nil? || volume <= 0.0
 
-            cache_intersection_overlay_geometry(
-              result,
-              @current_intersection_cell_ids,
-              volume
-            )
+              cache_intersection_overlay_geometry(
+                result,
+                @current_intersection_cell_ids,
+                volume
+              )
 
-            {
-              status: :reproduced,
-              reason: 'REPRODUCED_AS_VALID_SKETCHUP_INTERSECTION',
-              volume: volume,
-              component_count: face_components(faces).length
-            }
+              {
+                status: :reproduced,
+                reason: 'REPRODUCED_AS_VALID_SKETCHUP_INTERSECTION',
+                volume: volume,
+                component_count: face_components(faces).length
+              }
+            end
           rescue StandardError => e
             log("Model CellSpace intersection failed: #{e.class}: #{e.message}")
             { status: :inconclusive, reason: "BOOLEAN_OPERATION_FAILED: #{e.class}: #{e.message}" }
           ensure
-            model.abort_operation if started
             [result, copy1, copy2].compact.each do |entity|
               next if entity.equal?(group1) || entity.equal?(group2)
 

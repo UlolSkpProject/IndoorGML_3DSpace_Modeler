@@ -320,14 +320,13 @@ module ULOL
                 # Opening another operation for every Solid can leave dialog and
                 # observer state unresponsive after the batch commit.
                 normalization_options = {
-                  debug: debug,
-                  manage_operation: false
+                  debug: debug
                 }
                 if report == true
                   normalization_options[:report] = true
                   normalization_options[:write_report] = false
                 end
-                LocalVertexNormalizer.normalize(
+                normalize_local_vertex_group_with_operation(
                   group,
                   tolerance_mm,
                   **normalization_options
@@ -345,6 +344,17 @@ module ULOL
               else
                 runner.call
               end
+            end
+          end
+
+          def normalize_local_vertex_group_with_operation(group, tolerance_mm, **options)
+            with_indoor_model_operation('Normalize IndoorGML local vertices') do
+              LocalVertexNormalizer.normalize(
+                group,
+                tolerance_mm,
+                **options,
+                manage_operation: false
+              )
             end
           end
 

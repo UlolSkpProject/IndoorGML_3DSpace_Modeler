@@ -307,16 +307,15 @@ module ULOL
             )
             return false unless confirmed == IDYES
 
-            model.start_operation('Clear All IndoorGML Elements', true)
             begin
-              @editor_session.finish() if editing?
-              clear_indoor_gml_groups()
-              reset_runtime_collections()
-              model.active_view.invalidate if model&.active_view
-              model.commit_operation
+              with_indoor_model_operation('Clear All IndoorGML Elements') do
+                @editor_session.finish() if editing?
+                clear_indoor_gml_groups()
+                reset_runtime_collections()
+                model.active_view.invalidate if model&.active_view
+              end
               true
             rescue StandardError => e
-              model.abort_operation
               IndoorCore::Logger.puts "[IndoorGML] Clear all failed: #{e.class}: #{e.message}"
               false
             end
@@ -431,21 +430,18 @@ module ULOL
               return false if cell_spaces.empty?
 
               model = Sketchup.active_model()
-              operation_started = false
-              model.start_operation('Change CellSpace Type and Category', true)
-              operation_started = true
-              cell_type = CellSpaceType.from_label(cell_type_label)
-              category_code = nil unless CellSpaceCategory.valid_for_type?(cell_type, category_code)
-              cell_spaces.each do |cell_space|
-                change_cell_space_type(cell_space.sketchup_group, cell_type, category_code)
+              with_indoor_model_operation('Change CellSpace Type and Category') do
+                cell_type = CellSpaceType.from_label(cell_type_label)
+                category_code = nil unless CellSpaceCategory.valid_for_type?(cell_type, category_code)
+                cell_spaces.each do |cell_space|
+                  change_cell_space_type(cell_space.sketchup_group, cell_type, category_code)
+                end
               end
-              model.commit_operation()
               @editor_session.refresh_visibility_filter
               @editor_session.selection_changed()
               model.active_view().invalidate() if model&.active_view
               true
             rescue StandardError => e
-              model.abort_operation() if operation_started
               IndoorCore::Logger.puts "[IndoorGML] Selected CellSpace type update failed: #{e.class}: #{e.message}"
               false
             end
@@ -504,22 +500,19 @@ module ULOL
               normalized_storey = storey_range_allowed_for_cell_spaces(cell_spaces) ? storey : first_storey_value(storey)
 
               model = Sketchup.active_model()
-              operation_started = false
-              model.start_operation('Change CellSpace Storey', true)
-              operation_started = true
-              sync do
-                cell_spaces.each do |cell_space|
-                  cell_space.set_storey(normalized_storey)
-                  write_cell_space_attributes(cell_space)
+              with_indoor_model_operation('Change CellSpace Storey') do
+                sync do
+                  cell_spaces.each do |cell_space|
+                    cell_space.set_storey(normalized_storey)
+                    write_cell_space_attributes(cell_space)
+                  end
                 end
               end
-              model.commit_operation()
               cell_spaces.each { |cell_space| remember_cell_space_change_snapshot(cell_space.sketchup_group) }
               @editor_session.refresh_visibility_filter
               @editor_session.selection_changed()
               true
             rescue StandardError => e
-              model.abort_operation() if operation_started
               IndoorCore::Logger.puts "[IndoorGML] Selected CellSpace storey update failed: #{e.class}: #{e.message}"
               false
             end

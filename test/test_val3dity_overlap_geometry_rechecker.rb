@@ -201,7 +201,17 @@ module ULOL
           end
 
           FakeCellSpace = Struct.new(:id, :sketchup_group)
-          FakeIndoorModel = Struct.new(:cell_spaces, :model)
+          FakeIndoorModel = Struct.new(:cell_spaces, :model) do
+            def with_indoor_model_operation(name, rollback: false)
+              started = model.start_operation(name, true)
+              result = yield
+              rollback ? model.abort_operation : model.commit_operation if started
+              result
+            rescue StandardError
+              model.abort_operation if started
+              raise
+            end
+          end
           FakePoint = Struct.new(:x, :y, :z)
 
           class FakeEntity

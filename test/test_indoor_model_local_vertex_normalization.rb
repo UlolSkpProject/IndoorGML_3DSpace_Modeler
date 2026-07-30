@@ -40,7 +40,18 @@ module ULOL
         class GroupNormalizationHarness
           include IndoorModel::LocalVertexNormalization
 
+          attr_reader :operation_names
+
+          def initialize
+            @operation_names = []
+          end
+
           def with_unlocked(_group)
+            yield
+          end
+
+          def with_indoor_model_operation(name)
+            @operation_names << name
             yield
           end
         end
@@ -94,13 +105,14 @@ module ULOL
           cell_space = FakeCellSpace.new('cell-1', group)
           calls = []
 
+          harness = GroupNormalizationHarness.new
           result = with_normalize_replacement(
             lambda do |entity, tolerance, **options|
               calls << [entity, tolerance, options]
               { manifold: true }
             end
           ) do
-            GroupNormalizationHarness.new.send(
+            harness.send(
               :normalize_cell_space_group,
               cell_space,
               group,
@@ -115,6 +127,7 @@ module ULOL
             [[group, 0.001, { debug: true, manage_operation: false }]],
             calls
           )
+          assert_equal ['Normalize IndoorGML local vertices'], harness.operation_names
         end
 
         def test_group_normalization_collects_report_without_writing_per_solid_files
@@ -122,13 +135,14 @@ module ULOL
           cell_space = FakeCellSpace.new('cell-1', group)
           calls = []
 
+          harness = GroupNormalizationHarness.new
           with_normalize_replacement(
             lambda do |entity, tolerance, **options|
               calls << [entity, tolerance, options]
               { manifold: true }
             end
           ) do
-            GroupNormalizationHarness.new.send(
+            harness.send(
               :normalize_cell_space_group,
               cell_space,
               group,
@@ -147,6 +161,7 @@ module ULOL
             }]],
             calls
           )
+          assert_equal ['Normalize IndoorGML local vertices'], harness.operation_names
         end
 
         def test_batch_timing_report_contains_geometry_and_stage_totals

@@ -93,7 +93,8 @@ module ULOL
           primal = fake_group(pid: 99)
           indoor_model = fake_indoor_model(primal_group: primal)
           callbacks = CallbackLog.new
-          Sketchup.test_active_model = fake_model
+          model = fake_model
+          Sketchup.test_active_model = model
 
           service = build_service(
             indoor_model,
@@ -106,6 +107,13 @@ module ULOL
           assert_equal false, primal.visible?
           assert_equal [primal], callbacks.unlocked_entities
           assert_equal 1, callbacks.invalidated
+          assert_equal ['IndoorGML Edit Visibility'], indoor_model.operation_names
+          assert_equal(
+            [:operation_start, :suppression_start, :suppression_end, :operation_end],
+            indoor_model.operation_events
+          )
+          assert_equal 0, model.starts
+          assert_equal 0, model.commits
         end
 
         def test_validation_focus_limits_visible_cell_spaces
@@ -362,14 +370,16 @@ module ULOL
 
         def fake_model
           Class.new do
-            attr_reader :commits, :aborts
+            attr_reader :starts, :commits, :aborts
 
             def initialize
+              @starts = 0
               @commits = 0
               @aborts = 0
             end
 
             def start_operation(_name, _transparent)
+              @starts += 1
               true
             end
 
@@ -385,8 +395,27 @@ module ULOL
 
         def fake_indoor_model(primal_group: fake_group(pid: 0), cell_spaces: [])
           Struct.new(:primal_group, :cell_spaces) do
+            def operation_names
+              @operation_names ||= []
+            end
+
+            def operation_events
+              @operation_events ||= []
+            end
+
+            def with_indoor_model_operation(name)
+              operation_names << name
+              operation_events << :operation_start
+              result = yield
+              operation_events << :operation_end
+              result
+            end
+
             def with_runtime_observer_suppression
-              yield
+              operation_events << :suppression_start
+              result = yield
+              operation_events << :suppression_end
+              result
             end
           end.new(primal_group, cell_spaces)
         end

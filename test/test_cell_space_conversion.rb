@@ -539,7 +539,7 @@ module ULOL
 
           error = assert_raises(RuntimeError) { service.call }
 
-          assert_equal 'Failed to commit CellSpace conversion operation', error.message
+          assert_equal 'Failed to commit SketchUp operation: Bulk Convert', error.message
           assert_equal [[:start, 'Bulk Convert', true], [:commit], [:abort]], model.operations
           assert_equal [:runtime_snapshot], restored
           assert_equal [
@@ -590,13 +590,11 @@ module ULOL
             logger: logger
           )
 
-          result = service.call
+          error = assert_raises(RuntimeError) { service.call }
 
-          assert_equal 0, result.converted_count
-          assert_equal [{ group: 'source', reason: 'creation failed' }], result.errors
+          assert_equal 'abort failed', error.message
           assert_equal [[:start, 'Bulk Convert', true], [:abort]], model.operations
           assert_equal [:start_operation, :abort_operation, :runtime_restore, :restore_active_path], calls
-          assert_includes logger.messages.join("\n"), 'CellSpace conversion abort failed: RuntimeError: abort failed'
         end
 
         def test_bulk_service_returns_apply_error_when_runtime_restore_fails
@@ -657,7 +655,7 @@ module ULOL
 
           error = assert_raises(RuntimeError) { service.call }
 
-          assert_equal 'Failed to start CellSpace conversion operation', error.message
+          assert_equal 'Failed to start SketchUp operation: Bulk Convert', error.message
           assert_equal [[:start, 'Bulk Convert', true]], model.operations
           assert_equal [:start_operation, :runtime_restore, :restore_active_path], calls
           assert_equal [:runtime_snapshot], restored
@@ -820,6 +818,7 @@ module ULOL
             runtime_snapshot: proc { :runtime_snapshot },
             runtime_restore: runtime_restore,
             apply_guards: proc { |&block| block.call },
+            operation_runner: operation_runner_for(model),
             restore_active_path: restore_active_path,
             activate_root_context: activate_root_context,
             clear_dirty_topology: clear_dirty_topology,
@@ -828,6 +827,26 @@ module ULOL
             preserve_source: proc { |_source| true },
             operation_name: 'Bulk Convert'
           )
+        end
+
+        def operation_runner_for(model)
+          proc do |name, rollback_if: nil, force: false, &block|
+            started = model.start_operation(name, true)
+            raise "Failed to start SketchUp operation: #{name}" unless started
+
+            result = block.call
+            rollback = rollback_if && rollback_if.call
+            started = false if rollback
+            completed = rollback ? model.abort_operation : model.commit_operation
+            action = rollback ? 'abort' : 'commit'
+            raise "Failed to #{action} SketchUp operation: #{name}" if completed == false
+
+            started = false
+            result
+          rescue StandardError
+            model.abort_operation if started
+            raise
+          end
         end
 
         class FakeLogger
