@@ -50,7 +50,7 @@ module ULOL
                 restore_active_path(model, original_active_path)
               end
             end
-            UiFeedback.defer_modal("CellSpace conversion failed:\n#{e.message}")
+            UiFeedback.notify("CellSpace conversion failed:\n#{e.message}")
           end
         end
 
@@ -100,7 +100,7 @@ module ULOL
                 restore_active_path(model, original_active_path)
               end
             end
-            UiFeedback.defer_modal("CellSpace Local Grid V2 conversion failed:\n#{e.message}")
+            UiFeedback.notify("CellSpace Local Grid V2 conversion failed:\n#{e.message}")
           end
         end
 
@@ -138,7 +138,7 @@ module ULOL
           )
           UiFeedback.notify("Changed #{changed.length} CellSpace type(s).")
         rescue StandardError => e
-          UiFeedback.defer_modal("CellSpace type change failed:\n#{e.message}")
+          UiFeedback.notify("CellSpace type change failed:\n#{e.message}")
         end
 
         private
