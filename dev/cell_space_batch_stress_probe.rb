@@ -13,6 +13,8 @@ module IndoorGMLCellSpaceBatchStressProbe
     'IndoorGML_cellspace_batch_stress.log'
   )
 
+  @material_ensure_keys_original = nil
+
   module_function
 
   def clock
@@ -151,6 +153,7 @@ module IndoorGMLCellSpaceBatchStressProbe
   def install_material_probe(counters, times)
     materials = ULOL::Indoor3DGmlModeler::Utils::Materials
     singleton = materials.singleton_class
+    @material_ensure_keys_original = singleton.instance_method(:ensure_keys)
     original = materials.method(:ensure_keys)
     singleton.send(:define_method, :ensure_keys) do |keys|
       counters[:ensure_keys] += 1
@@ -174,8 +177,12 @@ module IndoorGMLCellSpaceBatchStressProbe
   end
 
   def restore_material_probe
+    original = @material_ensure_keys_original
+    return unless original
+
     singleton = ULOL::Indoor3DGmlModeler::Utils::Materials.singleton_class
-    singleton.send(:remove_method, :ensure_keys) if singleton.instance_methods(false).include?(:ensure_keys)
+    singleton.send(:define_method, :ensure_keys, original)
+    @material_ensure_keys_original = nil
   rescue StandardError => e
     log("MATERIAL PROBE RESTORE ERROR #{e.class}: #{e.message}")
   end
@@ -303,6 +310,7 @@ module IndoorGMLCellSpaceBatchStressProbe
     log("BATCH STRESS #{passed ? 'PASS' : 'FAIL'}")
     passed
   rescue StandardError => e
+    restore_material_probe
     log("BATCH STRESS ERROR #{e.class}: #{e.message}")
     Array(e.backtrace).each { |line| log("BACKTRACE #{line}") }
     false
