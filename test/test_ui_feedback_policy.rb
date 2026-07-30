@@ -4,9 +4,10 @@ require 'minitest/autorun'
 
 class UiFeedbackPolicyTest < Minitest::Test
   ROOT = File.expand_path('..', __dir__)
+  FEEDBACK_PATH = File.join(ROOT, 'indoor3d/ui/ui_feedback.rb')
 
   def test_feedback_policy_uses_one_persistent_dispatcher
-    source = File.read(File.join(ROOT, 'indoor3d/ui/ui_feedback.rb'))
+    source = File.read(FEEDBACK_PATH)
 
     assert_includes source, 'UI.start_timer(DISPATCH_INTERVAL_SECONDS, true)'
     assert_includes source, 'def start_dispatcher'
@@ -17,7 +18,7 @@ class UiFeedbackPolicyTest < Minitest::Test
   end
 
   def test_feedback_calls_enqueue_instead_of_showing_ui_inline
-    source = File.read(File.join(ROOT, 'indoor3d/ui/ui_feedback.rb'))
+    source = File.read(FEEDBACK_PATH)
 
     assert_match(/def notify\(message\)\s+enqueue_feedback\(:notification, message\)/m, source)
     assert_match(/def defer_modal\(message, \*arguments\)\s+enqueue_feedback\(:modal, message, arguments\)/m, source)
@@ -25,14 +26,23 @@ class UiFeedbackPolicyTest < Minitest::Test
     assert_includes source, 'return false if @dispatcher_tick <= item[:ready_after_tick].to_i'
   end
 
+  def test_confirmations_use_same_dispatcher_and_callback
+    source = File.read(FEEDBACK_PATH)
+
+    assert_match(/def confirm\(message, \*arguments, &callback\)/, source)
+    assert_includes source, 'enqueue_feedback(:confirmation, message, modal_arguments, callback)'
+    assert_includes source, 'when :modal, :confirmation'
+    assert_includes source, 'item[:callback]&.call(result)'
+  end
+
   def test_cell_space_conversion_result_queues_dispatcher_modal
-    source = File.read(File.join(ROOT, 'indoor3d/ui/ui_feedback.rb'))
+    source = File.read(FEEDBACK_PATH)
 
     assert_match(/def publish_result\(message, errors: nil\)\s+defer_modal\(message\)/m, source)
   end
 
   def test_repeating_dispatcher_guards_modal_reentry
-    source = File.read(File.join(ROOT, 'indoor3d/ui/ui_feedback.rb'))
+    source = File.read(FEEDBACK_PATH)
 
     assert_includes source, 'return false if @dispatching_modal == true'
     assert_includes source, '@dispatching_modal = true'
@@ -40,10 +50,20 @@ class UiFeedbackPolicyTest < Minitest::Test
   end
 
   def test_notification_failure_stays_non_modal
-    source = File.read(File.join(ROOT, 'indoor3d/ui/ui_feedback.rb'))
+    source = File.read(FEEDBACK_PATH)
 
     assert_includes source, 'fallback_non_modal'
     assert_includes source, 'Sketchup.status_text = message'
+  end
+
+  def test_application_messageboxes_are_centralized
+    offenders = Dir.glob(File.join(ROOT, 'indoor3d/**/*.rb')).reject do |path|
+      File.expand_path(path) == File.expand_path(FEEDBACK_PATH)
+    end.select do |path|
+      File.read(path).include?('UI.messagebox')
+    end
+
+    assert_empty offenders, "Direct UI.messagebox calls remain: #{offenders.join(', ')}"
   end
 
   def test_cell_space_commands_never_create_post_bulk_timers_or_inline_messageboxes
@@ -62,12 +82,14 @@ class UiFeedbackPolicyTest < Minitest::Test
     refute_match(/cell_space_groups\.each.*change_cell_space_type/m, source)
   end
 
-  def test_indoor_model_conversion_never_creates_post_bulk_ui_timer
-    source = File.read(File.join(ROOT, 'indoor3d/application/indoor_model/ui_feedback.rb'))
+  def test_indoor_model_uses_shared_feedback_without_integration_shim
+    editor_source = File.read(File.join(ROOT, 'indoor3d/application/indoor_model/editor_control.rb'))
+    runtime_source = File.read(File.join(ROOT, 'indoor3d/application/indoor_model/runtime_support.rb'))
+    model_source = File.read(File.join(ROOT, 'indoor3d/application/indoor_model.rb'))
 
-    assert_includes source, 'UiFeedback.publish_result'
-    assert_includes source, 'UiFeedback.notify'
-    refute_includes source, 'UI.start_timer('
-    refute_includes source, 'UI.messagebox('
+    assert_includes editor_source, "require_relative '../../ui/ui_feedback'"
+    assert_includes runtime_source, "require_relative '../../ui/ui_feedback'"
+    refute_includes model_source, "indoor_model/ui_feedback.rb"
+    refute_includes model_source, 'UiFeedbackIntegration'
   end
 end
