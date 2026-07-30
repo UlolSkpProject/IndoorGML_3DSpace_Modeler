@@ -5,10 +5,13 @@ module ULOL
     module IndoorCore
       # Centralized UI feedback policy for model mutations.
       #
-      # Successful operations stay non-modal through UI::Notification. Any modal
-      # feedback that is still required is moved to the next SketchUp event-loop
-      # turn with a zero-delay timer. This intentionally expresses an event-loop
-      # boundary rather than an arbitrary time delay.
+      # Model-mutation results are always reported non-modally. A post-mutation
+      # code path must never depend on registering a new timer immediately after
+      # a large SketchUp transaction because SketchUp 2026 can reject that timer
+      # registration without invoking its callback.
+      #
+      # defer_modal remains available only for callers that are already running
+      # from a later UI event and genuinely require a modal user response.
       module UiFeedback
         class << self
           def notify(message)
@@ -16,22 +19,18 @@ module ULOL
             return false if text.empty?
 
             notification = build_notification(text)
-            unless notification
-              defer_modal(text)
-              return false
-            end
+            return fallback_non_modal(text) unless notification
 
             retain_notification(notification)
             notification.show
             true
           rescue StandardError => e
             log_failure('Notification', e)
-            defer_modal(text) unless text.to_s.empty?
-            false
+            fallback_non_modal(text)
           end
 
           def publish_result(message, errors: nil)
-            Array(errors).empty? ? notify(message) : defer_modal(message)
+            notify(message)
           end
 
           def defer_modal(message, *arguments)
@@ -66,6 +65,15 @@ module ULOL
           # title and is not invoked for automatic timeout dismissal.
           def retain_notification(notification)
             @last_notification = notification
+          end
+
+          def fallback_non_modal(message)
+            Sketchup.status_text = message if defined?(Sketchup) && Sketchup.respond_to?(:status_text=)
+            IndoorCore::Logger.puts("[IndoorGML] #{message}") if defined?(IndoorCore::Logger)
+            false
+          rescue StandardError => e
+            log_failure('Non-modal fallback', e)
+            false
           end
 
           def log_failure(label, error)
