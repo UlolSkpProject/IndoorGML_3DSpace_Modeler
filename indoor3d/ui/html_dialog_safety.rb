@@ -27,6 +27,19 @@ module ULOL
               </script>
             HTML
           end
+
+          def inject_external_file_drop_guard(html)
+            source = html.to_s
+            guard = external_file_drop_guard_script_tag
+
+            if source.include?('</head>')
+              source.sub('</head>', "#{guard}</head>")
+            elsif source.include?('</body>')
+              source.sub('</body>', "#{guard}</body>")
+            else
+              "#{source}\n#{guard}"
+            end
+          end
         end
       end
     end
