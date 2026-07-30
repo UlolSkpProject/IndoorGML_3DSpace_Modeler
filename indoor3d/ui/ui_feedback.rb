@@ -5,12 +5,10 @@ module ULOL
     module IndoorCore
       # Centralized UI feedback dispatcher.
       #
-      # SketchUp 2026 does not provide a public "UI is settled" callback after a
-      # large model mutation. Creating a new zero-delay timer immediately after a
-      # bulk operation is also not reliable in that context. Instead, one repeating
-      # dispatcher timer is registered once while the extension is loading. Runtime
-      # operations only enqueue feedback; the already-running dispatcher consumes it
-      # on a later UI turn.
+      # All application-owned message boxes are queued here. Runtime code never opens
+      # UI.messagebox inline; one dispatcher timer created at extension load consumes
+      # queued feedback on a later UI turn. Confirmations use the same queue and resume
+      # their caller through a callback after the user responds.
       module UiFeedback
         DISPATCH_INTERVAL_SECONDS = 0.05
         MIN_DISPATCH_TURNS_AFTER_ENQUEUE = 1
@@ -34,42 +32,34 @@ module ULOL
             !@dispatcher_timer_id.nil?
           end
 
-          def dispatcher_diagnostics
-            {
-              timer_id: @dispatcher_timer_id,
-              tick: @dispatcher_tick.to_i,
-              pending: Array(@pending_feedback).length,
-              dispatching_modal: @dispatching_modal == true
-            }
-          end
-
           def notify(message)
             enqueue_feedback(:notification, message)
           end
 
-          # CellSpace conversion results are intentionally modal. The modal itself
-          # is not opened inline after the model mutation; it is queued for the
-          # persistent dispatcher that already existed before the mutation started.
           def publish_result(message, errors: nil)
             defer_modal(message)
           end
 
-          # Queue a modal for the persistent dispatcher. This method intentionally
-          # does not register a timer. It is safe for post-bulk callers because the
-          # dispatcher already existed before the model mutation started.
           def defer_modal(message, *arguments)
             enqueue_feedback(:modal, message, arguments)
           end
 
+          def confirm(message, *arguments, &callback)
+            modal_arguments = arguments.empty? ? [MB_YESNO] : arguments
+            enqueue_feedback(:confirmation, message, modal_arguments, callback)
+          end
+
           private
 
-          def enqueue_feedback(kind, message, arguments = [])
+          def enqueue_feedback(kind, message, arguments = [], callback = nil)
             text = message.to_s
             return false if text.empty?
 
             unless dispatcher_started?
               log_message("UI feedback dispatcher unavailable: #{text}")
-              return fallback_non_modal(text)
+              fallback_non_modal(text)
+              callback&.call(nil)
+              return false
             end
 
             @pending_feedback ||= []
@@ -78,12 +68,15 @@ module ULOL
               kind: kind,
               message: text,
               arguments: Array(arguments),
+              callback: callback,
               ready_after_tick: @dispatcher_tick + MIN_DISPATCH_TURNS_AFTER_ENQUEUE
             }
             true
           rescue StandardError => e
             log_failure('UI feedback enqueue', e)
             fallback_non_modal(text)
+            callback&.call(nil)
+            false
           end
 
           def dispatch_pending_feedback
@@ -97,7 +90,7 @@ module ULOL
 
             queue.shift
             case item[:kind]
-            when :modal
+            when :modal, :confirmation
               show_modal_now(item)
             else
               show_notification_now(item[:message])
@@ -110,10 +103,14 @@ module ULOL
 
           def show_modal_now(item)
             @dispatching_modal = true
-            UI.messagebox(item[:message], *Array(item[:arguments]))
+            result = UI.messagebox(item[:message], *Array(item[:arguments]))
+            item[:callback]&.call(result)
+            result
           rescue StandardError => e
             log_failure('Modal UI', e)
             fallback_non_modal(item[:message])
+            item[:callback]&.call(nil)
+            nil
           ensure
             @dispatching_modal = false
           end
@@ -172,7 +169,4 @@ module ULOL
   end
 end
 
-# Register the dispatcher while the extension is loading, before any long-running
-# CellSpace operation can enter the fragile post-bulk UI context. Re-loading this
-# file in development is safe because start_dispatcher is idempotent.
 ULOL::Indoor3DGmlModeler::IndoorCore::UiFeedback.start_dispatcher if defined?(UI)
