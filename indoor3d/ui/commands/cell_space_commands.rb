@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../ui_feedback'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -18,7 +20,7 @@ module ULOL
             conversion_jobs = CellSpaceConversionJobBuilder.new(entities: groups).build
 
             if conversion_jobs.empty?
-              UI.messagebox('Select one or more solid groups to convert to CellSpace.')
+              UiFeedback.notify('Select one or more solid groups to convert to CellSpace.')
               return
             end
 
@@ -41,14 +43,14 @@ module ULOL
               operation_name: 'Convert Solid Groups to CellSpace',
               activate_root_context: true
             )
-            UI.messagebox(ConversionMessageFormatter.result_message(result.converted_count, result.errors))
+            publish_cell_space_command_result(result)
           rescue StandardError => e
             if model && defined?(original_active_path) && original_active_path
               IndoorModel.current.with_active_path_enforcement_suspended do
                 restore_active_path(model, original_active_path)
               end
             end
-            UI.messagebox("CellSpace conversion failed:\n#{e.message}")
+            UiFeedback.defer_modal("CellSpace conversion failed:\n#{e.message}")
           end
         end
 
@@ -68,7 +70,7 @@ module ULOL
             conversion_jobs = CellSpaceConversionJobBuilder.new(entities: groups).build
 
             if conversion_jobs.empty?
-              UI.messagebox('Select one or more solid groups to convert to CellSpace.')
+              UiFeedback.notify('Select one or more solid groups to convert to CellSpace.')
               return
             end
 
@@ -91,14 +93,14 @@ module ULOL
               operation_name: 'Convert Solid Groups to CellSpace Local Grid V2',
               activate_root_context: true
             )
-            UI.messagebox(ConversionMessageFormatter.result_message(result.converted_count, result.errors))
+            publish_cell_space_command_result(result)
           rescue StandardError => e
             if model && defined?(original_active_path) && original_active_path
               IndoorModel.current.with_active_path_enforcement_suspended do
                 restore_active_path(model, original_active_path)
               end
             end
-            UI.messagebox("CellSpace Local Grid V2 conversion failed:\n#{e.message}")
+            UiFeedback.defer_modal("CellSpace Local Grid V2 conversion failed:\n#{e.message}")
           end
         end
 
@@ -109,18 +111,18 @@ module ULOL
           groups = model.selection.to_a.select { |entity| convertible_container?(entity) }
 
           if groups.empty?
-            UI.messagebox('Select one or more CellSpace groups to change type.')
+            UiFeedback.notify('Select one or more CellSpace groups to change type.')
             return
           end
 
           cell_space_groups = groups.select { |group| indoor_feature(group) == 'CellSpace' }
           if cell_space_groups.empty?
-            UI.messagebox('Select one or more CellSpace groups to change type.')
+            UiFeedback.notify('Select one or more CellSpace groups to change type.')
             return
           end
 
           unless cell_space_type_change_available?(cell_space_groups)
-            UI.messagebox('Selected CellSpace type is locked by Tag and already matches the mapped type.')
+            UiFeedback.notify('Selected CellSpace type is locked by Tag and already matches the mapped type.')
             return
           end
 
@@ -128,30 +130,26 @@ module ULOL
           return if cell_type.nil?
 
           indoor_model = IndoorModel.current
-          changed_count = 0
-          errors = []
-
-          indoor_model.with_indoor_model_operation('Change CellSpace Type') do
-            cell_space_groups.each do |group|
-              begin
-                indoor_model.change_cell_space_type(group, cell_type, category_code)
-                changed_count += 1
-              rescue StandardError => e
-                Logger.puts "[IndoorGML] CellSpace type change failed: #{e.class}: #{e.message}"
-                errors << "#{group.name}: #{e.message}"
-              end
-            end
-          end
-
-          message = "Changed #{changed_count} CellSpace type(s)."
-          message += "\nFailed #{errors.length} group(s):\n#{errors.join("\n")}" if errors.any?
-          UI.messagebox(message)
+          changed = indoor_model.change_cell_space_types(
+            cell_space_groups,
+            cell_type,
+            category_code,
+            operation_name: 'Change CellSpace Type'
+          )
+          UiFeedback.notify("Changed #{changed.length} CellSpace type(s).")
         rescue StandardError => e
-          UI.messagebox("CellSpace type change failed:\n#{e.message}")
+          UiFeedback.defer_modal("CellSpace type change failed:\n#{e.message}")
         end
 
         private
 
+        def publish_cell_space_command_result(result)
+          message = ConversionMessageFormatter.result_message(
+            result.converted_count,
+            result.errors
+          )
+          UiFeedback.publish_result(message, errors: result.errors)
+        end
       end
     end
   end
