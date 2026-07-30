@@ -26,6 +26,7 @@ module ULOL
         require_relative 'indoor_model/local_grid_geometry_close_v2.rb'
         require_relative 'indoor_model/local_grid_runtime_dispatch_v2.rb'
         require_relative 'indoor_model/editor_control.rb'
+        require_relative 'indoor_model/cell_space_batch_lifecycle.rb'
 
         include RuntimeSupport
         include SceneGroups
@@ -37,6 +38,7 @@ module ULOL
         include LocalVertexNormalization
         include LocalGridCoordinateV2
         include EditorControl
+        include CellSpaceBatchLifecycle
 
         attr_reader :cell_spaces
         attr_reader :states
