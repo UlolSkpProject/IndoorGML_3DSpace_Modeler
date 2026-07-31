@@ -49,7 +49,11 @@ module ULOL
               apply_lock_policy: proc { apply_indoor_lock_policy },
               runtime_snapshot: proc { bulk_conversion_runtime_snapshot },
               runtime_restore: proc { |snapshot| restore_bulk_conversion_runtime(snapshot) },
-              apply_guards: proc { |&block| with_bulk_cell_space_conversion(&block) },
+              apply_guards: proc do |&block|
+                @attribute_serializer.with_cell_space_write_dedup do
+                  with_bulk_cell_space_conversion(&block)
+                end
+              end,
               operation_runner: proc do |name, **options, &block|
                 with_indoor_model_operation(name, **options) do
                   prepare_cell_space_batch_environment
