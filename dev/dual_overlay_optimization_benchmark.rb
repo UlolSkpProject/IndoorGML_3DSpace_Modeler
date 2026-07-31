@@ -27,7 +27,7 @@ module ULOL
           :root_local_vector_to_model,
           :transition_curve_input,
           :transition_curve_segments,
-          :cached_transition_curve_point_groups,
+          :transition_curve_point_groups,
           :hermite_transition_curve_point_groups,
           :generate_segment,
           :polyline_segments
