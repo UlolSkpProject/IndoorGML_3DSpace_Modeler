@@ -12,25 +12,24 @@ module ULOL
         def initialize(indoor_model:, transform_context:)
           @indoor_model = indoor_model
           @transform_context = transform_context
-          @transition_curve_cache = {}
           @transition_render_segment_cache = {}
           @render_transition_line_points = nil
           @render_transition_line_points_dirty = true
         end
 
         # Invalidates only the assembled GL_LINES render list. Per-transition
-        # render segments and Hermite curve geometry remain content-addressed by
-        # their geometric inputs, so unchanged transitions can be reused directly.
+        # render segments remain content-addressed by their geometric inputs and
+        # already contain any generated Hermite geometry, so unchanged
+        # transitions can be reused directly.
         def invalidate
           @render_transition_line_points = nil
           @render_transition_line_points_dirty = true
         end
 
         # Explicit hard reset for lifecycle/reload/debug cases that need all
-        # per-transition render and curve geometry released immediately.
+        # per-transition render geometry released immediately.
         def clear_cache
           @transition_render_segment_cache&.clear
-          @transition_curve_cache&.clear
           invalidate
         end
 
@@ -85,32 +84,23 @@ module ULOL
           { default: polyline_segments(control_points || []), first: [], second: [] }
         end
 
-        def cached_transition_curve_point_groups(transition, curve_input)
+        # The render-segment cache is the effective per-transition geometry cache.
+        # Keeping a second cache for the intermediate Hermite point groups only
+        # adds key construction/hash allocation on hard rebuilds: soft rebuilds
+        # hit @transition_render_segment_cache before this method is reached.
+        def cached_transition_curve_point_groups(_transition, curve_input)
           control_points = curve_input[:points]
           return { default: control_points, first: [], second: [] } if control_points.length < 3
 
-          @transition_curve_cache ||= {}
-          key = transition_curve_cache_key(transition, curve_input)
-          cached = @transition_curve_cache[key]
-          return cached if cached
-
-          @transition_curve_cache.clear if @transition_curve_cache.length > transition_curve_cache_limit
-          groups = curve_input[:normal1] && curve_input[:normal2] ?
-            hermite_transition_curve_point_groups(control_points, curve_input[:normal1], curve_input[:normal2]) :
+          if curve_input[:normal1] && curve_input[:normal2]
+            hermite_transition_curve_point_groups(
+              control_points,
+              curve_input[:normal1],
+              curve_input[:normal2]
+            )
+          else
             { default: control_points, first: [], second: [] }
-          @transition_curve_cache[key] = groups
-          groups
-        end
-
-        def transition_curve_cache_key(transition, curve_input)
-          [
-            transition.id,
-            curve_input[:points].map { |point| @transform_context.rounded_point_key(point) },
-            @transform_context.rounded_vector_key(curve_input[:normal1]),
-            @transform_context.rounded_vector_key(curve_input[:normal2])
-          ]
-        rescue StandardError
-          [transition.id, Time.now.to_f]
+          end
         end
 
         def hermite_transition_curve_point_groups(control_points, normal1, normal2)
