@@ -7,7 +7,7 @@ module ULOL
         TRANSITION_MIN_CURVE_SEGMENTS = 3
         TRANSITION_RIGHT_ANGLE_CURVE_SEGMENTS = 6
         TRANSITION_CURVE_SEGMENTS = 9
-        MIN_TRANSITION_CURVE_CACHE_LIMIT = 2048
+        MIN_TRANSITION_RENDER_CACHE_LIMIT = 2048
 
         def initialize(indoor_model:, transform_context:)
           @indoor_model = indoor_model
@@ -219,7 +219,7 @@ module ULOL
 
           segments = transition_curve_segments(transition, render_snapshot)
           if fingerprint
-            @transition_render_segment_cache.clear if @transition_render_segment_cache.length > transition_curve_cache_limit
+            @transition_render_segment_cache.clear if @transition_render_segment_cache.length > transition_render_cache_limit
             @transition_render_segment_cache[cache_key] = {
               fingerprint: fingerprint,
               segments: segments
@@ -302,11 +302,11 @@ module ULOL
           { default: [], first: [], second: [] }
         end
 
-        def transition_curve_cache_limit
+        def transition_render_cache_limit
           transition_count = @indoor_model.transitions.length
-          [transition_count * 2, MIN_TRANSITION_CURVE_CACHE_LIMIT].max
+          [transition_count * 2, MIN_TRANSITION_RENDER_CACHE_LIMIT].max
         rescue StandardError
-          MIN_TRANSITION_CURVE_CACHE_LIMIT
+          MIN_TRANSITION_RENDER_CACHE_LIMIT
         end
 
         def scaled_normal(normal, magnitude)
