@@ -56,6 +56,7 @@ module ULOL
 
         public :overlay_render_context_cache_key,
                :overlay_render_point,
+               :overlay_render_points,
                :overlay_render_vector,
                :overlay_state_root_local_point,
                :rounded_point_key,
