@@ -73,21 +73,10 @@ module ULOL
         end
 
         def add_dual_overlay_bounds(bounds)
-          state_radius_scale = DualOverlayPreferences.state_radius_scale
-          @indoor_model.states.each do |state|
-            next unless state&.valid?()
-            next unless overlay_state_visible?(state)
-
-            point = @state_renderer.overlay_state_point(state)
-            radius = @state_renderer.overlay_state_bounds_radius(
-              state,
-              state_radius_scale: state_radius_scale
-            )
-            bounds.add(
-              Geom::Point3d.new(point.x - radius, point.y - radius, point.z - radius),
-              Geom::Point3d.new(point.x + radius, point.y + radius, point.z + radius)
-            )
-          end
+          extent_points = @state_renderer.overlay_state_extent_points(
+            state_radius_scale: DualOverlayPreferences.state_radius_scale
+          )
+          extent_points.each { |point| bounds.add(point) }
         end
 
         def validation_focus_active?
