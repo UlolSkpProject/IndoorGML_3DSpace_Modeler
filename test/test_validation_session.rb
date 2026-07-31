@@ -18,11 +18,25 @@ module ULOL
             Object.send(:remove_const, :Sketchup) if Object.const_defined?(:Sketchup)
             Object.const_set(:UI, fake_ui)
             Object.const_set(:Sketchup, fake_sketchup)
+            @feedback_messages = []
+            @ui_feedback_singleton = UiFeedback.singleton_class
+            @original_defer_modal =
+              @ui_feedback_singleton.instance_method(:defer_modal)
+            feedback_messages = @feedback_messages
+            @ui_feedback_singleton.send(:define_method, :defer_modal) do |message, *_arguments|
+              feedback_messages << message
+              true
+            end
             ValidationSession.reset!
           end
 
           def teardown
             ValidationSession.reset!
+            @ui_feedback_singleton.send(
+              :define_method,
+              :defer_modal,
+              @original_defer_modal
+            )
             Object.send(:remove_const, :UI) if Object.const_defined?(:UI)
             Object.send(:remove_const, :Sketchup) if Object.const_defined?(:Sketchup)
             Object.const_set(:UI, @original_ui) if @original_ui
@@ -252,7 +266,10 @@ module ULOL
 
             assert_empty indoor_a.begin_focus_calls
             assert_empty indoor_a.highlight_calls
-            assert_equal [ValidationSession::EXPIRED_MESSAGE], UI.messages
+            assert_equal(
+              [ValidationSession::EXPIRED_MESSAGE],
+              @feedback_messages
+            )
             assert_equal 1, progress.close_count
             assert_equal :cancelled, session.status
           end

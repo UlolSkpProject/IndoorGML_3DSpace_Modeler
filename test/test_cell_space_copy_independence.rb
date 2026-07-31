@@ -116,9 +116,8 @@ module ULOL
           copy.set_attribute('OtherExtension', 'keep', 'yes')
           write_cell_attributes(copy, id: original.id, state_id: original.duality_state.id)
 
-          out, = capture_io { model.primal_entity_added(copy) }
+          model.primal_entity_added(copy)
 
-          assert_includes out, 'CellSpace copy independence failed'
           assert_equal [original], model.cell_spaces
           assert_equal [original.duality_state], model.states
           assert_empty model.transitions
@@ -130,6 +129,10 @@ module ULOL
           assert_nil copy.get_attribute('IndoorGml', 'duality_state_id')
           assert_equal 'yes', copy.get_attribute('OtherExtension', 'keep')
           assert_equal 1, model.deferred_messages.length
+          assert_includes(
+            model.deferred_messages.first,
+            'CellSpace copy independence failed'
+          )
 
           model.primal_entity_added(copy)
 

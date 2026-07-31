@@ -30,6 +30,15 @@ module ULOL
       class DisplayCommandsDualOverlayScaleTest < Minitest::Test
         def setup
           UI.messages = []
+          @feedback_messages = []
+          @ui_feedback_singleton = UiFeedback.singleton_class
+          @original_defer_modal =
+            @ui_feedback_singleton.instance_method(:defer_modal)
+          feedback_messages = @feedback_messages
+          @ui_feedback_singleton.send(:define_method, :defer_modal) do |message, *_arguments|
+            feedback_messages << message
+            true
+          end
           @previous_dialog_defined = IndoorCore.const_defined?(:DualOverlayScaleDialog, false)
           @previous_dialog = IndoorCore.const_get(:DualOverlayScaleDialog) if @previous_dialog_defined
           IndoorCore.send(:remove_const, :DualOverlayScaleDialog) if @previous_dialog_defined
@@ -37,6 +46,11 @@ module ULOL
         end
 
         def teardown
+          @ui_feedback_singleton.send(
+            :define_method,
+            :defer_modal,
+            @original_defer_modal
+          )
           IndoorCore.send(:remove_const, :DualOverlayScaleDialog) if IndoorCore.const_defined?(:DualOverlayScaleDialog, false)
           IndoorCore.const_set(:DualOverlayScaleDialog, @previous_dialog) if @previous_dialog_defined
         end
@@ -58,7 +72,10 @@ module ULOL
 
           dispatcher.open_dual_overlay_scale_dialog
 
-          assert_match(/State\/Link overlay scale dialog failed/, UI.messages.last)
+          assert_match(
+            /State\/Link overlay scale dialog failed/,
+            @feedback_messages.last
+          )
         end
 
         private

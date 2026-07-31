@@ -2,6 +2,7 @@
 
 require 'minitest/autorun'
 
+require_relative '../indoor3d/utils/logger'
 require_relative '../indoor3d/application/cell_space_lifecycle_service'
 require_relative '../indoor3d/application/indoor_model/local_grid_coordinate_v2'
 require_relative '../indoor3d/application/indoor_model/local_grid_runtime_dispatch_v2'

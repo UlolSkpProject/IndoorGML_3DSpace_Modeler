@@ -115,7 +115,7 @@ module ULOL
   end
 end
 
-require_relative '../indoor3d/application/local_vertex_normalizer/source_altitude_sliver_collapse_v2'
+require_relative '../indoor3d/application/local_vertex_normalizer/source_collapsed_sliver_cleanup_v2'
 
 normalizer = ULOL::Indoor3DGmlModeler::IndoorCore::LocalVertexNormalizer.new
 
@@ -129,7 +129,7 @@ sliver = {
   source_polygon_index: 0
 }
 sliver_points_before = sliver[:points].map { |point| [point.x, point.y, point.z] }
-records, report = normalizer.send(:collapse_source_altitude_sliver_triangles, [sliver])
+records, report = normalizer.send(:cleanup_source_collapsed_slivers, [sliver])
 sliver_points_after = records.first[:points].map { |point| [point.x, point.y, point.z] }
 
 raise 'non-zero source sliver was removed' unless records.length == 1
@@ -147,7 +147,7 @@ collapsed = {
   source_face_key: 2,
   source_polygon_index: 0
 }
-records, report = normalizer.send(:collapse_source_altitude_sliver_triangles, [collapsed])
+records, report = normalizer.send(:cleanup_source_collapsed_slivers, [collapsed])
 
 raise 'zero-area source triangle was retained' unless records.empty?
 raise 'zero-area source triangle removal was not reported' unless

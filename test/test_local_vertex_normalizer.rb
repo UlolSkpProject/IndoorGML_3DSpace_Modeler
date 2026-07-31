@@ -1683,7 +1683,7 @@ module ULOL
           )
         end
 
-        def test_source_altitude_sliver_collapse_moves_shared_apex_to_longest_edge
+        def test_source_sliver_cleanup_diagnoses_without_moving_shared_apex
           apex = mm_point(0, 0.1, 0)
           edge_start = mm_point(-5, 0, 0)
           edge_end = mm_point(5, 0, 0)
@@ -1695,54 +1695,55 @@ module ULOL
           add_triangle_record(records, apex, edge_end, lower, 803)
           instance = normalizer
 
-          collapsed, report = instance.send(
-            :collapse_source_altitude_sliver_triangles,
+          cleaned, report = instance.send(
+            :cleanup_source_collapsed_slivers,
             records
           )
-          target_key = instance.send(
-            :source_precision_indices,
-            mm_point(0, 0, 0)
-          )
           apex_key = instance.send(:source_precision_indices, apex)
-          output_keys = collapsed.flat_map do |record|
+          output_keys = cleaned.flat_map do |record|
             record[:points].map do |point|
               instance.send(:source_precision_indices, point)
             end
           end
 
-          assert_equal 2, collapsed.length
+          assert_equal records, cleaned
+          assert_equal :natural_collapse_only, report[:policy]
           assert_equal 1, report[:detected_sliver_count]
-          assert_equal 1, report[:selected_apex_count]
-          assert_equal 1, report[:moved_vertex_count]
-          assert_equal 3, report[:moved_triangle_count]
-          assert_equal 1, report[:removed_collapsed_triangle_count]
-          assert_includes output_keys, target_key
-          refute_includes output_keys, apex_key
-          assert_equal [801, 802, 803], report[:affected_source_face_keys].sort
+          assert_equal 1, report[:remaining_sliver_count]
+          assert_equal 0, report[:selected_apex_count]
+          assert_equal 0, report[:moved_vertex_count]
+          assert_equal 0, report[:moved_triangle_count]
+          assert_equal 0, report[:removed_collapsed_triangle_count]
+          assert_includes output_keys, apex_key
+          assert_empty report[:affected_source_face_keys]
+          assert report[:skipped]
         end
 
-        def test_source_altitude_sliver_collapse_leaves_face_collapsed_to_edge
+        def test_source_sliver_cleanup_removes_only_triangle_already_collapsed_to_edge
           apex = mm_point(0, 0.1, 0)
           edge_start = mm_point(-5, 0, 0)
           edge_end = mm_point(5, 0, 0)
           foot = mm_point(0, 0, 0)
           records = []
           add_triangle_record(records, apex, edge_start, edge_end, 811)
-          add_triangle_record(records, apex, edge_start, foot, 812)
+          add_triangle_record(records, foot, edge_start, edge_end, 812)
           instance = normalizer
 
-          collapsed, report = instance.send(
-            :collapse_source_altitude_sliver_triangles,
+          cleaned, report = instance.send(
+            :cleanup_source_collapsed_slivers,
             records
           )
 
-          assert_empty collapsed
+          assert_equal [records.first], cleaned
+          assert_equal :natural_collapse_only, report[:policy]
           assert_equal 2, report[:detected_sliver_count]
-          assert_equal 2, report[:removed_collapsed_triangle_count]
-          assert_equal 0, report[:remaining_sliver_count]
+          assert_equal 1, report[:removed_collapsed_triangle_count]
+          assert_equal 1, report[:remaining_sliver_count]
+          assert_equal [812], report[:affected_source_face_keys]
+          refute report[:skipped]
         end
 
-        def test_source_altitude_sliver_collapse_respects_half_millimeter_threshold
+        def test_source_sliver_cleanup_respects_half_millimeter_diagnostic_threshold
           apex = mm_point(0, 0.5001, 0)
           edge_start = mm_point(-5, 0, 0)
           edge_end = mm_point(5, 0, 0)
@@ -1750,19 +1751,20 @@ module ULOL
           add_triangle_record(records, apex, edge_start, edge_end, 821)
           instance = normalizer
 
-          collapsed, report = instance.send(
-            :collapse_source_altitude_sliver_triangles,
+          cleaned, report = instance.send(
+            :cleanup_source_collapsed_slivers,
             records
           )
 
-          assert_same records, collapsed
+          assert_equal records, cleaned
+          assert_equal :natural_collapse_only, report[:policy]
           assert_equal 0, report[:detected_sliver_count]
           assert_equal 1, report[:input_triangle_count]
           assert_equal 1, report[:output_triangle_count]
           assert report[:skipped]
         end
 
-        def test_source_altitude_sliver_collapse_post_conforming_splits_target_edge
+        def test_source_sliver_cleanup_does_not_create_projection_vertex
           apex = mm_point(0, 0.1, 0)
           edge_start = mm_point(-5, 0, 0)
           edge_end = mm_point(5, 0, 0)
@@ -1776,13 +1778,13 @@ module ULOL
           add_triangle_record(records, edge_start, opposite, edge_end, 834)
           instance = normalizer
 
-          collapsed, = instance.send(
-            :collapse_source_altitude_sliver_triangles,
+          cleaned, report = instance.send(
+            :cleanup_source_collapsed_slivers,
             records
           )
           conforming = instance.send(
             :conforming_triangle_snapshot,
-            collapsed,
+            cleaned,
             coordinate_space: :source
           )
           target_key = instance.send(
@@ -1793,12 +1795,16 @@ module ULOL
             record[:source_face_key] == 834
           end
 
-          assert_equal 2, split_neighbor.length
-          assert split_neighbor.all? do |record|
-            record[:points].any? do |point|
-              instance.send(:source_precision_indices, point) == target_key
+          assert_equal records, cleaned
+          assert_equal :natural_collapse_only, report[:policy]
+          assert_equal 1, split_neighbor.length
+          refute(
+            split_neighbor.any? do |record|
+              record[:points].any? do |point|
+                instance.send(:source_precision_indices, point) == target_key
+              end
             end
-          end
+          )
         end
 
         def test_aabb_hybrid_matches_brute_force_overlap_pairs

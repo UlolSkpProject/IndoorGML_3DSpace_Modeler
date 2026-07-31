@@ -31,9 +31,23 @@ module ULOL
           @original_ui = Object.const_get(:UI) if Object.const_defined?(:UI)
           Object.send(:remove_const, :UI) if Object.const_defined?(:UI)
           Object.const_set(:UI, fake_ui)
+          @feedback_messages = []
+          @ui_feedback_singleton = UiFeedback.singleton_class
+          @original_defer_modal =
+            @ui_feedback_singleton.instance_method(:defer_modal)
+          feedback_messages = @feedback_messages
+          @ui_feedback_singleton.send(:define_method, :defer_modal) do |message, *_arguments|
+            feedback_messages << message
+            true
+          end
         end
 
         def teardown
+          @ui_feedback_singleton.send(
+            :define_method,
+            :defer_modal,
+            @original_defer_modal
+          )
           Object.send(:remove_const, :UI) if Object.const_defined?(:UI)
           Object.const_set(:UI, @original_ui) if @original_ui
         end
@@ -99,7 +113,7 @@ module ULOL
 
             assert_empty progress_class.instances
             refute harness.validation_focus_recheck_running?
-            assert_match(/topology 동기화에 실패/, UI.messages.last)
+            assert_match(/topology 동기화에 실패/, @feedback_messages.last)
           end
         end
 
@@ -133,7 +147,7 @@ module ULOL
 
               harness.recheck_validation_focus_errors
               assert_equal 1, progress_class.instances.length
-              assert_match(/이미 실행 중/, UI.messages.last)
+              assert_match(/이미 실행 중/, @feedback_messages.last)
             end
           end
         end
