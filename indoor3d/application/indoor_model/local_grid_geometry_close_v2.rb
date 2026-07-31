@@ -56,9 +56,9 @@ module ULOL
           #
           # Geometry close policy:
           #   frame evaluation/alignment
-          #   -> production LVN exactly once
           #   -> snapped recenter
-          #   -> no frame evaluation from recenter itself
+          #
+          # Beta LVN is intentionally excluded and remains console/API opt-in.
           def cell_space_closed(entity)
             return super unless local_grid_coordinate_v2_enabled?
             return if observer_routing_suppressed? || @syncing || @erasing
@@ -96,29 +96,16 @@ module ULOL
             ensure_cell_space_is_child_of_primal_space!(cell_space)
 
             frame_report = align_cell_space_local_frame_local_grid_v2(group)
-
-            # Geometry editing can move vertices off-grid even when the local frame
-            # itself did not change, so close always performs one production LVN.
-            normalize_cell_space_local_grid_v2!(
-              group,
-              reason: :geometry_edit_close
-            )
-
             recenter_report = recenter_cell_space_geometry_local_grid_v2(
               group,
               fixed_z_offset_from_bottom: fixed_state_height_offset(cell_space)
-            )
-
-            assert_cell_space_local_grid_v2!(
-              group,
-              context: :geometry_edit_close
             )
 
             log_local_grid_v2_coordinate_report(
               cell_space,
               frame_report,
               recenter_report,
-              normalized: true
+              normalized: :unchecked
             )
             true
           end

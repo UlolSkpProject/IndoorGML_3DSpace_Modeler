@@ -153,65 +153,44 @@ module ULOL
           end
 
           # Creation policy:
-          #   1. decide/apply the final local frame first;
-          #   2. run the production LVN once in that frame;
-          #   3. recenter using a translation snapped to the same 0.001 mm grid.
+          #   1. decide/apply the final local frame;
+          #   2. recenter using a translation snapped to the 0.001 mm grid.
+          #
+          # LVN is beta functionality and must only run through its explicit
+          # console/API entrypoint.
           def initialize_cell_space_coordinates_local_grid_v2(cell_space)
             raise ArgumentError, 'CellSpace is invalid during Local Grid V2 initialization' unless cell_space&.valid?
 
             group = cell_space.sketchup_group
             ensure_cell_space_is_child_of_primal_space!(cell_space)
             frame_report = align_cell_space_local_frame_local_grid_v2(group)
-            normalize_cell_space_local_grid_v2!(group, reason: :creation)
             recenter_report = recenter_cell_space_geometry_local_grid_v2(
               group,
               fixed_z_offset_from_bottom: fixed_state_height_offset(cell_space)
             )
-            assert_cell_space_local_grid_v2!(group, context: :creation)
-            log_local_grid_v2_coordinate_report(cell_space, frame_report, recenter_report, normalized: true)
+            log_local_grid_v2_coordinate_report(cell_space, frame_report, recenter_report, normalized: :unchecked)
             true
           end
 
           # Refresh policy:
-          # - If the local frame changes, LVN must run because rotation/scale baking
-          #   does not preserve a Cartesian local grid.
-          # - If the frame is unchanged, do not normalize again.
-          # - A grid-snapped recenter translation preserves an already-normalized grid.
+          # - evaluate/apply the local frame;
+          # - recenter without implicitly invoking beta LVN.
           def refresh_cell_space_coordinates_local_grid_v2(cell_space)
             return false unless cell_space&.valid?
 
             ensure_cell_space_is_child_of_primal_space!(cell_space)
             group = cell_space.sketchup_group
-            normalized_before = LocalVertexNormalizer.normalized?(
-              group,
-              LOCAL_GRID_V2_TOLERANCE_MM
-            )
             frame_report = align_cell_space_local_frame_local_grid_v2(group)
-
-            if frame_report[:changed]
-              normalize_cell_space_local_grid_v2!(group, reason: :local_frame_changed)
-            end
-
             recenter_report = recenter_cell_space_geometry_local_grid_v2(
               group,
               fixed_z_offset_from_bottom: fixed_state_height_offset(cell_space)
             )
 
-            expected_normalized = normalized_before || frame_report[:changed]
-            normalized_after = LocalVertexNormalizer.normalized?(
-              group,
-              LOCAL_GRID_V2_TOLERANCE_MM
-            )
-            if expected_normalized && !normalized_after
-              raise LocalVertexNormalizer::TopologyChangedError,
-                    'Local Grid V2 recenter did not preserve normalized local coordinates'
-            end
-
             log_local_grid_v2_coordinate_report(
               cell_space,
               frame_report,
               recenter_report,
-              normalized: normalized_after
+              normalized: :unchecked
             )
             true
           end
@@ -230,32 +209,9 @@ module ULOL
             end
           end
 
-          def normalize_cell_space_local_grid_v2!(group, reason:)
-            report = normalize_local_vertex_group_with_operation(
-              group,
-              LOCAL_GRID_V2_TOLERANCE_MM,
-              debug: false
-            )
-            IndoorCore::Logger.puts(
-              "[IndoorGML] CellSpace Local Grid V2 LVN: " \
-              "entity_id=#{group.entityID} reason=#{reason} tolerance=#{LOCAL_GRID_V2_TOLERANCE_MM}mm"
-            )
-            report
-          end
-
-          def assert_cell_space_local_grid_v2!(group, context:)
-            return true if LocalVertexNormalizer.normalized?(
-              group,
-              LOCAL_GRID_V2_TOLERANCE_MM
-            )
-
-            raise LocalVertexNormalizer::TopologyChangedError,
-                  "CellSpace Local Grid V2 postcondition failed context=#{context}"
-          end
-
           # Equivalent geometric intent to the legacy dominant-wall alignment, but
           # it skips a no-op frame rewrite and reports whether local coordinates were
-          # materially transformed. Any material frame transform requires LVN.
+          # materially transformed.
           def align_cell_space_local_frame_local_grid_v2(cell_space_entity)
             return local_grid_v2_frame_report(false, false, nil, nil) unless cell_space_entity&.valid?
             return local_grid_v2_frame_report(false, false, nil, nil) unless @primal_group&.valid?
