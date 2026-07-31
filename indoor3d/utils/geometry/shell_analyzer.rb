@@ -82,13 +82,21 @@ module ULOL
             normal = face.normal
             normal.normalize!
             loops = face.loops.map { |loop| loop.vertices.map(&:position) }
+            inners = loops.reject { |loop| loop == outer || loop.length < 3 }
+            axis = dominant_axis(normal)
             {
               outer: outer,
-              inners: loops.reject { |loop| loop == outer || loop.length < 3 },
+              inners: inners,
               loops: loops.select { |loop| loop.length >= 2 },
+              outer_2d: outer.map { |vertex| project_point_for_axis(vertex, axis) },
+              inners_2d: inners.map do |loop|
+                loop.map { |vertex| project_point_for_axis(vertex, axis) }
+              end,
+              loop_edges: loops.select { |loop| loop.length >= 2 }
+                               .flat_map { |loop| loop_edges(loop) },
               normal: normal,
               plane_point: outer.first,
-              axis: dominant_axis(normal)
+              axis: axis
             }
           end.compact
         end
@@ -247,7 +255,12 @@ module ULOL
         private_class_method :clamp_point_to_bounds
 
         def self.shell_distance(faces, point)
-          faces.map { |face| point_to_face_distance(point, face) }.min || 0.0
+          minimum = nil
+          faces.each do |face|
+            distance = point_to_face_distance(point, face)
+            minimum = distance if minimum.nil? || distance < minimum
+          end
+          minimum || 0.0
         end
         private_class_method :shell_distance
 
@@ -256,19 +269,21 @@ module ULOL
           projected = offset_point(point, face[:normal], -signed_distance)
           return signed_distance.abs if point_in_face_region?(projected, face, SHELL_CENTER_TOLERANCE)
 
-          face[:loops].flat_map { |loop| loop_edges(loop) }
-                      .map { |edge_start, edge_end| point_to_segment_distance(point, edge_start, edge_end) }
-                      .min || signed_distance.abs
+          minimum = nil
+          face[:loop_edges].each do |edge_start, edge_end|
+            distance = point_to_segment_distance(point, edge_start, edge_end)
+            minimum = distance if minimum.nil? || distance < minimum
+          end
+          minimum || signed_distance.abs
         end
         private_class_method :point_to_face_distance
 
         def self.point_in_face_region?(point, face, tolerance)
           point_2d = project_point_for_axis(point, face[:axis])
-          outer = face[:outer].map { |vertex| project_point_for_axis(vertex, face[:axis]) }
-          return false unless point_in_polygon?(point_2d, outer, tolerance)
+          return false unless point_in_polygon?(point_2d, face[:outer_2d], tolerance)
 
-          face[:inners].none? do |inner|
-            point_in_polygon?(point_2d, inner.map { |vertex| project_point_for_axis(vertex, face[:axis]) }, tolerance)
+          face[:inners_2d].none? do |inner|
+            point_in_polygon?(point_2d, inner, tolerance)
           end
         end
         private_class_method :point_in_face_region?
