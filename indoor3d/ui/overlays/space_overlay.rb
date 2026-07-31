@@ -41,6 +41,39 @@ module ULOL
           vector
         end
 
+        # Captures the render transform once for a single overlay rebuild. This
+        # snapshot is intentionally short-lived: callers must acquire a new one
+        # for each rebuild so active-path / Primal transform changes are observed.
+        def overlay_render_context_snapshot
+          transformation = Utils::Transformation.root_transformation_in_model(@indoor_model.primal_group)
+          {
+            transformation: transformation,
+            cache_key: [rounded_transformation_key(transformation)]
+          }
+        rescue StandardError
+          nil
+        end
+
+        def overlay_render_point_from_snapshot(point, snapshot)
+          transformation = snapshot && snapshot[:transformation]
+          return overlay_render_point(point) unless transformation && point.is_a?(Geom::Point3d)
+
+          point.transform(transformation)
+        rescue StandardError
+          overlay_render_point(point)
+        end
+
+        def overlay_render_vector_from_snapshot(vector, snapshot)
+          transformation = snapshot && snapshot[:transformation]
+          return overlay_render_vector(vector) unless transformation && vector.is_a?(Geom::Vector3d)
+
+          transformed = vector.transform(transformation)
+          transformed.normalize! if transformed.length > 0.001
+          transformed
+        rescue StandardError
+          overlay_render_vector(vector)
+        end
+
         def overlay_render_context_cache_key
           [
             rounded_transformation_key(Utils::Transformation.root_transformation_in_model(@indoor_model.primal_group))
