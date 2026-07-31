@@ -10,8 +10,6 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       module DualOverlayRegressionCheck
-        REPORT_DELAY_SECONDS = 10.0
-
         module_function
 
         def run
@@ -62,7 +60,7 @@ module ULOL
                           !transition_builder.instance_variable_defined?(:@transition_curve_cache))
 
           passed = checks.all? { |entry| entry[:pass] }
-          report = build_report(
+          puts build_report(
             indoor_model,
             baseline.length,
             visible_states,
@@ -70,15 +68,11 @@ module ULOL
             render_cache.length,
             checks
           )
-          schedule_report(report)
           passed
         rescue StandardError => e
-          report = [
-            '[regression] Dual Overlay Regression Check failed',
-            "#{e.class}: #{e.message}",
-            Array(e.backtrace).first(10).join("\n")
-          ].join("\n")
-          schedule_report(report)
+          warn '[regression] Dual Overlay Regression Check failed'
+          warn "#{e.class}: #{e.message}"
+          warn Array(e.backtrace).first(10).join("\n")
           false
         end
 
@@ -112,12 +106,6 @@ module ULOL
 
         def check(label, pass, detail = nil)
           { label: label, pass: !!pass, detail: detail }
-        end
-
-        def schedule_report(report)
-          UI.start_timer(REPORT_DELAY_SECONDS, false) { puts report }
-        rescue StandardError
-          puts report
         end
 
         def build_report(indoor_model, point_count, visible_states, visible_transitions, cache_entries, checks)
