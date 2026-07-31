@@ -239,15 +239,6 @@ module ULOL
           end
         end
 
-        def repair_degenerate_source_triangles(triangle_records, coordinate_space: :grid)
-          measure_debug_stage(
-            "degenerate_repair_#{coordinate_space}".to_sym,
-            triangle_count: triangle_records.length
-          ) do
-            super
-          end
-        end
-
         def normalize_triangle_records_allowing_collisions(
           triangle_records,
           axis_plane_plan = nil,
@@ -255,15 +246,6 @@ module ULOL
         )
           measure_debug_stage(
             :grid_target_projection,
-            triangle_count: triangle_records.length
-          ) do
-            super
-          end
-        end
-
-        def repair_grid_triangles_with_patch_fallback(triangle_records)
-          measure_debug_stage(
-            :grid_triangle_repair,
             triangle_count: triangle_records.length
           ) do
             super
@@ -301,20 +283,6 @@ module ULOL
           measure_debug_stage(
             :triangle_record_sanitize,
             triangle_count: triangle_records.length
-          ) do
-            super
-          end
-        end
-
-        def retriangulate_exact_coplanar_patches(
-          triangle_records,
-          forced_source_face_keys: [],
-          force_all: false
-        )
-          measure_debug_stage(
-            :exact_coplanar_patch_retriangulation,
-            triangle_count: triangle_records.length,
-            forced_face_count: forced_source_face_keys.length
           ) do
             super
           end
@@ -459,10 +427,6 @@ module ULOL
           ) do
             super
           end
-        end
-
-        def aggregate_degenerate_repair_reports(stage_reports)
-          measure_debug_stage(:degenerate_report_aggregation) { super }
         end
 
         def build_normalization_report(**options)

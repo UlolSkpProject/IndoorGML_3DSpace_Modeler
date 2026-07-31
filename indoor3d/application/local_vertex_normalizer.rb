@@ -12,7 +12,6 @@ require_relative 'local_vertex_normalizer/source_boundary_normalization_v2'
 require_relative 'local_vertex_normalizer/source_collapsed_sliver_cleanup_v2'
 require_relative 'local_vertex_normalizer/pipeline_v2'
 require_relative 'local_vertex_normalizer/grid_altitude_sliver_retriangulation_v2'
-require_relative 'local_vertex_normalizer/runtime_regression_fixes_v2'
 
 # Correctness repair chain.
 require_relative 'local_vertex_normalizer/grid_near_edge_split_repair_v2'
@@ -23,7 +22,6 @@ require_relative 'local_vertex_normalizer/grid_cross_source_sliver_flip_v2'
 require_relative 'local_vertex_normalizer/grid_post_conforming_altitude_sliver_repair_v2'
 require_relative 'local_vertex_normalizer/rebuild_omission_vertex_collapse_v2'
 require_relative 'local_vertex_normalizer/surface_descriptor_boundary_graph_v2'
-require_relative 'local_vertex_normalizer/coplanar_patch_provenance_trace_v2'
 
 # Alias-based normalize_entity wrappers. Fast-path must capture the completed
 # correctness pipeline, and final merge must remain outside the fast-path.

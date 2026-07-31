@@ -1250,28 +1250,6 @@ module ULOL
           ]
         end
 
-        def aggregate_degenerate_repair_reports(stage_reports)
-          normalized_stages = stage_reports.transform_values do |report|
-            normalized = {
-              repaired_triangles: report[:repaired_triangles].to_i,
-              replaced_pairs: report[:replaced_pairs].to_i
-            }
-            normalized[:repair_failure_set] = report[:repair_failure_set] if
-              report[:repair_failure_set]
-            normalized
-          end
-
-          {
-            repaired_triangles: normalized_stages.values.sum do |report|
-              report[:repaired_triangles]
-            end,
-            replaced_pairs: normalized_stages.values.sum do |report|
-              report[:replaced_pairs]
-            end,
-            stages: normalized_stages
-          }
-        end
-
         def degenerate_triangle_record?(record, coordinate_space: :grid)
           triangle = record[:points].map do |point|
             triangle_point_key(point, coordinate_space)
@@ -1429,24 +1407,6 @@ module ULOL
         end
 
 
-        def exact_coplanar_patch_retriangulation_required?(patch)
-          triangles = patch.map do |record|
-            triangle = record[:points].map { |point| grid_indices(point) }
-            source_normal = Array(record[:source_normal]).map(&:to_f)
-            actual_normal = integer_triangle_normal(triangle)
-            return true if source_normal.length == 3 &&
-                           vector_dot(actual_normal, source_normal).negative?
-            return true if exact_triangle_minimum_altitude_mm(triangle) < @tolerance_mm
-
-            triangle
-          end
-
-          validate_triangle_intersections!(triangles)
-          false
-        rescue TopologyChangedError
-          true
-        end
-
         def exact_triangle_minimum_altitude_mm(triangle)
           normal_length = Math.sqrt(
             integer_dot(
@@ -1464,58 +1424,6 @@ module ULOL
           return 0.0 unless longest_edge&.positive?
 
           (normal_length / longest_edge) * @tolerance_mm
-        end
-
-        def exact_coplanar_triangle_patches(triangle_records)
-          grouped = triangle_records.group_by do |record|
-            exact_coplanar_patch_key(record)
-          end
-          patches = []
-
-          grouped.each_value do |records|
-            edge_owners = Hash.new { |hash, key| hash[key] = [] }
-            records.each_with_index do |record, index|
-              triangle = record[:points].map { |point| grid_indices(point) }
-              3.times do |edge_index|
-                edge = canonical_edge_key(
-                  triangle[edge_index],
-                  triangle[(edge_index + 1) % 3]
-                )
-                edge_owners[edge] << index
-              end
-            end
-
-            adjacency = Array.new(records.length) { [] }
-            edge_owners.each_value do |owners|
-              next unless owners.length == 2
-
-              first, second = owners
-              adjacency[first] << second
-              adjacency[second] << first
-            end
-
-            visited = Array.new(records.length, false)
-            records.each_index do |seed|
-              next if visited[seed]
-
-              visited[seed] = true
-              queue = [seed]
-              component = []
-              until queue.empty?
-                index = queue.shift
-                component << records[index]
-                adjacency[index].each do |neighbor|
-                  next if visited[neighbor]
-
-                  visited[neighbor] = true
-                  queue << neighbor
-                end
-              end
-              patches << component
-            end
-          end
-
-          patches
         end
 
         def exact_coplanar_patch_key(record)
@@ -2901,13 +2809,6 @@ module ULOL
 
         def project_integer_point(point, drop_axis)
           point.each_with_index.filter_map { |value, index| value unless index == drop_axis }
-        end
-
-        def integer_aabbs_overlap?(triangle_a, triangle_b)
-          integer_aabb_bounds_overlap?(
-            integer_triangle_aabb(triangle_a),
-            integer_triangle_aabb(triangle_b)
-          )
         end
 
         def integer_triangle_aabb(triangle)

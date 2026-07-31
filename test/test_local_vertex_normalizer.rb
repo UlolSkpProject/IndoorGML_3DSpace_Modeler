@@ -720,7 +720,7 @@ module ULOL
           refute repaired.any? { |record| instance.send(:degenerate_triangle_record?, record) }
         end
 
-        def test_clean_triangle_worklists_skip_repair_and_collision_sanitize
+        def test_clean_triangle_worklist_skips_collision_sanitize
           instance = normalizer
           records = []
           add_triangle_record(
@@ -730,13 +730,6 @@ module ULOL
             mm_point(0, 10, 0),
             :clean
           )
-
-          repaired, repair_report = instance.send(
-            :repair_degenerate_source_triangles,
-            records
-          )
-          assert_same records, repaired
-          assert_empty repair_report.dig(:repair_failure_set, :triangle_indices)
 
           instance.define_singleton_method(:sanitize_triangle_records) do |*_args, **_options|
             raise 'clean collision worklist must not sanitize'
@@ -2094,21 +2087,6 @@ module ULOL
           @snapshot_role_profile = nil
         end
 
-        def test_degenerate_repair_report_aggregates_each_mesh_stage
-          instance = normalizer
-          report = instance.send(
-            :aggregate_degenerate_repair_reports,
-            source: { repaired_triangles: 1, replaced_pairs: 1 },
-            conforming: { repaired_triangles: 0, replaced_pairs: 0 },
-            rebuilt: { repaired_triangles: 0, replaced_pairs: 0 },
-            final: { repaired_triangles: 2, replaced_pairs: 2 }
-          )
-
-          assert_equal 3, report[:repaired_triangles]
-          assert_equal 3, report[:replaced_pairs]
-          assert_equal 2, report.dig(:stages, :final, :repaired_triangles)
-        end
-
         def test_short_edge_sliver_shape_requires_opposite_short_edges
           instance = normalizer
           sliver = [
@@ -2291,49 +2269,6 @@ module ULOL
           assert_equal 20, plan[:collapsed_cluster_count]
           assert_equal 20, plan[:collapsed_vertex_count]
           assert_operator plan[:max_displacement_mm], :<, 0.106
-        end
-
-        def test_exact_coplanar_patch_retriangulates_overlapping_concave_diagonal
-          instance = normalizer
-          point_a = mm_point(0, 0, 0)
-          point_b = mm_point(10, 0, 0)
-          point_c = mm_point(10, 10, 0)
-          point_d = mm_point(8, 7, 0)
-          point_e = mm_point(20, 0, 0)
-          point_f = mm_point(25, 0, 0)
-          point_g = mm_point(20, 5, 0)
-          triangles = []
-          add_triangle_record(triangles, point_a, point_b, point_c, :surface)
-          add_triangle_record(triangles, point_a, point_c, point_d, :surface)
-          add_triangle_record(triangles, point_e, point_f, point_g, :healthy)
-
-          rebuilt, report = instance.send(
-            :retriangulate_exact_coplanar_patches,
-            triangles
-          )
-          signatures = rebuilt.map do |record|
-            record[:points].map { |point| instance.send(:grid_indices, point) }.sort
-          end
-          expected = [
-            [point_a, point_b, point_d],
-            [point_b, point_c, point_d],
-            [point_e, point_f, point_g]
-          ].map do |points|
-            points.map { |point| instance.send(:grid_indices, point) }.sort
-          end
-
-          assert_equal expected.sort, signatures.sort
-          assert_equal 2, report[:detected_patches]
-          assert_equal 1, report[:rebuilt_patches]
-          assert_equal 1, report[:preserved_patches]
-          assert_equal 1, report[:boundary_loops]
-          assert_equal 0, report[:holes]
-          assert_equal [0], report.dig(:repair_failure_set, :patch_indices)
-          assert_equal 1, report.dig(
-            :repair_failure_set,
-            :reasons,
-            :triangle_intersection
-          )
         end
 
         def test_intersection_failure_collection_respects_patch_partitions

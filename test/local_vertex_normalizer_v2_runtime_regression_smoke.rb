@@ -1,8 +1,7 @@
 # frozen_string_literal: true
 
-# Standalone regression smoke test for the two failures observed in the
-# 159-group SketchUp run: source zero-area cleanup and exact-plane false
-# negatives during final surface equivalence.
+# Standalone regression smoke test for exact-plane false negatives during
+# final surface equivalence.
 
 module ULOL
   module Indoor3DGmlModeler
@@ -19,48 +18,6 @@ module ULOL
         end
 
         private
-
-        def repair_degenerate_source_triangles(records, coordinate_space: :grid)
-          raise ReconstructionError, 'unresolved source zero-area triangle' if coordinate_space == :source
-
-          [records, { repaired_triangles: 0, replaced_pairs: 0 }]
-        end
-
-        def normalize_triangle_records_allowing_collisions(records, _plan = nil, duplicate_diagnostics: nil)
-          duplicate_diagnostics
-          [records, { forced_source_face_keys: [] }]
-        end
-
-        def degenerate_triangle_record?(record, coordinate_space: :grid)
-          coordinate_space
-          triangle = record[:points]
-          triangle.uniq.length != 3 || integer_zero_vector?(integer_triangle_normal(triangle))
-        end
-
-        def empty_repair_failure_set
-          {
-            vertex_keys: [], edge_keys: [], triangle_indices: [],
-            source_face_keys: [], patch_indices: [], reasons: {}
-          }
-        end
-
-        def add_repair_failure!(failure_set, reason:, **provenance)
-          provenance.each do |key, values|
-            failure_set[key].concat(Array(values).compact) if failure_set.key?(key)
-          end
-          failure_set[:reasons][reason] = failure_set[:reasons].fetch(reason, 0) + 1
-        end
-
-        def finalize_repair_failure_set(failure_set)
-          failure_set.transform_values do |value|
-            value.is_a?(Hash) ? value.dup : value.uniq.sort_by(&:inspect)
-          end
-        end
-
-        def source_face_keys_with_adjacent_triangles(records, indices, coordinate_space:)
-          coordinate_space
-          indices.map { |index| records[index][:source_face_key] }.compact.uniq
-        end
 
         def triangle_signature_for_space(points, _space)
           points.sort
@@ -179,34 +136,9 @@ module ULOL
 end
 
 require_relative '../indoor3d/application/local_vertex_normalizer/rebuild_repair_v2'
-require_relative '../indoor3d/application/local_vertex_normalizer/runtime_regression_fixes_v2'
 
 klass = ULOL::Indoor3DGmlModeler::IndoorCore::LocalVertexNormalizer
 normalizer = klass.new
-
-degenerate = {
-  points: [[0, 0, 0], [1, 0, 0], [2, 0, 0]],
-  source_face_key: 10
-}
-valid = {
-  points: [[0, 0, 0], [2, 0, 0], [0, 2, 0]],
-  source_face_key: 10
-}
-records, report = normalizer.send(
-  :repair_degenerate_source_triangles,
-  [degenerate, valid],
-  coordinate_space: :source
-)
-raise 'source fallback did not remove zero-area record' unless records.length == 1
-raise 'source fallback did not mark forced patch' unless records.first[:force_retriangulation]
-raise 'source fallback report missing face key' unless report[:forced_source_face_keys] == [10]
-
-_normalized, cleanup = normalizer.send(
-  :normalize_triangle_records_allowing_collisions,
-  records
-)
-raise 'removed patch-retriangulation marker leaked into grid cleanup' unless
-  cleanup[:forced_source_face_keys].empty?
 
 missing_plane_triangle = {
   points: [

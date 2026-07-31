@@ -415,18 +415,6 @@ module ULOL
           ]
         end
 
-        def reusable_post_cleanup_snapshot?(
-          snapshot,
-          final_repair,
-          topology_after
-        )
-          post_cleanup_snapshot_reuse_decision(
-            snapshot,
-            final_repair,
-            topology_after
-          )[:reused]
-        end
-
         def post_cleanup_snapshot_reuse_decision(
           snapshot,
           final_repair,
