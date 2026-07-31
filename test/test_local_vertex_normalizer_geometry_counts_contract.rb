@@ -62,6 +62,8 @@ module ULOL
             LocalVertexNormalizer.instance_method(:geometry_counts).owner
           )
           refute_includes LocalVertexNormalizer.ancestors, CoplanarFaceComponentMergeV2
+          refute_respond_to CoplanarFaceComponentMergeV2, :geometry_counts
+          assert_respond_to CoplanarFaceComponentMergeV2, :coplanar_merge_face_summary
         end
 
         def test_geometry_counts_reports_vertices_wire_edges_and_orientation_conflicts

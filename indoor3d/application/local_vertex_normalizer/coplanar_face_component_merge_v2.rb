@@ -68,7 +68,7 @@ module ULOL
                            [-group.length, group.map { |face| stable_entity_id(face) }.min]
                          end
 
-          initial_topology = geometry_counts(entities)
+          initial_topology = coplanar_merge_face_summary(entities)
           initial_manifold = manifold?(solid)
           plans = merge_groups.map.with_index do |group, index|
             prepare_merge_plan(group, ordinal: index + 1, total: merge_groups.length)
@@ -83,7 +83,7 @@ module ULOL
 
           entities.erase_entities(all_internal_edges) unless all_internal_edges.empty?
 
-          final_topology = geometry_counts(entities)
+          final_topology = coplanar_merge_face_summary(entities)
           final_manifold = manifold?(solid)
           actual_face_reduction = initial_topology[:faces] - final_topology[:faces]
 
@@ -377,7 +377,7 @@ module ULOL
           angles.max || 0.0
         end
 
-        def geometry_counts(entities)
+        def coplanar_merge_face_summary(entities)
           faces = entities.grep(Sketchup::Face).select(&:valid?)
           edges = entities.grep(Sketchup::Edge).select(&:valid?)
           boundary_edges = edges.count { |edge| edge.faces.length == 1 }
