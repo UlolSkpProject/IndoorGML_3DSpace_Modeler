@@ -167,9 +167,21 @@ module ULOL
         private_class_method :ray_face_intersection_distance
 
         def self.unique_sorted_distances(distances, tolerance)
-          distances.sort.each_with_object([]) do |distance, unique|
-            unique << distance if unique.empty? || (distance - unique.last).abs > tolerance
+          return distances if distances.length < 2
+
+          distances.sort!
+          write_index = 1
+          last_distance = distances.first
+          (1...distances.length).each do |read_index|
+            distance = distances[read_index]
+            next if (distance - last_distance).abs <= tolerance
+
+            distances[write_index] = distance
+            write_index += 1
+            last_distance = distance
           end
+          distances.slice!(write_index, distances.length - write_index) if write_index < distances.length
+          distances
         end
         private_class_method :unique_sorted_distances
 
