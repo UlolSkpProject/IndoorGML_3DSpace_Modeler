@@ -73,6 +73,7 @@ module ULOL
           return [] unless entity&.valid?
           return [] unless entity.respond_to?(:definition) && entity.definition&.valid?
 
+          ray_directions = shell_ray_directions
           entity.definition.entities.grep(Sketchup::Face).map do |face|
             next unless face&.valid?
 
@@ -94,6 +95,7 @@ module ULOL
               end,
               loop_edges: loops.select { |loop| loop.length >= 2 }
                                .flat_map { |loop| loop_edges(loop) },
+              ray_denominators: ray_directions.map { |direction| dot_product(normal, direction) },
               normal: normal,
               plane_point: outer.first,
               axis: axis
@@ -103,10 +105,25 @@ module ULOL
         private_class_method :local_shell_faces
 
         def self.shell_contains_point?(faces, point, tolerance)
-          votes = shell_ray_directions.count do |direction|
-            ray_intersection_count(faces, point, direction, tolerance).odd?
+          directions = shell_ray_directions
+          required_votes = (directions.length / 2) + 1
+          inside_votes = 0
+
+          directions.each_with_index do |direction, index|
+            inside_votes += 1 if ray_intersection_count(
+              faces,
+              point,
+              direction,
+              tolerance,
+              ray_index: index
+            ).odd?
+            return true if inside_votes >= required_votes
+
+            remaining = directions.length - index - 1
+            return false if inside_votes + remaining < required_votes
           end
-          votes > (shell_ray_directions.length / 2)
+
+          false
         end
         private_class_method :shell_contains_point?
 
@@ -119,16 +136,26 @@ module ULOL
         end
         private_class_method :shell_ray_directions
 
-        def self.ray_intersection_count(faces, point, direction, tolerance)
+        def self.ray_intersection_count(faces, point, direction, tolerance, ray_index: nil)
           distances = faces.filter_map do |face|
-            ray_face_intersection_distance(face, point, direction, tolerance)
+            ray_face_intersection_distance(
+              face,
+              point,
+              direction,
+              tolerance,
+              ray_index: ray_index
+            )
           end
           unique_sorted_distances(distances, tolerance).length
         end
         private_class_method :ray_intersection_count
 
-        def self.ray_face_intersection_distance(face, point, direction, tolerance)
-          denominator = dot_product(face[:normal], direction)
+        def self.ray_face_intersection_distance(face, point, direction, tolerance, ray_index: nil)
+          denominator = if ray_index && face[:ray_denominators]
+                          face[:ray_denominators][ray_index]
+                        else
+                          dot_product(face[:normal], direction)
+                        end
           return nil if denominator.abs <= tolerance
 
           distance = dot_product(point.vector_to(face[:plane_point]), face[:normal]) / denominator
