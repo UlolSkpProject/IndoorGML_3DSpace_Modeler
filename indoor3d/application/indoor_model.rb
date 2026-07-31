@@ -13,6 +13,7 @@ module ULOL
 
         require_relative 'cell_space_lifecycle_service'
         require_relative 'cell_space_conversion'
+        require_relative 'cell_space_logging_policy'
         require_relative 'topology_coordinator'
         require_relative 'indoor_model/runtime_support.rb'
         require_relative 'indoor_model/scene_groups.rb'
