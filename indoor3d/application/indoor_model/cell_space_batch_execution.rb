@@ -3,6 +3,61 @@
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
+      # Adapts the executor's model/world-space copy request into a direct copy
+      # under IndoorGML_PrimalSpaceFeatures. The executor still owns source
+      # isolation, attribute copying, success cleanup, and failure rollback.
+      #
+      # Input transformation contract:
+      #   world = transformation
+      #
+      # Direct-child transformation contract:
+      #   local = primal_world.inverse * world
+      #   primal_world * local == world
+      #
+      # The returned entity is always a unique Group, matching the net result of
+      # the previous prepare_source copy followed by place_cell_group cloning.
+      class CellSpaceBatchTargetEntities
+        def initialize(primal_group_resolver:)
+          @primal_group_resolver = primal_group_resolver
+        end
+
+        def add_instance(definition, world_transformation)
+          primal_group = resolve_primal_group
+          local_transformation = self.class.primal_local_transformation(
+            primal_group,
+            world_transformation
+          )
+
+          created = primal_group.entities.add_instance(definition, local_transformation)
+          raise ArgumentError, 'Could not create direct PrimalSpaceFeatures copy' unless created&.valid?
+
+          created = created.to_group if created.respond_to?(:to_group)
+          raise ArgumentError, 'Could not convert direct PrimalSpaceFeatures copy to Group' unless created&.valid?
+
+          created.make_unique if created.respond_to?(:make_unique)
+          created
+        rescue StandardError
+          created.erase! if created&.valid?
+          raise
+        end
+
+        def self.primal_local_transformation(primal_group, world_transformation)
+          primal_world = Utils::Transformation.root_transformation_in_model(primal_group)
+          primal_world.inverse * world_transformation
+        end
+
+        private
+
+        def resolve_primal_group
+          primal_group = @primal_group_resolver.call
+          unless primal_group&.valid? && primal_group.respond_to?(:entities)
+            raise ArgumentError, 'IndoorGML_PrimalSpaceFeatures is not ready for direct batch copy'
+          end
+
+          primal_group
+        end
+      end
+
       class IndoorModel
         # Execution-layer override for the batch lifecycle. The global CellSpace
         # environment is prepared exactly once by the operation owner before any
@@ -26,12 +81,15 @@ module ULOL
             lifecycle = local_grid_v2 ?
               cell_space_lifecycle_service_local_grid_v2 :
               cell_space_lifecycle_service
+            target_entities = CellSpaceBatchTargetEntities.new(
+              primal_group_resolver: proc { @primal_group }
+            )
 
             BulkCellSpaceConversionService.new(
               model: model,
               jobs: jobs,
               fallback_target: fallback_target,
-              target_entities: model.entities,
+              target_entities: target_entities,
               converter: proc do |source, target_type, target_category, target_storey|
                 cell_space = lifecycle.create_from_group_deferred(
                   source,
