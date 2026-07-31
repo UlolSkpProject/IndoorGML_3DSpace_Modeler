@@ -21,6 +21,7 @@ end
 
 require_relative '../indoor3d/infrastructure/observers/observer_helpers'
 require_relative '../indoor3d/infrastructure/observers/space_features_observer'
+require_relative '../indoor3d/infrastructure/observers/primal_entities_observer'
 require_relative '../indoor3d/infrastructure/observers/root_entities_observer'
 
 module ULOL
@@ -49,12 +50,26 @@ module ULOL
           assert_equal [101], model.root_removed_ids
         end
 
+        def test_primal_entity_tracking_can_be_cleared_by_indoor_model
+          model = FakeIndoorModel.new
+          observer = Indoor3DGmlPrimalEntitiesObserver.new(model)
+          observer.instance_variable_set(:@indoor_entity_ids, 101 => true)
+
+          assert_respond_to observer, :untrack_entity_id
+          assert_equal true, observer.untrack_entity_id(101)
+
+          observer.onElementRemoved(nil, 101)
+
+          assert_empty model.primal_removed_ids
+        end
+
         class FakeIndoorModel
-          attr_reader :space_features_erased_entities, :root_removed_ids
+          attr_reader :space_features_erased_entities, :root_removed_ids, :primal_removed_ids
 
           def initialize
             @space_features_erased_entities = []
             @root_removed_ids = []
+            @primal_removed_ids = []
           end
 
           def space_features_erased(entity)
@@ -63,6 +78,10 @@ module ULOL
 
           def root_entity_removed(entity_id)
             @root_removed_ids << entity_id
+          end
+
+          def primal_entity_removed(entity_id)
+            @primal_removed_ids << entity_id
           end
         end
 

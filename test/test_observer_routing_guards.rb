@@ -97,6 +97,17 @@ module ULOL
           assert_equal 0, model.sketchup_model.commit_count
         end
 
+        def test_indoor_model_operation_is_a_public_entry_point
+          model = FakeOperationModel.new
+
+          result = model.with_indoor_model_operation('Public Operation') { :ran }
+
+          assert_equal :ran, result
+          assert_equal 1, model.sketchup_model.start_count
+          assert_equal 1, model.sketchup_model.commit_count
+          assert_equal 0, model.sketchup_model.abort_count
+        end
+
         def test_forced_owner_can_start_while_observers_are_suppressed
           model = FakeOperationModel.new(syncing: true)
 

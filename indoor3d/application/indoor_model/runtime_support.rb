@@ -205,6 +205,7 @@ module ULOL
               @indoor_operation_depth = [@indoor_operation_depth.to_i - 1, 0].max
             end
           end
+          public :with_indoor_model_operation
 
           def indoor_operation_suppressed?
             respond_to?(:observer_routing_suppressed?) && observer_routing_suppressed?
