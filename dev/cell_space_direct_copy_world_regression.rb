@@ -27,7 +27,8 @@ module ULOL
 
         class << self
           def run!
-            build!
+            return false unless build!
+
             convert_and_verify!
           end
 
@@ -114,7 +115,7 @@ module ULOL
 
           def verify!
             ensure_extension_ready!
-            ensure_built_state!
+            ensure_snapshot_state!
             report = verify_current_model
             print_verification_report(report)
             report[:passed]
@@ -597,12 +598,17 @@ module ULOL
           end
 
           def ensure_built_state!
-            unless @baseline && @jobs && @roots
-              raise 'Fixture is not built. Run build! first.'
-            end
+            ensure_snapshot_state!
             invalid_sources = @jobs.reject { |job| job[:source]&.valid? }
             unless invalid_sources.empty?
               raise 'Fixture sources are no longer valid. Reopen an empty model and run build! again.'
+            end
+            true
+          end
+
+          def ensure_snapshot_state!
+            unless @baseline && @jobs && @roots
+              raise 'Fixture is not built. Run build! first.'
             end
             true
           end
