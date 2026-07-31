@@ -17,7 +17,8 @@ module ULOL
             category_code: category_code,
             storey: storey,
             synchronize_adjacency: true,
-            apply_lock_policy: true
+            apply_lock_policy: true,
+            persist_attributes: true
           )
         end
 
@@ -28,11 +29,28 @@ module ULOL
             category_code: category_code,
             storey: storey,
             synchronize_adjacency: false,
-            apply_lock_policy: false
+            apply_lock_policy: false,
+            persist_attributes: true
           )
         end
 
-        def create_from_group_internal(sketchup_group, cell_type:, category_code:, storey:, synchronize_adjacency:, apply_lock_policy:)
+        # Batch conversion owns the whole operation and performs one final
+        # persistence pass after topology synchronization. Keep the existing
+        # deferred API eager so non-batch callers preserve their established
+        # persistence contract.
+        def create_from_group_batch_deferred(sketchup_group, cell_type: CellSpaceType::GENERAL, category_code: nil, storey: nil)
+          create_from_group_internal(
+            sketchup_group,
+            cell_type: cell_type,
+            category_code: category_code,
+            storey: storey,
+            synchronize_adjacency: false,
+            apply_lock_policy: false,
+            persist_attributes: false
+          )
+        end
+
+        def create_from_group_internal(sketchup_group, cell_type:, category_code:, storey:, synchronize_adjacency:, apply_lock_policy:, persist_attributes:)
           raise ArgumentError, 'Group is already converted to CellSpace' if @source_preparer.converted?(sketchup_group)
 
           resolved_cell_type, resolved_category_code = @source_preparer.resolve_type_and_category(
@@ -60,7 +78,8 @@ module ULOL
             cell_space,
             state,
             synchronize_adjacency: synchronize_adjacency,
-            apply_lock_policy: apply_lock_policy
+            apply_lock_policy: apply_lock_policy,
+            persist_attributes: persist_attributes
           )
 
           cell_space
@@ -171,11 +190,11 @@ module ULOL
           @apply_cell_space_material.call(cell_space)
         end
 
-        def register_created(cell_space, state, synchronize_adjacency: true, apply_lock_policy: true)
+        def register_created(cell_space, state, synchronize_adjacency: true, apply_lock_policy: true, persist_attributes: true)
           raise ArgumentError, 'CellSpace scale normalization failed' if @register_cell_space.call(cell_space) == false
 
           @register_state.call(state)
-          @write_attributes.call(cell_space)
+          @write_attributes.call(cell_space) if persist_attributes
           @track_cell_space_entity.call(cell_space.sketchup_group)
           @synchronize_adjacency_and_transitions_for_cell_space.call(cell_space) if synchronize_adjacency
           @apply_indoor_lock_policy.call if apply_lock_policy
