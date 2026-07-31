@@ -119,7 +119,9 @@ module ULOL
             assert_equal 0, @group.mutation_count
             assert_nil @group.get_attribute(AttributeSerializer::ATTRIBUTE_DICTIONARY_NAME, 'feature')
 
-            assert @serializer.flush_deferred_cell_space_writes([@cell_space])
+            @serializer.with_cell_space_write_flush do
+              assert @serializer.write_cell_space(@cell_space)
+            end
 
             assert_operator @group.mutation_count, :>, 0
             assert_equal 'CellSpace', @group.get_attribute(AttributeSerializer::ATTRIBUTE_DICTIONARY_NAME, 'feature')
@@ -130,7 +132,9 @@ module ULOL
         def test_flush_populates_dedup_cache_for_later_topology_writes
           @serializer.with_cell_space_write_dedup(defer_writes: true) do
             assert @serializer.write_cell_space(@cell_space)
-            assert @serializer.flush_deferred_cell_space_writes([@cell_space])
+            @serializer.with_cell_space_write_flush do
+              assert @serializer.write_cell_space(@cell_space)
+            end
             flushed_count = @group.mutation_count
 
             assert @serializer.write_cell_space(@cell_space)
@@ -143,7 +147,9 @@ module ULOL
             assert @serializer.write_cell_space(@cell_space)
             @cell_space.storey = 'F03'
 
-            assert @serializer.flush_deferred_cell_space_writes([@cell_space])
+            @serializer.with_cell_space_write_flush do
+              assert @serializer.write_cell_space(@cell_space)
+            end
 
             assert_equal 'F03', @group.get_attribute(AttributeSerializer::ATTRIBUTE_DICTIONARY_NAME, 'storey')
           end
