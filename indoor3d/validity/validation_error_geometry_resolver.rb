@@ -361,6 +361,10 @@ module ULOL
 
           def cell_space_for(value)
             target = normalize_cell_id(value)
+            if @indoor_model&.respond_to?(:find_cell_space_by_normalized_id)
+              return @indoor_model.find_cell_space_by_normalized_id(target)
+            end
+
             Array(@indoor_model&.cell_spaces).find do |cell_space|
               normalize_cell_id(cell_space&.id) == target
             end
