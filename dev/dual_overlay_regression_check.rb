@@ -10,6 +10,8 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       module DualOverlayRegressionCheck
+        REPORT_DELAY_SECONDS = 10.0
+
         module_function
 
         def run
@@ -59,11 +61,24 @@ module ULOL
           checks << check('legacy curve-cache ivar is absent',
                           !transition_builder.instance_variable_defined?(:@transition_curve_cache))
 
-          print_report(indoor_model, baseline.length, visible_states, visible_transitions, render_cache.length, checks)
-          checks.all? { |entry| entry[:pass] }
+          passed = checks.all? { |entry| entry[:pass] }
+          report = build_report(
+            indoor_model,
+            baseline.length,
+            visible_states,
+            visible_transitions,
+            render_cache.length,
+            checks
+          )
+          schedule_report(report)
+          passed
         rescue StandardError => e
-          warn "[regression] #{e.class}: #{e.message}"
-          warn Array(e.backtrace).first(10).join("\n")
+          report = [
+            '[regression] Dual Overlay Regression Check failed',
+            "#{e.class}: #{e.message}",
+            Array(e.backtrace).first(10).join("\n")
+          ].join("\n")
+          schedule_report(report)
           false
         end
 
@@ -99,25 +114,33 @@ module ULOL
           { label: label, pass: !!pass, detail: detail }
         end
 
-        def print_report(indoor_model, point_count, visible_states, visible_transitions, cache_entries, checks)
-          puts '=' * 72
-          puts ' IndoorGML Dual Overlay Regression Check'
-          puts '=' * 72
-          puts format('states total        : %d', Array(indoor_model.states).length)
-          puts format('states visible      : %d', visible_states)
-          puts format('transitions total   : %d', Array(indoor_model.transitions).length)
-          puts format('transitions visible : %d', visible_transitions)
-          puts format('GL line points      : %d', point_count)
-          puts format('GL segments         : %d', point_count / 2)
-          puts format('render cache entries: %d', cache_entries)
-          puts '--- checks ------------------------------------------------------------'
+        def schedule_report(report)
+          UI.start_timer(REPORT_DELAY_SECONDS, false) { puts report }
+        rescue StandardError
+          puts report
+        end
+
+        def build_report(indoor_model, point_count, visible_states, visible_transitions, cache_entries, checks)
+          lines = []
+          lines << ('=' * 72)
+          lines << ' IndoorGML Dual Overlay Regression Check'
+          lines << ('=' * 72)
+          lines << format('states total        : %d', Array(indoor_model.states).length)
+          lines << format('states visible      : %d', visible_states)
+          lines << format('transitions total   : %d', Array(indoor_model.transitions).length)
+          lines << format('transitions visible : %d', visible_transitions)
+          lines << format('GL line points      : %d', point_count)
+          lines << format('GL segments         : %d', point_count / 2)
+          lines << format('render cache entries: %d', cache_entries)
+          lines << '--- checks ------------------------------------------------------------'
           checks.each do |entry|
             suffix = entry[:detail].nil? ? '' : " (#{entry[:detail]})"
-            puts format('%-6s %s%s', entry[:pass] ? 'PASS' : 'FAIL', entry[:label], suffix)
+            lines << format('%-6s %s%s', entry[:pass] ? 'PASS' : 'FAIL', entry[:label], suffix)
           end
-          puts '------------------------------------------------------------------------'
-          puts(checks.all? { |entry| entry[:pass] } ? 'RESULT: PASS' : 'RESULT: FAIL')
-          puts '=' * 72
+          lines << '------------------------------------------------------------------------'
+          lines << (checks.all? { |entry| entry[:pass] } ? 'RESULT: PASS' : 'RESULT: FAIL')
+          lines << ('=' * 72)
+          lines.join("\n")
         end
       end
     end
