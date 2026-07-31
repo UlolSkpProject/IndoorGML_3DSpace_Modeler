@@ -13,22 +13,23 @@ module ULOL
           @indoor_model = indoor_model
           @transform_context = transform_context
           @transition_curve_cache = {}
+          @transition_render_segment_cache = {}
           @render_transition_line_points = nil
           @render_transition_line_points_dirty = true
         end
 
-        # Invalidates only the assembled GL_LINES render list. Per-transition curve
-        # geometry remains cached because its key already contains every geometric
-        # input that affects the curve (transition id, rendered points, normals).
-        # A changed geometry therefore misses the old cache entry naturally.
+        # Invalidates only the assembled GL_LINES render list. Per-transition
+        # render segments and Hermite curve geometry remain content-addressed by
+        # their geometric inputs, so unchanged transitions can be reused directly.
         def invalidate
           @render_transition_line_points = nil
           @render_transition_line_points_dirty = true
         end
 
-        # Explicit hard reset for lifecycle/reload/debug cases that need cached
-        # per-transition geometry released immediately.
+        # Explicit hard reset for lifecycle/reload/debug cases that need all
+        # per-transition render and curve geometry released immediately.
         def clear_cache
+          @transition_render_segment_cache&.clear
           @transition_curve_cache&.clear
           invalidate
         end
@@ -44,12 +45,13 @@ module ULOL
 
         def build_render_transition_line_points
           points = []
+          render_context_key = transition_render_context_cache_key
           @indoor_model.transitions.each do |transition|
             next unless transition&.valid?
             next unless transition.state1&.valid? && transition.state2&.valid?
             next unless overlay_transition_visible?(transition)
 
-            segments = transition_curve_segments(transition)
+            segments = cached_transition_render_segments(transition, render_context_key)
             points.concat(segments[:default])
             points.concat(segments[:first])
             points.concat(segments[:second])
@@ -197,6 +199,57 @@ module ULOL
         end
 
         private
+
+        def cached_transition_render_segments(transition, render_context_key)
+          fingerprint = transition_render_fingerprint(transition, render_context_key)
+          cache_key = transition_render_cache_identity(transition)
+          if fingerprint
+            cached = @transition_render_segment_cache[cache_key]
+            return cached[:segments] if cached && cached[:fingerprint] == fingerprint
+          end
+
+          segments = transition_curve_segments(transition)
+          if fingerprint
+            @transition_render_segment_cache.clear if @transition_render_segment_cache.length > transition_curve_cache_limit
+            @transition_render_segment_cache[cache_key] = {
+              fingerprint: fingerprint,
+              segments: segments
+            }
+          end
+          segments
+        end
+
+        def transition_render_fingerprint(transition, render_context_key)
+          return nil if render_context_key.nil?
+
+          point1 = transition.state1_point || @transform_context.overlay_state_root_local_point(transition.state1)
+          point2 = transition.state2_point || @transform_context.overlay_state_root_local_point(transition.state2)
+          [
+            render_context_key,
+            @transform_context.rounded_point_key(point1),
+            @transform_context.rounded_point_key(point2),
+            @transform_context.rounded_point_key(transition.selected_waypoint),
+            @transform_context.rounded_vector_key(transition.selected_waypoint_normal1),
+            @transform_context.rounded_vector_key(transition.selected_waypoint_normal2)
+          ]
+        rescue StandardError
+          nil
+        end
+
+        def transition_render_cache_identity(transition)
+          id = transition.id
+          id.to_s.empty? ? transition.object_id : id
+        rescue StandardError
+          transition.object_id
+        end
+
+        def transition_render_context_cache_key
+          return nil unless @transform_context.respond_to?(:overlay_render_context_cache_key)
+
+          @transform_context.overlay_render_context_cache_key
+        rescue StandardError
+          nil
+        end
 
         def overlay_transition_visible?(transition)
           if @indoor_model.respond_to?(:dual_overlay_transition_visible?)
