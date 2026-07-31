@@ -148,6 +148,8 @@ module ULOL
             result.converted_count,
             result.errors
           )
+          elapsed = result.metrics&.[](:total_duration)
+          message = "#{message}\nTotal elapsed: #{format('%.3f', elapsed)} sec" if elapsed
           UiFeedback.publish_result(message, errors: result.errors)
         end
       end
