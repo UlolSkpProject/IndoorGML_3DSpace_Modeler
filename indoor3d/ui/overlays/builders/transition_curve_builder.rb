@@ -207,7 +207,14 @@ module ULOL
         end
 
         def polyline_segments(points)
-          points.each_cons(2).flat_map { |from, to| [from, to] }
+          segments = []
+          index = 0
+          last_index = points.length - 1
+          while index < last_index
+            segments << points[index] << points[index + 1]
+            index += 1
+          end
+          segments
         end
 
         private
