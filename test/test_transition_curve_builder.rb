@@ -192,7 +192,7 @@ module ULOL
           assert_equal 1, build_count
         end
 
-        def test_invalidate_rebuilds_final_points_and_per_transition_curve_cache
+        def test_invalidate_rebuilds_render_list_but_reuses_matching_curve_geometry
           transition = fake_transition(
             point1: Geom::Point3d.new(0, 0, 0),
             point2: Geom::Point3d.new(10, 0, 0),
@@ -208,10 +208,57 @@ module ULOL
           first_points = builder.transition_line_points
           assert_equal 2, Utils::Math::HermiteSpline.calls.length
           assert_same first_points, builder.transition_line_points
-          assert_equal 2, Utils::Math::HermiteSpline.calls.length
 
           builder.invalidate
-          refute_same first_points, builder.transition_line_points
+          second_points = builder.transition_line_points
+
+          refute_same first_points, second_points
+          assert_equal first_points, second_points
+          assert_equal 2, Utils::Math::HermiteSpline.calls.length
+        end
+
+        def test_invalidate_recomputes_curve_when_geometric_cache_key_changes
+          transition = fake_transition(
+            point1: Geom::Point3d.new(0, 0, 0),
+            point2: Geom::Point3d.new(10, 0, 0),
+            waypoint: Geom::Point3d.new(5, 5, 0),
+            normal1: Geom::Vector3d.new(0, 1, 0),
+            normal2: Geom::Vector3d.new(0, 1, 0)
+          )
+          builder = TransitionCurveBuilder.new(
+            indoor_model: fake_indoor_model([transition]),
+            transform_context: identity_transform_context
+          )
+
+          builder.transition_line_points
+          assert_equal 2, Utils::Math::HermiteSpline.calls.length
+
+          transition.selected_waypoint = Geom::Point3d.new(6, 5, 0)
+          builder.invalidate
+          builder.transition_line_points
+
+          assert_equal 4, Utils::Math::HermiteSpline.calls.length
+        end
+
+        def test_clear_cache_forces_curve_geometry_rebuild
+          transition = fake_transition(
+            point1: Geom::Point3d.new(0, 0, 0),
+            point2: Geom::Point3d.new(10, 0, 0),
+            waypoint: Geom::Point3d.new(5, 5, 0),
+            normal1: Geom::Vector3d.new(0, 1, 0),
+            normal2: Geom::Vector3d.new(0, 1, 0)
+          )
+          builder = TransitionCurveBuilder.new(
+            indoor_model: fake_indoor_model([transition]),
+            transform_context: identity_transform_context
+          )
+
+          builder.transition_line_points
+          assert_equal 2, Utils::Math::HermiteSpline.calls.length
+
+          builder.clear_cache
+          builder.transition_line_points
+
           assert_equal 4, Utils::Math::HermiteSpline.calls.length
         end
 
