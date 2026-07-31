@@ -17,10 +17,20 @@ module ULOL
           @render_transition_line_points_dirty = true
         end
 
+        # Invalidates only the assembled GL_LINES render list. Per-transition curve
+        # geometry remains cached because its key already contains every geometric
+        # input that affects the curve (transition id, rendered points, normals).
+        # A changed geometry therefore misses the old cache entry naturally.
         def invalidate
-          @transition_curve_cache&.clear
           @render_transition_line_points = nil
           @render_transition_line_points_dirty = true
+        end
+
+        # Explicit hard reset for lifecycle/reload/debug cases that need cached
+        # per-transition geometry released immediately.
+        def clear_cache
+          @transition_curve_cache&.clear
+          invalidate
         end
 
         def transition_line_points
