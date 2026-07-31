@@ -21,6 +21,9 @@ class ConsoleLoggingPolicyTest < Minitest::Test
     assert_includes indoor_model, "require_relative 'cell_space_logging_policy'"
     assert_includes policy, '@logger.debug do'
     assert_includes policy, "format('  전체 시간                  : %.3f sec', metrics[:total_duration].to_f)"
+    assert_operator policy.index('metrics[:total_duration]'), :<, policy.index('metrics[:preflight_duration]')
+    assert_operator policy.index('metrics[:preflight_duration]'), :<, policy.index('metrics[:cell_space_state_duration]')
+    assert_operator policy.index('metrics[:cell_space_state_duration]'), :<, policy.index('metrics[:adjacency_transition_duration]')
     refute_match(/^\s*puts\b/, policy)
   end
 

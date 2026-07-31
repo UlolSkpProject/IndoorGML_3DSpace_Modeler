@@ -723,10 +723,10 @@ module ULOL
         def log_benchmark(metrics)
           puts '----------------------------------------'
           puts 'Create CellSpace 시간 요약'
+          puts format('  전체 시간                  : %.3f sec', metrics[:total_duration].to_f)
           puts format('  시작 전 검사               : %.3f sec', metrics[:preflight_duration].to_f)
           puts format('  CellSpace/State 생성       : %.3f sec', metrics[:cell_space_state_duration].to_f)
           puts format('  Adjacency/Transition 생성  : %.3f sec', metrics[:adjacency_transition_duration].to_f)
-          puts format('  전체 시간                  : %.3f sec', metrics[:total_duration].to_f)
           puts '----------------------------------------'
         end
       end
