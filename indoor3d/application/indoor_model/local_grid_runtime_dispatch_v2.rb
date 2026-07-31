@@ -9,8 +9,8 @@ module ULOL
         # Hard refresh:
         # - used for initial model/extension load and explicit hard refreshes
         # - may evaluate/rewrite CellSpace local axes
-        # - repairs normalization through the public LVN contract
         # - finishes with a 0.001 mm grid-snapped recenter
+        # - never invokes beta LVN implicitly
         #
         # Soft refresh:
         # - runtime/topology reconstruction only
@@ -18,8 +18,7 @@ module ULOL
         # - never invokes LVN
         # - never recenters CellSpace geometry
         #
-        # LVN remains independently replaceable: this policy only depends on
-        # LocalVertexNormalizer.normalize and LocalVertexNormalizer.normalized?.
+        # LVN remains available through its explicit console/API entrypoint.
 
         def refresh_runtime_data(initial_model_load: false)
           if initial_model_load
@@ -127,7 +126,7 @@ module ULOL
         end
 
         # Overall Edit Mode finish performs only a soft refresh. Geometry-specific
-        # axis/LVN/recenter work has already been handled by cell_space_closed.
+        # axis/recenter work has already been handled by cell_space_closed.
         def finish_editing
           return super unless local_grid_coordinate_v2_enabled?
           return false if validation_focus_recheck_running?
@@ -163,33 +162,17 @@ module ULOL
 
           ensure_cell_space_is_child_of_primal_space!(cell_space)
           group = cell_space.sketchup_group
-
-          normalized_before = LocalVertexNormalizer.normalized?(
-            group,
-            LOCAL_GRID_V2_TOLERANCE_MM
-          )
-
           frame_report = align_cell_space_local_frame_local_grid_v2(group)
-
-          normalize_reason = if frame_report[:changed]
-                               :hard_refresh_frame_changed
-                             elsif !normalized_before
-                               :hard_refresh_not_normalized
-                             end
-
-          normalize_cell_space_local_grid_v2!(group, reason: normalize_reason) if normalize_reason
-
           recenter_report = recenter_cell_space_geometry_local_grid_v2(
             group,
             fixed_z_offset_from_bottom: fixed_state_height_offset(cell_space)
           )
 
-          assert_cell_space_local_grid_v2!(group, context: :hard_refresh)
           log_local_grid_v2_coordinate_report(
             cell_space,
             frame_report,
             recenter_report,
-            normalized: true
+            normalized: :unchecked
           )
           true
         end
