@@ -47,8 +47,10 @@ module ULOL
           points = []
           render_context_key = transition_render_context_cache_key
           @indoor_model.transitions.each do |transition|
-            next unless transition&.valid?
-            next unless transition.state1&.valid? && transition.state2&.valid?
+            # Renderability is the single validity/visibility gate. Production
+            # IndoorModel#dual_overlay_transition_visible? validates Transition
+            # and endpoint States, so repeating the same checks here multiplies
+            # expensive CellSpace#valid? / manifold? calls for every frame rebuild.
             next unless overlay_transition_visible?(transition)
 
             segments = cached_transition_render_segments(transition, render_context_key)
@@ -255,6 +257,8 @@ module ULOL
           if @indoor_model.respond_to?(:dual_overlay_transition_visible?)
             return @indoor_model.dual_overlay_transition_visible?(transition)
           end
+
+          return false unless transition&.valid?
 
           @transform_context.overlay_state_visible?(transition.state1) &&
             @transform_context.overlay_state_visible?(transition.state2)

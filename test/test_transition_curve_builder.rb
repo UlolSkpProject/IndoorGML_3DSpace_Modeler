@@ -192,6 +192,30 @@ module ULOL
           assert_equal 1, build_count
         end
 
+        def test_build_uses_visibility_predicate_as_single_renderability_gate
+          transition = fake_transition(
+            point1: Geom::Point3d.new(0, 0, 0),
+            point2: Geom::Point3d.new(10, 0, 0)
+          )
+          valid_calls = 0
+          transition.define_singleton_method(:valid?) do
+            valid_calls += 1
+            true
+          end
+          indoor_model = Struct.new(:transitions) do
+            def dual_overlay_transition_visible?(transition)
+              transition.valid?
+            end
+          end.new([transition])
+          builder = TransitionCurveBuilder.new(
+            indoor_model: indoor_model,
+            transform_context: identity_transform_context
+          )
+
+          assert_equal [transition.state1_point, transition.state2_point], builder.transition_line_points
+          assert_equal 1, valid_calls
+        end
+
         def test_invalidate_reuses_matching_render_segments_without_transforming_again
           transition = fake_transition(
             point1: Geom::Point3d.new(0, 0, 0),
