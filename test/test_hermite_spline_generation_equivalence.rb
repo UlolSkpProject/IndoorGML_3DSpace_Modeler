@@ -76,9 +76,11 @@ module ULOL
             ]
           ].freeze
 
+          SEGMENT_COUNTS = [1, 2, 3, 6, 9].freeze
+
           def test_refined_generation_matches_legacy_coordinates_and_order
             CASES.each do |p0, p1, tangent0, tangent1|
-              [3, 6, 9].each do |segments|
+              SEGMENT_COUNTS.each do |segments|
                 [true, false].each do |include_start|
                   expected = legacy_generate_segment(
                     p0, p1, tangent0, tangent1, segments,
@@ -104,7 +106,7 @@ module ULOL
 
           def test_unrefined_generation_still_matches_legacy_path
             p0, p1, tangent0, tangent1 = CASES.first
-            [3, 6, 9].each do |segments|
+            SEGMENT_COUNTS.each do |segments|
               [true, false].each do |include_start|
                 expected = legacy_generate_segment(
                   p0, p1, tangent0, tangent1, segments,
