@@ -481,7 +481,7 @@ module ULOL
               return false if cell_spaces.length > 1 && common_cell_space_type(cell_spaces).nil?
               normalized_storey = storey_range_allowed_for_cell_spaces(cell_spaces) ? storey : first_storey_value(storey)
 
-              model = Sketchup.active_model()
+              # model = Sketchup.active_model()
               with_indoor_model_operation('Change CellSpace Storey') do
                 sync do
                   cell_spaces.each do |cell_space|
@@ -700,7 +700,10 @@ module ULOL
               progress&.set_result_message('GML export failed: topology synchronization failed.')
               return nil
             end
-            IndoorGmlConverter::GmlExporter.new(self).export(output_path: path)
+            IndoorGmlConverter::GmlExporter.new(
+              self,
+              refresh_runtime_data: false
+            ).export(output_path: path)
             progress&.set_result_message("GML exported:\n#{path}")
             path
           rescue StandardError => e
