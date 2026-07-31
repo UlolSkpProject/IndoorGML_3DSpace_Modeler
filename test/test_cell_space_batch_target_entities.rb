@@ -84,7 +84,7 @@ module ULOL
           assert_equal 1, entities.group.make_unique_calls
         end
 
-        def test_add_instance_erases_partial_copy_when_group_conversion_fails
+        def test_add_instance_erases_partial_copy_when_group_conversion_raises
           entities = FakeEntities.new(to_group_error: RuntimeError.new('to_group failed'))
           primal = FakePrimalGroup.new(TestTransformation.identity, entities: entities)
           target = CellSpaceBatchTargetEntities.new(
@@ -96,6 +96,21 @@ module ULOL
           end
 
           assert_equal 'to_group failed', error.message
+          assert entities.instance.erased?
+        end
+
+        def test_add_instance_erases_partial_copy_when_group_conversion_returns_nil
+          entities = FakeEntities.new(to_group_result: nil)
+          primal = FakePrimalGroup.new(TestTransformation.identity, entities: entities)
+          target = CellSpaceBatchTargetEntities.new(
+            primal_group_resolver: proc { primal }
+          )
+
+          error = assert_raises(ArgumentError) do
+            target.add_instance(:definition, TestTransformation.identity)
+          end
+
+          assert_match(/Could not convert/, error.message)
           assert entities.instance.erased?
         end
 
@@ -194,9 +209,13 @@ module ULOL
         class FakeEntities
           attr_reader :received_definition, :received_transformation, :instance, :group
 
-          def initialize(to_group_error: nil)
+          def initialize(to_group_error: nil, to_group_result: :default)
             @group = FakeGroup.new
-            @instance = FakeInstance.new(@group, to_group_error: to_group_error)
+            @instance = FakeInstance.new(
+              @group,
+              to_group_error: to_group_error,
+              to_group_result: to_group_result
+            )
           end
 
           def add_instance(definition, transformation)
@@ -209,9 +228,10 @@ module ULOL
         class FakeInstance
           attr_reader :to_group_calls
 
-          def initialize(group, to_group_error: nil)
+          def initialize(group, to_group_error: nil, to_group_result: :default)
             @group = group
             @to_group_error = to_group_error
+            @to_group_result = to_group_result
             @to_group_calls = 0
             @erased = false
           end
@@ -223,8 +243,9 @@ module ULOL
           def to_group
             @to_group_calls += 1
             raise @to_group_error if @to_group_error
+            return @group if @to_group_result == :default
 
-            @group
+            @to_group_result
           end
 
           def erase!
