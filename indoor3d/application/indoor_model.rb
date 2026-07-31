@@ -74,6 +74,10 @@ module ULOL
           @instances&.each_value || []
         end
 
+        def find_cell_space_by_normalized_id(value)
+          @feature_registry.find_cell_space_by_normalized_id(value)
+        end
+
         def cleanup_for_model_close
           IndoorGmlConverter::Val3dityRunner.terminate_for_model(@model, wait_ms: 0)
           @editor_session.close_dialog_only()
