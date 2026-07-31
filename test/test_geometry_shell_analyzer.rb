@@ -95,6 +95,25 @@ module ULOL
           assert_equal [[:ray0, 0], [:ray1, 1], [:ray2, 2]], calls
         end
 
+        def test_unique_sorted_distances_handles_empty_and_single_values
+          assert_equal [], Geometry.send(:unique_sorted_distances, [], 0.001)
+          assert_equal [3.0], Geometry.send(:unique_sorted_distances, [3.0], 0.001)
+        end
+
+        def test_unique_sorted_distances_preserves_tolerance_semantics
+          distances = [5.0, 1.0008, 3.0, 1.0, 3.0011]
+
+          result = Geometry.send(:unique_sorted_distances, distances, 0.001)
+
+          assert_equal [1.0, 3.0, 3.0011, 5.0], result
+        end
+
+        def test_unique_sorted_distances_keeps_value_exactly_at_tolerance_collapsed
+          result = Geometry.send(:unique_sorted_distances, [1.0, 1.001], 0.001)
+
+          assert_equal [1.0], result
+        end
+
         private
 
         def with_stubbed_singleton_method(target, method_name, replacement)
