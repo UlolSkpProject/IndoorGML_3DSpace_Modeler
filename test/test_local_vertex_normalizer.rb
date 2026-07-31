@@ -1590,6 +1590,99 @@ module ULOL
           assert_empty plan[:occurrences]
         end
 
+        def test_grid_invalid_repair_preserves_source_fallback_and_defers_near_edge
+          source_fallback =
+            :retriangulate_grid_invalid_source_faces_before_near_edge_split_v2
+          current = LocalVertexNormalizer.instance_method(
+            :retriangulate_grid_invalid_source_faces
+          )
+          preserved = LocalVertexNormalizer.instance_method(source_fallback)
+
+          assert_match(
+            /grid_post_conforming_invalid_repair_v2\.rb\z/,
+            current.source_location.first
+          )
+          assert_match(
+            /grid_altitude_sliver_retriangulation_v2\.rb\z/,
+            preserved.source_location.first
+          )
+
+          pre_conforming = normalizer
+          pre_calls = []
+          pre_conforming.define_singleton_method(source_fallback) do |records|
+            pre_calls << :source_face
+            [
+              records,
+              {
+                accepted_face_count: 0,
+                final_invalid_pair_count: 0,
+                affected_source_face_keys: []
+              }
+            ]
+          end
+          pre_conforming.define_singleton_method(
+            :repair_grid_invalid_near_edge_splits
+          ) do |_records|
+            raise 'near-edge repair must not run before grid conforming'
+          end
+
+          input = [:input]
+          pre_result, = pre_conforming.send(
+            :retriangulate_grid_invalid_source_faces,
+            input
+          )
+
+          assert_same input, pre_result
+          assert_equal [:source_face], pre_calls
+
+          post_conforming = normalizer
+          post_calls = []
+          source_result = [:source_result]
+          near_result = [:near_result]
+          post_conforming.define_singleton_method(
+            :grid_invalid_pair_signatures
+          ) do |records|
+            records.equal?(near_result) ? [] : [:invalid_pair]
+          end
+          post_conforming.define_singleton_method(source_fallback) do |_records|
+            post_calls << :source_face
+            [
+              source_result,
+              {
+                accepted_face_count: 1,
+                affected_source_face_keys: [:source]
+              }
+            ]
+          end
+          post_conforming.define_singleton_method(
+            :repair_grid_invalid_near_edge_splits
+          ) do |records|
+            raise 'near-edge repair received the wrong input' unless
+              records.equal?(source_result)
+
+            post_calls << :near_edge
+            [
+              near_result,
+              {
+                accepted_split_count: 1,
+                affected_source_face_keys: [:near]
+              }
+            ]
+          end
+
+          post_result, report = post_conforming.send(
+            :repair_post_conforming_grid_invalids,
+            input
+          )
+
+          assert_same near_result, post_result
+          assert_equal [:source_face, :near_edge], post_calls
+          assert_equal(
+            :post_conforming_source_face_then_near_edge,
+            report[:policy]
+          )
+        end
+
         def test_source_altitude_sliver_collapse_moves_shared_apex_to_longest_edge
           apex = mm_point(0, 0.1, 0)
           edge_start = mm_point(-5, 0, 0)
