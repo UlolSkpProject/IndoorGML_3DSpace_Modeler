@@ -97,37 +97,36 @@ module ULOL
           [points.map(&:first).sum / points.length.to_f, points.map(&:last).sum / points.length.to_f]
         end
         private_class_method :vertex_average_2d
-        def self.polygon_edges(polygon)
-          polygon.each_index.map do |index|
-            [polygon[index], polygon[(index + 1) % polygon.length]]
-          end
-        end
-        private_class_method :polygon_edges
 
         def self.point_in_polygon?(point, polygon, tolerance)
-          return true if polygon_edges(polygon).any? { |edge| point_on_segment?(point, edge, tolerance) }
+          return false if polygon.empty?
 
           inside = false
-          j = polygon.length - 1
-          polygon.each_index do |i|
-            xi, yi = polygon[i]
-            xj, yj = polygon[j]
+          previous_index = polygon.length - 1
+          polygon.each_index do |index|
+            current = polygon[index]
+            previous = polygon[previous_index]
+            return true if point_on_segment?(point, previous, current, tolerance)
+
+            xi, yi = current
+            xj, yj = previous
             intersects = ((yi > point[1]) != (yj > point[1])) &&
                          (point[0] < ((xj - xi) * (point[1] - yi) / (yj - yi)) + xi)
             inside = !inside if intersects
-            j = i
+            previous_index = index
           end
           inside
         end
         private_class_method :point_in_polygon?
 
-        def self.point_on_segment?(point, edge, tolerance)
-          p1, p2 = edge
+        def self.point_on_segment?(point, p1, p2, tolerance)
           cross = ((point[1] - p1[1]) * (p2[0] - p1[0])) - ((point[0] - p1[0]) * (p2[1] - p1[1]))
           return false if cross.abs > tolerance
 
-          min_x, max_x = [p1[0], p2[0]].minmax
-          min_y, max_y = [p1[1], p2[1]].minmax
+          min_x = p1[0] < p2[0] ? p1[0] : p2[0]
+          max_x = p1[0] > p2[0] ? p1[0] : p2[0]
+          min_y = p1[1] < p2[1] ? p1[1] : p2[1]
+          max_y = p1[1] > p2[1] ? p1[1] : p2[1]
           point[0] >= min_x - tolerance && point[0] <= max_x + tolerance &&
             point[1] >= min_y - tolerance && point[1] <= max_y + tolerance
         end
