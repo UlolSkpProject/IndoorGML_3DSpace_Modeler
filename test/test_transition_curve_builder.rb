@@ -192,7 +192,31 @@ module ULOL
           assert_equal 1, build_count
         end
 
-        def test_invalidate_rebuilds_final_points_and_per_transition_curve_cache
+        def test_build_uses_visibility_predicate_as_single_renderability_gate
+          transition = fake_transition(
+            point1: Geom::Point3d.new(0, 0, 0),
+            point2: Geom::Point3d.new(10, 0, 0)
+          )
+          valid_calls = 0
+          transition.define_singleton_method(:valid?) do
+            valid_calls += 1
+            true
+          end
+          indoor_model = Struct.new(:transitions) do
+            def dual_overlay_transition_visible?(transition)
+              transition.valid?
+            end
+          end.new([transition])
+          builder = TransitionCurveBuilder.new(
+            indoor_model: indoor_model,
+            transform_context: identity_transform_context
+          )
+
+          assert_equal [transition.state1_point, transition.state2_point], builder.transition_line_points
+          assert_equal 1, valid_calls
+        end
+
+        def test_invalidate_reuses_matching_render_segments_without_transforming_again
           transition = fake_transition(
             point1: Geom::Point3d.new(0, 0, 0),
             point2: Geom::Point3d.new(10, 0, 0),
@@ -200,18 +224,101 @@ module ULOL
             normal1: Geom::Vector3d.new(0, 1, 0),
             normal2: Geom::Vector3d.new(0, 1, 0)
           )
+          context = counting_transform_context
           builder = TransitionCurveBuilder.new(
             indoor_model: fake_indoor_model([transition]),
-            transform_context: identity_transform_context
+            transform_context: context
           )
 
           first_points = builder.transition_line_points
-          assert_equal 2, Utils::Math::HermiteSpline.calls.length
-          assert_same first_points, builder.transition_line_points
+          assert_equal 3, context.render_point_calls
+          assert_equal 2, context.render_vector_calls
           assert_equal 2, Utils::Math::HermiteSpline.calls.length
 
           builder.invalidate
-          refute_same first_points, builder.transition_line_points
+          second_points = builder.transition_line_points
+
+          refute_same first_points, second_points
+          assert_equal first_points, second_points
+          assert_equal 3, context.render_point_calls
+          assert_equal 2, context.render_vector_calls
+          assert_equal 2, Utils::Math::HermiteSpline.calls.length
+        end
+
+        def test_invalidate_recomputes_render_segments_when_geometry_changes
+          transition = fake_transition(
+            point1: Geom::Point3d.new(0, 0, 0),
+            point2: Geom::Point3d.new(10, 0, 0),
+            waypoint: Geom::Point3d.new(5, 5, 0),
+            normal1: Geom::Vector3d.new(0, 1, 0),
+            normal2: Geom::Vector3d.new(0, 1, 0)
+          )
+          context = counting_transform_context
+          builder = TransitionCurveBuilder.new(
+            indoor_model: fake_indoor_model([transition]),
+            transform_context: context
+          )
+
+          builder.transition_line_points
+          assert_equal 3, context.render_point_calls
+          assert_equal 2, context.render_vector_calls
+          assert_equal 2, Utils::Math::HermiteSpline.calls.length
+
+          transition.selected_waypoint = Geom::Point3d.new(6, 5, 0)
+          builder.invalidate
+          builder.transition_line_points
+
+          assert_equal 6, context.render_point_calls
+          assert_equal 4, context.render_vector_calls
+          assert_equal 4, Utils::Math::HermiteSpline.calls.length
+        end
+
+        def test_render_context_change_invalidates_render_segment_cache
+          transition = fake_transition(
+            point1: Geom::Point3d.new(0, 0, 0),
+            point2: Geom::Point3d.new(10, 0, 0),
+            waypoint: Geom::Point3d.new(5, 5, 0),
+            normal1: Geom::Vector3d.new(0, 1, 0),
+            normal2: Geom::Vector3d.new(0, 1, 0)
+          )
+          context = counting_transform_context
+          builder = TransitionCurveBuilder.new(
+            indoor_model: fake_indoor_model([transition]),
+            transform_context: context
+          )
+
+          builder.transition_line_points
+          assert_equal 3, context.render_point_calls
+
+          context.cache_key = :moved
+          builder.invalidate
+          builder.transition_line_points
+
+          assert_equal 6, context.render_point_calls
+        end
+
+        def test_clear_cache_forces_render_and_curve_geometry_rebuild
+          transition = fake_transition(
+            point1: Geom::Point3d.new(0, 0, 0),
+            point2: Geom::Point3d.new(10, 0, 0),
+            waypoint: Geom::Point3d.new(5, 5, 0),
+            normal1: Geom::Vector3d.new(0, 1, 0),
+            normal2: Geom::Vector3d.new(0, 1, 0)
+          )
+          context = counting_transform_context
+          builder = TransitionCurveBuilder.new(
+            indoor_model: fake_indoor_model([transition]),
+            transform_context: context
+          )
+
+          builder.transition_line_points
+          assert_equal 3, context.render_point_calls
+          assert_equal 2, Utils::Math::HermiteSpline.calls.length
+
+          builder.clear_cache
+          builder.transition_line_points
+
+          assert_equal 6, context.render_point_calls
           assert_equal 4, Utils::Math::HermiteSpline.calls.length
         end
 
@@ -271,6 +378,49 @@ module ULOL
             end
 
             def overlay_render_vector(vector)
+              vector
+            end
+          end.new
+        end
+
+        def counting_transform_context
+          Class.new do
+            attr_accessor :cache_key
+            attr_reader :render_point_calls, :render_vector_calls
+
+            def initialize
+              @cache_key = :identity
+              @render_point_calls = 0
+              @render_vector_calls = 0
+            end
+
+            def overlay_render_context_cache_key
+              [@cache_key]
+            end
+
+            def rounded_point_key(point)
+              return nil unless point
+
+              [point.x.round(6), point.y.round(6), point.z.round(6)]
+            end
+
+            def rounded_vector_key(vector)
+              return nil unless vector
+
+              [vector.x.round(6), vector.y.round(6), vector.z.round(6)]
+            end
+
+            def overlay_state_root_local_point(state)
+              state.position
+            end
+
+            def overlay_render_point(point)
+              @render_point_calls += 1
+              point
+            end
+
+            def overlay_render_vector(vector)
+              @render_vector_calls += 1
               vector
             end
           end.new

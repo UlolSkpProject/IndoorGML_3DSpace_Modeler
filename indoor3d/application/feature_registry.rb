@@ -21,6 +21,7 @@ module ULOL
           @cell_spaces_by_entity_object = {}
           @cell_spaces_by_persistent_id = {}
           @cell_spaces_by_entity_id_for_removed_callback = {}
+          @cell_spaces_by_normalized_id = {}
           @adjacent_cell_space_pairs = {}
           @transitions_by_cell_pair = {}
           @adjacent_pair_keys_by_cell_id = {}
@@ -49,12 +50,16 @@ module ULOL
           @cell_spaces_by_entity_id_for_removed_callback = Hash(snapshot[:cell_spaces_by_entity_id_for_removed_callback]).dup
           @adjacent_cell_space_pairs = Hash(snapshot[:adjacent_cell_space_pairs]).dup
           @transitions_by_cell_pair = Hash(snapshot[:transitions_by_cell_pair]).dup
+          rebuild_cell_space_normalized_id_index
           rebuild_pair_key_indexes
         end
 
         def add_cell_space(cell_space)
           ensure_unique_feature_id!(cell_space)
-          @cell_spaces << cell_space unless @cell_spaces.include?(cell_space)
+          unless @cell_spaces.include?(cell_space)
+            @cell_spaces << cell_space
+            index_cell_space_normalized_id(cell_space)
+          end
           @cell_spaces_by_entity_object[cell_space.sketchup_group] = cell_space
           @cell_spaces_by_persistent_id[cell_space.sketchup_group.persistent_id] = cell_space
           @cell_spaces_by_entity_id_for_removed_callback[cell_space.sketchup_group.entityID] = cell_space
@@ -63,10 +68,16 @@ module ULOL
         def remove_cell_space(cell_space)
           return if cell_space.nil?
 
+          indexed_keys = @cell_spaces_by_normalized_id.each_with_object([]) do |(key, mapped), keys|
+            keys << key if mapped.equal?(cell_space)
+          end
+
           @cell_spaces.delete(cell_space)
           @cell_spaces_by_entity_object.delete(cell_space.sketchup_group)
           @cell_spaces_by_persistent_id.delete(cell_space.sketchup_group_id)
           @cell_spaces_by_entity_id_for_removed_callback.delete_if { |_entity_id, mapped_cell_space| mapped_cell_space == cell_space }
+
+          indexed_keys.each { |key| restore_first_normalized_id_match(key) }
         end
 
         def find_cell_space_for_entity(entity)
@@ -83,6 +94,14 @@ module ULOL
 
         def find_cell_space_by_removed_entity_id(entity_id)
           @cell_spaces_by_entity_id_for_removed_callback[entity_id]
+        end
+
+        # Validation reports may reference the same CellSpace as `id`, `cell_id`,
+        # or `solid_id`, and non-ID-safe characters are normalized to `_`.
+        # Keep the first registered match so lookup semantics stay identical to
+        # the former Array#find path even when normalized IDs collide.
+        def find_cell_space_by_normalized_id(value)
+          @cell_spaces_by_normalized_id[normalize_cell_space_lookup_id(value)]
         end
 
         def add_state(state)
@@ -159,6 +178,34 @@ module ULOL
         end
 
         private
+
+        def rebuild_cell_space_normalized_id_index
+          @cell_spaces_by_normalized_id = {}
+          @cell_spaces.each { |cell_space| index_cell_space_normalized_id(cell_space) }
+        end
+
+        def index_cell_space_normalized_id(cell_space)
+          key = normalize_cell_space_lookup_id(cell_space&.id)
+          @cell_spaces_by_normalized_id[key] ||= cell_space
+        end
+
+        def restore_first_normalized_id_match(key)
+          replacement = @cell_spaces.find do |cell_space|
+            normalize_cell_space_lookup_id(cell_space&.id) == key
+          end
+
+          if replacement
+            @cell_spaces_by_normalized_id[key] = replacement
+          else
+            @cell_spaces_by_normalized_id.delete(key)
+          end
+        end
+
+        def normalize_cell_space_lookup_id(value)
+          value.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')
+               .sub(/\Asolid_/, '')
+               .sub(/\Acell_/, '')
+        end
 
         def rebuild_pair_key_indexes
           @adjacent_pair_keys_by_cell_id = {}

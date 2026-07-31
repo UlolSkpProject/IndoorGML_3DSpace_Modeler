@@ -62,6 +62,10 @@ module ULOL
           return entity.transformation unless entity&.valid?
           return entity.transformation unless root_group&.valid?
 
+          # A direct child already stores its transform in the root container's
+          # coordinate system. Avoid converting root-local -> model -> root-local.
+          return entity.transformation if entity.parent == parent_container_for(root_group)
+
           root_transformation_in_model(root_group).inverse * entity_world_transformation_under_root(entity, root_group)
         rescue StandardError
           entity&.transformation || Geom::Transformation.new

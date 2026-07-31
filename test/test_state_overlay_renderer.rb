@@ -61,6 +61,22 @@ module ULOL
           assert_equal StateOverlayRenderer::STATE_POINT_STYLE, call[:style]
         end
 
+        def test_rebuild_uses_batch_render_points_when_available
+          states = [
+            drawable_state(position: Geom::Point3d.new(1, 0, 0)),
+            drawable_state(position: Geom::Point3d.new(2, 0, 0))
+          ]
+          context = batch_drawing_transform_context
+          view = recording_view
+          renderer = renderer_for(states, transform_context: context)
+
+          renderer.draw(view)
+
+          assert_equal states.map(&:position), view.point_calls.first[:points]
+          assert_equal 1, context.render_points_calls
+          assert_equal 0, context.render_point_calls
+        end
+
         def test_repeated_draw_reuses_cached_points_without_recalculating_positions
           state = drawable_state(position: Geom::Point3d.new(1, 0, 0))
           context = drawing_transform_context
@@ -91,6 +107,41 @@ module ULOL
           assert_equal 24, second_view.point_calls.first[:size]
         end
 
+        def test_extent_points_reuse_cached_state_positions
+          states = [
+            drawable_state(position: Geom::Point3d.new(10, 20, 30)),
+            drawable_state(position: Geom::Point3d.new(-5, 4, 8))
+          ]
+          context = drawing_transform_context
+          renderer = renderer_for(states, transform_context: context)
+
+          first = renderer.overlay_state_extent_points(state_radius_scale: 2.0)
+          second = renderer.overlay_state_extent_points(state_radius_scale: 2.0)
+
+          assert_same first, second
+          assert_equal 2, context.render_point_calls
+          assert_in_delta(-7.0, first.first.x, 0.001)
+          assert_in_delta(2.0, first.first.y, 0.001)
+          assert_in_delta(6.0, first.first.z, 0.001)
+          assert_in_delta(12.0, first.last.x, 0.001)
+          assert_in_delta(22.0, first.last.y, 0.001)
+          assert_in_delta(32.0, first.last.z, 0.001)
+        end
+
+        def test_extent_scale_change_reuses_positions_but_rebuilds_bounds
+          state = drawable_state(position: Geom::Point3d.new(10, 20, 30))
+          context = drawing_transform_context
+          renderer = renderer_for([state], transform_context: context)
+
+          first = renderer.overlay_state_extent_points(state_radius_scale: 1.0)
+          second = renderer.overlay_state_extent_points(state_radius_scale: 2.0)
+
+          refute_same first, second
+          assert_equal 1, context.render_point_calls
+          assert_in_delta 9.0, first.first.x, 0.001
+          assert_in_delta 8.0, second.first.x, 0.001
+        end
+
         def test_clear_cache_recalculates_positions_on_next_draw
           state = drawable_state(position: Geom::Point3d.new(1, 0, 0))
           context = drawing_transform_context
@@ -100,6 +151,19 @@ module ULOL
           renderer.clear_cache
           renderer.draw(recording_view)
 
+          assert_equal 2, context.render_point_calls
+        end
+
+        def test_clear_cache_invalidates_extent_points
+          state = drawable_state(position: Geom::Point3d.new(1, 0, 0))
+          context = drawing_transform_context
+          renderer = renderer_for([state], transform_context: context)
+
+          first = renderer.overlay_state_extent_points(state_radius_scale: 1.0)
+          renderer.clear_cache
+          second = renderer.overlay_state_extent_points(state_radius_scale: 1.0)
+
+          refute_same first, second
           assert_equal 2, context.render_point_calls
         end
 
@@ -179,6 +243,35 @@ module ULOL
             def overlay_render_point(point)
               @render_point_calls += 1
               point
+            end
+          end.new
+        end
+
+        def batch_drawing_transform_context
+          Class.new do
+            attr_reader :render_point_calls, :render_points_calls
+
+            def initialize
+              @render_point_calls = 0
+              @render_points_calls = 0
+            end
+
+            def overlay_state_visible?(state)
+              state.visible
+            end
+
+            def overlay_state_root_local_point(state)
+              state.position
+            end
+
+            def overlay_render_point(point)
+              @render_point_calls += 1
+              point
+            end
+
+            def overlay_render_points(points)
+              @render_points_calls += 1
+              points
             end
           end.new
         end
