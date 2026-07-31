@@ -33,7 +33,7 @@ module ULOL
               fallback_target: fallback_target,
               target_entities: model.entities,
               converter: proc do |source, target_type, target_category, target_storey|
-                cell_space = lifecycle.create_from_group_deferred(
+                cell_space = lifecycle.create_from_group_batch_deferred(
                   source,
                   cell_type: target_type,
                   category_code: target_category,
@@ -44,7 +44,9 @@ module ULOL
               end,
               synchronize_all: proc do
                 apply_cell_space_materials_batch(created)
-                synchronize_topology_after_bulk_conversion
+                metrics = synchronize_topology_after_bulk_conversion
+                persist_cell_space_attributes_batch(created)
+                metrics
               end,
               apply_lock_policy: proc { apply_indoor_lock_policy },
               runtime_snapshot: proc { bulk_conversion_runtime_snapshot },
@@ -68,6 +70,15 @@ module ULOL
               preserve_source: preserve_source,
               operation_name: operation_name
             )
+          end
+
+          def persist_cell_space_attributes_batch(cell_spaces)
+            Array(cell_spaces).each do |cell_space|
+              next unless cell_space&.valid?
+
+              write_attributes(cell_space)
+            end
+            true
           end
         end
       end
