@@ -58,11 +58,7 @@ module ULOL
           builder.transition_line_points
           captured
         ensure
-          if current
-            spline.define_singleton_method(:generate_segment) do |*args, **kwargs|
-              kwargs.empty? ? current.call(*args) : current.call(*args, **kwargs)
-            end
-          end
+          spline.define_singleton_method(:generate_segment, current) if spline && current
         end
 
         def compare_outputs(current, captured_calls)
