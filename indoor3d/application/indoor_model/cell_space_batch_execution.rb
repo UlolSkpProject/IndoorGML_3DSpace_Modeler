@@ -28,16 +28,17 @@ module ULOL
             world_transformation
           )
 
-          created = primal_group.entities.add_instance(definition, local_transformation)
-          raise ArgumentError, 'Could not create direct PrimalSpaceFeatures copy' unless created&.valid?
+          instance = primal_group.entities.add_instance(definition, local_transformation)
+          raise ArgumentError, 'Could not create direct PrimalSpaceFeatures copy' unless instance&.valid?
 
-          created = created.to_group if created.respond_to?(:to_group)
-          raise ArgumentError, 'Could not convert direct PrimalSpaceFeatures copy to Group' unless created&.valid?
+          group = instance.respond_to?(:to_group) ? instance.to_group : instance
+          raise ArgumentError, 'Could not convert direct PrimalSpaceFeatures copy to Group' unless group&.valid?
 
-          created.make_unique if created.respond_to?(:make_unique)
-          created
+          group.make_unique if group.respond_to?(:make_unique)
+          group
         rescue StandardError
-          created.erase! if created&.valid?
+          group.erase! if group&.valid?
+          instance.erase! if instance&.valid? && instance != group
           raise
         end
 
