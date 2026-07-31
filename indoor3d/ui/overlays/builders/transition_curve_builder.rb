@@ -45,7 +45,8 @@ module ULOL
 
         def build_render_transition_line_points
           points = []
-          render_context_key = transition_render_context_cache_key
+          render_snapshot = transition_render_context_snapshot
+          render_context_key = render_snapshot&.[](:cache_key) || transition_render_context_cache_key
           @indoor_model.transitions.each do |transition|
             # Renderability is the single validity/visibility gate. Production
             # IndoorModel#dual_overlay_transition_visible? validates Transition
@@ -53,7 +54,7 @@ module ULOL
             # expensive CellSpace#valid? / manifold? calls for every frame rebuild.
             next unless overlay_transition_visible?(transition)
 
-            segments = cached_transition_render_segments(transition, render_context_key)
+            segments = cached_transition_render_segments(transition, render_context_key, render_snapshot)
             points.concat(segments[:default])
             points.concat(segments[:first])
             points.concat(segments[:second])
@@ -61,8 +62,11 @@ module ULOL
           points
         end
 
-        def transition_curve_segments(transition)
-          transition_curve_segments_from_input(transition, transition_curve_input(transition))
+        def transition_curve_segments(transition, render_snapshot = nil)
+          transition_curve_segments_from_input(
+            transition,
+            transition_curve_input(transition, render_snapshot)
+          )
         end
 
         def transition_curve_segments_from_input(transition, curve_input)
@@ -151,21 +155,27 @@ module ULOL
           { default: [], first: first_segment, second: second_segment }
         end
 
-        def transition_curve_input(transition)
-          point1 = @transform_context.overlay_render_point(
-            transition.state1_point || @transform_context.overlay_state_root_local_point(transition.state1)
+        def transition_curve_input(transition, render_snapshot = nil)
+          point1 = render_transition_point(
+            transition.state1_point || @transform_context.overlay_state_root_local_point(transition.state1),
+            render_snapshot
           )
-          point2 = @transform_context.overlay_render_point(
-            transition.state2_point || @transform_context.overlay_state_root_local_point(transition.state2)
+          point2 = render_transition_point(
+            transition.state2_point || @transform_context.overlay_state_root_local_point(transition.state2),
+            render_snapshot
           )
           return { points: [], normal1: nil, normal2: nil } if point1.distance(point2) <= 0.001
 
           waypoint = transition.selected_waypoint
-          points = waypoint ? [point1, @transform_context.overlay_render_point(waypoint), point2] : [point1, point2]
+          points = waypoint ? [point1, render_transition_point(waypoint, render_snapshot), point2] : [point1, point2]
           {
             points: points,
-            normal1: normalized_transition_normal(@transform_context.overlay_render_vector(transition.selected_waypoint_normal1)),
-            normal2: normalized_transition_normal(@transform_context.overlay_render_vector(transition.selected_waypoint_normal2))
+            normal1: normalized_transition_normal(
+              render_transition_vector(transition.selected_waypoint_normal1, render_snapshot)
+            ),
+            normal2: normalized_transition_normal(
+              render_transition_vector(transition.selected_waypoint_normal2, render_snapshot)
+            )
           }
         end
 
@@ -202,7 +212,7 @@ module ULOL
 
         private
 
-        def cached_transition_render_segments(transition, render_context_key)
+        def cached_transition_render_segments(transition, render_context_key, render_snapshot)
           fingerprint = transition_render_fingerprint(transition, render_context_key)
           cache_key = transition_render_cache_identity(transition)
           if fingerprint
@@ -210,7 +220,7 @@ module ULOL
             return cached[:segments] if cached && cached[:fingerprint] == fingerprint
           end
 
-          segments = transition_curve_segments(transition)
+          segments = transition_curve_segments(transition, render_snapshot)
           if fingerprint
             @transition_render_segment_cache.clear if @transition_render_segment_cache.length > transition_curve_cache_limit
             @transition_render_segment_cache[cache_key] = {
@@ -245,12 +255,37 @@ module ULOL
           transition.object_id
         end
 
+        def transition_render_context_snapshot
+          return nil unless @transform_context.respond_to?(:overlay_render_context_snapshot)
+
+          snapshot = @transform_context.overlay_render_context_snapshot
+          snapshot.is_a?(Hash) ? snapshot : nil
+        rescue StandardError
+          nil
+        end
+
         def transition_render_context_cache_key
           return nil unless @transform_context.respond_to?(:overlay_render_context_cache_key)
 
           @transform_context.overlay_render_context_cache_key
         rescue StandardError
           nil
+        end
+
+        def render_transition_point(point, render_snapshot)
+          if render_snapshot && @transform_context.respond_to?(:overlay_render_point_from_snapshot)
+            return @transform_context.overlay_render_point_from_snapshot(point, render_snapshot)
+          end
+
+          @transform_context.overlay_render_point(point)
+        end
+
+        def render_transition_vector(vector, render_snapshot)
+          if render_snapshot && @transform_context.respond_to?(:overlay_render_vector_from_snapshot)
+            return @transform_context.overlay_render_vector_from_snapshot(vector, render_snapshot)
+          end
+
+          @transform_context.overlay_render_vector(vector)
         end
 
         def overlay_transition_visible?(transition)
