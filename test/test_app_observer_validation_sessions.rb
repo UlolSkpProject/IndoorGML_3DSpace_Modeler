@@ -7,6 +7,28 @@ module Sketchup
   class ModelObserver; end unless const_defined?(:ModelObserver, false)
 end
 
+module UI
+  class << self
+    attr_reader :scheduled_timers
+
+    def start_timer(delay, repeat = false, &block)
+      @scheduled_timers ||= []
+      @scheduled_timers << { delay: delay, repeat: repeat, block: block }
+      @scheduled_timers.length
+    end
+
+    def run_scheduled_timers
+      timers = Array(@scheduled_timers)
+      @scheduled_timers = []
+      timers.each { |timer| timer[:block].call }
+    end
+
+    def reset_scheduled_timers
+      @scheduled_timers = []
+    end
+  end
+end
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -40,6 +62,7 @@ module ULOL
     module IndoorCore
       class AppObserverValidationSessionsTest < Minitest::Test
         def setup
+          UI.reset_scheduled_timers
           IndoorGmlConverter::ValidationSession.reset!
           IndoorGmlConverter::Val3dityRunner.instance_variable_set(:@shutting_down, false)
           IndoorGmlConverter::Val3dityRunner.active_sessions.clear
@@ -70,6 +93,11 @@ module ULOL
           assert_equal :model_changed, session.cancel_reason
           assert_equal 1, progress.close_count
           assert_nil IndoorGmlConverter::ValidationSession.for_model(model)
+          assert_equal 0, model.runtime.refreshes
+          assert_equal [0.5], UI.scheduled_timers.map { |timer| timer[:delay] }
+
+          UI.run_scheduled_timers
+
           assert_equal 1, model.runtime.refreshes
           assert_equal [true], model.runtime.initial_model_load_flags
         end
@@ -86,8 +114,69 @@ module ULOL
           assert_equal :model_changed, session.cancel_reason
           assert_equal 1, progress.close_count
           assert_nil IndoorGmlConverter::ValidationSession.for_model(model)
+          assert_equal 0, model.runtime.refreshes
+          assert_equal [0.5], UI.scheduled_timers.map { |timer| timer[:delay] }
+
+          UI.run_scheduled_timers
+
           assert_equal 1, model.runtime.refreshes
           assert_equal [true], model.runtime.initial_model_load_flags
+        end
+
+        def test_duplicate_initial_refresh_requests_share_one_timer_and_one_refresh
+          model = FakeModel.new
+          observer = Indoor3DGmlAppObserver.new
+
+          assert observer.schedule_initial_refresh(model)
+          refute observer.schedule_initial_refresh(model)
+          observer.onOpenModel(model)
+
+          assert_equal 1, UI.scheduled_timers.length
+          assert_equal :scheduled, observer.instance_variable_get(:@initial_refresh_states)[model.object_id]
+
+          UI.run_scheduled_timers
+
+          assert_equal 1, model.runtime.refreshes
+          assert_equal :complete, observer.instance_variable_get(:@initial_refresh_states)[model.object_id]
+          refute observer.schedule_initial_refresh(model)
+          assert_empty UI.scheduled_timers
+        end
+
+        def test_failed_initial_refresh_can_be_scheduled_again
+          model = FakeModel.new
+          model.runtime.fail_next_refresh = true
+          observer = Indoor3DGmlAppObserver.new
+
+          assert observer.schedule_initial_refresh(model)
+          UI.run_scheduled_timers
+
+          refute observer.instance_variable_get(:@initial_refresh_states).key?(model.object_id)
+          assert observer.schedule_initial_refresh(model)
+          UI.run_scheduled_timers
+
+          assert_equal 1, model.runtime.refreshes
+          assert_equal :complete, observer.instance_variable_get(:@initial_refresh_states)[model.object_id]
+        end
+
+        def test_releasing_model_cancels_pending_initial_refresh
+          model = FakeModel.new
+          observer = Indoor3DGmlAppObserver.new
+          observer.register_model(model)
+          assert observer.schedule_initial_refresh(model)
+
+          model.observers.first.onDeleteModel(model)
+          UI.run_scheduled_timers
+
+          assert_equal 0, model.runtime.refreshes
+          refute observer.instance_variable_get(:@initial_refresh_states).key?(model.object_id)
+        end
+
+        def test_extension_load_delegates_to_the_same_initial_refresh_scheduler
+          source = File.read(File.expand_path('../indoor3d/core.rb', __dir__))
+
+          assert_includes source, '@app_observer.schedule_initial_refresh(model)'
+          refute_includes source, 'UI.start_timer(0.5, false)'
+          refute_includes source, 'IndoorModel.current.refresh_runtime_data(initial_model_load: true)'
         end
 
         def test_repeated_open_and_delete_releases_every_model_and_observer_registration
@@ -160,6 +249,7 @@ module ULOL
         class FakeRuntime
           attr_reader :refreshes
           attr_reader :initial_model_load_flags
+          attr_accessor :fail_next_refresh
 
           def initialize
             @refreshes = 0
@@ -167,6 +257,11 @@ module ULOL
           end
 
           def refresh_runtime_data(initial_model_load: false)
+            if @fail_next_refresh
+              @fail_next_refresh = false
+              raise 'refresh failed'
+            end
+
             @refreshes += 1
             @initial_model_load_flags << initial_model_load
           end

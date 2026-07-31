@@ -115,18 +115,9 @@ module ULOL
       begin
         @app_observer ||= IndoorCore::Indoor3DGmlAppObserver.new
         Sketchup.add_observer(@app_observer)
-        @app_observer.register_model(Sketchup.active_model())
-
-        # Deferred runtime refresh to avoid SketchUp crash on model load.
-        UI.start_timer(0.5, false) do
-          begin
-            IndoorCore::IndoorModel.current.refresh_runtime_data(initial_model_load: true)
-          rescue StandardError => e
-            IndoorCore::Logger.error(
-              "[IndoorGML] Deferred runtime refresh failed: #{e.class}: #{e.message}\n#{e.backtrace&.join("\n")}"
-            )
-          end
-        end
+        model = Sketchup.active_model()
+        @app_observer.register_model(model)
+        @app_observer.schedule_initial_refresh(model)
 
       rescue StandardError => e
         IndoorCore::Logger.puts "[IndoorGML] Model observer setup failed: #{e.class}: #{e.message}"
