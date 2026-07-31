@@ -22,6 +22,19 @@ module ULOL
           point
         end
 
+        # Batch variant for overlay rebuilds. The Primal -> model transform is
+        # invariant during one rebuild, so resolve it once and reuse it for all
+        # root-local points instead of querying the active context per State.
+        def overlay_render_points(points)
+          source_points = Array(points)
+          transformation = Utils::Transformation.root_transformation_in_model(@indoor_model.primal_group)
+          source_points.map do |point|
+            point.is_a?(Geom::Point3d) ? point.transform(transformation) : point
+          end
+        rescue StandardError
+          source_points.map { |point| overlay_render_point(point) }
+        end
+
         def overlay_render_vector(vector)
           Utils::Transformation.root_local_vector_to_model(vector, @indoor_model.primal_group)
         rescue StandardError
