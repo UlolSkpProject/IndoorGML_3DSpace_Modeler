@@ -54,10 +54,10 @@ module ULOL
         # the existing eager-write behavior.
         #
         # When +defer_writes+ is true, write requests are acknowledged without
-        # mutating SketchUp attributes until the caller explicitly flushes the
-        # created CellSpaces. The persisted-signature cache is still populated by
-        # that flush, so later topology writes with unchanged serialized state become
-        # no-ops for the rest of the same batch.
+        # mutating SketchUp attributes until the caller explicitly enters a flush
+        # section. Successful flush writes populate the persisted-signature cache, so
+        # later topology writes with unchanged serialized state become no-ops for the
+        # rest of the same batch.
         def with_cell_space_write_dedup(defer_writes: false)
           previous_cache = @cell_space_write_dedup_cache
           previous_defer = @defer_cell_space_writes
@@ -69,15 +69,10 @@ module ULOL
           @defer_cell_space_writes = previous_defer
         end
 
-        def flush_deferred_cell_space_writes(cell_spaces)
+        def with_cell_space_write_flush
           previous_defer = @defer_cell_space_writes
           @defer_cell_space_writes = false
-          Array(cell_spaces).each do |cell_space|
-            next unless cell_space
-
-            write_cell_space(cell_space)
-          end
-          true
+          yield
         ensure
           @defer_cell_space_writes = previous_defer
         end
