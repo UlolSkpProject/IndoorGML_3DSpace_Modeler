@@ -40,6 +40,61 @@ module ULOL
           end
         end
 
+        def test_shell_contains_point_stops_after_two_inside_votes
+          calls = []
+          directions = [:ray0, :ray1, :ray2]
+          counter = proc do |_faces, _point, direction, _tolerance, ray_index: nil|
+            calls << [direction, ray_index]
+            1
+          end
+
+          result = with_stubbed_singleton_method(Geometry, :shell_ray_directions, proc { directions }) do
+            with_stubbed_singleton_method(Geometry, :ray_intersection_count, counter) do
+              Geometry.send(:shell_contains_point?, [:face], :point, 0.001)
+            end
+          end
+
+          assert result
+          assert_equal [[:ray0, 0], [:ray1, 1]], calls
+        end
+
+        def test_shell_contains_point_stops_after_two_outside_votes
+          calls = []
+          directions = [:ray0, :ray1, :ray2]
+          counter = proc do |_faces, _point, direction, _tolerance, ray_index: nil|
+            calls << [direction, ray_index]
+            0
+          end
+
+          result = with_stubbed_singleton_method(Geometry, :shell_ray_directions, proc { directions }) do
+            with_stubbed_singleton_method(Geometry, :ray_intersection_count, counter) do
+              Geometry.send(:shell_contains_point?, [:face], :point, 0.001)
+            end
+          end
+
+          refute result
+          assert_equal [[:ray0, 0], [:ray1, 1]], calls
+        end
+
+        def test_shell_contains_point_uses_third_vote_when_first_two_split
+          calls = []
+          directions = [:ray0, :ray1, :ray2]
+          counts = [1, 0, 1]
+          counter = proc do |_faces, _point, direction, _tolerance, ray_index: nil|
+            calls << [direction, ray_index]
+            counts.fetch(ray_index)
+          end
+
+          result = with_stubbed_singleton_method(Geometry, :shell_ray_directions, proc { directions }) do
+            with_stubbed_singleton_method(Geometry, :ray_intersection_count, counter) do
+              Geometry.send(:shell_contains_point?, [:face], :point, 0.001)
+            end
+          end
+
+          assert result
+          assert_equal [[:ray0, 0], [:ray1, 1], [:ray2, 2]], calls
+        end
+
         private
 
         def with_stubbed_singleton_method(target, method_name, replacement)
