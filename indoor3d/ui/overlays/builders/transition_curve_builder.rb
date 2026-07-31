@@ -73,7 +73,7 @@ module ULOL
           control_points = curve_input[:points]
           return empty_transition_segment_groups if control_points.length < 2
 
-          curve_point_groups = cached_transition_curve_point_groups(transition, curve_input)
+          curve_point_groups = transition_curve_point_groups(transition, curve_input)
           {
             default: polyline_segments(curve_point_groups[:default]),
             first: polyline_segments(curve_point_groups[:first]),
@@ -84,11 +84,11 @@ module ULOL
           { default: polyline_segments(control_points || []), first: [], second: [] }
         end
 
-        # The render-segment cache is the effective per-transition geometry cache.
-        # Keeping a second cache for the intermediate Hermite point groups only
-        # adds key construction/hash allocation on hard rebuilds: soft rebuilds
-        # hit @transition_render_segment_cache before this method is reached.
-        def cached_transition_curve_point_groups(_transition, curve_input)
+        # The render-segment cache is the sole per-transition geometry cache.
+        # Intermediate Hermite point groups are generated only on render-cache
+        # misses; keeping a second cache here would only add key/hash allocation
+        # on hard rebuilds without improving the soft path.
+        def transition_curve_point_groups(_transition, curve_input)
           control_points = curve_input[:points]
           return { default: control_points, first: [], second: [] } if control_points.length < 3
 
