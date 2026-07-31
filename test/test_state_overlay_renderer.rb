@@ -61,6 +61,22 @@ module ULOL
           assert_equal StateOverlayRenderer::STATE_POINT_STYLE, call[:style]
         end
 
+        def test_rebuild_uses_batch_render_points_when_available
+          states = [
+            drawable_state(position: Geom::Point3d.new(1, 0, 0)),
+            drawable_state(position: Geom::Point3d.new(2, 0, 0))
+          ]
+          context = batch_drawing_transform_context
+          view = recording_view
+          renderer = renderer_for(states, transform_context: context)
+
+          renderer.draw(view)
+
+          assert_equal states.map(&:position), view.point_calls.first[:points]
+          assert_equal 1, context.render_points_calls
+          assert_equal 0, context.render_point_calls
+        end
+
         def test_repeated_draw_reuses_cached_points_without_recalculating_positions
           state = drawable_state(position: Geom::Point3d.new(1, 0, 0))
           context = drawing_transform_context
@@ -227,6 +243,35 @@ module ULOL
             def overlay_render_point(point)
               @render_point_calls += 1
               point
+            end
+          end.new
+        end
+
+        def batch_drawing_transform_context
+          Class.new do
+            attr_reader :render_point_calls, :render_points_calls
+
+            def initialize
+              @render_point_calls = 0
+              @render_points_calls = 0
+            end
+
+            def overlay_state_visible?(state)
+              state.visible
+            end
+
+            def overlay_state_root_local_point(state)
+              state.position
+            end
+
+            def overlay_render_point(point)
+              @render_point_calls += 1
+              point
+            end
+
+            def overlay_render_points(points)
+              @render_points_calls += 1
+              points
             end
           end.new
         end
