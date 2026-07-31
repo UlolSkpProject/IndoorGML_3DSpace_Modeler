@@ -22,8 +22,24 @@ module ULOL
 
         def refresh_runtime_data(initial_model_load: false)
           if initial_model_load
+            started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
             enable_local_grid_coordinate_v2!
-            return hard_refresh_runtime_data_local_grid_v2(initial_model_load: true)
+            result = hard_refresh_runtime_data_local_grid_v2(initial_model_load: true)
+            elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at
+
+            if defined?(UI) && UI.respond_to?(:messagebox)
+              UI.messagebox(
+                format(
+                  "IndoorGML initial runtime load\n\n%.3f s\n\ncells=%d\nstates=%d\ntransitions=%d",
+                  elapsed,
+                  @cell_spaces.length,
+                  @states.length,
+                  @transitions.length
+                )
+              )
+            end
+
+            return result
           end
 
           return soft_refresh_runtime_data_local_grid_v2 if local_grid_coordinate_v2_enabled?
