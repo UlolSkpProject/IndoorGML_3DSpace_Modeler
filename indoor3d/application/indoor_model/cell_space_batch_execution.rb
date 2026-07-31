@@ -33,7 +33,7 @@ module ULOL
               fallback_target: fallback_target,
               target_entities: model.entities,
               converter: proc do |source, target_type, target_category, target_storey|
-                cell_space = lifecycle.create_from_group_batch_deferred(
+                cell_space = lifecycle.create_from_group_deferred(
                   source,
                   cell_type: target_type,
                   category_code: target_category,
@@ -43,16 +43,19 @@ module ULOL
                 cell_space
               end,
               synchronize_all: proc do
+                # Persist every newly-created CellSpace once before topology starts,
+                # preserving the old topology-visible attribute state. The batch
+                # dedup cache then turns repeated transition/state persistence for
+                # unchanged CellSpaces into no-ops.
+                @attribute_serializer.flush_deferred_cell_space_writes(created)
                 apply_cell_space_materials_batch(created)
-                metrics = synchronize_topology_after_bulk_conversion
-                persist_cell_space_attributes_batch(created)
-                metrics
+                synchronize_topology_after_bulk_conversion
               end,
               apply_lock_policy: proc { apply_indoor_lock_policy },
               runtime_snapshot: proc { bulk_conversion_runtime_snapshot },
               runtime_restore: proc { |snapshot| restore_bulk_conversion_runtime(snapshot) },
               apply_guards: proc do |&block|
-                @attribute_serializer.with_cell_space_write_dedup do
+                @attribute_serializer.with_cell_space_write_dedup(defer_writes: true) do
                   with_bulk_cell_space_conversion(&block)
                 end
               end,
@@ -70,15 +73,6 @@ module ULOL
               preserve_source: preserve_source,
               operation_name: operation_name
             )
-          end
-
-          def persist_cell_space_attributes_batch(cell_spaces)
-            Array(cell_spaces).each do |cell_space|
-              next unless cell_space&.valid?
-
-              write_attributes(cell_space)
-            end
-            true
           end
         end
       end
