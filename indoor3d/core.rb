@@ -57,7 +57,6 @@ module ULOL
     require_relative 'application/indoor_model/observer_routing'
     require_relative 'application/indoor_model/entity_relocation'
     require_relative 'application/indoor_model/primal_normalization'
-    require_relative 'application/indoor_model/local_vertex_normalization'
     require_relative 'application/indoor_model/edit_mode_selection_projection'
     require_relative 'application/indoor_model/editor_control'
     require_relative 'application/indoor_model'
@@ -241,7 +240,7 @@ module ULOL
         dispatcher.open_dual_overlay_scale_dialog()
       end
       @dual_overlay_scale_command.set_validation_proc do
-        dispatcher.validation_operation_running? ? MF_GRAYED : MF_ENABLED
+        MF_ENABLED
       end
       export_command = create_command(
         'Export GML',

@@ -67,6 +67,15 @@ module ULOL
           assert_includes validation_proc, 'next MF_GRAYED if dispatcher.validation_operation_running?'
         end
 
+        def test_overlay_scale_toolbar_remains_enabled_during_validation
+          source = File.read(File.expand_path('../indoor3d/core.rb', __dir__))
+          validation_proc = source[/@dual_overlay_scale_command\.set_validation_proc do.*?^      end/m]
+
+          refute_nil validation_proc
+          assert_includes validation_proc, 'MF_ENABLED'
+          refute_includes validation_proc, 'validation_operation_running?'
+        end
+
         private
 
         def selection_snapshot

@@ -174,6 +174,53 @@ module ULOL
             assert_equal 1, workspace.cleanup_count
           end
 
+          def test_completed_validation_result_is_closed_before_restart
+            model = FakeModel.new('A')
+            workspace = FakeWorkspace.new
+            progress = FakeProgress.new
+            session = ValidationSession.new(
+              model: model,
+              indoor_model: FakeIndoorModel.new(model),
+              progress: progress,
+              state: {},
+              workspace: workspace
+            )
+            session.result_ready!
+            dispatcher = Dispatcher.new
+            dispatcher.instance_variable_set(:@validation_session, session)
+            dispatcher.instance_variable_set(:@validation_progress_dialog, progress)
+
+            assert dispatcher.send(:close_previous_validation_result)
+
+            assert session.completed?
+            assert_equal 1, progress.close_count
+            assert progress.callbacks_cleared
+            assert_equal 1, workspace.cleanup_count
+            assert_nil dispatcher.instance_variable_get(:@validation_session)
+            assert_nil dispatcher.instance_variable_get(:@validation_progress_dialog)
+          end
+
+          def test_running_validation_is_not_closed_for_restart
+            model = FakeModel.new('A')
+            progress = FakeProgress.new
+            session = ValidationSession.new(
+              model: model,
+              indoor_model: FakeIndoorModel.new(model),
+              progress: progress,
+              state: {}
+            )
+            dispatcher = Dispatcher.new
+            dispatcher.instance_variable_set(:@validation_session, session)
+            dispatcher.instance_variable_set(:@validation_progress_dialog, progress)
+
+            refute dispatcher.send(:close_previous_validation_result)
+
+            assert session.running?
+            assert_equal 0, progress.close_count
+            assert_same session, dispatcher.instance_variable_get(:@validation_session)
+            assert_same progress, dispatcher.instance_variable_get(:@validation_progress_dialog)
+          end
+
           def test_perform_check_validity_uses_captured_session_indoor_model
             model_a = FakeModel.new('A')
             model_b = FakeModel.new('B')
@@ -210,6 +257,7 @@ module ULOL
 
             assert_equal 1, indoor.finish_editing_count
             assert_same indoor, FakeGmlExporter.last_indoor_model
+            assert_equal false, FakeGmlExporter.last_options[:refresh_runtime_data]
             assert_equal "#{UI.savepanel_path}.gml", FakeGmlExporter.last_output_path
           ensure
             FakeGmlExporter.reset
@@ -232,6 +280,7 @@ module ULOL
 
             assert_equal 1, indoor.finish_editing_count
             assert_same indoor, FakeGmlExporter.last_indoor_model
+            assert_equal false, FakeGmlExporter.last_options[:refresh_runtime_data]
             assert_equal "#{UI.savepanel_path}.gml", FakeGmlExporter.last_output_path
             assert_equal "GML exported:\n#{UI.savepanel_path}.gml", progress.result_message
           ensure
@@ -761,15 +810,18 @@ module ULOL
           class FakeGmlExporter
             class << self
               attr_reader :last_indoor_model
+              attr_reader :last_options
               attr_reader :last_output_path
 
-              def new(indoor_model)
+              def new(indoor_model, **options)
                 @last_indoor_model = indoor_model
+                @last_options = options
                 allocate
               end
 
               def reset
                 @last_indoor_model = nil
+                @last_options = nil
                 @last_output_path = nil
               end
 
