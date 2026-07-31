@@ -53,7 +53,6 @@ module ULOL
         end
 
         def self.enabled?(level_name)
-          return true if !logging_enabled? && warning_or_error?(level_name)
           return false unless logging_enabled?
 
           LEVELS.fetch(level_name, LEVELS[:info]) >= LEVELS.fetch(level, LEVELS[DEFAULT_LEVEL])
@@ -63,12 +62,6 @@ module ULOL
           return true unless defined?(::ULOL::Indoor3DGmlModeler::Definition::LOGGING_ENABLED)
 
           ::ULOL::Indoor3DGmlModeler::Definition::LOGGING_ENABLED == true
-        end
-
-        def self.warning_or_error?(level_name)
-          %i[warn error].include?(level_name.to_sym)
-        rescue StandardError
-          false
         end
       end
     end
