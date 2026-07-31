@@ -148,8 +148,30 @@ module ULOL
             result.converted_count,
             result.errors
           )
-          elapsed = result.metrics&.[](:total_duration)
-          message = "#{message}\nTotal elapsed: #{format('%.3f', elapsed)} sec" if elapsed
+
+          metrics = result.metrics || {}
+          if metrics[:total_duration]
+            message << "\n\n----------------------------------------"
+            message << "\nCreate CellSpace 시간 요약"
+            message << format(
+              "\n  시작 전 검사                : %.3f sec",
+              metrics[:preflight_duration].to_f
+            )
+            message << format(
+              "\n  CellSpace/State 생성       : %.3f sec",
+              metrics[:cell_space_state_duration].to_f
+            )
+            message << format(
+              "\n  Adjacency/Transition 생성  : %.3f sec",
+              metrics[:adjacency_transition_duration].to_f
+            )
+            message << format(
+              "\n  전체 시간                   : %.3f sec",
+              metrics[:total_duration].to_f
+            )
+            message << "\n----------------------------------------"
+          end
+
           UiFeedback.publish_result(message, errors: result.errors)
         end
       end
