@@ -1,25 +1,40 @@
 # frozen_string_literal: true
 
+require 'digest'
+
 # LocalVertexNormalizer optimization baseline benchmark.
 #
-# Select one or more Group / ComponentInstance solids, then run from the
-# SketchUp Ruby Console:
+# Default execution is intentionally light:
+# - first selected solid only
+# - one production normalize call
+# - no warmup
+# - no TracePoint
+# - no debug profiler
+#
+# Run from the SketchUp Ruby Console after selecting a solid:
 #
 #   core_file = ULOL::Indoor3DGmlModeler.method(:attach_model_observer).source_location.first
 #   root = File.expand_path('..', File.dirname(core_file))
 #   load File.join(root, 'dev', 'lvn_optimization_baseline_benchmark.rb')
 #
-# Every normalization runs with manage_operation:false inside an outer SketchUp
-# operation that is aborted afterward. start_operation / abort_operation are NOT
-# included in production timing or allocation measurements. After every rollback
-# the selected entity is re-resolved by persistent_id and its local B-rep is
-# compared with the original source signature.
+# Optional explicit runs:
+#
+#   ULOL::Indoor3DGmlModeler::IndoorCore::LvnOptimizationBaselineBenchmark.run(
+#     rounds: 3,
+#     all: true,
+#     profile: true,
+#     trace: false
+#   )
+#
+# Every normalize call runs with manage_operation:false inside an outer
+# SketchUp operation. The operation is aborted immediately afterward and the
+# source B-rep signature is checked again. Normalized geometry is not retained.
 
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       module LvnOptimizationBaselineBenchmark
-        DEFAULT_ROUNDS = 3
+        DEFAULT_ROUNDS = 1
         TOP_STAGE_COUNT = 15
 
         TRACE_METHODS = [
@@ -51,35 +66,50 @@ module ULOL
 
         module_function
 
-        def run(rounds: DEFAULT_ROUNDS)
+        def run(rounds: DEFAULT_ROUNDS, all: false, profile: false, trace: false)
           model = Sketchup.active_model
-          selected = model.selection.to_a.select do |entity|
-            entity.respond_to?(:definition) &&
-              entity.respond_to?(:valid?) &&
-              entity.valid?
-          end
+          selected = benchmark_entities(model)
           if selected.empty?
             puts '[LVN BENCH] Select one or more Group / ComponentInstance solids first.'
             return false
           end
 
+          entities = all ? selected : [selected.first]
           rounds = [rounds.to_i, 1].max
+
           puts '=' * 78
           puts ' IndoorGML LVN Optimization Baseline Benchmark'
           puts '=' * 78
           puts format('selected solids : %d', selected.length)
-          puts format('rounds / solid  : %d production samples', rounds)
+          puts format('tested solids   : %d%s', entities.length, all ? '' : ' (first selected only)')
+          puts format('rounds / solid  : %d production sample(s)', rounds)
+          puts format('profile probe   : %s', profile ? 'enabled' : 'disabled')
+          puts format('TracePoint probe: %s', trace ? 'enabled' : 'disabled')
           puts format('ruby            : %s', RUBY_VERSION)
           puts format('tolerance       : %.6f mm', LocalVertexNormalizer::DEFAULT_TOLERANCE_MM)
-          puts 'measurement     : normalize only; outer operation/rollback excluded'
-          puts 'source safety   : local B-rep signature checked after every rollback'
+          puts 'measurement     : normalize call only; operation start/rollback excluded'
+          puts 'source safety   : exact local B-rep signature checked after every rollback'
+          if !all && selected.length > 1
+            puts '[LVN BENCH] Multiple solids selected; default run tests only the first one.'
+          end
 
-          results = selected.map do |entity|
-            benchmark_entity(model, entity, rounds)
+          results = entities.map.with_index do |entity, index|
+            puts
+            puts format('[LVN BENCH] Solid %d/%d: %s', index + 1, entities.length, entity_label(entity))
+            benchmark_entity(
+              model,
+              entity,
+              rounds,
+              profile: profile,
+              trace: trace
+            )
           rescue StandardError => error
+            warn "[LVN BENCH] FAILED #{entity_label(entity)}: #{error.class}: #{error.message}"
+            warn Array(error.backtrace).first(8).join("\n")
             {
-              status: :failed,
               label: entity_label(entity),
+              pid: persistent_id(entity),
+              status: :failed,
               error: "#{error.class}: #{error.message}",
               backtrace: Array(error.backtrace).first(6)
             }
@@ -93,22 +123,29 @@ module ULOL
           false
         end
 
-        def benchmark_entity(model, original, rounds)
-          pid = persistent_id(original)
-          source = resolve_entity(model, pid, original)
+        def benchmark_entities(model)
+          model.selection.to_a.select do |entity|
+            entity.respond_to?(:definition) &&
+              entity.respond_to?(:valid?) &&
+              entity.valid?
+          end
+        end
+
+        def benchmark_entity(model, original_entity, rounds, profile:, trace:)
+          pid = persistent_id(original_entity)
+          source = resolve_entity(model, pid, original_entity)
           raise "Could not resolve selected entity #{pid.inspect}" unless source
 
-          signature = brep_signature(source)
+          puts '[LVN BENCH] Building source B-rep signature...'
+          source_signature = brep_signature(source)
           geometry = geometry_summary(source)
-
-          with_rollback(model, source, 'LVN benchmark warmup') do |entity|
-            LocalVertexNormalizer.normalize(
-              entity,
-              LocalVertexNormalizer::DEFAULT_TOLERANCE_MM,
-              manage_operation: false
-            )
-          end
-          assert_restored!(model, pid, source, signature)
+          puts format(
+            '[LVN BENCH] Source ready: faces=%d edges=%d vertices=%d manifold=%s',
+            geometry[:faces],
+            geometry[:edges],
+            geometry[:vertices],
+            geometry[:manifold].inspect
+          )
 
           samples = []
           allocations = []
@@ -116,66 +153,99 @@ module ULOL
 
           rounds.times do |index|
             entity = resolve_entity(model, pid, source)
-            GC.start
-            measured_ms = nil
-            measured_alloc = nil
-
-            result = with_rollback(model, entity, "LVN benchmark production #{index + 1}") do |current|
-              before_alloc = GC.stat(:total_allocated_objects)
-              started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-              normalized = LocalVertexNormalizer.normalize(
+            measurement = measure_with_rollback(
+              model,
+              entity,
+              pid,
+              source_signature,
+              label: "LVN baseline production #{index + 1}/#{rounds}"
+            ) do |current|
+              LocalVertexNormalizer.normalize(
                 current,
                 LocalVertexNormalizer::DEFAULT_TOLERANCE_MM,
                 manage_operation: false
               )
-              measured_ms =
-                (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000.0
-              measured_alloc =
-                GC.stat(:total_allocated_objects) - before_alloc
-              normalized
             end
 
-            samples << measured_ms
-            allocations << measured_alloc
-            strategies << normalization_strategy(result)
-            assert_restored!(model, pid, source, signature)
+            samples << measurement[:elapsed_ms]
+            allocations << measurement[:allocations]
+            strategies << normalization_strategy(measurement[:result])
           end
 
-          trace_counts = trace_probe(model, pid, source)
-          assert_restored!(model, pid, source, signature)
-
-          profile_result = profile_probe(model, pid, source)
-          assert_restored!(model, pid, source, signature)
+          trace_counts = trace ? trace_probe(model, pid, source, source_signature) : {}
+          profile_result = profile ? profile_probe(model, pid, source, source_signature) : nil
+          timing = summarize_samples(samples, allocations)
+          debug_profile = profile_result.is_a?(Hash) ? profile_result[:debug_profile] : nil
 
           result = {
+            label: entity_label(resolve_entity(model, pid, source) || source),
+            pid: pid,
             status: :success,
-            label: entity_label(source),
             geometry: geometry,
-            timing: summarize(samples, allocations),
+            timing: timing,
             strategies: strategies.uniq,
             trace_counts: trace_counts,
-            profile:
-              profile_result.is_a?(Hash) ? profile_result[:debug_profile] : nil
+            profile: debug_profile,
+            source_restored: true
           }
-          print_entity_result(result)
+          print_entity_result(result, trace: trace, profile: profile)
           result
         end
 
-        def with_rollback(model, entity, label)
-          started = model.start_operation(label, true)
-          raise 'SketchUp start_operation returned false' if started == false
+        def measure_with_rollback(model, entity, pid, expected_signature, label:)
+          puts "[LVN BENCH] START #{label}"
+          started_operation = model.start_operation(label, true)
+          raise 'SketchUp start_operation returned false' if started_operation == false
 
           result = nil
+          elapsed_ms = nil
+          allocations = nil
+          normalize_error = nil
+
           begin
-            result = yield(entity)
+            GC.start
+            before_alloc = GC.stat(:total_allocated_objects)
+            started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+            begin
+              result = yield(entity)
+            rescue StandardError => error
+              normalize_error = error
+            ensure
+              finished_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+              after_alloc = GC.stat(:total_allocated_objects)
+              elapsed_ms = (finished_at - started_at) * 1000.0
+              allocations = after_alloc - before_alloc
+            end
+
+            puts format(
+              '[LVN BENCH] END   %s normalize=%9.3f ms alloc=%d status=%s',
+              label,
+              elapsed_ms,
+              allocations,
+              normalize_error ? 'failed' : 'success'
+            )
           ensure
+            puts "[LVN BENCH] ROLLBACK START #{label}"
             aborted = model.abort_operation
             raise 'SketchUp abort_operation returned false' if aborted == false
+            puts "[LVN BENCH] ROLLBACK END   #{label}"
           end
-          result
+
+          puts "[LVN BENCH] SOURCE CHECK START #{label}"
+          assert_source_restored!(model, pid, expected_signature, entity)
+          puts "[LVN BENCH] SOURCE CHECK PASS  #{label}"
+
+          raise normalize_error if normalize_error
+
+          {
+            result: result,
+            elapsed_ms: elapsed_ms,
+            allocations: allocations
+          }
         end
 
-        def trace_probe(model, pid, fallback)
+        def trace_probe(model, pid, fallback, source_signature)
+          puts '[LVN BENCH] TracePoint probe explicitly enabled; this probe may be much slower.'
           counts = Hash.new(0)
           tracer = TracePoint.new(:call, :c_call) do |tp|
             method_id = tp.method_id
@@ -183,7 +253,13 @@ module ULOL
           end
 
           entity = resolve_entity(model, pid, fallback)
-          with_rollback(model, entity, 'LVN benchmark trace') do |current|
+          measurement = measure_with_rollback(
+            model,
+            entity,
+            pid,
+            source_signature,
+            label: 'LVN baseline TracePoint probe'
+          ) do |current|
             tracer.enable do
               LocalVertexNormalizer.normalize(
                 current,
@@ -192,14 +268,22 @@ module ULOL
               )
             end
           end
+          puts format('[LVN BENCH] TracePoint probe normalize time: %.3f ms', measurement[:elapsed_ms])
           counts
         ensure
           tracer&.disable
         end
 
-        def profile_probe(model, pid, fallback)
+        def profile_probe(model, pid, fallback, source_signature)
+          puts '[LVN BENCH] Debug profile probe explicitly enabled.'
           entity = resolve_entity(model, pid, fallback)
-          with_rollback(model, entity, 'LVN benchmark profile') do |current|
+          measurement = measure_with_rollback(
+            model,
+            entity,
+            pid,
+            source_signature,
+            label: 'LVN baseline debug profile probe'
+          ) do |current|
             LocalVertexNormalizer.normalize(
               current,
               LocalVertexNormalizer::DEFAULT_TOLERANCE_MM,
@@ -208,9 +292,10 @@ module ULOL
               manage_operation: false
             )
           end
+          measurement[:result]
         end
 
-        def summarize(samples, allocations)
+        def summarize_samples(samples, allocations)
           sorted = samples.sort
           alloc_sorted = allocations.sort
           {
@@ -249,49 +334,44 @@ module ULOL
           }
         end
 
+        # Linearithmic signature construction. Face loops are represented by
+        # sorted exact edge keys, avoiding rotation-based O(n^2) canonicalization.
         def brep_signature(entity)
           entities = entity.definition.entities
-          edges = entities.grep(Sketchup::Edge).map do |edge|
-            a = point_key(edge.start.position)
-            b = point_key(edge.end.position)
-            (a <=> b) <= 0 ? [a, b] : [b, a]
+          edge_signatures = entities.grep(Sketchup::Edge).map do |edge|
+            canonical_edge_key_exact(edge.start.position, edge.end.position)
           end.sort
 
-          faces = entities.grep(Sketchup::Face).map do |face|
+          face_signatures = entities.grep(Sketchup::Face).map do |face|
             face.loops.map do |loop|
-              canonical_cycle(
-                loop.vertices.map { |vertex| point_key(vertex.position) }
-              )
+              vertices = loop.vertices
+              vertices.each_index.map do |index|
+                first = vertices[index].position
+                second = vertices[(index + 1) % vertices.length].position
+                canonical_edge_key_exact(first, second)
+              end.sort
             end.sort
           end.sort
-          [edges, faces]
+
+          Digest::SHA256.hexdigest(Marshal.dump([edge_signatures, face_signatures]))
         end
 
-        def point_key(point)
+        def canonical_edge_key_exact(first, second)
+          point_a = exact_point_key(first)
+          point_b = exact_point_key(second)
+          (point_a <=> point_b) <= 0 ? [point_a, point_b] : [point_b, point_a]
+        end
+
+        def exact_point_key(point)
           [point.x.to_f, point.y.to_f, point.z.to_f]
         end
 
-        def canonical_cycle(points)
-          return points if points.length < 2
-
-          forward = minimum_rotation(points)
-          reverse = minimum_rotation(points.reverse)
-          (forward <=> reverse) <= 0 ? forward : reverse
-        end
-
-        def minimum_rotation(points)
-          best = nil
-          points.length.times do |index|
-            candidate = points.rotate(index)
-            best = candidate if best.nil? || (candidate <=> best) < 0
-          end
-          best
-        end
-
-        def assert_restored!(model, pid, fallback, expected)
+        def assert_source_restored!(model, pid, expected_signature, fallback)
           entity = resolve_entity(model, pid, fallback)
-          raise "Entity #{pid.inspect} invalid after rollback" unless entity&.valid?
-          return true if brep_signature(entity) == expected
+          raise "Entity #{pid.inspect} is invalid after rollback" unless entity&.valid?
+
+          actual = brep_signature(entity)
+          return true if actual == expected_signature
 
           raise "Source B-rep changed after rollback for #{entity_label(entity)}"
         end
@@ -323,15 +403,17 @@ module ULOL
           entity.class.to_s
         end
 
-        def top_stages(profile)
-          return [] unless profile.is_a?(Hash) && profile[:stages].is_a?(Hash)
+        def top_profile_stages(profile)
+          return [] unless profile.is_a?(Hash)
 
-          profile[:stages]
-            .sort_by { |_name, metrics| -metrics[:total_seconds].to_f }
-            .first(TOP_STAGE_COUNT)
+          stages = profile[:stages]
+          return [] unless stages.is_a?(Hash)
+
+          stages.sort_by { |_name, metrics| -metrics[:total_seconds].to_f }
+                .first(TOP_STAGE_COUNT)
         end
 
-        def print_entity_result(result)
+        def print_entity_result(result, trace:, profile:)
           timing = result[:timing]
           geometry = result[:geometry]
           puts
@@ -339,39 +421,38 @@ module ULOL
           puts result[:label]
           puts format(
             'geometry        : faces=%d edges=%d vertices=%d manifold=%s',
-            geometry[:faces],
-            geometry[:edges],
-            geometry[:vertices],
-            geometry[:manifold].inspect
+            geometry[:faces], geometry[:edges], geometry[:vertices], geometry[:manifold].inspect
           )
           puts format(
             'production      : median=%9.3f ms  min=%9.3f  max=%9.3f  alloc=%9d',
-            timing[:median_ms],
-            timing[:min_ms],
-            timing[:max_ms],
-            timing[:median_alloc]
+            timing[:median_ms], timing[:min_ms], timing[:max_ms], timing[:median_alloc]
           )
           puts format('strategies      : %s', result[:strategies].join(', '))
-          puts 'trace counts:'
-          printed = false
-          TRACE_METHODS.each do |method_id|
-            count = result[:trace_counts][method_id]
-            next if count.nil? || count.zero?
 
-            puts format('  %-45s %8d', method_id, count)
-            printed = true
+          if trace
+            puts 'trace counts:'
+            printed = false
+            TRACE_METHODS.each do |method_id|
+              count = result[:trace_counts][method_id]
+              next if count.nil? || count.zero?
+
+              puts format('  %-45s %8d', method_id, count)
+              printed = true
+            end
+            puts '  (no traced calls)' unless printed
+          else
+            puts 'trace counts     : skipped'
           end
-          puts '  (no traced calls)' unless printed
 
-          profile = result[:profile]
-          if profile
+          debug_profile = result[:profile]
+          if profile && debug_profile
             puts format(
               'profile probe   : total=%9.3f ms status=%s',
-              profile[:total_seconds].to_f * 1000.0,
-              profile[:status]
+              debug_profile[:total_seconds].to_f * 1000.0,
+              debug_profile[:status]
             )
             puts 'top inclusive stages:'
-            top_stages(profile).each do |name, metrics|
+            top_profile_stages(debug_profile).each do |name, metrics|
               puts format(
                 '  %-45s %9.3f ms  calls=%4d  max=%9.3f',
                 name,
@@ -380,14 +461,10 @@ module ULOL
                 metrics[:max_seconds].to_f * 1000.0
               )
             end
-            if profile[:snapshot_reuse]
-              puts format(
-                'snapshot reuse  : %s',
-                profile[:snapshot_reuse].inspect
-              )
-            end
+            snapshot_reuse = debug_profile[:snapshot_reuse]
+            puts format('snapshot reuse  : %s', snapshot_reuse.inspect) if snapshot_reuse
           else
-            puts 'profile probe   : unavailable'
+            puts 'profile probe   : skipped'
           end
           puts 'source restored : true'
         end
@@ -414,29 +491,18 @@ module ULOL
           end
 
           unless successes.empty?
-            total_median = successes.sum do |result|
-              result[:timing][:median_ms]
-            end
-            total_alloc = successes.sum do |result|
-              result[:timing][:median_alloc]
-            end
+            total_median = successes.sum { |result| result[:timing][:median_ms] }
+            total_alloc = successes.sum { |result| result[:timing][:median_alloc] }
             puts '--- aggregate ------------------------------------------------------------'
             puts format('sum of per-solid medians : %9.3f ms', total_median)
             puts format('sum median allocations   : %9d', total_alloc)
           end
 
           failures.each do |result|
-            puts format(
-              'FAILED %-34s %s',
-              result[:label][0, 34],
-              result[:error]
-            )
+            puts format('FAILED %-34s %s', result[:label][0, 34], result[:error])
             Array(result[:backtrace]).each { |line| puts "  #{line}" }
           end
-          puts format(
-            'result                  : %s',
-            failures.empty? ? 'PASS' : 'FAIL'
-          )
+          puts format('result                  : %s', failures.empty? ? 'PASS' : 'FAIL')
           puts '=' * 78
         end
       end
