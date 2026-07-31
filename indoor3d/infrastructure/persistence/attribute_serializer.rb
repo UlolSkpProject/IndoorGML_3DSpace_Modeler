@@ -48,6 +48,18 @@ module ULOL
           feature(sketchup_group) == 'CellSpace'
         end
 
+        # Bulk conversion can request many logically identical CellSpace writes while
+        # topology creates/updates transitions. Keep the optimization explicitly
+        # scoped to the caller-owned batch: normal create/edit/load persistence keeps
+        # the existing eager-write behavior.
+        def with_cell_space_write_dedup
+          previous_cache = @cell_space_write_dedup_cache
+          @cell_space_write_dedup_cache = {}
+          yield
+        ensure
+          @cell_space_write_dedup_cache = previous_cache
+        end
+
         def write_space_features(group, feature)
           return false unless valid_entity?(group)
 
@@ -66,7 +78,12 @@ module ULOL
           group = cell_space.valid_sketchup_group
           return false unless group
 
-          write_attributes(group) do
+          cache_key = group.object_id
+          signature = cell_space_write_signature(cell_space)
+          cache = @cell_space_write_dedup_cache
+          return true if cache && cache[cache_key] == signature
+
+          written = write_attributes(group) do
             group.set_attribute(@dictionary_name, 'feature', 'CellSpace')
             group.set_attribute(@dictionary_name, 'id', cell_space.id)
             group.set_attribute(@dictionary_name, 'cell_type', CellSpaceType.label(cell_space.cell_type))
@@ -75,6 +92,9 @@ module ULOL
             group.set_attribute(@dictionary_name, 'storey', cell_space.storey)
             group.set_attribute(@dictionary_name, 'duality_state_id', cell_space.duality_state.id) if cell_space.duality_state
           end
+
+          cache[cache_key] = signature if written && cache
+          written
         end
 
         def write_state(state)
@@ -121,6 +141,23 @@ module ULOL
         end
 
         private
+
+        def cell_space_write_signature(cell_space)
+          state = cell_space.duality_state
+          [
+            cell_space.id,
+            cell_space.cell_type,
+            cell_space.category_code,
+            cell_space.storey,
+            state&.id,
+            cell_space.navigation_class,
+            cell_space.navigation_class_code_space,
+            cell_space.navigation_function,
+            cell_space.navigation_function_code_space,
+            cell_space.navigation_usage,
+            cell_space.navigation_usage_code_space
+          ].freeze
+        end
 
         def indoor_gml_attribute_keys(entity)
           dictionary = entity.attribute_dictionary(@dictionary_name) if entity.respond_to?(:attribute_dictionary)
