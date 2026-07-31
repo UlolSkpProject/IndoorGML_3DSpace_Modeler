@@ -27,7 +27,7 @@ module ULOL
           :root_local_vector_to_model,
           :transition_curve_input,
           :transition_curve_segments,
-          :cached_transition_curve_point_groups,
+          :transition_curve_point_groups,
           :hermite_transition_curve_point_groups,
           :generate_segment,
           :polyline_segments
@@ -96,7 +96,7 @@ module ULOL
             state_renderer.send(:rebuild_state_points)
           end
 
-          # Ensure per-transition render/curve caches exist for the soft probe.
+          # Ensure per-transition render cache exists for the soft probe.
           transition_builder.clear_cache
           transition_builder.transition_line_points
           diagnostics['Transition soft invalidate + rebuild'] = trace_calls do
@@ -201,21 +201,21 @@ module ULOL
 
           state_points = Array(state_renderer.instance_variable_get(:@render_state_points))
           transition_points = Array(transition_builder.instance_variable_get(:@render_transition_line_points))
-          curve_cache = transition_builder.instance_variable_get(:@transition_curve_cache) || {}
+          render_segment_cache = transition_builder.instance_variable_get(:@transition_render_segment_cache) || {}
           extent_points = Array(state_renderer.instance_variable_get(:@render_state_extent_points))
 
           puts '--- cache / render data ------------------------------------'
-          puts format('state render points:                %8d', state_points.length)
-          puts format('transition GL line points:          %8d', transition_points.length)
-          puts format('transition GL segments:             %8d', transition_points.length / 2)
-          puts format('transition curve cache entries:     %8d', curve_cache.length)
-          puts format('state extent cache:                 %8s', extent_points.empty? ? 'nil' : 'present')
+          puts format('state render points:                    %8d', state_points.length)
+          puts format('transition GL line points:              %8d', transition_points.length)
+          puts format('transition GL segments:                 %8d', transition_points.length / 2)
+          puts format('transition render cache entries:        %8d', render_segment_cache.length)
+          puts format('state extent cache:                     %8s', extent_points.empty? ? 'nil' : 'present')
 
           puts '--- derived metrics ----------------------------------------'
           segment_ratio = transitions.empty? ? 0.0 : (transition_points.length / 2.0) / transitions.length
-          coverage = transitions.empty? ? 0.0 : (curve_cache.length.to_f / transitions.length) * 100.0
+          coverage = transitions.empty? ? 0.0 : (render_segment_cache.length.to_f / transitions.length) * 100.0
           puts format('GL segments / transition : %.3f', segment_ratio)
-          puts format('curve-cache coverage      : %.2f%%', coverage)
+          puts format('render-cache coverage     : %.2f%%', coverage)
           puts format('states                    : %d', states.length)
           puts '=' * 60
           puts ' Benchmark complete'
