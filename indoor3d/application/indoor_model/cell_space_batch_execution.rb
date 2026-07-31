@@ -44,10 +44,17 @@ module ULOL
               end,
               synchronize_all: proc do
                 # Persist every newly-created CellSpace once before topology starts,
-                # preserving the old topology-visible attribute state. The batch
-                # dedup cache then turns repeated transition/state persistence for
-                # unchanged CellSpaces into no-ops.
-                @attribute_serializer.flush_deferred_cell_space_writes(created)
+                # preserving the old topology-visible attribute state and the
+                # existing IndoorModel snapshot side effects. The batch dedup cache
+                # then turns repeated transition/state persistence for unchanged
+                # CellSpaces into no-ops.
+                @attribute_serializer.with_cell_space_write_flush do
+                  created.each do |cell_space|
+                    next unless cell_space&.valid?
+
+                    write_attributes(cell_space)
+                  end
+                end
                 apply_cell_space_materials_batch(created)
                 synchronize_topology_after_bulk_conversion
               end,
