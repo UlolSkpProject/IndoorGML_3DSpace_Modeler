@@ -125,8 +125,10 @@ module ULOL
           remember_cell_space_change_snapshot(cell_space.sketchup_group)
         end
 
-        # Overall Edit Mode finish performs only a soft refresh. Geometry-specific
-        # axis/recenter work has already been handled by cell_space_closed.
+        # Overall Edit Mode finish must not rebuild whole-model runtime/topology
+        # when the runtime registry is still consistent. Geometry-specific local
+        # frame work is already handled by cell_space_closed, and dirty CellSpaces
+        # already have an incremental topology sync path.
         def finish_editing
           return super unless local_grid_coordinate_v2_enabled?
           return false if validation_focus_recheck_running?
@@ -135,13 +137,46 @@ module ULOL
             finished = @editor_session.finish()
             if finished
               normalize_primal_children_for_finish()
-              soft_refresh_runtime_data_local_grid_v2
+              finalize_local_grid_v2_runtime_after_edit_finish
             end
             finished
           end
         end
 
         private
+
+        def finalize_local_grid_v2_runtime_after_edit_finish
+          if local_grid_v2_runtime_refresh_required_after_edit_finish?
+            soft_refresh_runtime_data_local_grid_v2
+          elsif !dirty_topology_queue.empty?
+            flush_dirty_cell_space_sync
+          end
+          true
+        end
+
+        def local_grid_v2_runtime_refresh_required_after_edit_finish?
+          return true unless @primal_group&.valid?
+
+          model_cell_groups = @primal_group.entities.grep(Sketchup::Group).select do |group|
+            group&.valid? && indoor_feature(group) == 'CellSpace'
+          end
+          runtime_cells = Array(@cell_spaces).select { |cell_space| cell_space&.valid? }
+          return true unless model_cell_groups.length == runtime_cells.length
+
+          model_cell_groups.any? do |group|
+            cell_space = @feature_registry.find_cell_space_for_entity(group)
+            cell_space.nil? ||
+              !cell_space.valid? ||
+              cell_space.sketchup_group != group ||
+              !cell_space.duality_state&.valid?
+          end
+        rescue StandardError => e
+          IndoorCore::Logger.puts(
+            '[IndoorGML] Edit finish runtime consistency check failed; falling back to soft refresh: ' \
+            "#{e.class}: #{e.message}"
+          )
+          true
+        end
 
         def hard_refresh_runtime_cell_spaces_local_grid_v2
           @cell_spaces.each do |cell_space|
