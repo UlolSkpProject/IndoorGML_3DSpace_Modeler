@@ -100,14 +100,30 @@ module ULOL
           @render_states.clear
           @render_state_points.clear
           clear_extent_cache
+
+          root_local_points = []
           @indoor_model.states.each do |state|
             next unless state&.valid?()
             next unless @transform_context.overlay_state_visible?(state)
 
             @render_states << state
-            @render_state_points << overlay_state_point(state)
+            root_local_points << state_root_local_point(state)
+          end
+
+          if @transform_context.respond_to?(:overlay_render_points)
+            @render_state_points.concat(@transform_context.overlay_render_points(root_local_points))
+          else
+            root_local_points.each do |point|
+              @render_state_points << @transform_context.overlay_render_point(point)
+            end
           end
           @render_state_points_dirty = false
+        end
+
+        def state_root_local_point(state)
+          @transform_context.overlay_state_root_local_point(state)
+        rescue StandardError
+          state.position
         end
 
         def clear_extent_cache
