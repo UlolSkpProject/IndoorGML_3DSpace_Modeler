@@ -6,11 +6,7 @@ require 'minitest/autorun'
 module ULOL
   module Indoor3DGmlModeler
     module Utils
-      module Transformation
-        def self.root_transformation_in_model(root_group)
-          root_group.world_transformation
-        end
-      end
+      module Transformation; end
     end
 
     module IndoorCore
@@ -26,6 +22,30 @@ module ULOL
     module IndoorCore
       class CellSpaceBatchTargetEntitiesTest < Minitest::Test
         EPSILON = 1.0e-10
+
+        def setup
+          transformation = Utils::Transformation
+          @original_root_transformation_in_model =
+            transformation.method(:root_transformation_in_model) if
+              transformation.respond_to?(:root_transformation_in_model)
+          transformation.define_singleton_method(:root_transformation_in_model) do |root_group|
+            root_group.world_transformation
+          end
+        end
+
+        def teardown
+          transformation = Utils::Transformation
+          if @original_root_transformation_in_model
+            original = @original_root_transformation_in_model
+            transformation.define_singleton_method(:root_transformation_in_model) do |*args|
+              original.call(*args)
+            end
+          else
+            singleton_class = class << transformation; self; end
+            singleton_class.send(:remove_method, :root_transformation_in_model) if
+              singleton_class.method_defined?(:root_transformation_in_model)
+          end
+        end
 
         def test_primal_local_transform_preserves_world_transform
           primal_world = TestTransformation.translation(120.0, -35.0, 18.0) *
