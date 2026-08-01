@@ -3,7 +3,7 @@
 probe_path = File.join(__dir__, 'lvn_bridge_nearest_first_probe.rb')
 source = File.binread(probe_path).force_encoding(Encoding::UTF_8)
 
-old_install = <<~'RUBY'
+old_install = <<-'RUBY'
         LocalVertexNormalizer.class_eval do
           define_method(
             :triangulate_exact_weak_polygon,
@@ -15,7 +15,7 @@ old_install = <<~'RUBY'
         end
 RUBY
 
-new_install = <<~'RUBY'
+new_install = <<-'RUBY'
         incremental_method_names =
           IncrementalEarTriangulation.private_instance_methods(false)
         required_incremental_method_names = [
