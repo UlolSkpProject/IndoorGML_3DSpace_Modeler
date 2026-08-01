@@ -93,6 +93,7 @@ module ULOL
             worker_thread_id = Thread.current.object_id
             completed = 0
             checksum = 0
+            current_item_iteration = 0
             last_progress_at = started_at
             last_yield_at = started_at
             yield_count = 0
@@ -103,18 +104,23 @@ module ULOL
               type: :started,
               total: @total,
               completed: 0,
+              current_item: 1,
+              current_item_percent: 0.0,
+              effective_completed: 0.0,
               percent: 0.0,
               elapsed: 0.0,
               worker_thread_id: worker_thread_id
             )
 
-            checkpoint = lambda do
+            checkpoint = lambda do |item_iteration|
               checkpoint_count += 1
+              current_item_iteration = item_iteration
               now = monotonic_time
 
               if (now - last_progress_at) >= @progress_interval
                 publish_progress(
                   completed: completed,
+                  item_iteration: current_item_iteration,
                   started_at: started_at,
                   now: now,
                   worker_thread_id: worker_thread_id
@@ -133,16 +139,23 @@ module ULOL
             end
 
             @total.times do |index|
-              break if checkpoint.call
+              current_item_iteration = 0
+              break if checkpoint.call(0)
 
-              checksum, cancelled = perform_pure_ruby_work(checksum, index, &checkpoint)
+              checksum, cancelled, current_item_iteration = perform_pure_ruby_work(
+                checksum,
+                index,
+                &checkpoint
+              )
               break if cancelled
 
               completed = index + 1
+              current_item_iteration = completed == @total ? @work_per_item : 0
               now = monotonic_time
               if completed == @total || (now - last_progress_at) >= @progress_interval
                 publish_progress(
                   completed: completed,
+                  item_iteration: current_item_iteration,
                   started_at: started_at,
                   now: now,
                   worker_thread_id: worker_thread_id
@@ -154,17 +167,21 @@ module ULOL
 
             finished_at = monotonic_time
             terminal_type = @cancellation_token.cancelled? ? :cancelled : :completed
-            @mailbox.publish(
-              type: terminal_type,
-              total: @total,
+            terminal_progress = progress_metrics(
               completed: completed,
-              percent: completed.fdiv(@total) * 100.0,
-              elapsed: finished_at - started_at,
-              checksum: checksum,
-              worker_thread_id: worker_thread_id,
-              yield_count: yield_count,
-              checkpoint_count: checkpoint_count,
-              progress_event_count: progress_event_count
+              item_iteration: current_item_iteration
+            )
+            @mailbox.publish(
+              terminal_progress.merge(
+                type: terminal_type,
+                total: @total,
+                elapsed: finished_at - started_at,
+                checksum: checksum,
+                worker_thread_id: worker_thread_id,
+                yield_count: yield_count,
+                checkpoint_count: checkpoint_count,
+                progress_event_count: progress_event_count
+              )
             )
           rescue StandardError => e
             @mailbox.publish(
@@ -175,26 +192,54 @@ module ULOL
             )
           end
 
-          def publish_progress(completed:, started_at:, now:, worker_thread_id:)
+          def publish_progress(completed:, item_iteration:, started_at:, now:, worker_thread_id:)
             @mailbox.publish(
-              type: :progress,
-              total: @total,
-              completed: completed,
-              percent: completed.fdiv(@total) * 100.0,
-              elapsed: now - started_at,
-              worker_thread_id: worker_thread_id
+              progress_metrics(
+                completed: completed,
+                item_iteration: item_iteration
+              ).merge(
+                type: :progress,
+                total: @total,
+                elapsed: now - started_at,
+                worker_thread_id: worker_thread_id
+              )
             )
+          end
+
+          def progress_metrics(completed:, item_iteration:)
+            completed = [[completed.to_i, 0].max, @total].min
+            if completed >= @total
+              return {
+                completed: @total,
+                current_item: @total,
+                current_item_percent: 100.0,
+                effective_completed: @total.to_f,
+                percent: 100.0
+              }
+            end
+
+            iteration = [[item_iteration.to_i, 0].max, @work_per_item].min
+            item_fraction = iteration.fdiv(@work_per_item)
+            effective_completed = completed + item_fraction
+            {
+              completed: completed,
+              current_item: completed + 1,
+              current_item_percent: item_fraction * 100.0,
+              effective_completed: effective_completed,
+              percent: effective_completed.fdiv(@total) * 100.0
+            }
           end
 
           def perform_pure_ruby_work(seed, item_index)
             value = (seed ^ item_index) & 0xFFFF_FFFF
             @work_per_item.times do |iteration|
               value = ((value * 1_664_525) + 1_013_904_223 + iteration) & 0xFFFF_FFFF
-              next unless ((iteration + 1) % @checkpoint_iterations).zero?
+              item_iteration = iteration + 1
+              next unless (item_iteration % @checkpoint_iterations).zero?
 
-              return [value, true] if yield
+              return [value, true, item_iteration] if yield(item_iteration)
             end
-            [value, false]
+            [value, false, @work_per_item]
           end
 
           def monotonic_time
