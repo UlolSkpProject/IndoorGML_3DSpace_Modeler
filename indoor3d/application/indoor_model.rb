@@ -30,6 +30,7 @@ module ULOL
         require_relative 'indoor_model/cell_space_batch_lifecycle.rb'
         require_relative 'indoor_model/cell_space_batch_execution.rb'
         require_relative 'indoor_model/cell_space_batch_compatibility.rb'
+        require_relative 'indoor_model/cell_space_demotion_batch.rb'
 
         include RuntimeSupport
         include SceneGroups
@@ -44,6 +45,7 @@ module ULOL
         include CellSpaceBatchLifecycle
         include CellSpaceBatchExecution
         include CellSpaceBatchCompatibility
+        include CellSpaceDemotionBatch
 
         attr_reader :cell_spaces
         attr_reader :states
