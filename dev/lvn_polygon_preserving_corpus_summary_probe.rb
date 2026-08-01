@@ -16,7 +16,7 @@ module ULOL
         module_function
 
         def run
-          unless const_defined?(:LvnPolygonPreservingFeasibilityProbe, false)
+          unless IndoorCore.const_defined?(:LvnPolygonPreservingFeasibilityProbe, false)
             raise NameError,
                   'Load dev/lvn_polygon_preserving_feasibility_probe.rb first'
           end
