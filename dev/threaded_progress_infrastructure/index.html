@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Threaded Progress Prototype</title>
+  <style>
+    :root { color-scheme: light dark; font-family: "Segoe UI", sans-serif; }
+    body { margin: 0; padding: 20px; background: Canvas; color: CanvasText; }
+    h1 { margin: 0 0 8px; font-size: 18px; }
+    .description { margin: 0 0 18px; opacity: 0.72; font-size: 12px; line-height: 1.5; }
+    .card { border: 1px solid color-mix(in srgb, CanvasText 20%, transparent); border-radius: 10px; padding: 14px; }
+    .row { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; font-size: 13px; }
+    .bar { height: 16px; border-radius: 8px; overflow: hidden; background: color-mix(in srgb, CanvasText 12%, transparent); }
+    .fill { height: 100%; width: 0%; background: Highlight; transition: width 80ms linear; }
+    .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+    label { display: grid; gap: 4px; font-size: 11px; opacity: 0.8; }
+    input { width: 100%; box-sizing: border-box; padding: 6px; }
+    .buttons { display: flex; gap: 8px; margin-top: 12px; }
+    button { flex: 1; padding: 8px; }
+    .threads { margin-top: 12px; font-family: Consolas, monospace; font-size: 11px; line-height: 1.5; opacity: 0.8; }
+    .heartbeat { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: #48b36b; }
+    .heartbeat.pulse { transform: scale(1.7); opacity: 0.45; }
+    .terminal { font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>Ruby Thread / HtmlDialog Prototype</h1>
+  <p class="description">
+    Worker는 순수 Ruby 계산만 수행하고 Queue에 이벤트를 기록합니다.
+    HtmlDialog API와 timer pump는 SketchUp 메인 스레드에서만 실행됩니다.
+  </p>
+
+  <div class="card">
+    <div class="row"><span><i id="heartbeat" class="heartbeat"></i>Chromium heartbeat</span><span id="heartbeatCount">0</span></div>
+    <div class="row"><span>상태</span><span id="state">idle</span></div>
+    <div class="row"><span>진행</span><span id="progressText">0 / 0 (0.0%)</span></div>
+    <div class="bar"><div id="fill" class="fill"></div></div>
+
+    <div class="controls">
+      <label>작업 항목 수<input id="total" type="number" min="1" value="1200"></label>
+      <label>항목당 순수 Ruby 반복<input id="workPerItem" type="number" min="1" value="40000"></label>
+    </div>
+
+    <div class="buttons">
+      <button id="start">시작</button>
+      <button id="cancel" disabled>취소</button>
+      <button id="status">상태 출력</button>
+    </div>
+
+    <div class="threads">
+      Main thread: <span id="mainThread">-</span><br>
+      Worker thread: <span id="workerThread">-</span><br>
+      Queue batch: <span id="queueBatch">-</span>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const elements = {
+        state: document.getElementById('state'),
+        progressText: document.getElementById('progressText'),
+        fill: document.getElementById('fill'),
+        start: document.getElementById('start'),
+        cancel: document.getElementById('cancel'),
+        status: document.getElementById('status'),
+        total: document.getElementById('total'),
+        workPerItem: document.getElementById('workPerItem'),
+        mainThread: document.getElementById('mainThread'),
+        workerThread: document.getElementById('workerThread'),
+        queueBatch: document.getElementById('queueBatch'),
+        heartbeat: document.getElementById('heartbeat'),
+        heartbeatCount: document.getElementById('heartbeatCount')
+      };
+
+      const terminalTypes = new Set(['completed', 'cancelled', 'failed']);
+
+      window.ThreadedProgressPrototype = {
+        update(event) {
+          const type = String(event.type || 'unknown');
+          const total = Number(event.total || 0);
+          const completed = Number(event.completed || 0);
+          const percent = Math.max(0, Math.min(100, Number(event.percent || 0)));
+
+          elements.state.textContent = type;
+          elements.state.classList.toggle('terminal', terminalTypes.has(type));
+          elements.progressText.textContent = `${completed} / ${total} (${percent.toFixed(1)}%)`;
+          elements.fill.style.width = `${percent}%`;
+          elements.mainThread.textContent = event.main_thread_id ?? '-';
+          elements.workerThread.textContent = event.worker_thread_id ?? '-';
+          elements.queueBatch.textContent = event.queue_batch_size ?? '-';
+
+          const running = ['starting', 'started', 'progress'].includes(type);
+          elements.start.disabled = running;
+          elements.cancel.disabled = !running;
+        }
+      };
+
+      elements.start.addEventListener('click', () => {
+        sketchup.startPrototype(
+          Number(elements.total.value),
+          Number(elements.workPerItem.value)
+        );
+      });
+      elements.cancel.addEventListener('click', () => sketchup.cancelPrototype());
+      elements.status.addEventListener('click', () => sketchup.requestStatus());
+
+      let heartbeat = 0;
+      setInterval(() => {
+        heartbeat += 1;
+        elements.heartbeatCount.textContent = String(heartbeat);
+        elements.heartbeat.classList.toggle('pulse');
+      }, 100);
+
+      sketchup.domReady();
+    })();
+  </script>
+</body>
+</html>
