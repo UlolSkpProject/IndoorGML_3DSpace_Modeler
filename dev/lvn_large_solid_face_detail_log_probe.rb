@@ -39,8 +39,9 @@ module ULOL
           Process.clock_gettime(Process::CLOCK_MONOTONIC)
         end
 
-        def log(event, data = {}, level: 'INFO')
-          BASE.active_context&.log(event, data, level: level)
+        def log(event, data = {}, level: 'INFO', **fields)
+          payload = fields.empty? ? data : data.merge(fields)
+          BASE.active_context&.log(event, payload, level: level)
         end
 
         def reset_progress
