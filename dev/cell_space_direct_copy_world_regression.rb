@@ -1,104 +1,84 @@
 # frozen_string_literal: true
 
-# Dev-only end-to-end regression for direct PrimalSpaceFeatures batch copy.
-# Fixture inputs are Sketchup::Group only. ComponentInstance input is forbidden.
+# Group-only end-to-end regression for direct PrimalSpaceFeatures batch copy.
+# ComponentInstance input is forbidden.
 #
-# SketchUp Ruby Console:
-#   core_file = ULOL::Indoor3DGmlModeler.method(:attach_model_observer).source_location.first
-#   root = File.expand_path('..', File.dirname(core_file))
-#
-#   load File.join(
-#     root,
-#     'dev',
-#     'cell_space_direct_copy_world_regression.rb'
-#   )
-#
-#   ULOL::Indoor3DGmlModeler::IndoorCore::CellSpaceDirectCopyWorldRegression.build!
-#   ULOL::Indoor3DGmlModeler::IndoorCore::CellSpaceDirectCopyWorldRegression.convert_and_verify!
-#
-# Or:
-#   ULOL::Indoor3DGmlModeler::IndoorCore::CellSpaceDirectCopyWorldRegression.run!
+# core_file = ULOL::Indoor3DGmlModeler.method(:attach_model_observer).source_location.first
+# root = File.expand_path('..', File.dirname(core_file))
+# load File.join(root, 'dev', 'cell_space_direct_copy_world_regression.rb')
+# ULOL::Indoor3DGmlModeler::IndoorCore::CellSpaceDirectCopyWorldRegression.build!
+# ULOL::Indoor3DGmlModeler::IndoorCore::CellSpaceDirectCopyWorldRegression.convert_and_verify!
+
+if defined?(ULOL::Indoor3DGmlModeler::IndoorCore::CellSpaceDirectCopyWorldRegression)
+  ULOL::Indoor3DGmlModeler::IndoorCore.send(:remove_const, :CellSpaceDirectCopyWorldRegression)
+end
 
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       module CellSpaceDirectCopyWorldRegression
-        FIXTURE_PREFIX = '__CS_DIRECT_COPY_WORLD__'
-        EXPECTED_SOLID_COUNT = 8
+        PREFIX = '__CS_DIRECT_COPY_WORLD__'
+        EXPECTED = 8
         STOREY = 'F01'
-        CATEGORY_CODE = 'Room'
+        CATEGORY = 'Room'
         TOLERANCE_MM = 0.001
 
         class << self
           def run!
-            return false unless build!
-
-            convert_and_verify!
+            build! && convert_and_verify!
           end
 
           def build!
-            ensure_extension_ready!
+            ensure_ready!
             model = Sketchup.active_model
             ensure_blank_model!(model)
-
-            operation_started = false
+            started = false
             model.start_operation('Build CellSpace Direct Copy World Regression Fixture', true)
-            operation_started = true
+            started = true
 
-            @shared_group_pairs = []
             @roots = build_fixture(model)
-            assert_group_only_fixture!(model)
-            validate_shared_group_definitions!
-
+            assert_group_only!(model)
             @jobs = CellSpaceConversionJobBuilder.new(entities: @roots).build
             validate_jobs!(@jobs)
             @baseline = snapshot_jobs(@jobs)
-            @existing_cell_keys = current_cell_groups(model).map { |group| entity_key(group) }
+            @existing_cells = current_cells(model).map { |group| entity_key(group) }
+            select_roots(model)
 
-            select_roots(model, @roots)
             model.commit_operation
-            operation_started = false
-
-            print_fixture_report
+            started = false
+            print_fixture
             true
           rescue StandardError => e
-            model.abort_operation if model && operation_started
-            reset_state!
+            model.abort_operation if model && started
+            reset!
             report_error('build', e)
             false
           end
 
           def convert_and_verify!
-            ensure_extension_ready!
-            ensure_built_state!
-
+            ensure_ready!
+            ensure_built!
             model = Sketchup.active_model
-            assert_group_only_fixture!(model)
-
+            assert_group_only!(model)
             indoor_model = IndoorModel.current
             unless indoor_model.prepare_cell_space_creation_active_context(model)
               raise 'Failed to prepare active context for CellSpace conversion'
             end
 
-            original_active_path = ActivePathController.new(
-              model,
-              logger: IndoorCore::Logger
-            ).snapshot
-
+            active_path = ActivePathController.new(model, logger: IndoorCore::Logger).snapshot
             jobs = CellSpaceConversionJobBuilder.apply_fallback_storey(@jobs, STOREY)
-            started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-            @conversion_result = indoor_model.convert_cell_space_jobs_bulk_local_grid_v2(
+            started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+            @result = indoor_model.convert_cell_space_jobs_bulk_local_grid_v2(
               jobs,
-              fallback_target: [CellSpaceType::GENERAL, CATEGORY_CODE],
-              original_active_path: original_active_path,
+              fallback_target: [CellSpaceType::GENERAL, CATEGORY],
+              original_active_path: active_path,
               operation_name: 'CellSpace Direct Copy World Regression',
               activate_root_context: true
             )
-            elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at
-
-            report = verify_current_model
-            print_conversion_result(@conversion_result, elapsed)
-            print_verification_report(report)
+            elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+            report = verify_model
+            print_conversion(@result, elapsed)
+            print_verification(report)
             report[:passed]
           rescue StandardError => e
             report_error('convert/verify', e)
@@ -106,24 +86,18 @@ module ULOL
           end
 
           def verify!
-            ensure_extension_ready!
-            ensure_snapshot_state!
-
-            report = verify_current_model
-            print_verification_report(report)
+            ensure_ready!
+            ensure_snapshot!
+            report = verify_model
+            print_verification(report)
             report[:passed]
           rescue StandardError => e
             report_error('verify', e)
             false
           end
 
-          def reset_state!
-            @roots = nil
-            @jobs = nil
-            @baseline = nil
-            @existing_cell_keys = nil
-            @conversion_result = nil
-            @shared_group_pairs = nil
+          def reset!
+            @roots = @jobs = @baseline = @existing_cells = @result = nil
             true
           end
 
@@ -131,377 +105,147 @@ module ULOL
 
           def build_fixture(model)
             roots = []
+            roots << box(model.entities, 'ROOT_A', [1100, 700, 900], tr([1200, 800, 300], 17))
+            roots << box(model.entities, 'ROOT_B', [980, 1330, 760], tr([-2600, -1700, 620], -34))
 
-            roots << add_box_group(
-              model.entities,
-              name: fixture_name('ROOT_SOLID'),
-              size_mm: [1100.0, 700.0, 900.0],
-              transformation: transform(
-                translation_mm: [1200.0, 800.0, 300.0],
-                rotation_deg: 17.0
-              )
-            )
+            parent = group(model.entities, 'NESTED_2_PARENT', tr([4500, -1200, 500], -23))
+            box(parent.entities, 'NESTED_2_SOLID', [1250, 760, 980], tr([350, 420, 200], 11))
+            roots << parent
 
-            nested_two_parent = add_empty_group(
-              model.entities,
-              name: fixture_name('NESTED_2_PARENT'),
-              transformation: transform(
-                translation_mm: [4500.0, -1200.0, 500.0],
-                rotation_deg: -23.0
-              )
-            )
-            add_box_group(
-              nested_two_parent.entities,
-              name: fixture_name('NESTED_2_SOLID'),
-              size_mm: [1250.0, 760.0, 980.0],
-              transformation: transform(
-                translation_mm: [350.0, 420.0, 200.0],
-                rotation_deg: 11.0
-              )
-            )
-            roots << nested_two_parent
+            parent = group(model.entities, 'NESTED_3_PARENT', tr([-3200, 2800, 700], 31))
+            middle = group(parent.entities, 'NESTED_3_MIDDLE', tr([900, -350, 250], -14, [1.15, 0.85, 1.20]))
+            box(middle.entities, 'NESTED_3_SOLID', [900, 1400, 800], tr([-220, 510, 130], 8))
+            roots << parent
 
-            nested_three_parent = add_empty_group(
-              model.entities,
-              name: fixture_name('NESTED_3_PARENT'),
-              transformation: transform(
-                translation_mm: [-3200.0, 2800.0, 700.0],
-                rotation_deg: 31.0
-              )
-            )
-            nested_three_middle = add_empty_group(
-              nested_three_parent.entities,
-              name: fixture_name('NESTED_3_MIDDLE'),
-              transformation: transform(
-                translation_mm: [900.0, -350.0, 250.0],
-                rotation_deg: -14.0,
-                scale: [1.15, 0.85, 1.20]
-              )
-            )
-            add_box_group(
-              nested_three_middle.entities,
-              name: fixture_name('NESTED_3_SOLID'),
-              size_mm: [900.0, 1400.0, 800.0],
-              transformation: transform(
-                translation_mm: [-220.0, 510.0, 130.0],
-                rotation_deg: 8.0
-              )
-            )
-            roots << nested_three_parent
+            parent = group(model.entities, 'NESTED_ROTATED_A_PARENT', tr([7000, 3000, 200], 42))
+            box(parent.entities, 'NESTED_ROTATED_A_SOLID', [1450, 850, 1050], tr([500, -200, 300], -9))
+            roots << parent
 
-            shared_container_a = add_empty_group(
-              model.entities,
-              name: fixture_name('SHARED_CONTAINER_A'),
-              transformation: transform(
-                translation_mm: [7000.0, 3000.0, 200.0],
-                rotation_deg: 42.0
-              )
-            )
-            add_box_group(
-              shared_container_a.entities,
-              name: fixture_name('SHARED_CONTAINER_CHILD_SOLID'),
-              size_mm: [1450.0, 850.0, 1050.0],
-              transformation: transform(
-                translation_mm: [500.0, -200.0, 300.0],
-                rotation_deg: -9.0
-              )
-            )
-            shared_container_b = copy_group(
-              shared_container_a,
-              name: fixture_name('SHARED_CONTAINER_B'),
-              transformation: transform(
-                translation_mm: [-6500.0, -2800.0, 400.0],
-                rotation_deg: -37.0,
-                scale: [0.90, 0.90, 1.10]
-              )
-            )
-            @shared_group_pairs << [
-              'shared nested container',
-              shared_container_a,
-              shared_container_b
-            ]
-            roots.concat([shared_container_a, shared_container_b])
+            parent = group(model.entities, 'NESTED_ROTATED_B_PARENT', tr([-6500, -2800, 400], -37, [0.90, 0.90, 1.10]))
+            box(parent.entities, 'NESTED_ROTATED_B_SOLID', [1380, 930, 1170], tr([-350, 600, 150], 18))
+            roots << parent
 
-            shared_solid_a = add_box_group(
-              model.entities,
-              name: fixture_name('SHARED_SOLID_A'),
-              size_mm: [1000.0, 1600.0, 750.0],
-              transformation: transform(
-                translation_mm: [2500.0, 6500.0, 280.0],
-                rotation_deg: 28.0
-              )
-            )
-            shared_solid_b = copy_group(
-              shared_solid_a,
-              name: fixture_name('SHARED_SOLID_B'),
-              transformation: transform(
-                translation_mm: [-2500.0, -6500.0, 810.0],
-                rotation_deg: -41.0,
-                scale: [1.10, 0.90, 1.30]
-              )
-            )
-            @shared_group_pairs << [
-              'shared solid group',
-              shared_solid_a,
-              shared_solid_b
-            ]
-            roots.concat([shared_solid_a, shared_solid_b])
-
-            roots << add_box_group(
-              model.entities,
-              name: fixture_name('ROOT_SCALED_GROUP'),
-              size_mm: [1750.0, 650.0, 1200.0],
-              transformation: transform(
-                translation_mm: [9000.0, -5200.0, 900.0],
-                rotation_deg: 63.0,
-                scale: [0.95, 1.20, 0.80]
-              )
-            )
-
+            roots << box(model.entities, 'ROOT_SCALED_A', [1000, 1600, 750], tr([2500, 6500, 280], 28, [1.10, 0.90, 1.30]))
+            roots << box(model.entities, 'ROOT_SCALED_B', [1750, 650, 1200], tr([9000, -5200, 900], 63, [0.95, 1.20, 0.80]))
             roots
           end
 
-          def add_empty_group(entities, name:, transformation:)
-            group = entities.add_group
-            raise 'Fixture Group creation failed' unless group&.valid?
-
-            group.name = name
-            group.transformation = transformation
-            group
+          def group(entities, suffix, transformation)
+            result = entities.add_group
+            raise 'Fixture Group creation failed' unless result&.valid?
+            result.name = name(suffix)
+            result.transformation = transformation
+            result
           end
 
-          def add_box_group(entities, name:, size_mm:, transformation:)
-            group = add_empty_group(
-              entities,
-              name: name,
-              transformation: transformation
-            )
-            add_box_geometry(group.entities, size_mm)
-            group
-          end
-
-          def copy_group(source, name:, transformation:)
-            raise ArgumentError, 'Group copy source is invalid' unless source&.valid?
-            raise ArgumentError, 'Group copy source must be Sketchup::Group' unless source.is_a?(Sketchup::Group)
-
-            copy = source.copy
-            raise 'Group#copy failed' unless copy&.valid?
-            raise "Group#copy returned #{copy.class}" unless copy.is_a?(Sketchup::Group)
-
-            copy.name = name
-            copy.transformation = transformation
-            copy
-          end
-
-          def add_box_geometry(entities, size_mm)
+          def box(entities, suffix, size_mm, transformation)
+            result = group(entities, suffix, transformation)
             width, depth, height = size_mm.map { |value| value.to_f.mm }
-            points = [
-              Geom::Point3d.new(0.0, 0.0, 0.0),
-              Geom::Point3d.new(width, 0.0, 0.0),
-              Geom::Point3d.new(width, depth, 0.0),
-              Geom::Point3d.new(0.0, depth, 0.0)
-            ]
-            face = entities.add_face(points)
-            raise 'Fixture box base face creation failed' unless face&.valid?
-
-            face.reverse! if face.normal.z < 0.0
+            face = result.entities.add_face(
+              ORIGIN,
+              Geom::Point3d.new(width, 0, 0),
+              Geom::Point3d.new(width, depth, 0),
+              Geom::Point3d.new(0, depth, 0)
+            )
+            raise 'Fixture box face creation failed' unless face&.valid?
+            face.reverse! if face.normal.z < 0
             face.pushpull(height)
-            true
+            result
           end
 
-          def transform(translation_mm:, rotation_deg:, scale: [1.0, 1.0, 1.0])
-            translation = Geom::Transformation.translation(
-              translation_mm.map { |value| value.to_f.mm }
-            )
-            rotation = Geom::Transformation.rotation(
-              ORIGIN,
-              Z_AXIS,
-              rotation_deg.to_f * Math::PI / 180.0
-            )
-            scaling = Geom::Transformation.scaling(
-              ORIGIN,
-              scale[0].to_f,
-              scale[1].to_f,
-              scale[2].to_f
-            )
-            translation * rotation * scaling
+          def tr(position_mm, angle_deg, scale = [1.0, 1.0, 1.0])
+            Geom::Transformation.translation(position_mm.map { |value| value.to_f.mm }) *
+              Geom::Transformation.rotation(ORIGIN, Z_AXIS, angle_deg.to_f * Math::PI / 180.0) *
+              Geom::Transformation.scaling(ORIGIN, *scale.map(&:to_f))
           end
 
-          def assert_group_only_fixture!(model)
-            components = collect_component_instances(model.entities)
+          def assert_group_only!(model)
+            components = collect_components(model.entities)
             unless components.empty?
-              labels = components.first(10).map { |entity| source_label(entity) }
-              raise "ComponentInstance is forbidden in fixture: #{labels.inspect}"
+              raise "ComponentInstance is forbidden: #{components.first(10).map { |e| label(e) }.inspect}"
             end
-
-            non_groups = Array(@roots).reject do |entity|
-              entity&.valid? && entity.is_a?(Sketchup::Group)
-            end
-            unless non_groups.empty?
-              labels = non_groups.map { |entity| source_label(entity) }
-              raise "All fixture roots must be Sketchup::Group: #{labels.inspect}"
-            end
-
+            invalid_roots = Array(@roots).reject { |e| e&.valid? && e.is_a?(Sketchup::Group) }
+            raise "Fixture roots must all be Group: #{invalid_roots.map { |e| label(e) }.inspect}" unless invalid_roots.empty?
             true
           end
 
-          def collect_component_instances(entities, visited_definitions = {})
+          def collect_components(entities, visited = {})
             entities.to_a.flat_map do |entity|
               found = []
-              if defined?(Sketchup::ComponentInstance) &&
-                 entity.instance_of?(Sketchup::ComponentInstance)
+              if defined?(Sketchup::ComponentInstance) && entity.instance_of?(Sketchup::ComponentInstance)
                 found << entity
               end
-
               if entity.is_a?(Sketchup::Group) && entity.valid? && entity.definition&.valid?
-                key = definition_key(entity.definition)
-                unless visited_definitions[key]
-                  visited_definitions[key] = true
-                  found.concat(
-                    collect_component_instances(
-                      entity.definition.entities,
-                      visited_definitions
-                    )
-                  )
+                key = entity.definition.object_id
+                unless visited[key]
+                  visited[key] = true
+                  found.concat(collect_components(entity.definition.entities, visited))
                 end
               end
               found
             end
           end
 
-          def validate_shared_group_definitions!
-            Array(@shared_group_pairs).each do |label, first, second|
-              unless first&.valid? && second&.valid?
-                raise "Shared Group pair is invalid: #{label}"
-              end
-              unless first.is_a?(Sketchup::Group) && second.is_a?(Sketchup::Group)
-                raise "Shared definition pair must contain Group only: #{label}"
-              end
-              next if same_definition?(first.definition, second.definition)
-
-              raise(
-                "Group#copy did not preserve the same definition: #{label}; " \
-                "first=#{definition_debug(first.definition)} " \
-                "second=#{definition_debug(second.definition)}"
-              )
+          def validate_jobs!(jobs)
+            unless jobs.length == EXPECTED
+              raise "Expected #{EXPECTED} solid jobs, got #{jobs.length}: #{jobs.map { |j| label(j[:source]) }.inspect}"
             end
+            invalid = jobs.reject { |j| j[:source].is_a?(Sketchup::Group) }
+            raise "All jobs must be Group: #{invalid.map { |j| label(j[:source]) }.inspect}" unless invalid.empty?
+            invalid = jobs.reject { |j| j[:source]&.valid? && j[:source].respond_to?(:manifold?) && j[:source].manifold? }
+            raise "Fixture produced non-solid jobs: #{invalid.map { |j| label(j[:source]) }.inspect}" unless invalid.empty?
             true
-          end
-
-          def same_definition?(first, second)
-            return false unless first&.valid? && second&.valid?
-
-            first_key = definition_key(first)
-            second_key = definition_key(second)
-            return first_key == second_key if first_key && second_key
-
-            first == second
-          end
-
-          def definition_key(definition)
-            if definition.respond_to?(:persistent_id)
-              persistent_id = definition.persistent_id
-              return [:persistent_id, persistent_id] if persistent_id && persistent_id != 0
-            end
-            if definition.respond_to?(:entityID)
-              entity_id = definition.entityID
-              return [:entity_id, entity_id] if entity_id && entity_id != 0
-            end
-            if definition.respond_to?(:guid)
-              guid = definition.guid.to_s
-              return [:guid, guid] unless guid.empty?
-            end
-
-            nil
-          rescue StandardError
-            nil
-          end
-
-          def definition_debug(definition)
-            {
-              class: definition.class.name.to_s,
-              key: definition_key(definition),
-              object_id: definition.object_id,
-              name: definition.respond_to?(:name) ? definition.name.to_s : nil,
-              instances: definition.respond_to?(:instances) ? definition.instances.length : nil
-            }.inspect
-          rescue StandardError => e
-            "(definition debug failed: #{e.class}: #{e.message})"
           end
 
           def snapshot_jobs(jobs)
             jobs.each_with_index.map do |job, index|
-              source = job[:source]
-              world_transformation = job[:transformation]
-              points = world_vertex_points(source, world_transformation)
-              raise "Fixture source has no edge vertices: #{source_label(source)}" if points.empty?
-
-              origin = world_transformation.origin
+              transformation = job[:transformation]
+              points = world_points(job[:source], transformation)
+              raise "No vertices: #{label(job[:source])}" if points.empty?
+              origin = transformation.origin
               {
                 index: index,
-                label: source_label(source),
-                source_class: source.class.name.to_s,
+                label: label(job[:source]),
                 points: points,
-                world_origin_mm: [origin.x.to_mm, origin.y.to_mm, origin.z.to_mm]
+                origin_mm: [origin.x.to_mm, origin.y.to_mm, origin.z.to_mm]
               }
             end
           end
 
-          def verify_current_model
+          def verify_model
             model = Sketchup.active_model
-            primal_group = find_primal_group(model)
-            raise 'IndoorGML_PrimalSpaceFeatures group not found after conversion' unless primal_group&.valid?
-
-            all_components = collect_component_instances(model.entities)
-            new_cells = current_cell_groups(model).reject do |group|
-              Array(@existing_cell_keys).include?(entity_key(group))
-            end
-            primal_world = Utils::Transformation.root_transformation_in_model(primal_group)
-            candidates = new_cells.map do |group|
+            primal = find_primal(model)
+            raise 'IndoorGML_PrimalSpaceFeatures not found' unless primal&.valid?
+            components = collect_components(model.entities)
+            cells = current_cells(model).reject { |group| Array(@existing_cells).include?(entity_key(group)) }
+            primal_world = Utils::Transformation.root_transformation_in_model(primal)
+            candidates = cells.map do |group|
               {
                 group: group,
                 label: group.name.to_s,
-                points: world_vertex_points(group, primal_world * group.transformation),
-                direct_child: Utils::Transformation.direct_child_of_root?(group, primal_group)
+                points: world_points(group, primal_world * group.transformation),
+                direct: Utils::Transformation.direct_child_of_root?(group, primal)
               }
             end
-
             matches = greedy_match(@baseline, candidates)
-            matched_candidates = matches.filter_map { |match| match[:candidate] }
-            all_matched = matches.length == @baseline.length &&
-                          matches.all? { |match| match[:candidate] }
-            all_within_tolerance = all_matched && matches.all? do |match|
-              match[:error] <= tolerance_length
-            end
-            all_direct_children = candidates.all? { |candidate| candidate[:direct_child] }
-            definitions = new_cells.filter_map do |group|
-              group.definition if group.respond_to?(:definition) && group.definition&.valid?
-            end
-            all_unique_definitions = definitions.length == new_cells.length &&
-                                     definitions.map { |definition| definition_key(definition) || definition.object_id }.uniq.length == definitions.length
-            count_ok = new_cells.length == EXPECTED_SOLID_COUNT
-            no_components = all_components.empty?
-            max_error = matches.map { |match| match[:error] }.compact.max || Float::INFINITY
-
+            matched = matches.filter_map { |match| match[:candidate] }
+            all_matched = matches.length == @baseline.length && matches.all? { |match| match[:candidate] }
+            within = all_matched && matches.all? { |match| match[:error] <= tolerance }
+            direct = candidates.all? { |candidate| candidate[:direct] }
+            count_ok = cells.length == EXPECTED
+            no_components = components.empty?
             {
-              passed: count_ok &&
-                      all_matched &&
-                      all_within_tolerance &&
-                      all_direct_children &&
-                      all_unique_definitions &&
-                      no_components,
+              passed: count_ok && all_matched && within && direct && no_components,
               count_ok: count_ok,
-              expected_count: EXPECTED_SOLID_COUNT,
-              actual_count: new_cells.length,
+              actual_count: cells.length,
               all_matched: all_matched,
-              all_within_tolerance: all_within_tolerance,
-              all_direct_children: all_direct_children,
-              all_unique_definitions: all_unique_definitions,
+              within: within,
+              direct: direct,
               no_components: no_components,
-              component_labels: all_components.map { |entity| source_label(entity) },
-              max_error: max_error,
+              components: components.map { |entity| label(entity) },
+              max_error: matches.map { |match| match[:error] }.compact.max || Float::INFINITY,
               matches: matches,
-              unmatched_candidates: candidates - matched_candidates
+              unmatched: candidates - matched
             }
           end
 
@@ -509,290 +253,173 @@ module ULOL
             remaining = candidates.dup
             baselines.map do |baseline|
               candidate, error = remaining.map do |entry|
-                [entry, point_cloud_distance(baseline[:points], entry[:points])]
+                [entry, cloud_distance(baseline[:points], entry[:points])]
               end.min_by { |_entry, distance| distance }
-
               remaining.delete(candidate) if candidate
-              {
-                baseline: baseline,
-                candidate: candidate,
-                error: error || Float::INFINITY
-              }
+              { baseline: baseline, candidate: candidate, error: error || Float::INFINITY }
             end
           end
 
-          def point_cloud_distance(first_points, second_points)
-            return Float::INFINITY unless first_points.length == second_points.length
-            return Float::INFINITY if first_points.empty?
-
-            [
-              directed_point_cloud_distance(first_points, second_points),
-              directed_point_cloud_distance(second_points, first_points)
-            ].max
+          def cloud_distance(first, second)
+            return Float::INFINITY unless first.length == second.length && !first.empty?
+            [directed_distance(first, second), directed_distance(second, first)].max
           end
 
-          def directed_point_cloud_distance(source_points, target_points)
-            source_points.map do |point|
-              target_points.map { |candidate| point_distance(point, candidate) }.min
+          def directed_distance(first, second)
+            first.map do |point|
+              second.map do |candidate|
+                dx = point[0] - candidate[0]
+                dy = point[1] - candidate[1]
+                dz = point[2] - candidate[2]
+                Math.sqrt(dx * dx + dy * dy + dz * dz)
+              end.min
             end.max
           end
 
-          def point_distance(first, second)
-            dx = first[0] - second[0]
-            dy = first[1] - second[1]
-            dz = first[2] - second[2]
-            Math.sqrt((dx * dx) + (dy * dy) + (dz * dz))
+          def world_points(entity, transformation)
+            return [] unless entity&.valid? && entity.respond_to?(:definition) && entity.definition&.valid?
+            entity.definition.entities.grep(Sketchup::Edge).flat_map(&:vertices).uniq.map do |vertex|
+              point = vertex.position.transform(transformation)
+              [point.x.to_f, point.y.to_f, point.z.to_f]
+            end
           end
 
-          def world_vertex_points(entity, world_transformation)
-            return [] unless entity&.valid?
-            return [] unless entity.respond_to?(:definition) && entity.definition&.valid?
-
-            entity.definition.entities
-                  .grep(Sketchup::Edge)
-                  .flat_map(&:vertices)
-                  .uniq
-                  .map do |vertex|
-                    point = vertex.position.transform(world_transformation)
-                    [point.x.to_f, point.y.to_f, point.z.to_f]
-                  end
-          end
-
-          def validate_jobs!(jobs)
-            unless jobs.length == EXPECTED_SOLID_COUNT
-              labels = jobs.map { |job| source_label(job[:source]) }
-              raise "Expected #{EXPECTED_SOLID_COUNT} solid jobs, got #{jobs.length}: #{labels.inspect}"
-            end
-
-            non_group_jobs = jobs.reject { |job| job[:source].is_a?(Sketchup::Group) }
-            unless non_group_jobs.empty?
-              labels = non_group_jobs.map { |job| source_label(job[:source]) }
-              raise "All conversion jobs must be Group: #{labels.inspect}"
-            end
-
-            non_solids = jobs.reject do |job|
-              source = job[:source]
-              source&.valid? && source.respond_to?(:manifold?) && source.manifold?
-            end
-            return true if non_solids.empty?
-
-            labels = non_solids.map { |job| source_label(job[:source]) }
-            raise "Fixture produced non-solid jobs: #{labels.inspect}"
-          end
-
-          def print_fixture_report
-            puts
-            puts '=' * 100
-            puts 'CellSpace Direct Copy World Regression Fixture — GROUP ONLY'
-            puts '=' * 100
-            puts "Top-level roots      : #{@roots.length}"
-            puts "Solid jobs           : #{@jobs.length}"
-            puts 'ComponentInstance    : 0 (enforced)'
-            Array(@shared_group_pairs).each do |label, first, _second|
-              puts format(
-                'Shared definition    : %-32s PASS key=%s',
-                label,
-                definition_key(first.definition).inspect
-              )
-            end
+          def print_fixture
+            puts "\n#{'=' * 96}"
+            puts 'CellSpace Direct Copy World Regression — GROUP ONLY'
+            puts "Roots=#{@roots.length}, Solid jobs=#{@jobs.length}, ComponentInstance=0, Shared definition=not tested"
             @baseline.each_with_index do |entry, index|
-              origin = entry[:world_origin_mm]
-              puts format(
-                '%2d. %-44s vertices=%d origin=(%.3f, %.3f, %.3f) mm',
-                index + 1,
-                entry[:label],
-                entry[:points].length,
-                origin[0],
-                origin[1],
-                origin[2]
-              )
+              origin = entry[:origin_mm]
+              puts format('%2d. %-48s origin=(%.3f, %.3f, %.3f) mm', index + 1, entry[:label], *origin)
             end
-            puts
-            puts 'Fixture 생성 완료. 모델을 확인한 뒤 convert_and_verify!를 실행하세요.'
-            puts '=' * 100
+            puts "Run convert_and_verify!\n#{'=' * 96}"
           end
 
-          def print_conversion_result(result, elapsed)
-            puts
-            puts '=' * 100
-            puts 'CellSpace Direct Copy Conversion Result'
-            puts '=' * 100
-            puts format('Elapsed         : %.3f sec', elapsed)
-            puts "Converted       : #{result&.converted_count.to_i}"
-            puts "Errors          : #{Array(result&.errors).length}"
-            Array(result&.errors).each do |error|
-              puts "  - #{error[:group]}: #{error[:reason]}"
-            end
+          def print_conversion(result, elapsed)
             metrics = result&.metrics || {}
-            puts format('Create/State    : %.3f sec', metrics[:cell_space_state_duration].to_f)
-            puts format('Adjacency       : %.3f sec', metrics[:adjacency_transition_duration].to_f)
-            puts '=' * 100
+            puts "\n#{'=' * 96}"
+            puts format('Converted=%d Errors=%d Elapsed=%.3f sec', result&.converted_count.to_i, Array(result&.errors).length, elapsed)
+            Array(result&.errors).each { |error| puts "  - #{error[:group]}: #{error[:reason]}" }
+            puts format('Create/State=%.3f sec, Adjacency=%.3f sec', metrics[:cell_space_state_duration].to_f, metrics[:adjacency_transition_duration].to_f)
+            puts '=' * 96
           end
 
-          def print_verification_report(report)
-            puts
-            puts '=' * 100
-            puts 'CellSpace Direct Copy World Coordinate Verification'
-            puts '=' * 100
+          def print_verification(report)
+            puts "\n#{'=' * 96}"
             report[:matches].each_with_index do |match, index|
-              baseline = match[:baseline]
               candidate = match[:candidate]
-              passed = candidate && match[:error] <= tolerance_length
-              puts format(
-                '%s %2d. %-42s -> %-42s max_error=%12.9f mm',
-                passed ? 'PASS' : 'FAIL',
-                index + 1,
-                baseline[:label],
-                candidate ? candidate[:label] : '(unmatched)',
-                length_to_mm(match[:error])
-              )
+              pass = candidate && match[:error] <= tolerance
+              puts format('%s %2d. %-40s -> %-36s error=%12.9f mm', pass ? 'PASS' : 'FAIL', index + 1, match[:baseline][:label], candidate ? candidate[:label] : '(unmatched)', to_mm(match[:error]))
             end
-            unless report[:unmatched_candidates].empty?
-              puts 'Unmatched CellSpaces:'
-              report[:unmatched_candidates].each { |candidate| puts "  - #{candidate[:label]}" }
-            end
-            unless report[:component_labels].empty?
-              puts 'Unexpected ComponentInstances:'
-              report[:component_labels].each { |label| puts "  - #{label}" }
-            end
-            puts '-' * 100
-            puts "Cell count                 : #{report[:actual_count]}/#{report[:expected_count]} #{report[:count_ok] ? 'PASS' : 'FAIL'}"
+            report[:unmatched].each { |candidate| puts "Unmatched: #{candidate[:label]}" }
+            report[:components].each { |component| puts "Unexpected ComponentInstance: #{component}" }
+            puts '-' * 96
+            puts "Cell count                 : #{report[:actual_count]}/#{EXPECTED} #{report[:count_ok] ? 'PASS' : 'FAIL'}"
             puts "All world clouds matched   : #{report[:all_matched] ? 'PASS' : 'FAIL'}"
-            puts "World error <= #{TOLERANCE_MM} mm : #{report[:all_within_tolerance] ? 'PASS' : 'FAIL'}"
-            puts "All direct Primal children : #{report[:all_direct_children] ? 'PASS' : 'FAIL'}"
-            puts "All definitions unique     : #{report[:all_unique_definitions] ? 'PASS' : 'FAIL'}"
-            puts "No ComponentInstance left  : #{report[:no_components] ? 'PASS' : 'FAIL'}"
-            puts format('Maximum world error        : %.9f mm', length_to_mm(report[:max_error]))
-            puts '-' * 100
+            puts "World error <= #{TOLERANCE_MM} mm : #{report[:within] ? 'PASS' : 'FAIL'}"
+            puts "All direct Primal children : #{report[:direct] ? 'PASS' : 'FAIL'}"
+            puts "No ComponentInstance       : #{report[:no_components] ? 'PASS' : 'FAIL'}"
+            puts format('Maximum world error        : %.9f mm', to_mm(report[:max_error]))
             puts(report[:passed] ? 'OVERALL: PASS' : 'OVERALL: FAIL')
-            puts '=' * 100
+            puts '=' * 96
             report
           end
 
-          def current_cell_groups(model)
-            primal_group = find_primal_group(model)
-            return [] unless primal_group&.valid?
-
-            primal_group.entities.grep(Sketchup::Group).select do |group|
-              group&.valid? && indoor_feature(group) == 'CellSpace'
-            end
+          def current_cells(model)
+            primal = find_primal(model)
+            return [] unless primal&.valid?
+            primal.entities.grep(Sketchup::Group).select { |group| group&.valid? && feature(group) == 'CellSpace' }
           rescue StandardError
             []
           end
 
-          def find_primal_group(model)
+          def find_primal(model)
             dictionary = IndoorModel::ATTRIBUTE_DICTIONARY_NAME
             model.entities.grep(Sketchup::Group).find do |group|
-              feature = group.get_attribute(dictionary, 'feature')
-              feature == 'PrimalSpaceFeatures' ||
+              group.get_attribute(dictionary, 'feature') == 'PrimalSpaceFeatures' ||
                 group.name.to_s == 'IndoorGML_PrimalSpaceFeatures'
             end
           rescue StandardError
-            model.entities.grep(Sketchup::Group).find do |group|
-              group.name.to_s == 'IndoorGML_PrimalSpaceFeatures'
-            end
+            nil
           end
 
-          def indoor_feature(entity)
+          def feature(entity)
             entity.get_attribute(IndoorModel::ATTRIBUTE_DICTIONARY_NAME, 'feature')
           rescue StandardError
             nil
           end
 
           def ensure_blank_model!(model)
-            existing_cells = current_cell_groups(model)
-            unless existing_cells.empty?
-              raise "Blank model required: found #{existing_cells.length} existing CellSpace group(s)"
+            cells = current_cells(model)
+            raise "Blank model required: found #{cells.length} CellSpace(s)" unless cells.empty?
+            blockers = model.entities.to_a.reject do |entity|
+              entity.is_a?(Sketchup::Group) && entity.name.to_s.start_with?('IndoorGML_')
             end
-
-            blockers = model.entities.to_a.reject { |entity| allowed_system_root_entity?(entity) }
-            return true if blockers.empty?
-
-            labels = blockers.first(10).map { |entity| source_label(entity) }
-            raise "Blank model required: found non-system root entities #{labels.inspect}"
+            raise "Blank model required: #{blockers.first(10).map { |entity| label(entity) }.inspect}" unless blockers.empty?
+            true
           end
 
-          def allowed_system_root_entity?(entity)
-            entity.is_a?(Sketchup::Group) && entity.name.to_s.start_with?('IndoorGML_')
-          rescue StandardError
-            false
-          end
-
-          def ensure_extension_ready!
-            unless defined?(Sketchup) && Sketchup.respond_to?(:active_model)
-              raise 'This script must run inside SketchUp'
-            end
-            unless defined?(IndoorModel) && IndoorModel.respond_to?(:current)
-              raise 'IndoorGML extension is not fully loaded'
-            end
-            indoor_model = IndoorModel.current
-            unless indoor_model.respond_to?(:convert_cell_space_jobs_bulk_local_grid_v2)
+          def ensure_ready!
+            raise 'This script must run inside SketchUp' unless defined?(Sketchup) && Sketchup.respond_to?(:active_model)
+            raise 'IndoorGML extension is not fully loaded' unless defined?(IndoorModel) && IndoorModel.respond_to?(:current)
+            unless IndoorModel.current.respond_to?(:convert_cell_space_jobs_bulk_local_grid_v2)
               raise 'Local Grid V2 bulk conversion entrypoint is unavailable'
             end
             true
           end
 
-          def ensure_built_state!
-            ensure_snapshot_state!
-            invalid_sources = @jobs.reject { |job| job[:source]&.valid? }
-            unless invalid_sources.empty?
-              raise 'Fixture sources are no longer valid. Reopen an empty model and run build! again.'
-            end
+          def ensure_built!
+            ensure_snapshot!
+            invalid = @jobs.reject { |job| job[:source]&.valid? }
+            raise 'Fixture sources are invalid. Open a blank model and run build! again.' unless invalid.empty?
             true
           end
 
-          def ensure_snapshot_state!
-            unless @baseline && @jobs && @roots
-              raise 'Fixture is not built. Run build! first.'
-            end
+          def ensure_snapshot!
+            raise 'Fixture is not built. Run build! first.' unless @baseline && @jobs && @roots
             true
           end
 
-          def select_roots(model, roots)
+          def select_roots(model)
             model.selection.clear
-            roots.each { |entity| model.selection.add(entity) if entity&.valid? }
+            @roots.each { |entity| model.selection.add(entity) if entity&.valid? }
             model.active_view.zoom_extents if model.active_view
           rescue StandardError
             nil
           end
 
-          def source_label(entity)
+          def label(entity)
             return '(nil)' unless entity
-
-            name = entity.respond_to?(:name) ? entity.name.to_s : ''
-            entity_id = entity.respond_to?(:entityID) ? entity.entityID : nil
-            label = name.empty? ? entity.class.name.to_s : name
-            entity_id ? "#{label} [entity #{entity_id}]" : label
+            name_value = entity.respond_to?(:name) ? entity.name.to_s : ''
+            id = entity.respond_to?(:entityID) ? entity.entityID : nil
+            value = name_value.empty? ? entity.class.name.to_s : name_value
+            id ? "#{value} [entity #{id}]" : value
           rescue StandardError
             entity.to_s
           end
 
-          def fixture_name(suffix)
-            "#{FIXTURE_PREFIX}#{suffix}"
+          def name(suffix)
+            "#{PREFIX}#{suffix}"
           end
 
           def entity_key(entity)
             return entity.persistent_id if entity.respond_to?(:persistent_id)
             return entity.entityID if entity.respond_to?(:entityID)
-
             entity.object_id
           rescue StandardError
             entity.object_id
           end
 
-          def tolerance_length
+          def tolerance
             TOLERANCE_MM.mm.to_f
           end
 
-          def length_to_mm(value)
-            return Float::INFINITY unless value&.finite?
-
-            value.to_f / 1.mm.to_f
+          def to_mm(value)
+            value&.finite? ? value.to_f / 1.mm.to_f : Float::INFINITY
           end
 
           def report_error(stage, error)
-            puts
-            puts "[CELLSPACE DIRECT COPY WORLD REGRESSION] #{stage} failed: #{error.class}: #{error.message}"
+            puts "\n[CELLSPACE DIRECT COPY WORLD REGRESSION] #{stage} failed: #{error.class}: #{error.message}"
             puts error.backtrace.first(15).join("\n")
           end
         end
