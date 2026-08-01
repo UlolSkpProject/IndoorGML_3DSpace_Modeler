@@ -5,10 +5,11 @@ require_relative 'lvn_polygon_candidate_reconstruction_probe'
 
 # Phase 2 large-solid stress reconstruction probe.
 #
-# Selects the largest Phase 1-safe, no-hole source from the current selection,
-# runs the already validated single-solid polygon reconstruction path unchanged,
-# suppresses the thousands of Face-order lines, and reports only final stress
-# diagnostics. The candidate operation is aborted by the reused single probe.
+# Searches the current selection first. If no eligible large source is found,
+# it falls back to all top-level Group / ComponentInstance entities in the model.
+# It then runs the already validated single-solid polygon reconstruction path
+# unchanged, suppresses the thousands of Face-order lines, and reports only final
+# stress diagnostics. The candidate operation is aborted by the reused single probe.
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -37,9 +38,11 @@ module ULOL
           base = LvnPolygonCandidateReconstructionProbe
           original_selection = model.selection.to_a
 
-          source, filter = find_largest_source(model, phase1, base)
+          source, filter, search_scope = find_largest_source(model, phase1, base)
           unless source
-            puts '[LVN POLYGON STRESS PHASE 2] No eligible large source found in selection.'
+            puts '[LVN POLYGON STRESS PHASE 2] No eligible large source found.'
+            puts format('source search scope   : %s', search_scope_label(search_scope))
+            puts format('searched source pool  : %d', filter[:pool_entities].to_i)
             print_filter_summary(filter)
             return false
           end
@@ -51,6 +54,8 @@ module ULOL
           puts ' LVN Polygon-Preserving Candidate Reconstruction — Phase 2 Large-Solid Stress'
           puts '=' * 100
           puts format('selected solids       : %d', original_selection.length)
+          puts format('source search scope   : %s', search_scope_label(search_scope))
+          puts format('searched source pool  : %d', filter[:pool_entities].to_i)
           puts format('eligible large solids : %d', filter[:eligible])
           puts format('minimum source Faces  : %d', MINIMUM_SOURCE_FACES)
           puts format('source                : %s', phase1.entity_label(source))
@@ -106,10 +111,46 @@ module ULOL
         end
 
         def find_largest_source(model, phase1, base)
+          selected = phase1.selected_entities(model)
+          selected_candidates, selected_filter = evaluate_pool(
+            selected,
+            model,
+            phase1,
+            base
+          )
+
+          unless selected_candidates.empty?
+            selected_filter[:pool_entities] = selected.length
+            return [
+              largest_candidate(selected_candidates, phase1),
+              selected_filter,
+              :selection
+            ]
+          end
+
+          root_pool = top_level_instances(model)
+          root_candidates, root_filter = evaluate_pool(
+            root_pool,
+            model,
+            phase1,
+            base
+          )
+          root_filter[:pool_entities] = root_pool.length
+          root_filter[:selection_entities] = selected.length
+          root_filter[:selection_had_no_eligible] = 1
+
+          [
+            largest_candidate(root_candidates, phase1),
+            root_filter,
+            :model_root_fallback
+          ]
+        end
+
+        def evaluate_pool(pool, model, phase1, base)
           filter = Hash.new(0)
           candidates = []
 
-          phase1.selected_entities(model).each do |entity|
+          Array(pool).each do |entity|
             unless entity.parent == model
               filter[:not_top_level] += 1
               next
@@ -143,10 +184,32 @@ module ULOL
           end
 
           filter[:eligible] = candidates.length
-          source = candidates.max_by do |entity, face_count|
+          [candidates, filter]
+        end
+
+        def largest_candidate(candidates, phase1)
+          candidates.max_by do |entity, face_count|
             [face_count, phase1.persistent_id(entity).to_i]
           end&.first
-          [source, filter]
+        end
+
+        def top_level_instances(model)
+          model.entities.to_a.select do |entity|
+            entity.respond_to?(:definition) &&
+              entity.respond_to?(:valid?) &&
+              entity.valid?
+          end
+        end
+
+        def search_scope_label(scope)
+          case scope
+          when :selection
+            'current selection'
+          when :model_root_fallback
+            'model root fallback'
+          else
+            scope.to_s
+          end
         end
 
         def capture_stdout(target)
