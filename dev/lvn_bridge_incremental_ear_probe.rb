@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 probe_path = File.join(__dir__, 'lvn_bridge_nearest_first_probe.rb')
-source = File.binread(probe_path).force_encoding(Encoding::UTF_8)
+source = File.binread(probe_path)
+             .force_encoding(Encoding::UTF_8)
+             .gsub(/\r\n?/, "\n")
 
 old_install = <<-'RUBY'
         LocalVertexNormalizer.class_eval do
@@ -48,6 +50,10 @@ RUBY
 patched = source.sub(old_install, new_install)
 if patched == source
   raise "Could not replace incremental ear installation block in #{probe_path}"
+end
+
+if defined?(RubyVM::InstructionSequence)
+  RubyVM::InstructionSequence.compile(patched, probe_path)
 end
 
 TOPLEVEL_BINDING.eval(patched, probe_path, 1)
