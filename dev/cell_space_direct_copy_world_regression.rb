@@ -1,13 +1,9 @@
 # frozen_string_literal: true
 
-# Dev-only end-to-end regression probe for direct PrimalSpaceFeatures batch copy.
+# Dev-only end-to-end regression for direct PrimalSpaceFeatures batch copy.
+# Fixture inputs are Sketchup::Group only. ComponentInstance input is forbidden.
 #
-# Preconditions:
-# - SketchUp model is empty except for IndoorGML system groups.
-# - IndoorGML extension is fully loaded.
-# - Fixture input entities must be Sketchup::Group only. ComponentInstance is forbidden.
-#
-# Load from SketchUp Ruby Console:
+# SketchUp Ruby Console:
 #   core_file = ULOL::Indoor3DGmlModeler.method(:attach_model_observer).source_location.first
 #   root = File.expand_path('..', File.dirname(core_file))
 #
@@ -17,13 +13,10 @@
 #     'cell_space_direct_copy_world_regression.rb'
 #   )
 #
-# Build and inspect the fixture:
 #   ULOL::Indoor3DGmlModeler::IndoorCore::CellSpaceDirectCopyWorldRegression.build!
-#
-# Convert all fixture solids and verify world coordinates:
 #   ULOL::Indoor3DGmlModeler::IndoorCore::CellSpaceDirectCopyWorldRegression.convert_and_verify!
 #
-# Or run both stages at once:
+# Or:
 #   ULOL::Indoor3DGmlModeler::IndoorCore::CellSpaceDirectCopyWorldRegression.run!
 
 module ULOL
@@ -52,6 +45,7 @@ module ULOL
             model.start_operation('Build CellSpace Direct Copy World Regression Fixture', true)
             operation_started = true
 
+            @shared_group_pairs = []
             @roots = build_fixture(model)
             assert_group_only_fixture!(model)
             validate_shared_group_definitions!
@@ -114,6 +108,7 @@ module ULOL
           def verify!
             ensure_extension_ready!
             ensure_snapshot_state!
+
             report = verify_current_model
             print_verification_report(report)
             report[:passed]
@@ -136,7 +131,6 @@ module ULOL
 
           def build_fixture(model)
             roots = []
-            @shared_group_pairs = []
 
             roots << add_box_group(
               model.entities,
@@ -212,7 +206,6 @@ module ULOL
                 rotation_deg: -9.0
               )
             )
-
             shared_container_b = copy_group(
               shared_container_a,
               name: fixture_name('SHARED_CONTAINER_B'),
@@ -227,8 +220,7 @@ module ULOL
               shared_container_a,
               shared_container_b
             ]
-            roots << shared_container_a
-            roots << shared_container_b
+            roots.concat([shared_container_a, shared_container_b])
 
             shared_solid_a = add_box_group(
               model.entities,
@@ -253,8 +245,7 @@ module ULOL
               shared_solid_a,
               shared_solid_b
             ]
-            roots << shared_solid_a
-            roots << shared_solid_b
+            roots.concat([shared_solid_a, shared_solid_b])
 
             roots << add_box_group(
               model.entities,
@@ -272,7 +263,7 @@ module ULOL
 
           def add_empty_group(entities, name:, transformation:)
             group = entities.add_group
-            raise 'Fixture group creation failed' unless group&.valid?
+            raise 'Fixture Group creation failed' unless group&.valid?
 
             group.name = name
             group.transformation = transformation
@@ -323,12 +314,12 @@ module ULOL
               translation_mm.map { |value| value.to_f.mm }
             )
             rotation = Geom::Transformation.rotation(
-              Geom::Point3d.new(0.0, 0.0, 0.0),
-              Geom::Vector3d.new(0.0, 0.0, 1.0),
+              ORIGIN,
+              Z_AXIS,
               rotation_deg.to_f * Math::PI / 180.0
             )
             scaling = Geom::Transformation.scaling(
-              Geom::Point3d.new(0.0, 0.0, 0.0),
+              ORIGIN,
               scale[0].to_f,
               scale[1].to_f,
               scale[2].to_f
@@ -347,7 +338,8 @@ module ULOL
               entity&.valid? && entity.is_a?(Sketchup::Group)
             end
             unless non_groups.empty?
-              raise "All fixture roots must be Sketchup::Group: #{non_groups.map { |entity| source_label(entity) }.inspect}"
+              labels = non_groups.map { |entity| source_label(entity) }
+              raise "All fixture roots must be Sketchup::Group: #{labels.inspect}"
             end
 
             true
@@ -361,12 +353,10 @@ module ULOL
                 found << entity
               end
 
-              if entity.is_a?(Sketchup::Group) &&
-                 entity.valid? &&
-                 entity.definition&.valid?
-                definition_key = entity.definition.object_id
-                unless visited_definitions[definition_key]
-                  visited_definitions[definition_key] = true
+              if entity.is_a?(Sketchup::Group) && entity.valid? && entity.definition&.valid?
+                key = definition_key(entity.definition)
+                unless visited_definitions[key]
+                  visited_definitions[key] = true
                   found.concat(
                     collect_component_instances(
                       entity.definition.entities,
@@ -387,11 +377,56 @@ module ULOL
               unless first.is_a?(Sketchup::Group) && second.is_a?(Sketchup::Group)
                 raise "Shared definition pair must contain Group only: #{label}"
               end
-              unless first.definition.equal?(second.definition)
-                raise "Group#copy did not preserve the same definition: #{label}"
-              end
+              next if same_definition?(first.definition, second.definition)
+
+              raise(
+                "Group#copy did not preserve the same definition: #{label}; " \
+                "first=#{definition_debug(first.definition)} " \
+                "second=#{definition_debug(second.definition)}"
+              )
             end
             true
+          end
+
+          def same_definition?(first, second)
+            return false unless first&.valid? && second&.valid?
+
+            first_key = definition_key(first)
+            second_key = definition_key(second)
+            return first_key == second_key if first_key && second_key
+
+            first == second
+          end
+
+          def definition_key(definition)
+            if definition.respond_to?(:persistent_id)
+              persistent_id = definition.persistent_id
+              return [:persistent_id, persistent_id] if persistent_id && persistent_id != 0
+            end
+            if definition.respond_to?(:entityID)
+              entity_id = definition.entityID
+              return [:entity_id, entity_id] if entity_id && entity_id != 0
+            end
+            if definition.respond_to?(:guid)
+              guid = definition.guid.to_s
+              return [:guid, guid] unless guid.empty?
+            end
+
+            nil
+          rescue StandardError
+            nil
+          end
+
+          def definition_debug(definition)
+            {
+              class: definition.class.name.to_s,
+              key: definition_key(definition),
+              object_id: definition.object_id,
+              name: definition.respond_to?(:name) ? definition.name.to_s : nil,
+              instances: definition.respond_to?(:instances) ? definition.instances.length : nil
+            }.inspect
+          rescue StandardError => e
+            "(definition debug failed: #{e.class}: #{e.message})"
           end
 
           def snapshot_jobs(jobs)
@@ -417,6 +452,7 @@ module ULOL
             primal_group = find_primal_group(model)
             raise 'IndoorGML_PrimalSpaceFeatures group not found after conversion' unless primal_group&.valid?
 
+            all_components = collect_component_instances(model.entities)
             new_cells = current_cell_groups(model).reject do |group|
               Array(@existing_cell_keys).include?(entity_key(group))
             end
@@ -425,19 +461,13 @@ module ULOL
               {
                 group: group,
                 label: group.name.to_s,
-                points: world_vertex_points(
-                  group,
-                  primal_world * group.transformation
-                ),
-                direct_child: Utils::Transformation.direct_child_of_root?(
-                  group,
-                  primal_group
-                )
+                points: world_vertex_points(group, primal_world * group.transformation),
+                direct_child: Utils::Transformation.direct_child_of_root?(group, primal_group)
               }
             end
 
             matches = greedy_match(@baseline, candidates)
-            max_error = matches.map { |match| match[:error] }.compact.max || Float::INFINITY
+            matched_candidates = matches.filter_map { |match| match[:candidate] }
             all_matched = matches.length == @baseline.length &&
                           matches.all? { |match| match[:candidate] }
             all_within_tolerance = all_matched && matches.all? do |match|
@@ -448,10 +478,10 @@ module ULOL
               group.definition if group.respond_to?(:definition) && group.definition&.valid?
             end
             all_unique_definitions = definitions.length == new_cells.length &&
-                                     definitions.map(&:object_id).uniq.length == definitions.length
+                                     definitions.map { |definition| definition_key(definition) || definition.object_id }.uniq.length == definitions.length
             count_ok = new_cells.length == EXPECTED_SOLID_COUNT
-            remaining_components = collect_component_instances(primal_group.entities)
-            no_component_instances = remaining_components.empty?
+            no_components = all_components.empty?
+            max_error = matches.map { |match| match[:error] }.compact.max || Float::INFINITY
 
             {
               passed: count_ok &&
@@ -459,7 +489,7 @@ module ULOL
                       all_within_tolerance &&
                       all_direct_children &&
                       all_unique_definitions &&
-                      no_component_instances,
+                      no_components,
               count_ok: count_ok,
               expected_count: EXPECTED_SOLID_COUNT,
               actual_count: new_cells.length,
@@ -467,11 +497,11 @@ module ULOL
               all_within_tolerance: all_within_tolerance,
               all_direct_children: all_direct_children,
               all_unique_definitions: all_unique_definitions,
-              no_component_instances: no_component_instances,
-              remaining_components: remaining_components,
+              no_components: no_components,
+              component_labels: all_components.map { |entity| source_label(entity) },
               max_error: max_error,
               matches: matches,
-              unmatched_candidates: candidates - matches.filter_map { |match| match[:candidate] }
+              unmatched_candidates: candidates - matched_candidates
             }
           end
 
@@ -534,12 +564,10 @@ module ULOL
               raise "Expected #{EXPECTED_SOLID_COUNT} solid jobs, got #{jobs.length}: #{labels.inspect}"
             end
 
-            non_groups = jobs.reject do |job|
-              source = job[:source]
-              source&.valid? && source.is_a?(Sketchup::Group)
-            end
-            unless non_groups.empty?
-              raise "Every conversion source must be Sketchup::Group: #{non_groups.map { |job| source_label(job[:source]) }.inspect}"
+            non_group_jobs = jobs.reject { |job| job[:source].is_a?(Sketchup::Group) }
+            unless non_group_jobs.empty?
+              labels = non_group_jobs.map { |job| source_label(job[:source]) }
+              raise "All conversion jobs must be Group: #{labels.inspect}"
             end
 
             non_solids = jobs.reject do |job|
@@ -548,7 +576,8 @@ module ULOL
             end
             return true if non_solids.empty?
 
-            raise "Fixture produced non-solid jobs: #{non_solids.map { |job| source_label(job[:source]) }.inspect}"
+            labels = non_solids.map { |job| source_label(job[:source]) }
+            raise "Fixture produced non-solid jobs: #{labels.inspect}"
           end
 
           def print_fixture_report
@@ -558,12 +587,12 @@ module ULOL
             puts '=' * 100
             puts "Top-level roots      : #{@roots.length}"
             puts "Solid jobs           : #{@jobs.length}"
-            puts 'ComponentInstance     : 0 (enforced)'
-            Array(@shared_group_pairs).each do |label, first, second|
+            puts 'ComponentInstance    : 0 (enforced)'
+            Array(@shared_group_pairs).each do |label, first, _second|
               puts format(
-                'Shared definition     : %-28s %s',
+                'Shared definition    : %-32s PASS key=%s',
                 label,
-                first.definition.equal?(second.definition) ? 'PASS' : 'FAIL'
+                definition_key(first.definition).inspect
               )
             end
             @baseline.each_with_index do |entry, index|
@@ -608,7 +637,6 @@ module ULOL
             report[:matches].each_with_index do |match, index|
               baseline = match[:baseline]
               candidate = match[:candidate]
-              error_mm = length_to_mm(match[:error])
               passed = candidate && match[:error] <= tolerance_length
               puts format(
                 '%s %2d. %-42s -> %-42s max_error=%12.9f mm',
@@ -616,14 +644,16 @@ module ULOL
                 index + 1,
                 baseline[:label],
                 candidate ? candidate[:label] : '(unmatched)',
-                error_mm
+                length_to_mm(match[:error])
               )
             end
             unless report[:unmatched_candidates].empty?
               puts 'Unmatched CellSpaces:'
-              report[:unmatched_candidates].each do |candidate|
-                puts "  - #{candidate[:label]}"
-              end
+              report[:unmatched_candidates].each { |candidate| puts "  - #{candidate[:label]}" }
+            end
+            unless report[:component_labels].empty?
+              puts 'Unexpected ComponentInstances:'
+              report[:component_labels].each { |label| puts "  - #{label}" }
             end
             puts '-' * 100
             puts "Cell count                 : #{report[:actual_count]}/#{report[:expected_count]} #{report[:count_ok] ? 'PASS' : 'FAIL'}"
@@ -631,12 +661,7 @@ module ULOL
             puts "World error <= #{TOLERANCE_MM} mm : #{report[:all_within_tolerance] ? 'PASS' : 'FAIL'}"
             puts "All direct Primal children : #{report[:all_direct_children] ? 'PASS' : 'FAIL'}"
             puts "All definitions unique     : #{report[:all_unique_definitions] ? 'PASS' : 'FAIL'}"
-            puts "No ComponentInstance left  : #{report[:no_component_instances] ? 'PASS' : 'FAIL'}"
-            unless report[:no_component_instances]
-              Array(report[:remaining_components]).each do |entity|
-                puts "  - #{source_label(entity)}"
-              end
-            end
+            puts "No ComponentInstance left  : #{report[:no_components] ? 'PASS' : 'FAIL'}"
             puts format('Maximum world error        : %.9f mm', length_to_mm(report[:max_error]))
             puts '-' * 100
             puts(report[:passed] ? 'OVERALL: PASS' : 'OVERALL: FAIL')
@@ -688,9 +713,7 @@ module ULOL
           end
 
           def allowed_system_root_entity?(entity)
-            return false unless entity.is_a?(Sketchup::Group)
-
-            entity.name.to_s.start_with?('IndoorGML_')
+            entity.is_a?(Sketchup::Group) && entity.name.to_s.start_with?('IndoorGML_')
           rescue StandardError
             false
           end
@@ -778,7 +801,7 @@ module ULOL
   end
 end
 
-puts '[CELLSPACE DIRECT COPY WORLD REGRESSION] loaded — GROUP ONLY'
+puts '[CELLSPACE DIRECT COPY WORLD REGRESSION] loaded'
 puts '1) ...::CellSpaceDirectCopyWorldRegression.build!'
 puts '2) ...::CellSpaceDirectCopyWorldRegression.convert_and_verify!'
 puts 'or ...::CellSpaceDirectCopyWorldRegression.run!'
