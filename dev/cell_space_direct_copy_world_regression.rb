@@ -5,11 +5,22 @@
 # Preconditions:
 # - SketchUp model is empty except for IndoorGML system groups.
 # - IndoorGML extension is fully loaded.
+# - Fixture input entities must be Sketchup::Group only. ComponentInstance is forbidden.
 #
-# Usage from SketchUp Ruby Console:
-#   load 'C:/path/to/IndoorGML_3DSpace_Modeler/dev/cell_space_direct_copy_world_regression.rb'
+# Load from SketchUp Ruby Console:
+#   core_file = ULOL::Indoor3DGmlModeler.method(:attach_model_observer).source_location.first
+#   root = File.expand_path('..', File.dirname(core_file))
+#
+#   load File.join(
+#     root,
+#     'dev',
+#     'cell_space_direct_copy_world_regression.rb'
+#   )
+#
+# Build and inspect the fixture:
 #   ULOL::Indoor3DGmlModeler::IndoorCore::CellSpaceDirectCopyWorldRegression.build!
-#   # Inspect the generated nested/shared-definition fixture if desired.
+#
+# Convert all fixture solids and verify world coordinates:
 #   ULOL::Indoor3DGmlModeler::IndoorCore::CellSpaceDirectCopyWorldRegression.convert_and_verify!
 #
 # Or run both stages at once:
@@ -40,36 +51,21 @@ module ULOL
             operation_started = false
             model.start_operation('Build CellSpace Direct Copy World Regression Fixture', true)
             operation_started = true
+
             @roots = build_fixture(model)
+            assert_group_only_fixture!(model)
+            validate_shared_group_definitions!
+
             @jobs = CellSpaceConversionJobBuilder.new(entities: @roots).build
             validate_jobs!(@jobs)
             @baseline = snapshot_jobs(@jobs)
             @existing_cell_keys = current_cell_groups(model).map { |group| entity_key(group) }
+
             select_roots(model, @roots)
             model.commit_operation
             operation_started = false
 
-            puts
-            puts '=' * 100
-            puts 'CellSpace Direct Copy World Regression Fixture'
-            puts '=' * 100
-            puts "Top-level roots : #{@roots.length}"
-            puts "Solid jobs      : #{@jobs.length}"
-            @baseline.each_with_index do |entry, index|
-              origin = entry[:world_origin_mm]
-              puts format(
-                '%2d. %-44s vertices=%d origin=(%.3f, %.3f, %.3f) mm',
-                index + 1,
-                entry[:label],
-                entry[:points].length,
-                origin[0],
-                origin[1],
-                origin[2]
-              )
-            end
-            puts
-            puts 'Fixture 생성 완료. 모델을 확인한 뒤 convert_and_verify!를 실행하세요.'
-            puts '=' * 100
+            print_fixture_report
             true
           rescue StandardError => e
             model.abort_operation if model && operation_started
@@ -83,6 +79,8 @@ module ULOL
             ensure_built_state!
 
             model = Sketchup.active_model
+            assert_group_only_fixture!(model)
+
             indoor_model = IndoorModel.current
             unless indoor_model.prepare_cell_space_creation_active_context(model)
               raise 'Failed to prepare active context for CellSpace conversion'
@@ -130,6 +128,7 @@ module ULOL
             @baseline = nil
             @existing_cell_keys = nil
             @conversion_result = nil
+            @shared_group_pairs = nil
             true
           end
 
@@ -137,6 +136,7 @@ module ULOL
 
           def build_fixture(model)
             roots = []
+            @shared_group_pairs = []
 
             roots << add_box_group(
               model.entities,
@@ -148,11 +148,13 @@ module ULOL
               )
             )
 
-            nested_two_parent = model.entities.add_group
-            nested_two_parent.name = fixture_name('NESTED_2_PARENT')
-            nested_two_parent.transformation = transform(
-              translation_mm: [4500.0, -1200.0, 500.0],
-              rotation_deg: -23.0
+            nested_two_parent = add_empty_group(
+              model.entities,
+              name: fixture_name('NESTED_2_PARENT'),
+              transformation: transform(
+                translation_mm: [4500.0, -1200.0, 500.0],
+                rotation_deg: -23.0
+              )
             )
             add_box_group(
               nested_two_parent.entities,
@@ -165,18 +167,22 @@ module ULOL
             )
             roots << nested_two_parent
 
-            nested_three_parent = model.entities.add_group
-            nested_three_parent.name = fixture_name('NESTED_3_PARENT')
-            nested_three_parent.transformation = transform(
-              translation_mm: [-3200.0, 2800.0, 700.0],
-              rotation_deg: 31.0
+            nested_three_parent = add_empty_group(
+              model.entities,
+              name: fixture_name('NESTED_3_PARENT'),
+              transformation: transform(
+                translation_mm: [-3200.0, 2800.0, 700.0],
+                rotation_deg: 31.0
+              )
             )
-            nested_three_middle = nested_three_parent.entities.add_group
-            nested_three_middle.name = fixture_name('NESTED_3_MIDDLE')
-            nested_three_middle.transformation = transform(
-              translation_mm: [900.0, -350.0, 250.0],
-              rotation_deg: -14.0,
-              scale: [1.15, 0.85, 1.20]
+            nested_three_middle = add_empty_group(
+              nested_three_parent.entities,
+              name: fixture_name('NESTED_3_MIDDLE'),
+              transformation: transform(
+                translation_mm: [900.0, -350.0, 250.0],
+                rotation_deg: -14.0,
+                scale: [1.15, 0.85, 1.20]
+              )
             )
             add_box_group(
               nested_three_middle.entities,
@@ -189,113 +195,111 @@ module ULOL
             )
             roots << nested_three_parent
 
-            shared_container_definition = model.definitions.add(
-              fixture_name('SHARED_CONTAINER_DEFINITION')
+            shared_container_a = add_empty_group(
+              model.entities,
+              name: fixture_name('SHARED_CONTAINER_A'),
+              transformation: transform(
+                translation_mm: [7000.0, 3000.0, 200.0],
+                rotation_deg: 42.0
+              )
             )
-            shared_container_child = add_box_group(
-              shared_container_definition.entities,
+            add_box_group(
+              shared_container_a.entities,
               name: fixture_name('SHARED_CONTAINER_CHILD_SOLID'),
               size_mm: [1450.0, 850.0, 1050.0],
               transformation: transform(
-                translation_mm: [180.0, 240.0, 120.0],
-                rotation_deg: 7.0
-              )
-            )
-            shared_container_child.set_attribute(
-              FIXTURE_PREFIX,
-              'shared_definition_probe',
-              true
-            )
-
-            shared_wrapper_a = model.entities.add_group
-            shared_wrapper_a.name = fixture_name('SHARED_CONTAINER_WRAPPER_A')
-            shared_wrapper_a.transformation = transform(
-              translation_mm: [7000.0, 3000.0, 200.0],
-              rotation_deg: 42.0
-            )
-            shared_instance_a = shared_wrapper_a.entities.add_instance(
-              shared_container_definition,
-              transform(
                 translation_mm: [500.0, -200.0, 300.0],
                 rotation_deg: -9.0
               )
             )
-            shared_instance_a.name = fixture_name('SHARED_CONTAINER_INSTANCE_A')
-            roots << shared_wrapper_a
 
-            shared_wrapper_b = model.entities.add_group
-            shared_wrapper_b.name = fixture_name('SHARED_CONTAINER_WRAPPER_B')
-            shared_wrapper_b.transformation = transform(
-              translation_mm: [-6500.0, -2800.0, 400.0],
-              rotation_deg: -37.0
-            )
-            shared_instance_b = shared_wrapper_b.entities.add_instance(
-              shared_container_definition,
-              transform(
-                translation_mm: [-350.0, 600.0, 150.0],
-                rotation_deg: 18.0,
+            shared_container_b = copy_group(
+              shared_container_a,
+              name: fixture_name('SHARED_CONTAINER_B'),
+              transformation: transform(
+                translation_mm: [-6500.0, -2800.0, 400.0],
+                rotation_deg: -37.0,
                 scale: [0.90, 0.90, 1.10]
               )
             )
-            shared_instance_b.name = fixture_name('SHARED_CONTAINER_INSTANCE_B')
-            roots << shared_wrapper_b
+            @shared_group_pairs << [
+              'shared nested container',
+              shared_container_a,
+              shared_container_b
+            ]
+            roots << shared_container_a
+            roots << shared_container_b
 
-            shared_solid_definition = model.definitions.add(
-              fixture_name('SHARED_SOLID_DEFINITION')
-            )
-            add_box_geometry(
-              shared_solid_definition.entities,
-              [1000.0, 1600.0, 750.0]
-            )
-
-            shared_solid_a = model.entities.add_instance(
-              shared_solid_definition,
-              transform(
+            shared_solid_a = add_box_group(
+              model.entities,
+              name: fixture_name('SHARED_SOLID_A'),
+              size_mm: [1000.0, 1600.0, 750.0],
+              transformation: transform(
                 translation_mm: [2500.0, 6500.0, 280.0],
                 rotation_deg: 28.0
               )
             )
-            shared_solid_a.name = fixture_name('SHARED_SOLID_A')
-            roots << shared_solid_a
-
-            shared_solid_b = model.entities.add_instance(
-              shared_solid_definition,
-              transform(
+            shared_solid_b = copy_group(
+              shared_solid_a,
+              name: fixture_name('SHARED_SOLID_B'),
+              transformation: transform(
                 translation_mm: [-2500.0, -6500.0, 810.0],
                 rotation_deg: -41.0,
                 scale: [1.10, 0.90, 1.30]
               )
             )
-            shared_solid_b.name = fixture_name('SHARED_SOLID_B')
+            @shared_group_pairs << [
+              'shared solid group',
+              shared_solid_a,
+              shared_solid_b
+            ]
+            roots << shared_solid_a
             roots << shared_solid_b
 
-            unique_component_definition = model.definitions.add(
-              fixture_name('ROOT_UNIQUE_COMPONENT_DEFINITION')
-            )
-            add_box_geometry(
-              unique_component_definition.entities,
-              [1750.0, 650.0, 1200.0]
-            )
-            unique_component = model.entities.add_instance(
-              unique_component_definition,
-              transform(
+            roots << add_box_group(
+              model.entities,
+              name: fixture_name('ROOT_SCALED_GROUP'),
+              size_mm: [1750.0, 650.0, 1200.0],
+              transformation: transform(
                 translation_mm: [9000.0, -5200.0, 900.0],
                 rotation_deg: 63.0,
                 scale: [0.95, 1.20, 0.80]
               )
             )
-            unique_component.name = fixture_name('ROOT_UNIQUE_COMPONENT')
-            roots << unique_component
 
             roots
           end
 
-          def add_box_group(entities, name:, size_mm:, transformation:)
+          def add_empty_group(entities, name:, transformation:)
             group = entities.add_group
+            raise 'Fixture group creation failed' unless group&.valid?
+
             group.name = name
-            add_box_geometry(group.entities, size_mm)
             group.transformation = transformation
             group
+          end
+
+          def add_box_group(entities, name:, size_mm:, transformation:)
+            group = add_empty_group(
+              entities,
+              name: name,
+              transformation: transformation
+            )
+            add_box_geometry(group.entities, size_mm)
+            group
+          end
+
+          def copy_group(source, name:, transformation:)
+            raise ArgumentError, 'Group copy source is invalid' unless source&.valid?
+            raise ArgumentError, 'Group copy source must be Sketchup::Group' unless source.is_a?(Sketchup::Group)
+
+            copy = source.copy
+            raise 'Group#copy failed' unless copy&.valid?
+            raise "Group#copy returned #{copy.class}" unless copy.is_a?(Sketchup::Group)
+
+            copy.name = name
+            copy.transformation = transformation
+            copy
           end
 
           def add_box_geometry(entities, size_mm)
@@ -330,6 +334,64 @@ module ULOL
               scale[2].to_f
             )
             translation * rotation * scaling
+          end
+
+          def assert_group_only_fixture!(model)
+            components = collect_component_instances(model.entities)
+            unless components.empty?
+              labels = components.first(10).map { |entity| source_label(entity) }
+              raise "ComponentInstance is forbidden in fixture: #{labels.inspect}"
+            end
+
+            non_groups = Array(@roots).reject do |entity|
+              entity&.valid? && entity.is_a?(Sketchup::Group)
+            end
+            unless non_groups.empty?
+              raise "All fixture roots must be Sketchup::Group: #{non_groups.map { |entity| source_label(entity) }.inspect}"
+            end
+
+            true
+          end
+
+          def collect_component_instances(entities, visited_definitions = {})
+            entities.to_a.flat_map do |entity|
+              found = []
+              if defined?(Sketchup::ComponentInstance) &&
+                 entity.instance_of?(Sketchup::ComponentInstance)
+                found << entity
+              end
+
+              if entity.is_a?(Sketchup::Group) &&
+                 entity.valid? &&
+                 entity.definition&.valid?
+                definition_key = entity.definition.object_id
+                unless visited_definitions[definition_key]
+                  visited_definitions[definition_key] = true
+                  found.concat(
+                    collect_component_instances(
+                      entity.definition.entities,
+                      visited_definitions
+                    )
+                  )
+                end
+              end
+              found
+            end
+          end
+
+          def validate_shared_group_definitions!
+            Array(@shared_group_pairs).each do |label, first, second|
+              unless first&.valid? && second&.valid?
+                raise "Shared Group pair is invalid: #{label}"
+              end
+              unless first.is_a?(Sketchup::Group) && second.is_a?(Sketchup::Group)
+                raise "Shared definition pair must contain Group only: #{label}"
+              end
+              unless first.definition.equal?(second.definition)
+                raise "Group#copy did not preserve the same definition: #{label}"
+              end
+            end
+            true
           end
 
           def snapshot_jobs(jobs)
@@ -388,13 +450,16 @@ module ULOL
             all_unique_definitions = definitions.length == new_cells.length &&
                                      definitions.map(&:object_id).uniq.length == definitions.length
             count_ok = new_cells.length == EXPECTED_SOLID_COUNT
+            remaining_components = collect_component_instances(primal_group.entities)
+            no_component_instances = remaining_components.empty?
 
             {
               passed: count_ok &&
                       all_matched &&
                       all_within_tolerance &&
                       all_direct_children &&
-                      all_unique_definitions,
+                      all_unique_definitions &&
+                      no_component_instances,
               count_ok: count_ok,
               expected_count: EXPECTED_SOLID_COUNT,
               actual_count: new_cells.length,
@@ -402,6 +467,8 @@ module ULOL
               all_within_tolerance: all_within_tolerance,
               all_direct_children: all_direct_children,
               all_unique_definitions: all_unique_definitions,
+              no_component_instances: no_component_instances,
+              remaining_components: remaining_components,
               max_error: max_error,
               matches: matches,
               unmatched_candidates: candidates - matches.filter_map { |match| match[:candidate] }
@@ -467,6 +534,14 @@ module ULOL
               raise "Expected #{EXPECTED_SOLID_COUNT} solid jobs, got #{jobs.length}: #{labels.inspect}"
             end
 
+            non_groups = jobs.reject do |job|
+              source = job[:source]
+              source&.valid? && source.is_a?(Sketchup::Group)
+            end
+            unless non_groups.empty?
+              raise "Every conversion source must be Sketchup::Group: #{non_groups.map { |job| source_label(job[:source]) }.inspect}"
+            end
+
             non_solids = jobs.reject do |job|
               source = job[:source]
               source&.valid? && source.respond_to?(:manifold?) && source.manifold?
@@ -474,6 +549,38 @@ module ULOL
             return true if non_solids.empty?
 
             raise "Fixture produced non-solid jobs: #{non_solids.map { |job| source_label(job[:source]) }.inspect}"
+          end
+
+          def print_fixture_report
+            puts
+            puts '=' * 100
+            puts 'CellSpace Direct Copy World Regression Fixture — GROUP ONLY'
+            puts '=' * 100
+            puts "Top-level roots      : #{@roots.length}"
+            puts "Solid jobs           : #{@jobs.length}"
+            puts 'ComponentInstance     : 0 (enforced)'
+            Array(@shared_group_pairs).each do |label, first, second|
+              puts format(
+                'Shared definition     : %-28s %s',
+                label,
+                first.definition.equal?(second.definition) ? 'PASS' : 'FAIL'
+              )
+            end
+            @baseline.each_with_index do |entry, index|
+              origin = entry[:world_origin_mm]
+              puts format(
+                '%2d. %-44s vertices=%d origin=(%.3f, %.3f, %.3f) mm',
+                index + 1,
+                entry[:label],
+                entry[:points].length,
+                origin[0],
+                origin[1],
+                origin[2]
+              )
+            end
+            puts
+            puts 'Fixture 생성 완료. 모델을 확인한 뒤 convert_and_verify!를 실행하세요.'
+            puts '=' * 100
           end
 
           def print_conversion_result(result, elapsed)
@@ -524,6 +631,12 @@ module ULOL
             puts "World error <= #{TOLERANCE_MM} mm : #{report[:all_within_tolerance] ? 'PASS' : 'FAIL'}"
             puts "All direct Primal children : #{report[:all_direct_children] ? 'PASS' : 'FAIL'}"
             puts "All definitions unique     : #{report[:all_unique_definitions] ? 'PASS' : 'FAIL'}"
+            puts "No ComponentInstance left  : #{report[:no_component_instances] ? 'PASS' : 'FAIL'}"
+            unless report[:no_component_instances]
+              Array(report[:remaining_components]).each do |entity|
+                puts "  - #{source_label(entity)}"
+              end
+            end
             puts format('Maximum world error        : %.9f mm', length_to_mm(report[:max_error]))
             puts '-' * 100
             puts(report[:passed] ? 'OVERALL: PASS' : 'OVERALL: FAIL')
@@ -577,8 +690,7 @@ module ULOL
           def allowed_system_root_entity?(entity)
             return false unless entity.is_a?(Sketchup::Group)
 
-            name = entity.name.to_s
-            name.start_with?('IndoorGML_')
+            entity.name.to_s.start_with?('IndoorGML_')
           rescue StandardError
             false
           end
@@ -666,7 +778,7 @@ module ULOL
   end
 end
 
-puts '[CELLSPACE DIRECT COPY WORLD REGRESSION] loaded'
+puts '[CELLSPACE DIRECT COPY WORLD REGRESSION] loaded — GROUP ONLY'
 puts '1) ...::CellSpaceDirectCopyWorldRegression.build!'
 puts '2) ...::CellSpaceDirectCopyWorldRegression.convert_and_verify!'
 puts 'or ...::CellSpaceDirectCopyWorldRegression.run!'
