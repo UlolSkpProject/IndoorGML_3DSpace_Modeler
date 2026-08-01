@@ -41,7 +41,8 @@ module ULOL
             total: 6,
             work_per_item: 50,
             progress_interval: 0.001,
-            yield_every: 1
+            yield_interval: 0.001,
+            checkpoint_iterations: 1
           )
 
           worker.start
@@ -54,6 +55,32 @@ module ULOL
           assert_equal 6, terminal[:completed]
           refute_equal main_thread_id, terminal[:worker_thread_id]
           assert_kind_of Integer, terminal[:checksum]
+          assert_operator terminal[:checkpoint_count], :>, 0
+        end
+
+        def test_worker_can_cancel_inside_a_single_large_item
+          mailbox = Infrastructure::ProgressMailbox.new
+          token = Infrastructure::CancellationToken.new
+          worker = Infrastructure::PureRubyWorker.new(
+            mailbox: mailbox,
+            cancellation_token: token,
+            total: 1,
+            work_per_item: 10_000_000,
+            progress_interval: 0.001,
+            yield_interval: 0.001,
+            checkpoint_iterations: 100
+          )
+
+          worker.start
+          sleep(0.01)
+          token.cancel!
+
+          assert worker.join(2), 'worker did not stop after cancellation'
+          terminal = mailbox.drain.last
+
+          assert_equal :cancelled, terminal[:type]
+          assert_equal 0, terminal[:completed]
+          assert_operator terminal[:checkpoint_count], :>, 0
         end
 
         def test_pre_cancelled_worker_publishes_cancelled_terminal_event
