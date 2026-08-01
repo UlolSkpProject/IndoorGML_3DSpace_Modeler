@@ -58,14 +58,15 @@ module ULOL
         class PureRubyWorker
           attr_reader :thread
 
-          def initialize(mailbox:, cancellation_token:, total:, work_per_item:, progress_interval: 0.05,
-                         yield_every: 4)
+          def initialize(mailbox:, cancellation_token:, total:, work_per_item:, progress_interval: 0.1,
+                         yield_interval: 0.01, checkpoint_iterations: 2_048)
             @mailbox = mailbox
             @cancellation_token = cancellation_token
             @total = [total.to_i, 1].max
             @work_per_item = [work_per_item.to_i, 1].max
             @progress_interval = [progress_interval.to_f, 0.001].max
-            @yield_every = [yield_every.to_i, 1].max
+            @yield_interval = [yield_interval.to_f, 0.001].max
+            @checkpoint_iterations = [checkpoint_iterations.to_i, 1].max
             @thread = nil
           end
 
@@ -93,35 +94,62 @@ module ULOL
             completed = 0
             checksum = 0
             last_progress_at = started_at
+            last_yield_at = started_at
+            yield_count = 0
+            checkpoint_count = 0
+            progress_event_count = 0
 
             @mailbox.publish(
               type: :started,
               total: @total,
               completed: 0,
               percent: 0.0,
+              elapsed: 0.0,
               worker_thread_id: worker_thread_id
             )
 
-            @total.times do |index|
-              break if @cancellation_token.cancelled?
-
-              checksum = perform_pure_ruby_work(checksum, index)
-              completed = index + 1
+            checkpoint = lambda do
+              checkpoint_count += 1
               now = monotonic_time
 
-              if completed == @total || (now - last_progress_at) >= @progress_interval
-                @mailbox.publish(
-                  type: :progress,
-                  total: @total,
+              if (now - last_progress_at) >= @progress_interval
+                publish_progress(
                   completed: completed,
-                  percent: completed.fdiv(@total) * 100.0,
-                  elapsed: now - started_at,
+                  started_at: started_at,
+                  now: now,
                   worker_thread_id: worker_thread_id
                 )
+                progress_event_count += 1
                 last_progress_at = now
               end
 
-              Thread.pass if (completed % @yield_every).zero?
+              if (now - last_yield_at) >= @yield_interval
+                Thread.pass
+                yield_count += 1
+                last_yield_at = monotonic_time
+              end
+
+              @cancellation_token.cancelled?
+            end
+
+            @total.times do |index|
+              break if checkpoint.call
+
+              checksum, cancelled = perform_pure_ruby_work(checksum, index, &checkpoint)
+              break if cancelled
+
+              completed = index + 1
+              now = monotonic_time
+              if completed == @total || (now - last_progress_at) >= @progress_interval
+                publish_progress(
+                  completed: completed,
+                  started_at: started_at,
+                  now: now,
+                  worker_thread_id: worker_thread_id
+                )
+                progress_event_count += 1
+                last_progress_at = now
+              end
             end
 
             finished_at = monotonic_time
@@ -133,7 +161,10 @@ module ULOL
               percent: completed.fdiv(@total) * 100.0,
               elapsed: finished_at - started_at,
               checksum: checksum,
-              worker_thread_id: worker_thread_id
+              worker_thread_id: worker_thread_id,
+              yield_count: yield_count,
+              checkpoint_count: checkpoint_count,
+              progress_event_count: progress_event_count
             )
           rescue StandardError => e
             @mailbox.publish(
@@ -144,12 +175,26 @@ module ULOL
             )
           end
 
+          def publish_progress(completed:, started_at:, now:, worker_thread_id:)
+            @mailbox.publish(
+              type: :progress,
+              total: @total,
+              completed: completed,
+              percent: completed.fdiv(@total) * 100.0,
+              elapsed: now - started_at,
+              worker_thread_id: worker_thread_id
+            )
+          end
+
           def perform_pure_ruby_work(seed, item_index)
             value = (seed ^ item_index) & 0xFFFF_FFFF
             @work_per_item.times do |iteration|
               value = ((value * 1_664_525) + 1_013_904_223 + iteration) & 0xFFFF_FFFF
+              next unless ((iteration + 1) % @checkpoint_iterations).zero?
+
+              return [value, true] if yield
             end
-            value
+            [value, false]
           end
 
           def monotonic_time
