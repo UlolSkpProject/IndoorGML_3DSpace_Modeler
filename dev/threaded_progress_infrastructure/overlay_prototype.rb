@@ -17,8 +17,8 @@ module ULOL
           OVERLAY_ID = 'ulol.indoor3dgml_modeler.threaded_progress_prototype'
           OVERLAY_NAME = 'IndoorGML Threaded Progress Prototype'
 
-          PANEL_WIDTH = 460
-          PANEL_HEIGHT = 76
+          PANEL_WIDTH = 560
+          PANEL_HEIGHT = 80
           PANEL_MARGIN = 18
           PANEL_COLOR = Sketchup::Color.new(28, 32, 38, 225)
           TRACK_COLOR = Sketchup::Color.new(78, 84, 94, 255)
@@ -54,11 +54,7 @@ module ULOL
           private
 
           def draw_panel(view, x, y, width, snapshot)
-            draw_2d_quad(
-              view,
-              quad(x, y, width, PANEL_HEIGHT),
-              PANEL_COLOR
-            )
+            draw_2d_quad(view, quad(x, y, width, PANEL_HEIGHT), PANEL_COLOR)
 
             view.draw_text(
               Geom::Point3d.new(x + 14, y + 10, 0),
@@ -66,33 +62,55 @@ module ULOL
               text_options(size: 13, bold: true, color: PRIMARY_TEXT_COLOR)
             )
 
-            percent = [[snapshot[:percent].to_f, 0.0].max, 100.0].min
-            counter = snapshot[:total].to_i.positive? ?
-              "#{snapshot[:completed].to_i} / #{snapshot[:total].to_i}" :
-              snapshot[:type].to_s
-            elapsed = format('%.2fs', snapshot[:elapsed].to_f)
-            detail = format('%6.2f%%   %s   %s', percent, counter, elapsed)
-
             view.draw_text(
-              Geom::Point3d.new(x + 14, y + 31, 0),
-              detail,
+              Geom::Point3d.new(x + 14, y + 32, 0),
+              detail_text(snapshot),
               text_options(size: 10, bold: false, color: SECONDARY_TEXT_COLOR)
             )
 
             track_x = x + 14
-            track_y = y + 55
+            track_y = y + 59
             track_width = width - 28
             track_height = 8
             draw_2d_quad(view, quad(track_x, track_y, track_width, track_height), TRACK_COLOR)
 
+            percent = normalized_percent(snapshot[:percent])
             fill_width = track_width * percent.fdiv(100.0)
-            if fill_width.positive?
-              draw_2d_quad(
-                view,
-                quad(track_x, track_y, fill_width, track_height),
-                fill_color(snapshot)
-              )
+            return unless fill_width.positive?
+
+            draw_2d_quad(
+              view,
+              quad(track_x, track_y, fill_width, track_height),
+              fill_color(snapshot)
+            )
+          end
+
+          def detail_text(snapshot)
+            percent = normalized_percent(snapshot[:percent])
+            elapsed = format('%.2fs', snapshot[:elapsed].to_f)
+            total = snapshot[:total].to_i
+            return format('%6.2f%%   %s   %s', percent, snapshot[:type], elapsed) unless total.positive?
+
+            completed = snapshot[:completed].to_i
+            if snapshot[:terminal]
+              return format('%6.2f%%   완료 %d / %d   %s', percent, completed, total, elapsed)
             end
+
+            current_item = [[snapshot[:current_item].to_i, 1].max, total].min
+            current_item_percent = normalized_percent(snapshot[:current_item_percent])
+            format(
+              '%6.2f%%   완료 %d / %d   현재 %d번 %.1f%%   %s',
+              percent,
+              completed,
+              total,
+              current_item,
+              current_item_percent,
+              elapsed
+            )
+          end
+
+          def normalized_percent(value)
+            [[value.to_f, 0.0].max, 100.0].min
           end
 
           def fill_color(snapshot)
@@ -153,6 +171,9 @@ module ULOL
               type: :starting,
               completed: 0,
               total: total.to_i,
+              current_item: 1,
+              current_item_percent: 0.0,
+              effective_completed: 0.0,
               percent: 0.0,
               main_thread_id: @main_thread.object_id
             )
@@ -244,10 +265,7 @@ module ULOL
             assert_main_thread!
             unless Sketchup.active_model.equal?(@registered_model)
               @cancellation_token&.cancel!
-              @state.apply(
-                type: :failed,
-                error_message: '작업 중 활성 모델이 변경되었습니다.'
-              )
+              @state.apply(type: :failed, error_message: '작업 중 활성 모델이 변경되었습니다.')
               finish_terminal_event
               return false
             end
