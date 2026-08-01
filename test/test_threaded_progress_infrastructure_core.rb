@@ -53,9 +53,30 @@ module ULOL
           assert_equal :started, events.first[:type]
           assert_equal :completed, terminal[:type]
           assert_equal 6, terminal[:completed]
+          assert_equal 100.0, terminal[:percent]
+          assert_equal 100.0, terminal[:current_item_percent]
           refute_equal main_thread_id, terminal[:worker_thread_id]
           assert_kind_of Integer, terminal[:checksum]
           assert_operator terminal[:checkpoint_count], :>, 0
+        end
+
+        def test_progress_metrics_include_current_item_fraction
+          mailbox = Infrastructure::ProgressMailbox.new
+          token = Infrastructure::CancellationToken.new
+          worker = Infrastructure::PureRubyWorker.new(
+            mailbox: mailbox,
+            cancellation_token: token,
+            total: 4,
+            work_per_item: 100
+          )
+
+          metrics = worker.send(:progress_metrics, completed: 1, item_iteration: 25)
+
+          assert_equal 1, metrics[:completed]
+          assert_equal 2, metrics[:current_item]
+          assert_in_delta 25.0, metrics[:current_item_percent], 1.0e-9
+          assert_in_delta 1.25, metrics[:effective_completed], 1.0e-9
+          assert_in_delta 31.25, metrics[:percent], 1.0e-9
         end
 
         def test_worker_can_cancel_inside_a_single_large_item
@@ -76,11 +97,16 @@ module ULOL
           token.cancel!
 
           assert worker.join(2), 'worker did not stop after cancellation'
-          terminal = mailbox.drain.last
+          events = mailbox.drain
+          terminal = events.last
 
           assert_equal :cancelled, terminal[:type]
           assert_equal 0, terminal[:completed]
+          assert_equal 1, terminal[:current_item]
+          assert_operator terminal[:current_item_percent], :>, 0.0
+          assert_operator terminal[:percent], :>, 0.0
           assert_operator terminal[:checkpoint_count], :>, 0
+          assert events.any? { |event| event[:type] == :progress && event[:percent].to_f.positive? }
         end
 
         def test_pre_cancelled_worker_publishes_cancelled_terminal_event
@@ -101,6 +127,7 @@ module ULOL
           assert_equal :started, events.first[:type]
           assert_equal :cancelled, events.last[:type]
           assert_equal 0, events.last[:completed]
+          assert_equal 0.0, events.last[:percent]
         end
 
         def test_core_has_no_sketchup_or_html_dialog_dependency
