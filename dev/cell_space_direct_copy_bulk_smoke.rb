@@ -51,35 +51,54 @@ module ULOL
             return yield unless armed?
 
             disarm!
-            model = service.instance_variable_get(:@model) || Sketchup.active_model
-            jobs = Array(service.instance_variable_get(:@jobs))
-            operation_name = service.instance_variable_get(:@operation_name).to_s
-            primal_before = find_primal_group(model)
-            before_cells = current_cell_groups(primal_before)
-            before_cell_keys = before_cells.map { |entity| entity_key(entity) }
-            before_components = direct_components(primal_before)
-            before_component_keys = before_components.map { |entity| entity_key(entity) }
-
+            context = prepare_context(service)
             started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
             result = yield
             elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at
 
-            report = build_report(
-              model: model,
-              jobs: jobs,
-              operation_name: operation_name,
-              result: result,
-              elapsed: elapsed,
-              before_cell_keys: before_cell_keys,
-              before_component_keys: before_component_keys
-            )
-            print_report(report)
-            write_log(report)
+            begin
+              report = build_report(
+                model: context[:model],
+                jobs: context[:jobs],
+                operation_name: context[:operation_name],
+                result: result,
+                elapsed: elapsed,
+                before_cell_keys: context[:before_cell_keys],
+                before_component_keys: context[:before_component_keys]
+              )
+              print_report(report)
+              write_log(report)
+            rescue StandardError => e
+              puts "[CELLSPACE DIRECT COPY BULK SMOKE] report failed: #{e.class}: #{e.message}"
+              puts e.backtrace.first(15).join("\n")
+            end
             result
           rescue StandardError => e
-            puts "[CELLSPACE DIRECT COPY BULK SMOKE] probe failed: #{e.class}: #{e.message}"
+            puts "[CELLSPACE DIRECT COPY BULK SMOKE] conversion raised: #{e.class}: #{e.message}"
             puts e.backtrace.first(15).join("\n")
             raise
+          end
+
+          def prepare_context(service)
+            model = service.instance_variable_get(:@model) || Sketchup.active_model
+            jobs = Array(service.instance_variable_get(:@jobs))
+            primal = find_primal_group(model)
+            {
+              model: model,
+              jobs: jobs,
+              operation_name: service.instance_variable_get(:@operation_name).to_s,
+              before_cell_keys: current_cell_groups(primal).map { |entity| entity_key(entity) },
+              before_component_keys: direct_components(primal).map { |entity| entity_key(entity) }
+            }
+          rescue StandardError => e
+            puts "[CELLSPACE DIRECT COPY BULK SMOKE] pre-snapshot failed: #{e.class}: #{e.message}"
+            {
+              model: service.instance_variable_get(:@model) || Sketchup.active_model,
+              jobs: Array(service.instance_variable_get(:@jobs)),
+              operation_name: service.instance_variable_get(:@operation_name).to_s,
+              before_cell_keys: [],
+              before_component_keys: []
+            }
           end
 
           def build_report(model:, jobs:, operation_name:, result:, elapsed:, before_cell_keys:, before_component_keys:)
