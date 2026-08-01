@@ -76,6 +76,11 @@ module ULOL
             @events = []
             @model = FakeSketchupModel.new
             @editor_session = FakeSession.new(@events, fail_display: fail_display)
+
+            # The production module is prepended, so a regular class method with
+            # the same name cannot override it. Stub the receiver itself to keep
+            # this test isolated when it runs inside a real SketchUp process.
+            define_singleton_method(:active_sketchup_model) { @model }
           end
 
           private
@@ -90,10 +95,6 @@ module ULOL
             yield
           ensure
             instance_variable_set(flag, previous)
-          end
-
-          def active_sketchup_model
-            @model
           end
         end
 
