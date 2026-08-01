@@ -19,6 +19,7 @@ module ULOL
         require_relative 'indoor_model/scene_groups.rb'
         require_relative 'indoor_model/feature_lifecycle.rb'
         require_relative 'indoor_model/topology.rb'
+        require_relative 'indoor_model/waypoint_snapshot_context.rb'
         require_relative 'indoor_model/observer_routing.rb'
         require_relative 'indoor_model/entity_relocation.rb'
         require_relative 'indoor_model/primal_normalization.rb'
@@ -31,6 +32,7 @@ module ULOL
         require_relative 'indoor_model/cell_space_batch_execution.rb'
         require_relative 'indoor_model/cell_space_batch_compatibility.rb'
         require_relative 'indoor_model/cell_space_demotion_batch.rb'
+        require_relative 'indoor_model/cell_space_batch_overlay_refresh.rb'
 
         include RuntimeSupport
         include SceneGroups
