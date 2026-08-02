@@ -15,6 +15,17 @@ module ULOL
           refute_includes source, "Sketchup.send_action('editRedo:')"
         end
 
+        def test_direct_history_command_runs_after_current_ui_callback
+          source = read_dev_file('cell_space_conversion_apply_direct_history_patch.rb')
+
+          assert_includes source, 'UI.start_timer(HISTORY_COMMAND_DELAY, false)'
+          assert_includes source, 'schedule_direct_history_command(:undo)'
+          assert_includes source, 'schedule_direct_history_command(:redo)'
+          assert_includes source, 'execute_direct_history_command(action)'
+          assert_includes source, 'invoked after UI callback'
+          assert_includes source, 'history_command_timer_active:'
+        end
+
         def test_runner_definition_loads_direct_history_patch
           source = read_dev_file('cell_space_conversion_progress_apply_runner.rb')
 
