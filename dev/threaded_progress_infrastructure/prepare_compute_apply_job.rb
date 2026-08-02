@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require_relative 'main_thread_slice_runner'
-require_relative 'staged_compute_worker'
 require_relative 'staged_job_contract'
 
 module ULOL
@@ -9,6 +8,8 @@ module ULOL
     module IndoorCore
       module ThreadedProgressInfrastructure
         class PrepareComputeApplyJob
+          COMPUTE_EXECUTION = :main_thread_sliced
+
           attr_reader :phase
 
           def initialize(
@@ -20,6 +21,8 @@ module ULOL
             finalize_step: nil,
             slice_budget_ms: 8.0,
             max_items_per_slice: 100,
+            compute_slice_budget_ms: nil,
+            compute_max_items_per_slice: nil,
             weights: StagedJobContract::DEFAULT_WEIGHTS
           )
             raise ArgumentError, 'prepare_step must respond to call' unless prepare_step.respond_to?(:call)
@@ -33,8 +36,14 @@ module ULOL
             @apply_step = apply_step
             @rollback_step = rollback_step
             @finalize_step = finalize_step
-            @slice_budget_ms = slice_budget_ms.to_f
-            @max_items_per_slice = max_items_per_slice.to_i
+            @prepare_slice_budget_ms = slice_budget_ms.to_f
+            @prepare_max_items_per_slice = max_items_per_slice.to_i
+            @compute_slice_budget_ms = (
+              compute_slice_budget_ms.nil? ? slice_budget_ms : compute_slice_budget_ms
+            ).to_f
+            @compute_max_items_per_slice = (
+              compute_max_items_per_slice.nil? ? max_items_per_slice : compute_max_items_per_slice
+            ).to_i
             @contract = StagedJobContract.new(weights: weights)
             reset_state
           end
@@ -48,8 +57,8 @@ module ULOL
             @prepared = Array.new(@prepare_total)
             @prepare_runner = MainThreadSliceRunner.new(
               total: @prepare_total,
-              slice_budget_ms: @slice_budget_ms,
-              max_items_per_slice: @max_items_per_slice
+              slice_budget_ms: @prepare_slice_budget_ms,
+              max_items_per_slice: @prepare_max_items_per_slice
             ) do |index|
               @prepared[index] = deep_freeze(@prepare_step.call(index))
               index
@@ -79,7 +88,7 @@ module ULOL
           def cancel!
             @cancel_requested = true
             @prepare_runner&.cancel! if @phase == :prepare
-            @compute_cancellation_token&.cancel! if @phase == :compute
+            @compute_runner&.cancel! if @phase == :compute
             true
           end
 
@@ -91,8 +100,9 @@ module ULOL
             StagedJobContract::TERMINAL_TYPES.include?(@type)
           end
 
+          # Retained for status compatibility. CPU-bound compute no longer runs in a Ruby worker.
           def worker_alive?
-            @compute_worker&.alive? == true
+            false
           end
 
           def snapshot
@@ -108,17 +118,24 @@ module ULOL
               phase_percent: @phase_percent,
               overall_percent: @overall_percent,
               elapsed: elapsed,
-              prepare_count: @prepared&.compact&.length.to_i,
-              compute_count: @computed&.length.to_i,
+              prepare_count: @prepare_snapshot[:completed].to_i,
+              compute_count: @compute_snapshot[:completed].to_i,
               apply_result: @apply_result,
               finalize_result: @finalize_result,
               rollback_attempted: @rollback_attempted,
               rollback_result: @rollback_result,
-              worker_thread_id: @worker_thread_id,
-              worker_alive: worker_alive?,
+              compute_execution: COMPUTE_EXECUTION,
+              compute_thread_id: @compute_thread_id,
+              worker_thread_id: nil,
+              worker_alive: false,
               prepare_slice_count: @prepare_snapshot[:slice_count],
+              prepare_last_slice_items: @prepare_snapshot[:last_slice_items],
               prepare_max_slice_ms: @prepare_snapshot[:max_slice_ms],
               prepare_overrun_count: @prepare_snapshot[:overrun_count],
+              compute_slice_count: @compute_snapshot[:slice_count],
+              compute_last_slice_items: @compute_snapshot[:last_slice_items],
+              compute_max_slice_ms: @compute_snapshot[:max_slice_ms],
+              compute_overrun_count: @compute_snapshot[:overrun_count],
               error_class: @error_class,
               error_message: @error_message
             }.freeze
@@ -136,10 +153,9 @@ module ULOL
             @computed = nil
             @prepare_runner = nil
             @prepare_snapshot = {}
-            @mailbox = nil
-            @compute_cancellation_token = nil
-            @compute_worker = nil
-            @worker_thread_id = nil
+            @compute_runner = nil
+            @compute_snapshot = {}
+            @compute_thread_id = nil
             @phase_total = 0
             @phase_completed = 0
             @phase_percent = 0.0
@@ -174,43 +190,32 @@ module ULOL
 
           def start_compute
             transition_to!(:compute)
-            @phase_total = @prepared.length
-            @phase_completed = 0
-            @phase_percent = @phase_total.zero? ? 100.0 : 0.0
-            update_overall_percent
-            @mailbox = ProgressMailbox.new
-            @compute_cancellation_token = CancellationToken.new
-            @compute_worker = StagedComputeWorker.new(
-              inputs: @prepared,
-              mailbox: @mailbox,
-              cancellation_token: @compute_cancellation_token,
-              &@compute_step
-            )
-            @compute_worker.start
+            @computed = Array.new(@prepared.length)
+            @compute_runner = MainThreadSliceRunner.new(
+              total: @prepared.length,
+              slice_budget_ms: @compute_slice_budget_ms,
+              max_items_per_slice: @compute_max_items_per_slice
+            ) do |index|
+              assert_main_thread!
+              @compute_thread_id ||= Thread.current.object_id
+              @computed[index] = deep_freeze(@compute_step.call(@prepared[index], index))
+              index
+            end
+            @compute_runner.start
+            update_from_compute_snapshot(@compute_runner.snapshot)
           end
 
           def tick_compute
-            @compute_cancellation_token.cancel! if @cancel_requested
-            events = @mailbox&.drain || []
-            return if events.empty?
+            compute_snapshot = @compute_runner.tick
+            update_from_compute_snapshot(compute_snapshot)
+            return unless compute_snapshot[:terminal]
 
-            event = reduce_compute_events(events)
-            @worker_thread_id = event[:worker_thread_id] if event[:worker_thread_id]
-            @phase_total = event[:total].to_i if event.key?(:total)
-            @phase_completed = event[:completed].to_i if event.key?(:completed)
-            @phase_percent = clamp_percent(event[:percent]) if event.key?(:percent)
-            update_overall_percent
-            return unless StagedJobContract::TERMINAL_TYPES.include?(event[:type].to_sym)
-
-            case event[:type].to_sym
+            case compute_snapshot[:type]
             when :completed
-              @compute_worker.join(0.25)
-              raise 'compute worker did not terminate after completion event' if @compute_worker.alive?
-
-              @computed = @compute_worker.results
               if @cancel_requested
                 finish!(:cancelled)
               else
+                @computed = @computed.freeze
                 transition_to!(:apply)
                 @phase_total = 1
                 @phase_completed = 0
@@ -220,9 +225,7 @@ module ULOL
             when :cancelled
               finish!(:cancelled)
             when :failed
-              error_class = event[:error_class].to_s
-              error_message = event[:error_message].to_s
-              raise RuntimeError, [error_class, error_message].reject(&:empty?).join(': ')
+              raise RuntimeError, compute_snapshot[:error_message].to_s
             end
           end
 
@@ -288,9 +291,18 @@ module ULOL
 
           def update_from_prepare_snapshot(prepare_snapshot)
             @prepare_snapshot = prepare_snapshot
-            @phase_total = prepare_snapshot[:total].to_i
-            @phase_completed = prepare_snapshot[:completed].to_i
-            @phase_percent = clamp_percent(prepare_snapshot[:percent])
+            update_phase_from_runner_snapshot(prepare_snapshot)
+          end
+
+          def update_from_compute_snapshot(compute_snapshot)
+            @compute_snapshot = compute_snapshot
+            update_phase_from_runner_snapshot(compute_snapshot)
+          end
+
+          def update_phase_from_runner_snapshot(runner_snapshot)
+            @phase_total = runner_snapshot[:total].to_i
+            @phase_completed = runner_snapshot[:completed].to_i
+            @phase_percent = clamp_percent(runner_snapshot[:percent])
             update_overall_percent
           end
 
@@ -299,13 +311,6 @@ module ULOL
               phase: @phase,
               phase_percent: @phase_percent
             )
-          end
-
-          def reduce_compute_events(events)
-            terminal = events.reverse.find do |event|
-              StagedJobContract::TERMINAL_TYPES.include?(event[:type].to_sym)
-            end
-            terminal || events.last
           end
 
           def deep_freeze(value)
