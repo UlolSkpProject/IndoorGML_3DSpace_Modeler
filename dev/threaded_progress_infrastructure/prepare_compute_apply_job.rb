@@ -23,6 +23,9 @@ module ULOL
             max_items_per_slice: 100,
             compute_slice_budget_ms: nil,
             compute_max_items_per_slice: nil,
+            compute_predictive_budget: true,
+            compute_prediction_safety_factor: 1.0,
+            compute_budget_guard_ms: 0.25,
             weights: StagedJobContract::DEFAULT_WEIGHTS
           )
             raise ArgumentError, 'prepare_step must respond to call' unless prepare_step.respond_to?(:call)
@@ -44,6 +47,9 @@ module ULOL
             @compute_max_items_per_slice = (
               compute_max_items_per_slice.nil? ? max_items_per_slice : compute_max_items_per_slice
             ).to_i
+            @compute_predictive_budget = compute_predictive_budget == true
+            @compute_prediction_safety_factor = [compute_prediction_safety_factor.to_f, 0.0].max
+            @compute_budget_guard_ms = [compute_budget_guard_ms.to_f, 0.0].max
             @contract = StagedJobContract.new(weights: weights)
             reset_state
           end
@@ -132,8 +138,16 @@ module ULOL
               prepare_last_slice_items: @prepare_snapshot[:last_slice_items],
               prepare_max_slice_ms: @prepare_snapshot[:max_slice_ms],
               prepare_overrun_count: @prepare_snapshot[:overrun_count],
+              compute_predictive_budget: @compute_snapshot[:predictive_budget],
+              compute_prediction_safety_factor: @compute_snapshot[:prediction_safety_factor],
+              compute_budget_guard_ms: @compute_snapshot[:budget_guard_ms],
+              compute_estimated_item_ms: @compute_snapshot[:estimated_item_ms],
+              compute_last_item_ms: @compute_snapshot[:last_item_ms],
+              compute_max_item_ms: @compute_snapshot[:max_item_ms],
+              compute_predictive_stop_count: @compute_snapshot[:predictive_stop_count],
               compute_slice_count: @compute_snapshot[:slice_count],
               compute_last_slice_items: @compute_snapshot[:last_slice_items],
+              compute_max_slice_items: @compute_snapshot[:max_slice_items],
               compute_max_slice_ms: @compute_snapshot[:max_slice_ms],
               compute_overrun_count: @compute_snapshot[:overrun_count],
               error_class: @error_class,
@@ -194,7 +208,10 @@ module ULOL
             @compute_runner = MainThreadSliceRunner.new(
               total: @prepared.length,
               slice_budget_ms: @compute_slice_budget_ms,
-              max_items_per_slice: @compute_max_items_per_slice
+              max_items_per_slice: @compute_max_items_per_slice,
+              predictive_budget: @compute_predictive_budget,
+              prediction_safety_factor: @compute_prediction_safety_factor,
+              budget_guard_ms: @compute_budget_guard_ms
             ) do |index|
               assert_main_thread!
               @compute_thread_id ||= Thread.current.object_id
