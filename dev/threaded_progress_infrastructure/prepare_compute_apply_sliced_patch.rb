@@ -25,8 +25,16 @@ module ULOL
             snapshot = base.merge(
               compute_execution: job_snapshot[:compute_execution],
               compute_thread_id: job_snapshot[:compute_thread_id],
+              compute_predictive_budget: job_snapshot[:compute_predictive_budget],
+              compute_prediction_safety_factor: job_snapshot[:compute_prediction_safety_factor],
+              compute_budget_guard_ms: job_snapshot[:compute_budget_guard_ms],
+              compute_estimated_item_ms: job_snapshot[:compute_estimated_item_ms],
+              compute_last_item_ms: job_snapshot[:compute_last_item_ms],
+              compute_max_item_ms: job_snapshot[:compute_max_item_ms],
+              compute_predictive_stop_count: job_snapshot[:compute_predictive_stop_count],
               compute_slice_count: job_snapshot[:compute_slice_count],
               compute_last_slice_items: job_snapshot[:compute_last_slice_items],
+              compute_max_slice_items: job_snapshot[:compute_max_slice_items],
               compute_max_slice_ms: job_snapshot[:compute_max_slice_ms],
               compute_overrun_count: job_snapshot[:compute_overrun_count]
             )
@@ -55,4 +63,4 @@ module ULOL
 end
 
 puts '[PREPARE COMPUTE APPLY SLICED PATCH] installed'
-puts 'Compute execution: main_thread_sliced'
+puts 'Compute execution: main_thread_sliced + predictive_budget'
