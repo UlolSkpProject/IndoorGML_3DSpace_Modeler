@@ -48,6 +48,8 @@ module ULOL
           assert_equal Thread.current.object_id, snapshot[:compute_thread_id]
           assert_equal Thread.current.object_id, apply_thread_id
           assert_equal :main_thread_sliced, snapshot[:compute_execution]
+          assert snapshot[:compute_predictive_budget]
+          assert_operator snapshot[:compute_predictive_stop_count], :>=, 0
           assert_nil snapshot[:worker_thread_id]
           refute snapshot[:worker_alive]
           assert_operator snapshot[:compute_slice_count], :>=, 5
