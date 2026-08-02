@@ -96,7 +96,7 @@ module ULOL
               apply_phase: @apply_phase,
               max_apply_jobs: @apply_policy&.max_apply_jobs,
               apply_decision: @apply_decision&.reason,
-              converted_count: result&.converted_count.to_i,
+              converted_count: result ? result.converted_count.to_i : 0,
               apply_error_count: result ? Array(result.errors).length : 0,
               apply_errors: result ? Array(result.errors) : [],
               apply_elapsed: @apply_elapsed,
@@ -113,7 +113,7 @@ module ULOL
             assert_main_thread!
             expected = expected.to_sym
             current = feature_counts(@indoor_model || IndoorModel.current)
-            converted = @apply_result&.converted_count.to_i
+            converted = @apply_result ? @apply_result.converted_count.to_i : 0
             passed = case expected
                      when :converted
                        converted.positive? &&
@@ -194,10 +194,11 @@ module ULOL
             @preflight_handled = true
             stop_hide_timer
             snapshot = @session.snapshot
+            plan = @session.plan
             @apply_decision = @apply_policy.evaluate(
               preflight_type: snapshot[:type],
               job_count: @jobs.length,
-              plan_count: @session.plan&.length.to_i,
+              plan_count: plan ? plan.length : 0,
               error_count: @session.errors.length
             )
 
