@@ -11,6 +11,7 @@ module ULOL
             undo_requested
             undone
             redo_requested
+            redone
           ].freeze
 
           attr_reader :position
@@ -39,7 +40,7 @@ module ULOL
           end
 
           def undo_allowed?
-            @position == :applied
+            @position == :applied || @position == :redone
           end
 
           def redo_allowed?
@@ -74,11 +75,11 @@ module ULOL
           end
 
           def confirm_redone!(matches:)
-            return matches == true if @position == :applied
+            return matches == true if @position == :redone
             return false unless @position == :redo_requested
 
             if matches == true
-              @position = :applied
+              @position = :redone
               true
             else
               @position = :undone
