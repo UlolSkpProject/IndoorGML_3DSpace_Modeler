@@ -143,7 +143,7 @@ module ULOL
         end
 
         class SketchupOverlayProgressRenderer
-          DEFAULT_REFRESH_INTERVAL = 0.1
+          DEFAULT_REFRESH_INTERVAL = 0.5
 
           attr_reader :overlay
 
