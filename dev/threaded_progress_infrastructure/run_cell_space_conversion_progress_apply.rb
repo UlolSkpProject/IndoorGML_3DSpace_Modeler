@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
-require_relative 'cell_space_conversion_apply_history_guard_patch'
+require_relative 'cell_space_conversion_apply_history_wait_patch'
 
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       module CellSpaceConversionProgressApplyRunner
-        TERMINAL_PHASES = %i[completed failed cancelled blocked].freeze
+        TERMINAL_PHASES = %i[completed failed cancelled blocked].freeze unless const_defined?(:TERMINAL_PHASES, false)
 
         class << self
           def run!(
@@ -95,9 +95,8 @@ module ULOL
 
             if snapshot[:apply_history_available]
               puts '[CELLSPACE PROGRESS APPLY RUNNER] Undo: ...::CellSpaceConversionProgressApplyRunner.undo!'
-              puts '[CELLSPACE PROGRESS APPLY RUNNER] Verify Undo: ...::CellSpaceConversionProgressApplyRunner.verify!(:undone)'
-              puts '[CELLSPACE PROGRESS APPLY RUNNER] Redo: ...::CellSpaceConversionProgressApplyRunner.redo!'
-              puts '[CELLSPACE PROGRESS APPLY RUNNER] Verify Redo: ...::CellSpaceConversionProgressApplyRunner.verify!(:redone)'
+              puts '[CELLSPACE PROGRESS APPLY RUNNER] Undo 완료는 비동기 감시 후 자동 검증됩니다.'
+              puts '[CELLSPACE PROGRESS APPLY RUNNER] Redo는 Undo 자동 검증 완료 후 실행하세요.'
             else
               puts '[CELLSPACE PROGRESS APPLY RUNNER] 실제 적용 이력이 없으므로 Undo/Redo는 차단됩니다.'
             end
