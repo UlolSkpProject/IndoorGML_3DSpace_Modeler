@@ -44,13 +44,26 @@ module ULOL
           assert_includes source, 'passed = passed == true'
         end
 
-        def test_runner_loads_history_guard_and_keeps_small_default_limit
+        def test_history_wait_patch_polls_transaction_replay_before_confirming
+          source = read_dev_file('cell_space_conversion_apply_history_wait_patch.rb')
+
+          assert_includes source, 'UI.start_timer(HISTORY_POLL_INTERVAL, true)'
+          assert_includes source, 'indoor_model.transaction_replay_pending?'
+          assert_includes source, 'stable_samples: HISTORY_STABLE_SAMPLES'
+          assert_includes source, 'apply_history_state.confirm_undone!(matches: true)'
+          assert_includes source, 'apply_history_state.confirm_redone!(matches: true)'
+          assert_includes source, 'reason: :undo_pending'
+          assert_includes source, 'reason: :redo_pending'
+        end
+
+        def test_runner_loads_history_wait_patch_and_is_reload_safe
           runner = read_dev_file('run_cell_space_conversion_progress_apply.rb')
           policy = read_dev_file('cell_space_conversion_apply_policy.rb')
 
-          assert_includes runner, "require_relative 'cell_space_conversion_apply_history_guard_patch'"
+          assert_includes runner, "require_relative 'cell_space_conversion_apply_history_wait_patch'"
           assert_includes runner, 'max_apply_jobs:'
-          assert_includes runner, '실제 적용 이력이 없으므로 Undo/Redo는 차단됩니다.'
+          assert_includes runner, 'unless const_defined?(:TERMINAL_PHASES, false)'
+          assert_includes runner, 'Undo 완료는 비동기 감시 후 자동 검증됩니다.'
           assert_includes policy, 'DEFAULT_MAX_APPLY_JOBS = 5'
         end
 
