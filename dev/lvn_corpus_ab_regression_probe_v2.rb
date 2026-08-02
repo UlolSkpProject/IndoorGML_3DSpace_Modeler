@@ -46,6 +46,10 @@ new_block = <<~'RUBY'
     )
   end
 
+  optimized_remove_coplanar =
+    incremental_implementation.instance_method(:remove_coplanar_shared_edges)
+  optimized_source_location = optimized_remove_coplanar.source_location
+
   normalizer_class.class_eval do
     incremental_methods.each do |name|
       define_method(name, incremental_implementation.instance_method(name))
@@ -53,9 +57,6 @@ new_block = <<~'RUBY'
     end
   end
 
-  optimized_remove_coplanar =
-    incremental_implementation.instance_method(:remove_coplanar_shared_edges)
-  optimized_source_location = optimized_remove_coplanar.source_location
   installed_remove_coplanar =
     normalizer_class.instance_method(:remove_coplanar_shared_edges)
   installed_source_location = installed_remove_coplanar.source_location
