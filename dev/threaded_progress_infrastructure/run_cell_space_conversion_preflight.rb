@@ -13,8 +13,12 @@ module ULOL
           max_items_per_slice: 25
         }.freeze unless const_defined?(:DEFAULT_OPTIONS, false)
 
+        POLL_INTERVAL = 0.1 unless const_defined?(:POLL_INTERVAL, false)
+
         class << self
           def run!(**options)
+            stop_poll_timer
+
             selected_count = selected_container_count
             if selected_count.zero?
               puts '[CELLSPACE PREFLIGHT RUNNER] Solid Group 또는 ComponentInstance를 먼저 선택하세요.'
@@ -26,13 +30,15 @@ module ULOL
 
             if started
               puts "[CELLSPACE PREFLIGHT RUNNER] started (selected containers=#{selected_count})"
-              puts '[CELLSPACE PREFLIGHT RUNNER] 완료 후 status!/verify!를 실행하세요.'
+              puts '[CELLSPACE PREFLIGHT RUNNER] 완료 시 status/verify 결과를 자동 출력합니다.'
+              start_poll_timer
             else
               puts '[CELLSPACE PREFLIGHT RUNNER] start failed'
             end
 
             started
           rescue StandardError => e
+            stop_poll_timer
             puts "[CELLSPACE PREFLIGHT RUNNER] failed: #{e.class}: #{e.message}"
             false
           end
@@ -50,6 +56,7 @@ module ULOL
           end
 
           def close!
+            stop_poll_timer
             prototype.close!
           end
 
@@ -69,6 +76,41 @@ module ULOL
             end
           rescue StandardError
             0
+          end
+
+          def start_poll_timer
+            stop_poll_timer
+            @poll_timer_id = UI.start_timer(POLL_INTERVAL, true) do
+              snapshot = current_session_snapshot
+              next true unless snapshot[:terminal]
+
+              stop_poll_timer
+              puts '[CELLSPACE PREFLIGHT RUNNER] terminal result'
+              status!
+              verify!
+              false
+            rescue StandardError => e
+              stop_poll_timer
+              puts "[CELLSPACE PREFLIGHT RUNNER] result polling failed: #{e.class}: #{e.message}"
+              false
+            end
+          end
+
+          def stop_poll_timer
+            timer_id = @poll_timer_id
+            @poll_timer_id = nil
+            return if timer_id.nil?
+            return unless UI.respond_to?(:stop_timer)
+
+            UI.stop_timer(timer_id)
+          rescue StandardError
+            nil
+          end
+
+          def current_session_snapshot
+            controller = prototype.send(:controller)
+            session = controller.instance_variable_get(:@session)
+            session&.snapshot || {}
           end
         end
       end
