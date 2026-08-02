@@ -56,6 +56,13 @@ module ULOL
                            current[:cell_spaces] == @before_feature_counts[:cell_spaces] + converted &&
                            current[:states] == @before_feature_counts[:states] + converted
                        end
+                     when :applied
+                       if !apply_history_state.apply_recorded?
+                         reason = :no_apply_history
+                         false
+                       else
+                         converted.positive? && after_matches
+                       end
                      when :undone
                        if %i[undo_requested undone].include?(apply_history_state.position)
                          verified = apply_history_state.confirm_undone!(matches: before_matches)
