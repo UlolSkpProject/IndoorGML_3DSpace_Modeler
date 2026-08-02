@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative 'cell_space_conversion_progress_apply_safety_patch'
+require_relative 'cell_space_conversion_apply_history_guard_patch'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -91,6 +91,8 @@ module ULOL
               puts '[CELLSPACE PROGRESS APPLY RUNNER] Verify Undo: ...::CellSpaceConversionProgressApplyRunner.verify!(:undone)'
               puts '[CELLSPACE PROGRESS APPLY RUNNER] Redo: ...::CellSpaceConversionProgressApplyRunner.redo!'
               puts '[CELLSPACE PROGRESS APPLY RUNNER] Verify Redo: ...::CellSpaceConversionProgressApplyRunner.verify!(:redone)'
+            else
+              puts '[CELLSPACE PROGRESS APPLY RUNNER] 실제 적용 이력이 없으므로 Undo/Redo는 차단됩니다.'
             end
             false
           rescue StandardError => e
