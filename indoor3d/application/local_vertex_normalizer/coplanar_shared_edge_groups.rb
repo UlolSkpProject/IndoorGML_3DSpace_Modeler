@@ -4,6 +4,18 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class LocalVertexNormalizer
+        COPLANAR_INCREMENTAL_REFERENCE_INTERVAL = 100 unless const_defined?(
+          :COPLANAR_INCREMENTAL_REFERENCE_INTERVAL,
+          false
+        )
+        COPLANAR_INCREMENTAL_TOPOLOGY_KEYS = %i[
+          faces edges vertices boundary_edges wire_edges overused_edges
+          orientation_conflicts
+        ].freeze unless const_defined?(:COPLANAR_INCREMENTAL_TOPOLOGY_KEYS, false)
+        COPLANAR_INCREMENTAL_EDGE_KEYS = (
+          COPLANAR_INCREMENTAL_TOPOLOGY_KEYS - [:faces]
+        ).freeze unless const_defined?(:COPLANAR_INCREMENTAL_EDGE_KEYS, false)
+
         private
 
         # Coplanarity is a property of the complete face pair, not of one
@@ -43,7 +55,6 @@ module ULOL
         rescue StandardError
           nil
         end
-
 
         # Returns groups keyed by the unordered pair of adjacent faces. Every
         # shared edge between the same two faces belongs to one group, including
@@ -145,6 +156,10 @@ module ULOL
           )
         end
 
+        # Tracks only the local topology affected by each successful edge-group
+        # removal. A complete geometry_counts reference remains authoritative at
+        # fixed intervals and at every pass boundary. Any disagreement raises and
+        # is rolled back by the enclosing normalization operation.
         def remove_coplanar_shared_edges(
           entities,
           plane_tolerance_mm:,
@@ -159,6 +174,9 @@ module ULOL
           max_angle_deg = 0.0
           multi_edge_group_count = 0
           max_shared_edges_per_group = 0
+          groups_done = 0
+          last_reference_group = -1
+          topology = geometry_counts(entities)
 
           MAX_COPLANAR_PASSES.times do |pass_index|
             groups = coplanar_shared_edge_groups(
@@ -181,22 +199,35 @@ module ULOL
 
               edges = current[:edges]
               signature = current[:signature]
-              topology_before = geometry_counts(entities)
-              faces_before = topology_before[:faces]
+              topology_before = topology.dup
+              affected_before, seed_vertices =
+                coplanar_incremental_affected_before(current)
+              local_before = coplanar_incremental_edge_counts(affected_before)
+              face_context = coplanar_incremental_face_context(
+                current,
+                affected_before
+              )
 
               begin
                 entities.erase_entities(edges)
-              rescue ArgumentError => e
+              rescue ArgumentError => error
                 ignored_group_signatures[signature] = true
                 unchanged += edges.length
-                next if e.message.to_s.downcase.include?('not planar')
+                next if error.message.to_s.downcase.include?('not planar')
 
                 raise
               end
 
-              topology_after = geometry_counts(entities)
-              faces_after = topology_after[:faces]
-              face_reduction = faces_before - faces_after
+              affected_after = coplanar_incremental_affected_after(
+                affected_before,
+                seed_vertices
+              )
+              local_after = coplanar_incremental_edge_counts(affected_after)
+              faces_after = coplanar_incremental_faces_after(
+                affected_after,
+                face_context[:outside]
+              )
+              face_reduction = face_context[:count] - faces_after
               expected_reduction = current[:self_adjacent] ? 0 : 1
 
               unless face_reduction == expected_reduction
@@ -207,8 +238,15 @@ module ULOL
                       "deviation=#{current[:max_plane_deviation_mm]}mm " \
                       "shared_edges=#{edges.length} " \
                       "self_adjacent=#{current[:self_adjacent]}: " \
-                      "faces #{faces_before} -> #{faces_after}"
+                      "local faces #{face_context[:count]} -> #{faces_after}"
               end
+
+              topology_after = coplanar_incremental_apply_delta(
+                topology_before,
+                local_before,
+                local_after,
+                face_reduction
+              )
 
               if closed_surface?(topology_before) && !closed_surface?(topology_after)
                 raise DestructiveCoplanarCleanupError,
@@ -233,11 +271,13 @@ module ULOL
                       "remaining=#{edges.count(&:valid?)} total=#{edges.length}"
               end
 
+              topology = topology_after
               edge_count = edges.length
               pass_removed += edge_count
               pass_removed_groups += 1
               removed += edge_count
               removed_groups += 1
+              groups_done += 1
               multi_edge_group_count += 1 if edge_count > 1
               max_shared_edges_per_group = [max_shared_edges_per_group, edge_count].max
               max_deviation_mm = [
@@ -245,9 +285,21 @@ module ULOL
                 current[:max_plane_deviation_mm]
               ].max
               max_angle_deg = [max_angle_deg, current[:max_angle_deg]].max
+
+              next unless (
+                groups_done % COPLANAR_INCREMENTAL_REFERENCE_INTERVAL
+              ).zero?
+
+              topology = coplanar_incremental_reference!(entities, topology)
+              last_reference_group = groups_done
             end
 
             break if pass_removed.zero?
+
+            if last_reference_group != groups_done
+              topology = coplanar_incremental_reference!(entities, topology)
+              last_reference_group = groups_done
+            end
 
             pass_reports << {
               pass: pass_index + 1,
@@ -295,6 +347,171 @@ module ULOL
             max_shared_edges_per_group: max_shared_edges_per_group,
             fallback_reason: nil
           }
+        end
+
+        def coplanar_incremental_affected_before(current)
+          face_edges = Array(current[:faces]).flat_map do |face|
+            face&.valid? ? Array(face.edges) : []
+          rescue StandardError
+            []
+          end
+          seed_edges = coplanar_incremental_unique(
+            face_edges + Array(current[:edges])
+          )
+          vertices = seed_edges.flat_map do |edge|
+            Array(edge.vertices)
+          rescue StandardError
+            []
+          end.uniq
+          [
+            coplanar_incremental_unique(
+              seed_edges + coplanar_incremental_incident(vertices)
+            ),
+            vertices
+          ]
+        end
+
+        def coplanar_incremental_affected_after(before, vertices)
+          survivors = Array(before).select do |edge|
+            edge&.valid?
+          rescue StandardError
+            false
+          end
+          coplanar_incremental_unique(
+            survivors + coplanar_incremental_incident(vertices)
+          )
+        end
+
+        def coplanar_incremental_incident(vertices)
+          Array(vertices).flat_map do |vertex|
+            vertex.respond_to?(:edges) ? Array(vertex.edges) : []
+          rescue StandardError
+            []
+          end
+        end
+
+        def coplanar_incremental_unique(items)
+          seen = {}
+          Array(items).each_with_object([]) do |item, result|
+            next unless item&.valid?
+
+            key = [item.class.name, stable_entity_id(item)]
+            next if seen[key]
+
+            seen[key] = true
+            result << item
+          rescue StandardError
+            next
+          end
+        end
+
+        def coplanar_incremental_face_context(current, affected)
+          local = coplanar_incremental_unique(Array(current[:faces]))
+          local_ids = local.to_h { |face| [stable_entity_id(face), true] }
+          outside = {}
+          Array(affected).each do |edge|
+            Array(edge.faces).each do |face|
+              next unless face&.valid?
+
+              id = stable_entity_id(face)
+              outside[id] = true unless local_ids[id]
+            end
+          rescue StandardError
+            next
+          end
+          { count: local.length, outside: outside }
+        end
+
+        def coplanar_incremental_faces_after(affected, outside)
+          faces = Array(affected).flat_map do |edge|
+            Array(edge.faces)
+          rescue StandardError
+            []
+          end
+          coplanar_incremental_unique(faces).count do |face|
+            !outside[stable_entity_id(face)]
+          end
+        end
+
+        def coplanar_incremental_edge_counts(items)
+          edges = coplanar_incremental_unique(items)
+          result = {
+            edges: edges.length,
+            vertices: edges.flat_map do |edge|
+              Array(edge.vertices)
+            rescue StandardError
+              []
+            end.uniq.length,
+            boundary_edges: 0,
+            wire_edges: 0,
+            overused_edges: 0,
+            orientation_conflicts: 0
+          }
+          edges.each do |edge|
+            faces = Array(edge.faces)
+            case faces.length
+            when 0
+              result[:wire_edges] += 1
+            when 1
+              result[:boundary_edges] += 1
+            when 2
+              begin
+                if edge.reversed_in?(faces[0]) == edge.reversed_in?(faces[1])
+                  result[:orientation_conflicts] += 1
+                end
+              rescue StandardError
+                nil
+              end
+            else
+              result[:overused_edges] += 1
+            end
+          rescue StandardError
+            next
+          end
+          result
+        end
+
+        def coplanar_incremental_apply_delta(
+          before,
+          local_before,
+          local_after,
+          face_reduction
+        )
+          after = before.dup
+          after[:faces] = before[:faces].to_i - face_reduction
+          COPLANAR_INCREMENTAL_EDGE_KEYS.each do |key|
+            after[key] = before[key].to_i +
+                         local_after[key].to_i -
+                         local_before[key].to_i
+          end
+
+          negative = COPLANAR_INCREMENTAL_TOPOLOGY_KEYS.select do |key|
+            after[key].to_i.negative?
+          end
+          unless negative.empty?
+            raise DestructiveCoplanarCleanupError,
+                  "Incremental coplanar topology became negative: " \
+                  "#{negative.inspect} #{after.inspect}"
+          end
+
+          after
+        end
+
+        def coplanar_incremental_reference!(entities, predicted)
+          actual = geometry_counts(entities)
+          mismatch = {}
+          COPLANAR_INCREMENTAL_TOPOLOGY_KEYS.each do |key|
+            next if predicted[key].to_i == actual[key].to_i
+
+            mismatch[key] = [predicted[key], actual[key]]
+          end
+          unless mismatch.empty?
+            raise DestructiveCoplanarCleanupError,
+                  "Incremental coplanar topology differs from full reference: " \
+                  "#{mismatch.inspect}"
+          end
+
+          actual
         end
       end
     end
