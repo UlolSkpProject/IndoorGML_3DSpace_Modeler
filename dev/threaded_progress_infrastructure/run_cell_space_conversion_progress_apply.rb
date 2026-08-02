@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative 'cell_space_conversion_apply_history_wait_patch'
+require_relative 'cell_space_conversion_apply_direct_history_patch'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -95,7 +95,8 @@ module ULOL
 
             if snapshot[:apply_history_available]
               puts '[CELLSPACE PROGRESS APPLY RUNNER] Undo: ...::CellSpaceConversionProgressApplyRunner.undo!'
-              puts '[CELLSPACE PROGRESS APPLY RUNNER] Undo 완료는 비동기 감시 후 자동 검증됩니다.'
+              puts '[CELLSPACE PROGRESS APPLY RUNNER] Undo API: Sketchup.undo'
+              puts '[CELLSPACE PROGRESS APPLY RUNNER] Undo 완료는 runtime 재조정 감시 후 자동 검증됩니다.'
               puts '[CELLSPACE PROGRESS APPLY RUNNER] Redo는 Undo 자동 검증 완료 후 실행하세요.'
             else
               puts '[CELLSPACE PROGRESS APPLY RUNNER] 실제 적용 이력이 없으므로 Undo/Redo는 차단됩니다.'
