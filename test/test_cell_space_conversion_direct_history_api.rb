@@ -15,11 +15,19 @@ module ULOL
           refute_includes source, "Sketchup.send_action('editRedo:')"
         end
 
-        def test_runner_loads_direct_history_patch
-          source = read_dev_file('run_cell_space_conversion_progress_apply.rb')
+        def test_runner_definition_loads_direct_history_patch
+          source = read_dev_file('cell_space_conversion_progress_apply_runner.rb')
 
           assert_includes source, "require_relative 'cell_space_conversion_apply_direct_history_patch'"
-          assert_includes source, 'Undo API: Sketchup.undo'
+          assert_includes source, 'module CellSpaceConversionProgressApplyRunner'
+        end
+
+        def test_auto_run_file_loads_runner_definition_then_runs_it
+          source = read_dev_file('run_cell_space_conversion_progress_apply.rb')
+
+          assert_includes source, "require_relative 'cell_space_conversion_progress_apply_runner'"
+          assert_includes source, 'CellSpaceConversionProgressApplyRunner.run!'
+          refute_includes source, 'module CellSpaceConversionProgressApplyRunner'
         end
 
         private
