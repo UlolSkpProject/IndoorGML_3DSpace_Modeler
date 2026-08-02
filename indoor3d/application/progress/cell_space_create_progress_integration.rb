@@ -4,6 +4,143 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       module ProductionProgress
+        module AdjacencyProgressContext
+          THREAD_KEY = :ulol_indoor3d_adjacency_progress_sink
+
+          module_function
+
+          def current
+            Thread.current[THREAD_KEY]
+          end
+
+          def with(sink)
+            previous = Thread.current[THREAD_KEY]
+            Thread.current[THREAD_KEY] = sink
+            yield
+          ensure
+            Thread.current[THREAD_KEY] = previous
+          end
+        end
+
+        class AdjacencyProgressSink
+          def initialize(progress, logger: IndoorCore::Logger)
+            @progress = progress
+            @logger = logger
+            @stage_open = false
+            @stage_name = nil
+          end
+
+          def mark_stage_open(name)
+            @stage_open = true
+            @stage_name = name.to_s
+            true
+          end
+
+          def call(event)
+            payload = event.to_h
+            case payload[:event]&.to_sym
+            when :stage_start
+              start_stage(payload)
+            when :stage_progress
+              update_stage(payload)
+            when :stage_finish
+              finish_stage(payload)
+            end
+            true
+          rescue StandardError => e
+            log_error('event', e)
+            false
+          end
+
+          def finish_open_stage(message: nil, telemetry: nil)
+            return false unless @stage_open
+            return false unless progress_active?
+
+            @progress.finish_stage(
+              message: message || "#{@stage_name} 완료",
+              telemetry: telemetry
+            )
+            @stage_open = false
+            @stage_name = nil
+            true
+          rescue StandardError => e
+            log_error('finish open stage', e)
+            @stage_open = false
+            @stage_name = nil
+            false
+          end
+
+          private
+
+          def start_stage(payload)
+            finish_open_stage
+            return false unless progress_active?
+
+            @progress.start_stage(
+              payload[:name].to_s,
+              total: payload[:total].to_i,
+              message: payload[:message].to_s,
+              cancellable: false,
+              metadata: {
+                source: :adjacency_service,
+                stage: payload[:stage]
+              }
+            )
+            mark_stage_open(payload[:name])
+          end
+
+          def update_stage(payload)
+            return false unless @stage_open
+            return false unless progress_active?
+
+            @progress.update_stage(
+              completed: payload[:completed].to_i,
+              message: payload[:message].to_s,
+              telemetry: payload[:telemetry]
+            )
+            true
+          end
+
+          def finish_stage(payload)
+            return false unless @stage_open
+            return false unless progress_active?
+
+            @progress.finish_stage(
+              message: payload[:message].to_s,
+              telemetry: payload[:telemetry]
+            )
+            @stage_open = false
+            @stage_name = nil
+            true
+          end
+
+          def progress_active?
+            @progress&.active? == true
+          end
+
+          def log_error(context, error)
+            @logger.puts(
+              "[IndoorGML] Adjacency progress #{context} failed: #{error.class}: #{error.message}"
+            )
+          rescue StandardError
+            nil
+          end
+        end
+
+        module TopologyCoordinatorProgressIntegration
+          def synchronize_all(**kwargs)
+            sink = AdjacencyProgressContext.current
+            kwargs = kwargs.merge(progress: sink) if sink && !kwargs.key?(:progress)
+            super(**kwargs)
+          end
+
+          def synchronize_within(cell_spaces, **kwargs)
+            sink = AdjacencyProgressContext.current
+            kwargs = kwargs.merge(progress: sink) if sink && !kwargs.key?(:progress)
+            super(cell_spaces, **kwargs)
+          end
+        end
+
         module BulkCellSpaceConversionProgressIntegration
           def production_progress=(progress)
             @production_progress = progress
@@ -92,18 +229,16 @@ module ULOL
             @synchronize_all = proc do
               finish_creation_progress_stage
               progress_start_stage(
-                'Adjacency/Transition 생성',
+                'CellSpace 재질 적용',
                 total: 1,
-                message: 'Adjacency/Transition 생성 중'
+                message: 'CellSpace 재질 일괄 적용 중'
               )
-              result = original.call
-              progress_update_stage(
-                completed: 1,
-                message: 'Adjacency/Transition 생성 완료',
-                telemetry: result || {}
-              )
-              progress_finish_stage(
-                message: 'Adjacency/Transition 생성 완료',
+
+              sink = AdjacencyProgressSink.new(@production_progress, logger: @logger)
+              sink.mark_stage_open('CellSpace 재질 적용')
+              result = AdjacencyProgressContext.with(sink) { original.call }
+              sink.finish_open_stage(
+                message: 'CellSpace 재질 및 Topology 후처리 완료',
                 telemetry: result || {}
               )
               result
@@ -220,6 +355,14 @@ module ULOL
       ) unless IndoorModel.ancestors.include?(
         ProductionProgress::IndoorModelCellSpaceProgressIntegration
       )
+
+      if defined?(TopologyCoordinator)
+        TopologyCoordinator.prepend(
+          ProductionProgress::TopologyCoordinatorProgressIntegration
+        ) unless TopologyCoordinator.ancestors.include?(
+          ProductionProgress::TopologyCoordinatorProgressIntegration
+        )
+      end
     end
   end
 end
