@@ -1,0 +1,59 @@
+# frozen_string_literal: true
+
+require 'minitest/autorun'
+
+module ULOL
+  module Indoor3DGmlModeler
+    module IndoorCore
+      class CellSpaceConversionProgressApplyContractTest < Minitest::Test
+        def test_apply_patch_delegates_to_existing_bulk_conversion_entrypoint
+          source = read_dev_file('cell_space_conversion_progress_apply_patch.rb')
+
+          assert_includes source, '@indoor_model.convert_cell_space_jobs_bulk('
+          assert_includes source, 'original_active_path: @conversion_active_path'
+          assert_includes source, "operation_name: '[DEV] Progress CellSpace Conversion'"
+          refute_includes source, '.start_operation('
+          refute_includes source, '.commit_operation'
+          refute_includes source, '.abort_operation'
+        end
+
+        def test_apply_requires_preflight_policy_and_explicit_confirmation
+          source = read_dev_file('cell_space_conversion_progress_apply_patch.rb')
+
+          assert_includes source, 'CellSpaceConversionApplyPolicy.new'
+          assert_includes source, '@apply_decision.allowed?'
+          assert_includes source, 'UI.messagebox('
+          assert_includes source, 'answer == IDYES'
+        end
+
+        def test_safety_patch_blocks_context_with_different_source_preservation_contract
+          source = read_dev_file('cell_space_conversion_progress_apply_safety_patch.rb')
+
+          assert_includes source, 'indoor_model.editing?'
+          assert_includes source, 'indoor_model.validation_focus_active?'
+          assert_includes source, 'separate source-preservation contract'
+        end
+
+        def test_runner_loads_safety_patch_and_keeps_small_default_limit
+          runner = read_dev_file('run_cell_space_conversion_progress_apply.rb')
+          policy = read_dev_file('cell_space_conversion_apply_policy.rb')
+
+          assert_includes runner, "require_relative 'cell_space_conversion_progress_apply_safety_patch'"
+          assert_includes runner, 'max_apply_jobs:'
+          assert_includes policy, 'DEFAULT_MAX_APPLY_JOBS = 5'
+        end
+
+        private
+
+        def read_dev_file(name)
+          File.read(
+            File.expand_path(
+              "../dev/threaded_progress_infrastructure/#{name}",
+              __dir__
+            )
+          )
+        end
+      end
+    end
+  end
+end
