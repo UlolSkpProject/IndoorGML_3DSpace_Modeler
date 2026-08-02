@@ -18,12 +18,16 @@ module ULOL
           refute contract.valid_transition?(from: :prepare, to: :apply)
         end
 
-        def test_full_pipeline_completes_with_pure_worker_and_main_thread_apply
+        def test_full_pipeline_completes_with_main_thread_sliced_compute_and_apply
+          compute_thread_ids = []
           apply_thread_id = nil
           job = Infrastructure::PrepareComputeApplyJob.new(
             prepare_total: 20,
             prepare_step: proc { |index| { index: index, value: index + 1 } },
-            compute_step: proc { |input, _index| [input[:index], input[:value] * 2] },
+            compute_step: proc do |input, _index|
+              compute_thread_ids << Thread.current.object_id
+              [input[:index], input[:value] * 2]
+            end,
             apply_step: proc do |computed|
               apply_thread_id = Thread.current.object_id
               computed.sum { |item| item[1] }
@@ -40,17 +44,26 @@ module ULOL
           assert_equal 20, snapshot[:compute_count]
           assert_equal 420, snapshot[:apply_result]
           assert_equal true, snapshot[:finalize_result]
+          assert_equal [Thread.current.object_id], compute_thread_ids.uniq
+          assert_equal Thread.current.object_id, snapshot[:compute_thread_id]
           assert_equal Thread.current.object_id, apply_thread_id
-          refute_equal Thread.current.object_id, snapshot[:worker_thread_id]
+          assert_equal :main_thread_sliced, snapshot[:compute_execution]
+          assert_nil snapshot[:worker_thread_id]
+          refute snapshot[:worker_alive]
+          assert_operator snapshot[:compute_slice_count], :>=, 5
           assert_in_delta 100.0, snapshot[:overall_percent], 0.0001
         end
 
-        def test_cancel_during_prepare_never_calls_apply
+        def test_cancel_during_prepare_never_calls_compute_or_apply
+          compute_called = false
           apply_called = false
           job = Infrastructure::PrepareComputeApplyJob.new(
             prepare_total: 1_000,
             prepare_step: proc { |index| index },
-            compute_step: proc { |input, _index| input },
+            compute_step: proc do |input, _index|
+              compute_called = true
+              input
+            end,
             apply_step: proc do |_computed|
               apply_called = true
               true
@@ -64,8 +77,35 @@ module ULOL
           snapshot = run_existing_job_to_terminal(job)
 
           assert_equal :cancelled, snapshot[:type]
+          refute compute_called
           refute apply_called
           assert_equal 0, snapshot[:compute_count]
+        end
+
+        def test_cancel_during_compute_never_calls_apply
+          apply_called = false
+          job = Infrastructure::PrepareComputeApplyJob.new(
+            prepare_total: 100,
+            prepare_step: proc { |index| index },
+            compute_step: proc { |input, _index| input * 2 },
+            apply_step: proc do |_computed|
+              apply_called = true
+              true
+            end,
+            max_items_per_slice: 10
+          )
+
+          job.start
+          job.tick until job.phase == :compute
+          job.tick
+          job.cancel!
+          snapshot = run_existing_job_to_terminal(job)
+
+          assert_equal :cancelled, snapshot[:type]
+          refute apply_called
+          assert_operator snapshot[:compute_count], :>, 0
+          assert_operator snapshot[:compute_count], :<, 100
+          refute snapshot[:worker_alive]
         end
 
         def test_apply_failure_calls_rollback_and_fails
@@ -101,7 +141,6 @@ module ULOL
           deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 3.0
           until job.terminal?
             job.tick
-            sleep(0.001)
             raise 'test job timeout' if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
           end
           job.snapshot
