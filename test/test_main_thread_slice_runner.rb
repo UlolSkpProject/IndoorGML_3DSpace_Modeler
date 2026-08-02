@@ -43,6 +43,7 @@ module ULOL
           assert_equal 3, first[:completed]
           assert_equal 3, first[:last_slice_items]
           assert_operator first[:last_slice_ms], :>=, 5.0
+          refute first[:predictive_budget]
 
           runner.tick until runner.terminal?
           terminal = runner.snapshot
@@ -51,6 +52,35 @@ module ULOL
           assert_equal 10, terminal[:completed]
           assert_equal (0...10).to_a, processed
           assert_operator terminal[:slice_count], :>, 1
+        end
+
+        def test_predictive_budget_stops_before_likely_overrun
+          clock = FakeClock.new
+          processed = []
+          runner = Runner.new(
+            total: 10,
+            slice_budget_ms: 5.0,
+            max_items_per_slice: 100,
+            predictive_budget: true,
+            prediction_safety_factor: 1.0,
+            budget_guard_ms: 0.0,
+            clock: clock
+          ) do |index|
+            processed << index
+            clock.advance(0.002)
+            index
+          end
+
+          first = runner.tick
+
+          assert_equal :running, first[:type]
+          assert_equal 2, first[:completed]
+          assert_equal 2, first[:last_slice_items]
+          assert_in_delta 4.0, first[:last_slice_ms], 0.0001
+          assert_equal 0, first[:overrun_count]
+          assert_equal 1, first[:predictive_stop_count]
+          assert_in_delta 2.0, first[:estimated_item_ms], 0.0001
+          assert first[:predictive_budget]
         end
 
         def test_max_item_limit_applies_when_steps_are_fast
