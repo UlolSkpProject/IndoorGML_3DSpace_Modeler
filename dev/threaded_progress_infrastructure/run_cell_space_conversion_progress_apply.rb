@@ -83,10 +83,17 @@ module ULOL
             end
 
             puts "[CELLSPACE PROGRESS APPLY RUNNER] terminal phase=#{phase}"
-            prototype.status!
-            expected = phase == :completed ? :converted : :not_applied
+            snapshot = prototype.status!
+            expected = if phase == :completed
+                         :converted
+                       elsif snapshot[:apply_history_available]
+                         :applied
+                       else
+                         :not_applied
+                       end
             prototype.verify_apply!(expected)
-            if phase == :completed
+
+            if snapshot[:apply_history_available]
               puts '[CELLSPACE PROGRESS APPLY RUNNER] Undo: ...::CellSpaceConversionProgressApplyRunner.undo!'
               puts '[CELLSPACE PROGRESS APPLY RUNNER] Verify Undo: ...::CellSpaceConversionProgressApplyRunner.verify!(:undone)'
               puts '[CELLSPACE PROGRESS APPLY RUNNER] Redo: ...::CellSpaceConversionProgressApplyRunner.redo!'
