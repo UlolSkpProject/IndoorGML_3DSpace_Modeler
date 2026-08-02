@@ -44,22 +44,20 @@ module ULOL
 
             passed = case expected
                      when :converted
-                       unless apply_history_state.apply_recorded?
+                       if !apply_history_state.apply_recorded?
                          reason = :no_apply_history
-                         next false
-                       end
-                       unless @apply_phase == :completed
+                         false
+                       elsif @apply_phase != :completed
                          reason = :apply_not_completed
-                         next false
+                         false
+                       else
+                         converted.positive? &&
+                           @before_feature_counts &&
+                           current[:cell_spaces] == @before_feature_counts[:cell_spaces] + converted &&
+                           current[:states] == @before_feature_counts[:states] + converted
                        end
-
-                       converted.positive? &&
-                         @before_feature_counts &&
-                         current[:cell_spaces] == @before_feature_counts[:cell_spaces] + converted &&
-                         current[:states] == @before_feature_counts[:states] + converted
                      when :undone
-                       if apply_history_state.position == :undo_requested ||
-                          apply_history_state.position == :undone
+                       if %i[undo_requested undone].include?(apply_history_state.position)
                          verified = apply_history_state.confirm_undone!(matches: before_matches)
                          reason = :undo_result_mismatch unless verified
                          verified
@@ -68,8 +66,7 @@ module ULOL
                          false
                        end
                      when :redone
-                       if apply_history_state.position == :redo_requested ||
-                          apply_history_state.position == :applied
+                       if %i[redo_requested redone].include?(apply_history_state.position)
                          verified = apply_history_state.confirm_redone!(matches: after_matches)
                          reason = :redo_result_mismatch unless verified
                          verified
