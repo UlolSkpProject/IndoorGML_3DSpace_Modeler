@@ -26,14 +26,13 @@ module ULOL
           assert_includes source, 'override.call do'
         end
 
-        def test_runner_verifies_geometry_runtime_source_and_transaction_rollback
+        def test_runner_captures_geometry_runtime_source_and_transaction_diagnostics
           source = read_dev_file('cell_space_conversion_rollback_failure_runner.rb')
 
           assert_includes source, 'feature_counts_unchanged'
           assert_includes source, 'root_entities_unchanged'
           assert_includes source, 'source_snapshot_unchanged'
           assert_includes source, 'active_path_restored'
-          assert_includes source, 'transaction_abort_clean'
           assert_includes source, 'transaction_replay_pending?'
           assert_includes source, 'onTransactionAbort'
           assert_includes source, 'onTransactionCommit'
@@ -41,14 +40,27 @@ module ULOL
           assert_includes source, 'onTransactionRedo'
         end
 
-        def test_runner_is_limited_and_scheduled_after_console_callback
+        def test_verification_patch_uses_postconditions_as_hard_gates
+          patch = read_dev_file('cell_space_conversion_rollback_verification_patch.rb')
+          policy = read_dev_file('cell_space_conversion_rollback_verification_policy.rb')
+
+          assert_includes patch, 'CellSpaceConversionRollbackVerificationPolicy.new'
+          assert_includes patch, 'transaction_rollback_signal:'
+          assert_includes patch, 'transaction_not_committed:'
+          assert_includes patch, 'rollback_hard_gates:'
+          assert_includes policy, 'source_snapshot_unchanged: source_snapshot_unchanged == true'
+          assert_includes policy, 'transaction_not_committed: transaction_not_committed'
+          assert_includes policy, 'return :undo_callback if counts[:undo].positive?'
+        end
+
+        def test_runner_is_limited_scheduled_and_loads_generalized_verification
           source = read_dev_file('cell_space_conversion_rollback_failure_runner.rb')
           auto_run = read_dev_file('run_cell_space_conversion_rollback_failure.rb')
 
           assert_includes source, 'MAX_JOBS = 5'
           assert_includes source, 'UI.start_timer(0, false)'
           assert_includes source, 'jobs exceed safety limit'
-          assert_includes auto_run, "require_relative 'cell_space_conversion_rollback_failure_runner'"
+          assert_includes auto_run, "require_relative 'cell_space_conversion_rollback_verification_patch'"
           assert_includes auto_run, 'CellSpaceConversionRollbackFailureRunner.run!'
         end
 
