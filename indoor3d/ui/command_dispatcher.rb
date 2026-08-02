@@ -3,6 +3,7 @@
 require_relative 'commands/conversion_message_formatter'
 require_relative 'commands/base_commands'
 require_relative 'commands/cell_space_commands'
+require_relative 'commands/cell_space_create_cooperative_command'
 require_relative 'commands/export_commands'
 require_relative 'commands/display_commands'
 
