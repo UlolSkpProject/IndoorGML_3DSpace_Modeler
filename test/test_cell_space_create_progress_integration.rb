@@ -122,10 +122,10 @@ module ULOL
               @active
             end
 
-            def start_stage(name, total:, message:, cancellable:)
+            def start_stage(name, total:, message:, cancellable:, metadata: {})
               raise 'progress start failed' if @fail_on == :start_stage
 
-              @events << [:start_stage, name, total, message, cancellable]
+              @events << [:start_stage, name, total, message, cancellable, metadata]
             end
 
             def update_stage(completed:, message:, telemetry: nil)
@@ -160,18 +160,55 @@ module ULOL
               '사전검사/형상 검증',
               '사전검사/대상 검증',
               'CellSpace/State 생성',
-              'Adjacency/Transition 생성'
+              'CellSpace 재질 적용'
             ], starts.map { |event| event[1] }
 
             creation_updates = progress.events.select do |event|
               event.first == :update_stage && event[2].include?('CellSpace/State 생성')
             end
             assert_equal [1, 2, 3], creation_updates.map { |event| event[1] }
-            adjacency_update = progress.events.find do |event|
-              event.first == :update_stage && event[2] == 'Adjacency/Transition 생성 완료'
-            end
-            assert_equal 1, adjacency_update[1]
-            assert_equal({ pair_comparison_count: 3 }, adjacency_update[3])
+
+            final_stage = progress.events.reverse.find { |event| event.first == :finish_stage }
+            assert_equal 'CellSpace 재질 및 Topology 후처리 완료', final_stage[1]
+            assert_equal({ pair_comparison_count: 3 }, final_stage[2])
+          end
+
+          def test_adjacency_sink_replaces_material_stage_with_detailed_stages
+            progress = RecordingProgress.new
+            sink = AdjacencyProgressSink.new(progress, logger: FakeLogger.new)
+            sink.mark_stage_open('CellSpace 재질 적용')
+
+            sink.call(
+              event: :stage_start,
+              stage: :candidate_generation,
+              name: 'Adjacency 후보 생성',
+              total: 10,
+              completed: 0,
+              message: '후보 생성 중'
+            )
+            sink.call(
+              event: :stage_progress,
+              stage: :candidate_generation,
+              name: 'Adjacency 후보 생성',
+              total: 10,
+              completed: 5,
+              message: '5 / 10'
+            )
+            sink.call(
+              event: :stage_finish,
+              stage: :candidate_generation,
+              name: 'Adjacency 후보 생성',
+              total: 10,
+              completed: 10,
+              message: '후보 생성 완료',
+              telemetry: { candidate_pair_count: 4 }
+            )
+
+            assert_equal [:finish_stage, 'CellSpace 재질 적용 완료', nil], progress.events[0]
+            assert_equal :start_stage, progress.events[1][0]
+            assert_equal 'Adjacency 후보 생성', progress.events[1][1]
+            assert_equal [:update_stage, 5, '5 / 10', nil], progress.events[2]
+            assert_equal [:finish_stage, '후보 생성 완료', { candidate_pair_count: 4 }], progress.events[3]
           end
 
           def test_three_argument_converter_contract_is_preserved
