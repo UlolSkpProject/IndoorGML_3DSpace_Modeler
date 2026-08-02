@@ -34,12 +34,23 @@ module ULOL
           assert_includes source, 'separate source-preservation contract'
         end
 
-        def test_runner_loads_safety_patch_and_keeps_small_default_limit
+        def test_history_guard_blocks_global_undo_redo_without_recorded_apply
+          source = read_dev_file('cell_space_conversion_apply_history_guard_patch.rb')
+
+          assert_includes source, 'apply_history_state.request_undo!'
+          assert_includes source, 'apply_history_state.request_redo!'
+          assert_includes source, 'Undo blocked:'
+          assert_includes source, 'Redo blocked:'
+          assert_includes source, 'passed = passed == true'
+        end
+
+        def test_runner_loads_history_guard_and_keeps_small_default_limit
           runner = read_dev_file('run_cell_space_conversion_progress_apply.rb')
           policy = read_dev_file('cell_space_conversion_apply_policy.rb')
 
-          assert_includes runner, "require_relative 'cell_space_conversion_progress_apply_safety_patch'"
+          assert_includes runner, "require_relative 'cell_space_conversion_apply_history_guard_patch'"
           assert_includes runner, 'max_apply_jobs:'
+          assert_includes runner, '실제 적용 이력이 없으므로 Undo/Redo는 차단됩니다.'
           assert_includes policy, 'DEFAULT_MAX_APPLY_JOBS = 5'
         end
 
