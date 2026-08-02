@@ -46,6 +46,51 @@ module ULOL
           def progress_apply_phase
             @apply_phase
           end
+
+          private
+
+          # The first apply patch assumes a completed preflight has a plan. This
+          # wrapper keeps cancelled/failed sessions away from that completed-only path.
+          def pump
+            result = pump_without_progress_apply
+            if @apply_mode && !@preflight_handled && @session&.terminal?
+              snapshot = @session.snapshot
+              if snapshot[:type] == :completed
+                handle_preflight_terminal
+              else
+                finish_noncompleted_preflight(snapshot)
+              end
+            end
+            result
+          end
+
+          def finish_noncompleted_preflight(snapshot)
+            @preflight_handled = true
+            stop_hide_timer
+            @apply_phase = snapshot[:type]
+            restore_initial_active_path
+            if snapshot[:type] == :failed
+              @apply_error_class = snapshot[:error_class]
+              @apply_error_message = snapshot[:error_message]
+              @state.apply(
+                type: :failed,
+                total: snapshot[:stage_total],
+                completed: snapshot[:stage_completed],
+                percent: snapshot[:overall_percent],
+                error_message: "#{snapshot[:error_class]}: #{snapshot[:error_message]}"
+              )
+            else
+              @state.apply(
+                type: :cancelled,
+                total: snapshot[:stage_total],
+                completed: snapshot[:stage_completed],
+                percent: snapshot[:overall_percent],
+                message: 'CellSpace 변환 사전검사가 취소되었습니다.'
+              )
+            end
+            invalidate_view
+            schedule_hide
+          end
         end
 
         class << self
