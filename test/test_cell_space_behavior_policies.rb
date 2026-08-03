@@ -92,6 +92,23 @@ module ULOL
         end
       end
 
+      class CellSpaceLifecycleContext
+        attr_reader :calls
+
+        def initialize
+          @calls = []
+        end
+
+        def default_storey_name
+          'F01'
+        end
+
+        def initialize_scene(cell_space, storey: default_storey_name)
+          @calls << [:base_initialize_scene, cell_space, storey]
+          true
+        end
+      end
+
       class BulkCellSpaceConversionService
         attr_reader :calls
 
@@ -206,6 +223,23 @@ module ULOL
             :runtime_restore,
             :restore_active_path
           ], calls
+        end
+
+        def test_create_scene_consumes_outer_tag_before_base_initialization
+          group = FakeGroup.new(mapped_tag: true)
+          cell_space = FakeCellSpace.new(group)
+          context = CellSpaceLifecycleContext.new
+          assert Policy.disable!(group)
+
+          assert context.initialize_scene(cell_space, storey: 'F02')
+
+          refute Policy.disabled?(group)
+          refute group.mapped_tag?
+          assert_equal 'Untagged', group.layer.name
+          assert_equal 1, group.layer_assignments
+          assert_equal [
+            [:base_initialize_scene, cell_space, 'F02']
+          ], context.calls
         end
 
         def test_explicit_demotion_consumes_outer_tag_and_clears_marker
