@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require_relative '../cell_space_auto_conversion_policy'
-
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -78,7 +76,6 @@ module ULOL
             unregister_cell_spaces_for_demotion_batch(plan[:cell_spaces])
             erase_adjacency_for_demotion_batch(plan[:cell_spaces])
             clear_indoor_attributes_for_demotion_batch(plan[:groups])
-            consume_demoted_group_tags_batch(plan[:groups])
             cleanup_demoted_group_runtime_tracking_batch(plan[:groups])
           end
 
@@ -131,27 +128,10 @@ module ULOL
             end
           end
 
-          # The outer classification Tag is input data, not persistent CellSpace
-          # identity. Consume it during demotion so finish/load normalization
-          # cannot recreate the removed CellSpace. Nested geometry Tags are left
-          # untouched.
-          def consume_demoted_group_tags_batch(groups)
-            Array(groups).each do |group|
-              unless consume_demoted_group_tag(group)
-                raise 'Demoted CellSpace Tag could not be moved to Untagged'
-              end
-            end
-          end
-
-          def consume_demoted_group_tag(group)
-            return false unless CellSpaceAutoConversionPolicy.consume_tag!(
-              group,
-              model: @model
-            )
-
-            CellSpaceAutoConversionPolicy.enable!(group)
-          end
-
+          # The source SketchUp Tag is user/model classification data. Demotion
+          # removes IndoorGML semantics only and deliberately leaves that Tag
+          # unchanged. Finish/load normalization no longer performs Tag-based
+          # automatic CellSpace creation.
           def cleanup_demoted_group_runtime_tracking_batch(groups)
             Array(groups).each do |group|
               @scene_group_guard.untrack(group) if @scene_group_guard
