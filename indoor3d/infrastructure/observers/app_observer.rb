@@ -58,7 +58,7 @@ module ULOL
 
             @initial_refresh_states[key] = :running
             begin
-              IndoorModel.for(model).refresh_runtime_data(initial_model_load: true)
+              run_initial_refresh_without_modal_feedback(model)
               @initial_refresh_states[key] = :complete
             rescue StandardError => e
               # A failed refresh may be explicitly scheduled again.
@@ -82,6 +82,19 @@ module ULOL
         end
 
         private
+
+        def run_initial_refresh_without_modal_feedback(model)
+          refresh = proc do
+            IndoorModel.for(model).refresh_runtime_data(initial_model_load: true)
+          end
+          if defined?(UiFeedback) && UiFeedback.respond_to?(:with_modal_suppressed)
+            UiFeedback.with_modal_suppressed(reason: :initial_runtime_refresh) do
+              refresh.call
+            end
+          else
+            refresh.call
+          end
+        end
 
         def cancel_all_validation_sessions
           return unless defined?(IndoorGmlConverter::ValidationSession)
