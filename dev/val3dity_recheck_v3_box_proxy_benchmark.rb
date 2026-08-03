@@ -80,7 +80,9 @@ module ULOL
               )
               live_counts = normalize_counts(live['status_counts'])
               aggregate_match = full_snapshot_run && baseline_counts == live_counts
-              v3_regression = compare_v3_topology(live, frozen_v3)
+              v3_regression = compare_v3_topology(
+                live, frozen_v3, full_snapshot_run
+              )
 
               snapshot = {
                 'schema_version' => SCHEMA_VERSION,
@@ -280,15 +282,16 @@ module ULOL
               sorted[lower] + ((sorted[upper] - sorted[lower]) * (position - lower))
             end
 
-            def compare_v3_topology(live, frozen_v3)
+            def compare_v3_topology(live, frozen_v3, full_snapshot_run)
               current_closed = live['v3_gate_closed_pair_count'].to_i
               current_open = live['v3_gate_open_or_error_pair_count'].to_i
               return {
                 'reference_available' => false,
+                'partial_run' => !full_snapshot_run,
                 'current_closed_pair_count' => current_closed,
                 'current_open_pair_count' => current_open,
                 'regressed' => false
-              } unless frozen_v3
+              } unless frozen_v3 && full_snapshot_run
 
               expected_closed = frozen_v3.dig(
                 'v3_gate_plus_fallback', 'v3_topology_success_pair_count'
