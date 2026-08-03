@@ -13,6 +13,8 @@ module ULOL
         DISPATCH_INTERVAL_SECONDS = 0.05
         MIN_DISPATCH_TURNS_AFTER_ENQUEUE = 1
         MAX_RETAINED_NOTIFICATIONS = 8
+        MODAL_SUPPRESSION_DEPTH_KEY = :ulol_indoor3d_modal_feedback_suppression_depth
+        MODAL_SUPPRESSION_REASON_KEY = :ulol_indoor3d_modal_feedback_suppression_reason
 
         class << self
           def start_dispatcher
@@ -30,6 +32,31 @@ module ULOL
 
           def dispatcher_started?
             !@dispatcher_timer_id.nil?
+          end
+
+          # Suppresses only informational/error modal messages enqueued inside the
+          # block. Confirmations are intentionally not suppressed because they are
+          # control flow, not passive feedback. The scope is thread-local and
+          # nestable so an initial model refresh cannot leak suppression into later
+          # user commands.
+          def with_modal_suppressed(reason: nil)
+            thread = Thread.current
+            previous_depth = thread[MODAL_SUPPRESSION_DEPTH_KEY].to_i
+            previous_reason = thread[MODAL_SUPPRESSION_REASON_KEY]
+            thread[MODAL_SUPPRESSION_DEPTH_KEY] = previous_depth + 1
+            thread[MODAL_SUPPRESSION_REASON_KEY] = reason unless reason.nil?
+            yield
+          ensure
+            if defined?(thread) && thread
+              thread[MODAL_SUPPRESSION_DEPTH_KEY] = previous_depth
+              thread[MODAL_SUPPRESSION_REASON_KEY] = previous_reason
+            end
+          end
+
+          def modal_suppressed?
+            Thread.current[MODAL_SUPPRESSION_DEPTH_KEY].to_i.positive?
+          rescue StandardError
+            false
           end
 
           def notify(message)
@@ -54,6 +81,13 @@ module ULOL
           def enqueue_feedback(kind, message, arguments = [], callback = nil)
             text = message.to_s
             return false if text.empty?
+
+            if kind == :modal && modal_suppressed?
+              reason = Thread.current[MODAL_SUPPRESSION_REASON_KEY]
+              suffix = reason.nil? ? '' : " reason=#{reason}"
+              log_message("Modal feedback suppressed#{suffix}: #{text}")
+              return false
+            end
 
             unless dispatcher_started?
               log_message("UI feedback dispatcher unavailable: #{text}")
