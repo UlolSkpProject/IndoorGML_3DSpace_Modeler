@@ -8,7 +8,7 @@ module ULOL
       # Invalid results are never cached, so every failing mesh still reaches the
       # unchanged exact predicate and produces its original invalid pair indices.
       module LocalVertexNormalizerTriangleIntersectionCleanCacheV2
-        TRIANGLE_INTERSECTION_CLEAN_CACHE_MIN_TRIANGLES = 64
+        TRIANGLE_INTERSECTION_CLEAN_CACHE_MIN_TRIANGLES = 8
         TRIANGLE_INTERSECTION_CLEAN_CACHE_MAX_ENTRIES = 32
 
         private
