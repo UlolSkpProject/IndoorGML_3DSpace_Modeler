@@ -11,20 +11,16 @@ module ULOL
             stage = snapshot[:stage]
             return format('%5.1f%%', displayed_percent(snapshot)) unless stage
 
-            stage_name = stage[:name].to_s
+            parts = []
+            position = stage_position_text(snapshot, stage)
+            parts << position unless position.nil?
+            parts << stage[:name].to_s
+
             completed = stage[:completed].to_i
             total = stage[:total].to_i
-            if total.positive?
-              format(
-                '%s · %d / %d · %5.1f%%',
-                stage_name,
-                completed,
-                total,
-                displayed_percent(snapshot)
-              )
-            else
-              format('%s · %5.1f%%', stage_name, displayed_percent(snapshot))
-            end
+            parts << "#{completed} / #{total}" if total.positive?
+            parts << format('%5.1f%%', displayed_percent(snapshot))
+            parts.join(' · ')
           end
         end
 
