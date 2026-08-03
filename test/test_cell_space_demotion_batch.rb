@@ -99,10 +99,11 @@ module ULOL
 
           attr_reader :events, :restored_snapshot
 
-          def initialize(cell_spaces, transitions, events = [])
+          def initialize(cell_spaces, transitions, events = [], fail_tag_consume: false)
             @cell_spaces = cell_spaces
             @transitions = transitions
             @events = events
+            @fail_tag_consume = fail_tag_consume
             @feature_registry = FeatureRegistry.new(@events)
             @attribute_serializer = AttributeSerializer.new(@events)
             @scene_group_guard = SceneGuard.new(@events)
@@ -178,6 +179,11 @@ module ULOL
 
           def indoor_gml_attribute_dictionary_empty?(_group) = true
 
+          def consume_demoted_group_tag(group)
+            @events << [:tag_consume, group.name]
+            !@fail_tag_consume
+          end
+
           def entity_observer_key(group) = group.name
 
           def unlock_indoor_entity(group)
@@ -219,8 +225,10 @@ module ULOL
           assert_operator categories.rindex(:state_unregister), :<, categories.index(:cell_unregister)
           assert_operator categories.rindex(:cell_unregister), :<, categories.index(:adjacency_remove)
           assert_operator categories.rindex(:adjacency_remove), :<, categories.index(:attributes)
-          assert_operator categories.rindex(:attributes), :<, categories.index(:scene_untrack)
+          assert_operator categories.rindex(:attributes), :<, categories.index(:tag_consume)
+          assert_operator categories.rindex(:tag_consume), :<, categories.index(:scene_untrack)
           assert_equal 2, categories.count(:transition)
+          assert_equal 2, categories.count(:tag_consume)
           assert_equal 1, categories.count(:ui_projection_refresh)
         end
 
@@ -238,7 +246,23 @@ module ULOL
           assert_includes categories, :cell_unregister
           assert_includes categories, :adjacency_remove
           assert_includes categories, :attributes
+          assert_includes categories, :tag_consume
           assert_equal 1, categories.count(:ui_projection_refresh)
+        end
+
+        def test_tag_consume_failure_rolls_back_batch
+          events, cell_spaces, transitions = build_fixture
+          host = Host.new(
+            cell_spaces,
+            transitions,
+            events,
+            fail_tag_consume: true
+          )
+
+          refute host.run([cell_spaces.first])
+          assert_equal :runtime_snapshot, host.restored_snapshot
+          assert_includes host.events.map(&:first), :tag_consume
+          refute_includes host.events.map(&:first), :ui_projection_refresh
         end
       end
     end
