@@ -168,7 +168,7 @@ module ULOL
     module IndoorCore
       module ProductionProgress
         class AdjacencyProgressKeywordGuardTest < Minitest::Test
-          def test_complete_internal_chain_strips_every_progress_keyword
+          def test_complete_internal_chain_strips_keywords_and_emits_visible_stages
             sink = Object.new
             service = AdjacencyService.new
             coordinator = TopologyCoordinator.new(service)
@@ -178,7 +178,8 @@ module ULOL
             end
 
             assert_equal :ok, result
-            assert_equal %i[start progress progress finish], service.events.map(&:first)
+            assert_equal %i[progress finish], service.events.map(&:first)
+            assert_equal %i[detailed_computation transition_apply], service.events.map { |event| event[2][:stage] }
             assert service.events.all? { |event| event[1].equal?(sink) }
             assert service.checkpoint_during_run
           end

@@ -62,6 +62,7 @@ module ULOL
 
         module AdjacencyServiceProgressContextBridge
           TARGET_PROGRESS_UPDATES_PER_STAGE = 100
+          HIDDEN_OVERLAY_STAGES = %i[snapshot candidate_generation].freeze
 
           def synchronize_all(*arguments, **keywords)
             delegate_without_progress(arguments, keywords) { |args, filtered| super(*args, **filtered) }
@@ -115,14 +116,20 @@ module ULOL
           end
 
           def emit_stage_start(progress = nil, **payload)
+            return false if hidden_overlay_stage?(payload[:stage])
+
             super(effective_progress_sink(progress), **payload)
           end
 
           def emit_stage_progress(progress = nil, **payload)
+            return false if hidden_overlay_stage?(payload[:stage])
+
             super(effective_progress_sink(progress), **payload)
           end
 
           def emit_stage_finish(progress = nil, **payload)
+            return false if hidden_overlay_stage?(payload[:stage])
+
             super(effective_progress_sink(progress), **payload)
           end
 
@@ -169,6 +176,10 @@ module ULOL
             factor * magnitude
           end
 
+          def hidden_overlay_stage?(stage)
+            HIDDEN_OVERLAY_STAGES.include?(stage&.to_sym)
+          end
+
           def delegate_without_progress(arguments, keywords)
             filtered = keywords.dup
             explicit_sink = filtered.delete(:progress)
@@ -201,6 +212,78 @@ module ULOL
             service
           end
         end
+
+        # A successful bulk conversion commits before its active path is restored.
+        # Keep that restoration inside the existing bulk observer-suppression guard
+        # so onActivePathChanged cannot create a second attribute transaction.
+        # Rollback and exception paths retain their original restore ordering.
+        module BulkCellSpaceConversionActivePathRestoreGuard
+          def initialize(*arguments, **keywords)
+            super(*arguments, **keywords)
+            install_guarded_active_path_restore
+          end
+
+          def call
+            @production_active_path_restore_consumed = false
+            @production_bulk_operation_outcome = nil
+            super
+          ensure
+            @production_bulk_operation_outcome = nil
+          end
+
+          private
+
+          def install_guarded_active_path_restore
+            return if @production_active_path_restore_guard_installed
+            return unless @apply_guards&.respond_to?(:call)
+            return unless @operation_runner&.respond_to?(:call)
+            return unless @restore_active_path&.respond_to?(:call)
+
+            @production_active_path_restore_guard_installed = true
+            original_apply_guards = @apply_guards
+            original_operation_runner = @operation_runner
+            original_restore_active_path = @restore_active_path
+
+            @operation_runner = proc do |name, **options, &block|
+              rollback_observed = false
+              wrapped_options = options.dup
+              rollback_if = wrapped_options[:rollback_if]
+              if rollback_if&.respond_to?(:call)
+                wrapped_options[:rollback_if] = proc do
+                  rollback_observed = rollback_if.call == true
+                end
+              end
+
+              result = original_operation_runner.call(name, **wrapped_options, &block)
+              @production_bulk_operation_outcome = rollback_observed ? :rolled_back : :committed
+              result
+            rescue StandardError
+              @production_bulk_operation_outcome = :failed
+              raise
+            end
+
+            @apply_guards = proc do |&block|
+              original_apply_guards.call do
+                result = block.call
+                if @production_bulk_operation_outcome == :committed
+                  safely_restore_active_path(success: true)
+                end
+                result
+              end
+            end
+
+            @restore_active_path = proc do
+              restore_active_path_once(original_restore_active_path)
+            end
+          end
+
+          def restore_active_path_once(callback)
+            return true if @production_active_path_restore_consumed
+
+            @production_active_path_restore_consumed = true
+            callback.call
+          end
+        end
       end
 
       if defined?(TopologyCoordinator)
@@ -224,6 +307,14 @@ module ULOL
           ProductionProgress::IndoorModelCellSpaceProgressContextInjection
         ) unless IndoorModel.ancestors.include?(
           ProductionProgress::IndoorModelCellSpaceProgressContextInjection
+        )
+      end
+
+      if defined?(BulkCellSpaceConversionService)
+        BulkCellSpaceConversionService.prepend(
+          ProductionProgress::BulkCellSpaceConversionActivePathRestoreGuard
+        ) unless BulkCellSpaceConversionService.ancestors.include?(
+          ProductionProgress::BulkCellSpaceConversionActivePathRestoreGuard
         )
       end
     end
