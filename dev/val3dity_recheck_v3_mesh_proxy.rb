@@ -136,11 +136,26 @@ module ULOL
               return rebuild_error(report, cap_result[:error]) if cap_result[:error]
 
               cap_triangles = cap_result.fetch(:triangles)
-              all_triangles = clipped_triangles + cap_triangles
-              return rebuild_error(report, 'reconstructed_mesh_empty') if all_triangles.empty?
+              raw_triangles = clipped_triangles + cap_triangles
+              return rebuild_error(report, 'reconstructed_mesh_empty') if raw_triangles.empty?
+
+              # Cap triangulation can simplify collinear boundary vertices while
+              # the clipped source surface keeps those vertices. That creates a
+              # geometrically coincident but topologically open T-junction. Make
+              # the complete triangle soup conforming before handing it to
+              # SketchUp: every vertex lying on any triangle edge subdivides that
+              # edge, and the affected triangle is retriangulated through its
+              # centroid. This is geometry-agnostic and uses only the existing
+              # weld tolerance.
+              all_triangles = conforming_triangle_soup(raw_triangles)
+              topology = triangle_soup_topology(all_triangles)
+              report['reconstructed_topology'] = topology
+              return rebuild_error(report, 'reconstructed_topology_open') unless
+                topology['closed_two_manifold'] == true
 
               report['reconstructed_surface_triangle_count'] = clipped_triangles.length
               report['reconstructed_cap_triangle_count'] = cap_triangles.length
+              report['reconstructed_raw_triangle_count'] = raw_triangles.length
               report['reconstructed_total_triangle_count'] = all_triangles.length
 
               {
@@ -574,9 +589,9 @@ module ULOL
                 [0.193117843, 1.0, 0.417291033],
                 [0.317819431, 0.229143117, 1.0]
               ]
-              votes = directions.filter_map do |direction|
+              votes = directions.map do |direction|
                 ray_parity(point, direction, mesh)
-              end
+              end.compact
               return nil if votes.empty?
 
               true_count = votes.count(true)
@@ -620,6 +635,144 @@ module ULOL
               return nil if v < -epsilon || u + v > 1.0 + epsilon
 
               inverse * dot(edge2, q)
+            end
+
+            def conforming_triangle_soup(triangles)
+              flattened = triangles.flatten(1)
+              welding = weld_endpoints(flattened)
+              point_cluster = welding.fetch(:point_cluster)
+              representatives = welding.fetch(:clusters).map do |cluster|
+                cluster.fetch(:representative).map(&:to_f)
+              end
+
+              welded_triangles = triangles.each_index.map do |triangle_index|
+                offset = triangle_index * 3
+                3.times.map do |corner|
+                  representatives.fetch(point_cluster.fetch(offset + corner))
+                end
+              end
+              candidate_vertices = representatives
+
+              welded_triangles.flat_map do |triangle|
+                conforming_subdivide_triangle(triangle, candidate_vertices)
+              end
+            end
+
+            def conforming_subdivide_triangle(triangle, candidate_vertices)
+              return [] if degenerate_triangle?(triangle)
+
+              boundary = []
+              3.times do |edge_index|
+                a = triangle[edge_index]
+                b = triangle[(edge_index + 1) % 3]
+                edge_points = candidate_vertices.filter_map do |point|
+                  parameter = point_on_segment_parameter(point, a, b)
+                  [parameter, point] if parameter
+                end
+                edge_points.sort_by! { |parameter, point| [parameter, *point] }
+                edge_points.each_with_index do |(_parameter, point), index|
+                  next if edge_index.positive? && index.zero?
+                  next if edge_index == 2 && index == edge_points.length - 1
+
+                  boundary << point
+                end
+              end
+              boundary = deduplicate_cycle_points(boundary)
+              return [triangle] if boundary.length == 3
+              return [] if boundary.length < 3
+
+              centroid = 3.times.map do |axis|
+                triangle.sum { |point| point[axis].to_f } / 3.0
+              end
+              reference_normal = cross(
+                subtract(triangle[1], triangle[0]),
+                subtract(triangle[2], triangle[0])
+              )
+
+              boundary.each_with_index.filter_map do |point, index|
+                following = boundary[(index + 1) % boundary.length]
+                candidate = [centroid, point, following]
+                next if degenerate_triangle?(candidate)
+
+                normal = cross(
+                  subtract(candidate[1], candidate[0]),
+                  subtract(candidate[2], candidate[0])
+                )
+                dot(normal, reference_normal).negative? ?
+                  [candidate[0], candidate[2], candidate[1]] : candidate
+              end
+            end
+
+            def point_on_segment_parameter(point, a, b)
+              ab = subtract(b, a)
+              length_squared = magnitude_squared(ab)
+              return nil if length_squared <= 1.0e-30
+
+              ap = subtract(point, a)
+              parameter = dot(ap, ab) / length_squared
+              epsilon = [@weld / Math.sqrt(length_squared), 1.0e-12].max
+              return nil if parameter < -epsilon || parameter > 1.0 + epsilon
+
+              clamped = [[parameter, 0.0].max, 1.0].min
+              projected = 3.times.map { |axis| a[axis] + ab[axis] * clamped }
+              distance_squared = squared_distance(point, projected)
+              return nil if distance_squared > (@weld * @weld)
+
+              clamped
+            end
+
+            def deduplicate_cycle_points(points)
+              result = []
+              points.each do |point|
+                next if result.any? && squared_distance(result[-1], point) <= @weld * @weld
+
+                result << point
+              end
+              if result.length > 1 &&
+                 squared_distance(result[0], result[-1]) <= @weld * @weld
+                result.pop
+              end
+              result
+            end
+
+            def triangle_soup_topology(triangles)
+              flattened = triangles.flatten(1)
+              welding = weld_endpoints(flattened)
+              point_cluster = welding.fetch(:point_cluster)
+              edge_counts = Hash.new(0)
+              degenerate_count = 0
+
+              triangles.each_index do |triangle_index|
+                offset = triangle_index * 3
+                vertices = 3.times.map do |corner|
+                  point_cluster.fetch(offset + corner)
+                end
+                if vertices.uniq.length < 3
+                  degenerate_count += 1
+                  next
+                end
+
+                3.times do |edge_index|
+                  a = vertices[edge_index]
+                  b = vertices[(edge_index + 1) % 3]
+                  edge_counts[[a, b].sort] += 1
+                end
+              end
+
+              histogram = edge_counts.values.tally.transform_keys(&:to_s).sort.to_h
+              boundary_count = edge_counts.count { |_edge, count| count == 1 }
+              non_manifold_count = edge_counts.count { |_edge, count| count > 2 }
+              {
+                'triangle_count' => triangles.length,
+                'welded_vertex_count' => welding.fetch(:clusters).length,
+                'unique_edge_count' => edge_counts.length,
+                'edge_occurrence_histogram' => histogram,
+                'boundary_edge_count' => boundary_count,
+                'non_manifold_edge_count' => non_manifold_count,
+                'degenerate_triangle_count' => degenerate_count,
+                'closed_two_manifold' =>
+                  boundary_count.zero? && non_manifold_count.zero? && degenerate_count.zero?
+              }
             end
 
             def build_bvh(bounds, indices)
@@ -922,9 +1075,7 @@ module ULOL
 
             def original_fallback(record, group1, group2, cell_id1, cell_id2, reason, started)
               fallback_started = clock
-              result = Val3dityOverlapGeometryRechecker.instance_method(
-                :model_solid_intersection_for_pair
-              ).bind(self).call(group1, group2, cell_id1, cell_id2)
+              result = super(group1, group2, cell_id1, cell_id2)
               record['path'] = 'original_full_recheck_fallback'
               record['fallback_reason'] = reason.to_s
               record['fallback_elapsed_ms'] = elapsed_ms(fallback_started)
@@ -936,10 +1087,6 @@ module ULOL
               record['total_elapsed_ms'] = elapsed_ms(started)
               store_record(record)
               result
-            end
-
-            def fallback_result(reason)
-              { fallback: true, fallback_reason: reason.to_s }
             end
 
             def valid_faces(group)
@@ -956,6 +1103,10 @@ module ULOL
               group.definition.entities.grep(Sketchup::Edge).select(&:valid?)
             rescue StandardError
               []
+            end
+
+            def fallback_result(reason)
+              { fallback: true, fallback_reason: reason.to_s }
             end
 
             def cleanup_entities(*entities)
@@ -987,6 +1138,24 @@ module ULOL
               Process.clock_gettime(Process::CLOCK_MONOTONIC)
             end
           end
+
+          class << self
+            def log(message)
+              text = "[IndoorGML][V3MeshProxy] #{message}"
+              if defined?(IndoorCore::Logger) && IndoorCore::Logger.respond_to?(:puts)
+                IndoorCore::Logger.puts(text)
+              else
+                puts(text)
+              end
+            rescue StandardError
+              nil
+            end
+          end
+
+          log(
+            'loaded: v3 direct clipped-mesh proxy; source crop Boolean removed, ' \
+            'production code unchanged'
+          )
         end
       end
     end
