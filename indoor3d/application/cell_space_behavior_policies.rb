@@ -50,6 +50,14 @@ module ULOL
         end
 
         module IndoorModelCellSpaceBehavior
+          # Preserve the visibility of the original routing predicate because
+          # observers and diagnostics may call it with an explicit receiver.
+          def observer_routing_suppressed?
+            return true if @bulk_cell_space_observer_settling == true
+
+            super
+          end
+
           private
 
           # SketchUp may deliver InstanceObserver events after the bulk operation
@@ -62,12 +70,6 @@ module ULOL
             super
           ensure
             schedule_bulk_cell_space_observer_settle_release(generation)
-          end
-
-          def observer_routing_suppressed?
-            return true if @bulk_cell_space_observer_settling == true
-
-            super
           end
 
           # An explicit demotion is stronger than Tag-based automatic conversion.
@@ -89,6 +91,12 @@ module ULOL
 
           def auto_convert_tagged_primal_entity(entity)
             return false if ExplicitDemotionPolicy.disabled?(entity)
+
+            super
+          end
+
+          def auto_convert_tagged_descendants(container, accumulated_transformation)
+            return false if ExplicitDemotionPolicy.disabled?(container)
 
             super
           end
