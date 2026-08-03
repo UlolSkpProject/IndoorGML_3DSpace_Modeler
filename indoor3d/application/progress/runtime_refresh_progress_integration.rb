@@ -322,7 +322,7 @@ module ULOL
             result
           end
 
-          def recenter_cell_space_origin(cell_space)
+          def write_cell_space_attributes(cell_space)
             result = super
             tracker = RuntimeRefreshProgressContext.current
             if tracker&.active? && tracker.phase?(:recenter)
@@ -363,6 +363,9 @@ module ULOL
           end
 
           def runtime_refresh_progress_applicable?(_initial_model_load)
+            return false if RuntimeRefreshProgressContext.current&.active?
+            return false if instance_variable_get(:@refreshing_runtime) == true
+
             model = @model || (defined?(Sketchup) ? Sketchup.active_model : nil)
             return false unless model&.respond_to?(:entities)
 
