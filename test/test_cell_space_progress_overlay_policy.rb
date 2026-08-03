@@ -55,21 +55,20 @@ module ULOL
       end
 
       class BulkCellSpaceConversionService
-        attr_reader :calls
-
         def initialize(
           apply_guards:,
           operation_runner:,
           restore_active_path:,
           rollback:,
-          logger:
+          logger:,
+          calls:
         )
           @apply_guards = apply_guards
           @operation_runner = operation_runner
           @restore_active_path = restore_active_path
           @rollback = rollback
           @logger = logger
-          @calls = []
+          @calls = calls
         end
 
         def call
@@ -197,15 +196,14 @@ module ULOL
             end
             restore_active_path = proc { calls << :restore_active_path }
 
-            service = BulkCellSpaceConversionService.new(
+            BulkCellSpaceConversionService.new(
               apply_guards: apply_guards,
               operation_runner: operation_runner,
               restore_active_path: restore_active_path,
               rollback: rollback,
-              logger: logger
+              logger: logger,
+              calls: calls
             )
-            service.calls.replace(calls)
-            service
           end
         end
       end
