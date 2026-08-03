@@ -268,10 +268,17 @@ module ULOL
         end
 
         def recenter_runtime_cell_spaces
-          @cell_spaces.each { |cell_space| recenter_cell_space_origin(cell_space) }
+          @cell_spaces.each do |cell_space|
+            recenter_cell_space_origin(cell_space)
+            write_cell_space_attributes(cell_space)
+          end
         end
 
         def recenter_cell_space_origin(cell_space)
+          cell_space
+        end
+
+        def write_cell_space_attributes(cell_space)
           cell_space
         end
 
@@ -343,6 +350,17 @@ module ULOL
           model = RuntimeProgressFakeModel.new([])
           Sketchup.runtime_progress_active_model = model
           indoor_model = IndoorModel.new(model)
+
+          assert indoor_model.refresh_runtime_data(initial_model_load: true)
+          assert_empty Session.instances
+        end
+
+        def test_active_refresh_guard_does_not_start_nested_progress
+          primal = build_primal(2)
+          model = RuntimeProgressFakeModel.new([primal])
+          Sketchup.runtime_progress_active_model = model
+          indoor_model = IndoorModel.new(model)
+          indoor_model.instance_variable_set(:@refreshing_runtime, true)
 
           assert indoor_model.refresh_runtime_data(initial_model_load: true)
           assert_empty Session.instances
