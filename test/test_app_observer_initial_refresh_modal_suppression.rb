@@ -4,13 +4,19 @@ require 'minitest/autorun'
 
 module UI
   class << self
-    attr_accessor :app_observer_timers
+    attr_accessor :app_observer_timers, :messagebox_calls
   end
 
   def self.start_timer(_delay, _repeat = false, &block)
     self.app_observer_timers ||= []
     app_observer_timers << block
     app_observer_timers.length
+  end
+
+  def self.messagebox(message, *arguments)
+    self.messagebox_calls ||= []
+    messagebox_calls << [message, arguments]
+    :shown
   end
 end
 
@@ -46,6 +52,10 @@ module ULOL
       end
 
       class IndoorModel
+        PRIMAL_GROUP_NAME = 'IndoorGML_PrimalSpaceFeatures' unless const_defined?(:PRIMAL_GROUP_NAME)
+        PRIMAL_GROUP_FEATURE = 'primalspace' unless const_defined?(:PRIMAL_GROUP_FEATURE)
+        ATTRIBUTE_DICTIONARY_NAME = 'IndoorGml' unless const_defined?(:ATTRIBUTE_DICTIONARY_NAME)
+
         def self.for(model)
           model.indoor_model
         end
@@ -62,6 +72,37 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class AppObserverInitialRefreshModalSuppressionTest < Minitest::Test
+        class FakeEntities
+          def initialize(items = [])
+            @items = items
+          end
+
+          def to_a
+            @items.dup
+          end
+        end
+
+        class FakeEntity
+          attr_reader :name, :entities
+
+          def initialize(name: '', feature: nil, children: [])
+            @name = name
+            @feature = feature
+            @entities = FakeEntities.new(children)
+          end
+
+          def valid?
+            true
+          end
+
+          def get_attribute(dictionary, key)
+            return nil unless dictionary == IndoorModel::ATTRIBUTE_DICTIONARY_NAME
+            return @feature if key == 'feature'
+
+            nil
+          end
+        end
+
         class FakeIndoorModel
           attr_reader :refresh_calls
 
@@ -76,11 +117,12 @@ module ULOL
         end
 
         class FakeModel
-          attr_reader :indoor_model, :observers
+          attr_reader :indoor_model, :observers, :entities
 
-          def initialize
+          def initialize(root_entities = [])
             @indoor_model = FakeIndoorModel.new
             @observers = []
+            @entities = FakeEntities.new(root_entities)
           end
 
           def add_observer(observer)
@@ -96,11 +138,12 @@ module ULOL
 
         def setup
           UI.app_observer_timers = []
+          UI.messagebox_calls = []
           UiFeedback.app_observer_suppression_reasons = []
         end
 
-        def test_initial_refresh_runs_inside_modal_suppression_scope
-          model = FakeModel.new
+        def test_initial_refresh_runs_only_for_primal_with_persisted_cell_space
+          model = model_with_persisted_cell_space
           observer = Indoor3DGmlAppObserver.new
 
           assert observer.schedule_initial_refresh(model)
@@ -113,14 +156,98 @@ module ULOL
           assert_equal [true], model.indoor_model.refresh_calls
         end
 
-        def test_open_model_registers_and_schedules_refresh
+        def test_model_without_primal_skips_initial_refresh
           model = FakeModel.new
+          observer = Indoor3DGmlAppObserver.new
+
+          assert observer.schedule_initial_refresh(model)
+          UI.app_observer_timers.shift.call
+
+          assert_empty model.indoor_model.refresh_calls
+          assert_empty UiFeedback.app_observer_suppression_reasons
+        end
+
+        def test_primal_without_cell_space_skips_initial_refresh
+          primal = FakeEntity.new(
+            name: IndoorModel::PRIMAL_GROUP_NAME,
+            feature: IndoorModel::PRIMAL_GROUP_FEATURE
+          )
+          model = FakeModel.new([primal])
+          observer = Indoor3DGmlAppObserver.new
+
+          assert observer.schedule_initial_refresh(model)
+          UI.app_observer_timers.shift.call
+
+          assert_empty model.indoor_model.refresh_calls
+        end
+
+        def test_tag_only_group_is_not_treated_as_persisted_cell_space
+          tag_only_group = FakeEntity.new(name: 'F01F01_IP_RM_23')
+          primal = FakeEntity.new(
+            name: IndoorModel::PRIMAL_GROUP_NAME,
+            feature: IndoorModel::PRIMAL_GROUP_FEATURE,
+            children: [tag_only_group]
+          )
+          model = FakeModel.new([primal])
+          observer = Indoor3DGmlAppObserver.new
+
+          assert observer.schedule_initial_refresh(model)
+          UI.app_observer_timers.shift.call
+
+          assert_empty model.indoor_model.refresh_calls
+        end
+
+        def test_nested_persisted_cell_space_is_detected
+          cell = FakeEntity.new(feature: 'CellSpace')
+          container = FakeEntity.new(children: [cell])
+          primal = FakeEntity.new(
+            name: IndoorModel::PRIMAL_GROUP_NAME,
+            feature: IndoorModel::PRIMAL_GROUP_FEATURE,
+            children: [container]
+          )
+          model = FakeModel.new([primal])
+          observer = Indoor3DGmlAppObserver.new
+
+          assert observer.schedule_initial_refresh(model)
+          UI.app_observer_timers.shift.call
+
+          assert_equal [true], model.indoor_model.refresh_calls
+        end
+
+        def test_initial_runtime_load_diagnostic_messagebox_is_suppressed
+          result = UI.messagebox(
+            "IndoorGML initial runtime load\n\n0.003 s\n\ncells=0\nstates=0\ntransitions=0"
+          )
+
+          assert_equal 1, result
+          assert_empty UI.messagebox_calls
+        end
+
+        def test_other_messageboxes_are_not_suppressed
+          assert_equal :shown, UI.messagebox('Other application message')
+          assert_equal [['Other application message', []]], UI.messagebox_calls
+        end
+
+        def test_open_model_registers_and_schedules_refresh
+          model = model_with_persisted_cell_space
           observer = Indoor3DGmlAppObserver.new
 
           observer.onOpenModel(model)
 
           assert_equal 1, model.observers.length
           assert_equal 1, UI.app_observer_timers.length
+        end
+
+        private
+
+        def model_with_persisted_cell_space
+          cell = FakeEntity.new(feature: 'CellSpace')
+          primal = FakeEntity.new(
+            name: IndoorModel::PRIMAL_GROUP_NAME,
+            feature: IndoorModel::PRIMAL_GROUP_FEATURE,
+            children: [cell]
+          )
+          FakeModel.new([primal])
         end
       end
     end
