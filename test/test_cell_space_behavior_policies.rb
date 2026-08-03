@@ -2,18 +2,6 @@
 
 require 'minitest/autorun'
 
-module UI
-  class << self
-    attr_accessor :behavior_policy_timers
-  end
-
-  def self.start_timer(_delay, _repeat, &block)
-    self.behavior_policy_timers ||= []
-    behavior_policy_timers << block
-    behavior_policy_timers.length
-  end
-end
-
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -48,14 +36,6 @@ module ULOL
 
         private
 
-        def with_bulk_cell_space_conversion
-          yield
-        end
-
-        def observer_routing_suppressed?
-          false
-        end
-
         def demote_cell_space_to_solid_group(cell_space)
           cell_space.sketchup_group
         end
@@ -88,6 +68,60 @@ module ULOL
           @snapshot_calls += 1
         end
       end
+
+      class BulkCellSpaceConversionService
+        attr_reader :calls
+
+        def initialize(calls:, rollback: false, commit_error: nil)
+          @calls = calls
+          @rollback = rollback
+          @commit_error = commit_error
+          @restore_active_path = proc { @calls << :restore_active_path }
+          @operation_runner = proc do |_name, rollback_if: nil, &block|
+            @calls << :operation_start
+            result = block.call
+            if rollback_if&.call
+              @calls << :abort
+            else
+              @calls << :commit
+              raise @commit_error if @commit_error
+            end
+            result
+          end
+        end
+
+        def call
+          result = @operation_runner.call(
+            'Bulk Convert',
+            rollback_if: proc { @rollback }
+          ) do
+            @calls << :work
+            :result
+          end
+
+          if @rollback
+            @calls << :runtime_restore
+            safely_restore_active_path(success: false)
+          else
+            safely_restore_active_path(success: true)
+          end
+          result
+        rescue StandardError
+          @calls << :runtime_restore
+          safely_restore_active_path(success: false)
+          raise
+        end
+
+        private
+
+        def safely_restore_active_path(success:)
+          @restore_active_path.call
+          true
+        rescue StandardError => e
+          Logger.puts("restore failed success=#{success}: #{e.message}")
+          false
+        end
+      end
     end
   end
 end
@@ -101,27 +135,54 @@ module ULOL
         Policy = CellSpaceBehaviorPolicies::ExplicitDemotionPolicy
 
         def setup
-          UI.behavior_policy_timers = []
           @model = IndoorModel.new
         end
 
-        def test_bulk_observer_suppression_survives_until_next_ui_tick
-          assert @model.respond_to?(:observer_routing_suppressed?)
+        def test_success_restores_active_path_before_commit_once
+          calls = []
+          service = BulkCellSpaceConversionService.new(calls: calls)
 
-          during = nil
-          result = @model.send(:with_bulk_cell_space_conversion) do
-            during = @model.observer_routing_suppressed?
-            :ok
-          end
+          assert_equal :result, service.call
+          assert_equal [
+            :operation_start,
+            :work,
+            :restore_active_path,
+            :commit
+          ], calls
+        end
 
-          assert_equal :ok, result
-          assert during
-          assert @model.observer_routing_suppressed?
-          assert_equal 1, UI.behavior_policy_timers.length
+        def test_rollback_restores_active_path_after_abort_and_runtime_restore
+          calls = []
+          service = BulkCellSpaceConversionService.new(calls: calls, rollback: true)
 
-          UI.behavior_policy_timers.shift.call
+          assert_equal :result, service.call
+          assert_equal [
+            :operation_start,
+            :work,
+            :abort,
+            :runtime_restore,
+            :restore_active_path
+          ], calls
+        end
 
-          refute @model.observer_routing_suppressed?
+        def test_commit_failure_allows_restore_retry_after_runtime_restore
+          calls = []
+          service = BulkCellSpaceConversionService.new(
+            calls: calls,
+            commit_error: RuntimeError.new('commit failed')
+          )
+
+          error = assert_raises(RuntimeError) { service.call }
+
+          assert_equal 'commit failed', error.message
+          assert_equal [
+            :operation_start,
+            :work,
+            :restore_active_path,
+            :commit,
+            :runtime_restore,
+            :restore_active_path
+          ], calls
         end
 
         def test_explicit_demotion_blocks_tag_auto_conversion_without_changing_tag
