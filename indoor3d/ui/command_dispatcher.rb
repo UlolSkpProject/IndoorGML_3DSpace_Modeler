@@ -24,3 +24,5 @@ module ULOL
     end
   end
 end
+
+require_relative '../application/diagnostics/create_cell_space_undo_trace'
