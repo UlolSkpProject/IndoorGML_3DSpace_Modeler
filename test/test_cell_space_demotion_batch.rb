@@ -24,8 +24,24 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class CellSpaceDemotionBatchTest < Minitest::Test
-        Group = Struct.new(:name) do
+        Tag = Struct.new(:name)
+
+        class Group
+          attr_reader :name, :layer_assignments
+          attr_accessor :layer
+
+          def initialize(name, tag_name)
+            @name = name
+            @layer = Tag.new(tag_name)
+            @layer_assignments = 0
+          end
+
           def valid? = true
+
+          def layer=(value)
+            @layer_assignments += 1
+            @layer = value
+          end
         end
 
         class State
@@ -99,11 +115,10 @@ module ULOL
 
           attr_reader :events, :restored_snapshot
 
-          def initialize(cell_spaces, transitions, events = [], fail_tag_consume: false)
+          def initialize(cell_spaces, transitions, events = [])
             @cell_spaces = cell_spaces
             @transitions = transitions
             @events = events
-            @fail_tag_consume = fail_tag_consume
             @feature_registry = FeatureRegistry.new(@events)
             @attribute_serializer = AttributeSerializer.new(@events)
             @scene_group_guard = SceneGuard.new(@events)
@@ -179,11 +194,6 @@ module ULOL
 
           def indoor_gml_attribute_dictionary_empty?(_group) = true
 
-          def consume_demoted_group_tag(group)
-            @events << [:tag_consume, group.name]
-            !@fail_tag_consume
-          end
-
           def entity_observer_key(group) = group.name
 
           def unlock_indoor_entity(group)
@@ -201,8 +211,8 @@ module ULOL
 
         def build_fixture
           events = []
-          group_a = Group.new('group-a')
-          group_b = Group.new('group-b')
+          group_a = Group.new('group-a', 'F01F01_IP_RM_23')
+          group_b = Group.new('group-b', 'F01F01_RM_DR')
           state_a = State.new('state-a', events)
           state_b = State.new('state-b', events)
           state_c = State.new('state-c', events)
@@ -213,9 +223,10 @@ module ULOL
           [events, [cell_a, cell_b], [transition_ab, transition_ac]]
         end
 
-        def test_multiple_cells_are_processed_by_global_stages
+        def test_multiple_cells_are_processed_by_global_stages_and_keep_tags
           events, cell_spaces, transitions = build_fixture
           host = Host.new(cell_spaces, transitions, events)
+          original_tags = cell_spaces.map { |cell| cell.sketchup_group.layer.name }
 
           assert host.run(cell_spaces)
           categories = host.events.map(&:first)
@@ -225,16 +236,19 @@ module ULOL
           assert_operator categories.rindex(:state_unregister), :<, categories.index(:cell_unregister)
           assert_operator categories.rindex(:cell_unregister), :<, categories.index(:adjacency_remove)
           assert_operator categories.rindex(:adjacency_remove), :<, categories.index(:attributes)
-          assert_operator categories.rindex(:attributes), :<, categories.index(:tag_consume)
-          assert_operator categories.rindex(:tag_consume), :<, categories.index(:scene_untrack)
+          assert_operator categories.rindex(:attributes), :<, categories.index(:scene_untrack)
           assert_equal 2, categories.count(:transition)
-          assert_equal 2, categories.count(:tag_consume)
           assert_equal 1, categories.count(:ui_projection_refresh)
+          assert_equal original_tags,
+                       cell_spaces.map { |cell| cell.sketchup_group.layer.name }
+          assert cell_spaces.all? { |cell| cell.sketchup_group.layer_assignments.zero? }
         end
 
-        def test_single_cell_uses_the_same_batch_path
+        def test_single_cell_uses_same_batch_path_and_keeps_tag
           events, cell_spaces, transitions = build_fixture
           host = Host.new(cell_spaces, transitions, events)
+          group = cell_spaces.first.sketchup_group
+          original_tag = group.layer.name
 
           assert host.run([cell_spaces.first])
           categories = host.events.map(&:first)
@@ -246,23 +260,9 @@ module ULOL
           assert_includes categories, :cell_unregister
           assert_includes categories, :adjacency_remove
           assert_includes categories, :attributes
-          assert_includes categories, :tag_consume
           assert_equal 1, categories.count(:ui_projection_refresh)
-        end
-
-        def test_tag_consume_failure_rolls_back_batch
-          events, cell_spaces, transitions = build_fixture
-          host = Host.new(
-            cell_spaces,
-            transitions,
-            events,
-            fail_tag_consume: true
-          )
-
-          refute host.run([cell_spaces.first])
-          assert_equal :runtime_snapshot, host.restored_snapshot
-          assert_includes host.events.map(&:first), :tag_consume
-          refute_includes host.events.map(&:first), :ui_projection_refresh
+          assert_equal original_tag, group.layer.name
+          assert_equal 0, group.layer_assignments
         end
       end
     end
