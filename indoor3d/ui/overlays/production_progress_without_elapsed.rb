@@ -27,6 +27,21 @@ module ULOL
             end
           end
         end
+
+        module ProductionProgressRendererEveryCount
+          private
+
+          def stage_signature(snapshot)
+            stage = snapshot[:stage]
+            [
+              stage&.dig(:name),
+              stage&.dig(:status),
+              stage&.dig(:completed),
+              stage&.dig(:total),
+              snapshot[:status]
+            ]
+          end
+        end
       end
 
       if defined?(ProductionProgress::ProductionProgressOverlay)
@@ -34,6 +49,14 @@ module ULOL
           ProductionProgress::ProductionProgressOverlayWithoutElapsed
         ) unless ProductionProgress::ProductionProgressOverlay.ancestors.include?(
           ProductionProgress::ProductionProgressOverlayWithoutElapsed
+        )
+      end
+
+      if defined?(ProductionProgress::SketchupOverlayProgressRenderer)
+        ProductionProgress::SketchupOverlayProgressRenderer.prepend(
+          ProductionProgress::ProductionProgressRendererEveryCount
+        ) unless ProductionProgress::SketchupOverlayProgressRenderer.ancestors.include?(
+          ProductionProgress::ProductionProgressRendererEveryCount
         )
       end
     end

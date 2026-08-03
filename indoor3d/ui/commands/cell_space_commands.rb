@@ -41,14 +41,15 @@ module ULOL
             conversion_jobs = CellSpaceConversionJobBuilder.apply_fallback_storey(conversion_jobs, storey)
             progress_session = start_cell_space_create_progress(model, conversion_jobs.length)
 
-            result = indoor_model.convert_cell_space_jobs_bulk(
-              conversion_jobs,
-              fallback_target: [cell_type, category_code],
-              original_active_path: original_active_path,
-              operation_name: 'Convert Solid Groups to CellSpace',
-              activate_root_context: true,
-              progress: progress_session
-            )
+            result = ProductionProgress::CellSpaceProgressContext.with(progress_session) do
+              indoor_model.convert_cell_space_jobs_bulk(
+                conversion_jobs,
+                fallback_target: [cell_type, category_code],
+                original_active_path: original_active_path,
+                operation_name: 'Convert Solid Groups to CellSpace',
+                activate_root_context: true
+              )
+            end
             finish_cell_space_create_progress(progress_session, result)
             close_cell_space_create_progress(progress_session)
             progress_session = nil
