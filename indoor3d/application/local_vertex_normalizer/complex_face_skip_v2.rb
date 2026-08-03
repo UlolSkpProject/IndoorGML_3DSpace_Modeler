@@ -190,7 +190,7 @@ module ULOL
 
         def complex_face_grid_key_v2(point)
           [point.x, point.y, point.z].map do |coordinate|
-            ((coordinate.to_f * MM_PER_INCH) / @tolerance_mm).round
+            ((coordinate.to_f * LocalVertexNormalizer::MM_PER_INCH) / @tolerance_mm).round
           end
         end
 
