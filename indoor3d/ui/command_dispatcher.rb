@@ -26,5 +26,6 @@ module ULOL
 end
 
 require_relative '../application/progress/runtime_refresh_progress_integration'
+require_relative '../application/progress/runtime_refresh_stage_handoff'
 require_relative '../application/progress/gml_export_progress_integration'
 require_relative '../application/progress/gml_export_progress_stage_order'
