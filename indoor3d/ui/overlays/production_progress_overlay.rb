@@ -126,6 +126,7 @@ module ULOL
             session_metadata = metadata_hash(snapshot[:metadata])
             stage_count = metadata_value(stage_metadata, :stage_count)
             stage_count = metadata_value(session_metadata, :stage_count) if stage_count.nil?
+            stage_count = default_stage_count(session_metadata) if stage_count.nil?
             stage_count = stage_count.to_i
             return nil unless stage_count.positive?
 
@@ -137,6 +138,20 @@ module ULOL
                            end
             stage_number = [[stage_number, 1].max, stage_count].min
             "#{stage_number} / #{stage_count}단계"
+          rescue StandardError
+            nil
+          end
+
+          def default_stage_count(session_metadata)
+            operation = metadata_value(session_metadata, :operation).to_s
+            case operation
+            when 'cell_space_create'
+              7
+            when 'gml_export'
+              5
+            when 'runtime_refresh'
+              metadata_value(session_metadata, :initial_model_load) == true ? 6 : 4
+            end
           rescue StandardError
             nil
           end
