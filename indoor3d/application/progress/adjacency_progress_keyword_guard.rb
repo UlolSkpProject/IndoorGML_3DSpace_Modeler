@@ -40,14 +40,11 @@ module ULOL
           end
         end
 
-        # Never forward :progress through TopologyCoordinator. A stale module left
-        # by DevLoader may try to add it again, so the visible context is cleared
-        # while the original topology method runs.
         module TopologyCoordinatorProgressKeywordGuard
           def synchronize_all(**kwargs)
             filtered = kwargs.dup
             explicit_sink = filtered.delete(:progress)
-            sink = explicit_sink || AdjacencyProgressContext.current
+            sink = AdjacencyProgressContext.current || explicit_sink
             AdjacencyProgressExecutionContext.with(sink) do
               AdjacencyProgressContext.with(nil) { super(**filtered) }
             end
@@ -56,30 +53,44 @@ module ULOL
           def synchronize_within(cell_spaces, **kwargs)
             filtered = kwargs.dup
             explicit_sink = filtered.delete(:progress)
-            sink = explicit_sink || AdjacencyProgressContext.current
+            sink = AdjacencyProgressContext.current || explicit_sink
             AdjacencyProgressExecutionContext.with(sink) do
               AdjacencyProgressContext.with(nil) { super(cell_spaces, **filtered) }
             end
           end
         end
 
-        # AdjacencyService owns the detailed stage events. The sink is injected
-        # only into its private helpers; no public topology/material call receives
-        # a new keyword. While a progress sink is active every logical item emits
-        # an update instead of using the default 250-item checkpoint.
         module AdjacencyServiceProgressContextBridge
-          private
-
-          def adjacency_snapshot_entries(*arguments, progress: nil)
-            super(*arguments, progress: effective_progress_sink(progress))
+          def synchronize_all(*arguments, **keywords)
+            delegate_without_progress(arguments, keywords) { |args, filtered| super(*args, **filtered) }
           end
 
-          def compute_pair_results(entries, tolerance:, progress: nil)
-            super(
-              entries,
-              tolerance: tolerance,
-              progress: effective_progress_sink(progress)
-            )
+          def synchronize_within(*arguments, **keywords)
+            delegate_without_progress(arguments, keywords) { |args, filtered| super(*args, **filtered) }
+          end
+
+          private
+
+          def adjacency_snapshot_entries(*arguments, **keywords)
+            delegate_without_progress(arguments, keywords) { |args, filtered| super(*args, **filtered) }
+          end
+
+          def compute_pair_results(entries, tolerance:, **keywords)
+            delegate_without_progress([entries], keywords) do |args, filtered|
+              super(*args, tolerance: tolerance, **filtered)
+            end
+          end
+
+          def candidate_pair_indices(snapshots, tolerance, **keywords)
+            delegate_without_progress([snapshots, tolerance], keywords) do |args, filtered|
+              super(*args, **filtered)
+            end
+          end
+
+          def compute_pair_chunk(snapshots, pair_indices, tolerance, **keywords)
+            delegate_without_progress([snapshots, pair_indices, tolerance], keywords) do |args, filtered|
+              super(*args, **filtered)
+            end
           end
 
           def apply_pair_results(
@@ -88,16 +99,29 @@ module ULOL
             transition_builder:,
             transition_eraser:,
             stale_pair_keys: nil,
-            progress: nil
+            **keywords
           )
-            super(
-              entries,
-              pair_results,
-              transition_builder: transition_builder,
-              transition_eraser: transition_eraser,
-              stale_pair_keys: stale_pair_keys,
-              progress: effective_progress_sink(progress)
-            )
+            delegate_without_progress([entries, pair_results], keywords) do |args, filtered|
+              super(
+                *args,
+                transition_builder: transition_builder,
+                transition_eraser: transition_eraser,
+                stale_pair_keys: stale_pair_keys,
+                **filtered
+              )
+            end
+          end
+
+          def emit_stage_start(progress = nil, **payload)
+            super(effective_progress_sink(progress), **payload)
+          end
+
+          def emit_stage_progress(progress = nil, **payload)
+            super(effective_progress_sink(progress), **payload)
+          end
+
+          def emit_stage_finish(progress = nil, **payload)
+            super(effective_progress_sink(progress), **payload)
           end
 
           def progress_checkpoint?(completed, total)
@@ -106,19 +130,26 @@ module ULOL
             completed.to_i.positive? && completed.to_i <= total.to_i
           end
 
+          def delegate_without_progress(arguments, keywords)
+            filtered = keywords.dup
+            explicit_sink = filtered.delete(:progress)
+            sink = effective_progress_sink(explicit_sink)
+            AdjacencyProgressExecutionContext.with(sink) do
+              yield(arguments, filtered)
+            end
+          end
+
           def active_progress_sink?
             !effective_progress_sink(nil).nil?
           end
 
           def effective_progress_sink(progress)
-            progress ||
-              AdjacencyProgressExecutionContext.current ||
-              AdjacencyProgressContext.current
+            AdjacencyProgressExecutionContext.current ||
+              AdjacencyProgressContext.current ||
+              progress
           end
         end
 
-        # The public IndoorModel conversion signature remains untouched. The
-        # progress session is injected only after the existing service is built.
         module IndoorModelCellSpaceProgressContextInjection
           private
 

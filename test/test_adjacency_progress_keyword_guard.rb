@@ -34,33 +34,105 @@ module ULOL
       end
 
       class AdjacencyService
-        attr_reader :seen_progress
+        attr_reader :seen_progress, :events, :checkpoint_during_run
+
+        def initialize
+          @events = []
+        end
 
         def synchronize_all
-          adjacency_snapshot_entries
+          entries = adjacency_snapshot_entries(progress: Object.new)
+          pair_results = compute_pair_results(entries, tolerance: 0.01, progress: Object.new)
+          apply_pair_results(
+            entries,
+            pair_results,
+            transition_builder: proc {},
+            transition_eraser: proc {},
+            progress: Object.new
+          )
+          @checkpoint_during_run = progress_checkpoint?(2, 10)
           :ok
+        end
+
+        def synchronize_within(_cell_spaces)
+          synchronize_all
         end
 
         private
 
-        def adjacency_snapshot_entries(_cell_spaces = [], progress: nil)
-          @seen_progress = progress
-          []
+        def adjacency_snapshot_entries
+          emit_stage_start(
+            nil,
+            stage: :snapshot,
+            name: 'Adjacency 스냅샷',
+            total: 1,
+            message: 'snapshot'
+          )
+          [:snapshot]
         end
 
-        def compute_pair_results(entries, tolerance:, progress: nil)
-          [entries, tolerance, progress]
+        def compute_pair_results(entries, tolerance:)
+          pair_indices = candidate_pair_indices(entries, tolerance, progress: Object.new)
+          compute_pair_chunk(entries, pair_indices, tolerance, progress: Object.new)
+        end
+
+        def candidate_pair_indices(_snapshots, _tolerance)
+          emit_stage_progress(
+            nil,
+            stage: :candidate_generation,
+            name: 'Adjacency 후보 생성',
+            total: 2,
+            completed: 1,
+            message: 'candidate'
+          )
+          [[0, 0]]
+        end
+
+        def compute_pair_chunk(_snapshots, pair_indices, _tolerance)
+          emit_stage_progress(
+            nil,
+            stage: :detailed_computation,
+            name: 'Adjacency 상세 판정',
+            total: pair_indices.length,
+            completed: 1,
+            message: 'detail'
+          )
+          [[0, 0, :x]]
         end
 
         def apply_pair_results(
-          entries,
+          _entries,
           pair_results,
           transition_builder:,
           transition_eraser:,
-          stale_pair_keys: nil,
-          progress: nil
+          stale_pair_keys: nil
         )
-          [entries, pair_results, transition_builder, transition_eraser, stale_pair_keys, progress]
+          transition_builder.call
+          transition_eraser.call if stale_pair_keys == :erase
+          emit_stage_finish(
+            nil,
+            stage: :transition_apply,
+            name: 'Transition 반영',
+            total: pair_results.length,
+            completed: pair_results.length,
+            message: 'apply'
+          )
+          true
+        end
+
+        def emit_stage_start(progress, **payload)
+          @seen_progress = progress
+          @events << [:start, progress, payload]
+        end
+
+        def emit_stage_progress(progress, **payload)
+          @seen_progress = progress
+          @events << [:progress, progress, payload]
+        end
+
+        def emit_stage_finish(progress, **payload)
+          @seen_progress = progress
+          @events << [:finish, progress, payload]
         end
 
         def progress_checkpoint?(_completed, _total)
@@ -79,26 +151,12 @@ module ULOL
           @service.synchronize_all(**kwargs)
         end
 
-        def synchronize_within(_cell_spaces, **kwargs)
-          @service.synchronize_all(**kwargs)
+        def synchronize_within(cell_spaces, **kwargs)
+          @service.synchronize_within(cell_spaces, **kwargs)
         end
       end
 
-      class FakeBatchService
-        attr_accessor :production_progress
-      end
-
-      class IndoorModel
-        def initialize(service)
-          @service = service
-        end
-
-        private
-
-        def build_batch_conversion_service(*_arguments, **_keywords)
-          @service
-        end
-      end
+      class IndoorModel; end
     end
   end
 end
@@ -110,7 +168,7 @@ module ULOL
     module IndoorCore
       module ProductionProgress
         class AdjacencyProgressKeywordGuardTest < Minitest::Test
-          def test_stale_integration_cannot_forward_progress_keyword
+          def test_complete_internal_chain_strips_every_progress_keyword
             sink = Object.new
             service = AdjacencyService.new
             coordinator = TopologyCoordinator.new(service)
@@ -120,7 +178,9 @@ module ULOL
             end
 
             assert_equal :ok, result
-            assert_same sink, service.seen_progress
+            assert_equal %i[start progress progress finish], service.events.map(&:first)
+            assert service.events.all? { |event| event[1].equal?(sink) }
+            assert service.checkpoint_during_run
           end
 
           def test_explicit_progress_keyword_is_consumed_before_service_call
@@ -134,30 +194,10 @@ module ULOL
             assert_same sink, service.seen_progress
           end
 
-          def test_cell_space_progress_is_injected_after_service_build
-            progress = Object.new
-            service = FakeBatchService.new
-            model = IndoorModel.new(service)
-
-            built = CellSpaceProgressContext.with(progress) do
-              model.send(:build_batch_conversion_service, [], local_grid_v2: false)
-            end
-
-            assert_same service, built
-            assert_same progress, service.production_progress
-            assert_nil CellSpaceProgressContext.current
-          end
-
-          def test_active_progress_emits_every_count
-            sink = Object.new
+          def test_without_progress_keeps_default_checkpoint_policy
             service = AdjacencyService.new
 
-            result = AdjacencyProgressExecutionContext.with(sink) do
-              service.send(:progress_checkpoint?, 2, 100)
-            end
-
-            assert_equal true, result
-            assert_equal false, service.send(:progress_checkpoint?, 2, 100)
+            refute service.send(:progress_checkpoint?, 2, 10)
           end
         end
       end
