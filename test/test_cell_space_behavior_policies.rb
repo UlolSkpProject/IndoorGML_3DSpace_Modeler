@@ -33,12 +33,14 @@ module ULOL
 
       class IndoorModel
         attr_reader :base_auto_convert_calls,
+                    :base_recursive_convert_calls,
                     :base_register_calls,
                     :legacy_etc_operation_calls,
                     :snapshot_calls
 
         def initialize
           @base_auto_convert_calls = 0
+          @base_recursive_convert_calls = 0
           @base_register_calls = 0
           @legacy_etc_operation_calls = 0
           @snapshot_calls = 0
@@ -60,6 +62,11 @@ module ULOL
 
         def auto_convert_tagged_primal_entity(_entity)
           @base_auto_convert_calls += 1
+          true
+        end
+
+        def auto_convert_tagged_descendants(_container, _transformation)
+          @base_recursive_convert_calls += 1
           true
         end
 
@@ -99,20 +106,22 @@ module ULOL
         end
 
         def test_bulk_observer_suppression_survives_until_next_ui_tick
+          assert @model.respond_to?(:observer_routing_suppressed?)
+
           during = nil
           result = @model.send(:with_bulk_cell_space_conversion) do
-            during = @model.send(:observer_routing_suppressed?)
+            during = @model.observer_routing_suppressed?
             :ok
           end
 
           assert_equal :ok, result
           assert during
-          assert @model.send(:observer_routing_suppressed?)
+          assert @model.observer_routing_suppressed?
           assert_equal 1, UI.behavior_policy_timers.length
 
           UI.behavior_policy_timers.shift.call
 
-          refute @model.send(:observer_routing_suppressed?)
+          refute @model.observer_routing_suppressed?
         end
 
         def test_explicit_demotion_blocks_tag_auto_conversion_without_changing_tag
@@ -125,6 +134,8 @@ module ULOL
 
           refute @model.send(:auto_convert_tagged_primal_entity, group)
           assert_equal 0, @model.base_auto_convert_calls
+          refute @model.send(:auto_convert_tagged_descendants, group, :transformation)
+          assert_equal 0, @model.base_recursive_convert_calls
           assert_nil @model.send(:target_for_tagged_child, group, :parent_target)
         end
 
