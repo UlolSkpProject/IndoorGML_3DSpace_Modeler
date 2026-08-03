@@ -7,6 +7,10 @@
 # Profilers remain outermost so final simplification and performance wrappers are
 # included in timing and workload diagnostics.
 require_relative 'local_vertex_normalizer/legacy_kernel'
+# Keep the strict triangle shortcut underneath source-boundary normalization.
+# Changed source loops must still be reconstructed by the correctness wrapper;
+# only unchanged exact triangular loops may reach this shortcut.
+require_relative 'local_vertex_normalizer/source_boundary_triangle_fast_path_v2'
 require_relative 'local_vertex_normalizer/coplanar_shared_edge_groups'
 require_relative 'local_vertex_normalizer/source_boundary_normalization_v2'
 require_relative 'local_vertex_normalizer/source_collapsed_sliver_cleanup_v2'
