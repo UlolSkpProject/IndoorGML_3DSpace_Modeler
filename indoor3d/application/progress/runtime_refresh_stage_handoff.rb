@@ -41,14 +41,16 @@ module ULOL
 
           def build_runtime_refresh_progress_session(initial_model_load)
             model = @model || Sketchup.active_model
+            stage_count = initial_model_load == true ? 6 : 4
             ProductionProgressSession.new(
               title: initial_model_load == true ? 'IndoorGML 모델 열기' : 'IndoorGML Runtime Refresh',
-              total: initial_model_load == true ? 6 : 4,
+              total: stage_count,
               renderer: RuntimeRefreshProgressRenderer.new(model: model),
               cancellable: false,
               metadata: {
                 operation: :runtime_refresh,
                 initial_model_load: initial_model_load == true,
+                stage_count: stage_count,
                 model_object_id: model&.object_id
               }
             )
