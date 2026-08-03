@@ -125,7 +125,7 @@ module ULOL
         def test_success_refreshes_runtime_display_without_apply_display_state
           indoor_model = IndoorModel.new(model: @model, editor_session: @session)
 
-          assert_equal :converted, indoor_model.with_bulk_cell_space_conversion
+          assert_equal :converted, indoor_model.__send__(:with_bulk_cell_space_conversion)
           assert_equal 1, @session.overlay_registration_count
           assert_equal 1, @session.overlay_enabled_update_count
           assert_equal 1, @session.geometry_visibility_count
@@ -141,7 +141,7 @@ module ULOL
           )
 
           assert_raises(RuntimeError) do
-            indoor_model.with_bulk_cell_space_conversion
+            indoor_model.__send__(:with_bulk_cell_space_conversion)
           end
           assert_equal 0, @session.overlay_registration_count
           assert_equal 0, @session.overlay_enabled_update_count
