@@ -62,25 +62,33 @@ module ULOL
             end
           end
 
-          def test_selects_nice_steps_for_about_five_hundred_updates
-            assert_equal 1, step(320)
-            assert_equal 2, step(780)
-            assert_equal 10, step(4_200)
-            assert_equal 20, step(8_500)
-            assert_equal 50, step(24_000)
-            assert_equal 200, step(80_000)
+          def test_selects_nice_steps_for_at_most_about_one_hundred_updates
+            assert_equal 1, step(87)
+            assert_equal 5, step(320)
+            assert_equal 10, step(780)
+            assert_equal 50, step(4_200)
+            assert_equal 100, step(8_500)
+            assert_equal 500, step(24_000)
+            assert_equal 1_000, step(80_000)
           end
 
           def test_checkpoint_uses_adaptive_step
             assert checkpoint(1, 24_000)
-            assert checkpoint(50, 24_000)
-            refute checkpoint(51, 24_000)
+            assert checkpoint(500, 24_000)
+            refute checkpoint(501, 24_000)
             assert checkpoint(24_000, 24_000)
           end
 
-          def test_small_stage_updates_every_count
-            assert checkpoint(2, 320)
-            assert checkpoint(319, 320)
+          def test_stage_below_one_hundred_updates_every_count
+            assert checkpoint(2, 87)
+            assert checkpoint(86, 87)
+          end
+
+          def test_medium_stage_uses_selected_step
+            refute checkpoint(4, 320)
+            assert checkpoint(5, 320)
+            assert checkpoint(315, 320)
+            assert checkpoint(320, 320)
           end
 
           def test_without_progress_uses_original_policy

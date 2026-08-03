@@ -61,7 +61,7 @@ module ULOL
         end
 
         module AdjacencyServiceProgressContextBridge
-          TARGET_PROGRESS_UPDATES_PER_STAGE = 500
+          TARGET_PROGRESS_UPDATES_PER_STAGE = 100
 
           def synchronize_all(*arguments, **keywords)
             delegate_without_progress(arguments, keywords) { |args, filtered| super(*args, **filtered) }
