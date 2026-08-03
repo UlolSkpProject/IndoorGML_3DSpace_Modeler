@@ -3,6 +3,34 @@
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
+      # A legacy/dev runtime profiler can display this diagnostic directly through
+      # UI.messagebox, bypassing UiFeedback. Suppress only this exact diagnostic
+      # family; all application confirmations and other message boxes remain
+      # untouched.
+      module InitialRuntimeLoadDiagnosticMessageboxGuard
+        MESSAGE_PREFIX = 'IndoorGML initial runtime load'
+
+        def messagebox(message, *arguments)
+          if message.to_s.start_with?(MESSAGE_PREFIX)
+            IndoorCore::Logger.puts(
+              '[IndoorGML] Initial runtime load diagnostic messagebox suppressed'
+            )
+            return defined?(IDOK) ? IDOK : 1
+          end
+
+          super
+        end
+      end
+
+      if defined?(UI) && UI.respond_to?(:messagebox)
+        singleton = UI.singleton_class
+        singleton.prepend(
+          InitialRuntimeLoadDiagnosticMessageboxGuard
+        ) unless singleton.ancestors.include?(
+          InitialRuntimeLoadDiagnosticMessageboxGuard
+        )
+      end
+
       class Indoor3DGmlAppObserver < Sketchup::AppObserver
         INITIAL_REFRESH_DELAY_SECONDS = 0.5
 
@@ -56,6 +84,15 @@ module ULOL
           UI.start_timer(INITIAL_REFRESH_DELAY_SECONDS, false) do
             next unless @initial_refresh_states[key] == :scheduled
 
+            unless initial_runtime_refresh_applicable?(model)
+              @initial_refresh_states[key] = :skipped
+              IndoorCore::Logger.puts(
+                '[IndoorGML] Initial runtime refresh skipped: ' \
+                'no PrimalSpaceFeatures with persisted CellSpace'
+              )
+              next
+            end
+
             @initial_refresh_states[key] = :running
             begin
               run_initial_refresh_without_modal_feedback(model)
@@ -82,6 +119,90 @@ module ULOL
         end
 
         private
+
+        def initial_runtime_refresh_applicable?(model)
+          return false unless model&.respond_to?(:entities)
+
+          root_entities = model.entities
+          return false unless root_entities&.respond_to?(:to_a)
+
+          root_entities.to_a.any? do |entity|
+            initial_runtime_primal_group?(entity) &&
+              persisted_cell_space_inside?(entity)
+          end
+        rescue StandardError => e
+          IndoorCore::Logger.puts(
+            "[IndoorGML] Initial runtime refresh preflight failed: " \
+            "#{e.class}: #{e.message}"
+          )
+          false
+        end
+
+        def initial_runtime_primal_group?(entity)
+          return false unless valid_runtime_entity?(entity)
+          return false unless entity.respond_to?(:entities)
+
+          feature = indoor_feature_value(entity)
+          feature == IndoorModel::PRIMAL_GROUP_FEATURE ||
+            (entity.respond_to?(:name) && entity.name.to_s == IndoorModel::PRIMAL_GROUP_NAME)
+        rescue StandardError
+          false
+        end
+
+        def persisted_cell_space_inside?(primal_group)
+          scan_persisted_cell_space_entities(primal_group.entities, {})
+        rescue StandardError
+          false
+        end
+
+        def scan_persisted_cell_space_entities(entities, visited)
+          return false unless entities&.respond_to?(:to_a)
+
+          entities.to_a.any? do |entity|
+            next false unless valid_runtime_entity?(entity)
+            next true if indoor_feature_value(entity) == 'CellSpace'
+
+            nested_entities = runtime_nested_entities(entity)
+            next false unless nested_entities
+
+            key = nested_entities.object_id
+            next false if visited[key]
+
+            visited[key] = true
+            scan_persisted_cell_space_entities(nested_entities, visited)
+          end
+        end
+
+        def runtime_nested_entities(entity)
+          return entity.entities if entity.respond_to?(:entities) && entity.entities
+
+          definition = entity.definition if entity.respond_to?(:definition)
+          return definition.entities if definition&.respond_to?(:entities)
+
+          nil
+        rescue StandardError
+          nil
+        end
+
+        def indoor_feature_value(entity)
+          return '' unless entity.respond_to?(:get_attribute)
+
+          entity.get_attribute(
+            IndoorModel::ATTRIBUTE_DICTIONARY_NAME,
+            'feature'
+          ).to_s
+        rescue StandardError
+          ''
+        end
+
+        def valid_runtime_entity?(entity)
+          return false if entity.nil?
+          return entity.valid? == true if entity.respond_to?(:valid?)
+
+          true
+        rescue StandardError
+          false
+        end
 
         def run_initial_refresh_without_modal_feedback(model)
           refresh = proc do
@@ -133,9 +254,7 @@ module ULOL
             IndoorCore::Logger.puts "[IndoorGML] Shutdown cleanup failed: #{e.class}: #{e.message}"
           end
         end
-
       end
-
     end
   end
 end
