@@ -108,14 +108,50 @@ module ULOL
             elapsed = format('%.1f초', snapshot[:elapsed].to_f)
             return format('%5.1f%% · %s', displayed_percent(snapshot), elapsed) unless stage
 
-            stage_name = stage[:name].to_s
+            parts = []
+            position = stage_position_text(snapshot, stage)
+            parts << position unless position.nil?
+            parts << stage[:name].to_s
+
             completed = stage[:completed].to_i
             total = stage[:total].to_i
-            if total.positive?
-              format('%s · %d / %d · %5.1f%% · %s', stage_name, completed, total, displayed_percent(snapshot), elapsed)
-            else
-              format('%s · %5.1f%% · %s', stage_name, displayed_percent(snapshot), elapsed)
-            end
+            parts << "#{completed} / #{total}" if total.positive?
+            parts << format('%5.1f%%', displayed_percent(snapshot))
+            parts << elapsed
+            parts.join(' · ')
+          end
+
+          def stage_position_text(snapshot, stage)
+            stage_metadata = metadata_hash(stage[:metadata])
+            session_metadata = metadata_hash(snapshot[:metadata])
+            stage_count = metadata_value(stage_metadata, :stage_count)
+            stage_count = metadata_value(session_metadata, :stage_count) if stage_count.nil?
+            stage_count = stage_count.to_i
+            return nil unless stage_count.positive?
+
+            explicit_index = metadata_value(stage_metadata, :stage_index)
+            stage_number = if explicit_index.nil?
+                             Array(snapshot[:stages]).length + 1
+                           else
+                             explicit_index.to_i + 1
+                           end
+            stage_number = [[stage_number, 1].max, stage_count].min
+            "#{stage_number} / #{stage_count}단계"
+          rescue StandardError
+            nil
+          end
+
+          def metadata_hash(value)
+            value.respond_to?(:[]) ? value : {}
+          end
+
+          def metadata_value(metadata, key)
+            value = metadata[key]
+            return value unless value.nil?
+
+            metadata[key.to_s]
+          rescue StandardError
+            nil
           end
 
           def displayed_percent(snapshot)
