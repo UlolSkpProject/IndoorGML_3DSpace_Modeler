@@ -6,71 +6,40 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       module CellSpaceBehaviorPolicies
-        # Compatibility alias for existing callers/tests.
+        # Compatibility alias for existing callers/tests and files written by the
+        # earlier marker-based policy. Tag-based conversion itself is now allowed
+        # only through the explicit Create CellSpace command path.
         ExplicitDemotionPolicy = CellSpaceAutoConversionPolicy unless const_defined?(
           :ExplicitDemotionPolicy,
           false
         )
 
-        # CellSpaceLifecycleService resolves type/category/storey from the source
-        # Tag before initialize_scene is called. Consume the outer Group Tag at
-        # this point so every successful manual/automatic Create path finishes on
-        # Untagged without disturbing nested Face/Edge Tags.
-        module CellSpaceLifecycleTagConsumption
-          def initialize_scene(cell_space, storey: default_storey_name)
-            group = cell_space&.sketchup_group
-            unless CellSpaceAutoConversionPolicy.consume_tag!(group)
-              raise 'CellSpace Tag could not be moved to Untagged'
-            end
-            unless CellSpaceAutoConversionPolicy.enable!(group)
-              raise 'Legacy CellSpace automatic-conversion marker cleanup failed'
-            end
-
-            super
-          end
-        end
-
         module IndoorModelCellSpaceBehavior
           private
 
-          # Explicit demotion must remove the same outer classification Tag that
-          # Create consumes. Otherwise finish/load normalization sees the mapped
-          # Tag and recreates the CellSpace.
-          def demote_cell_space_to_solid_group(cell_space)
-            group = super
-            return group unless group&.valid?
-
-            unless CellSpaceAutoConversionPolicy.consume_tag!(group, model: @model)
-              raise 'Demoted CellSpace Tag could not be moved to Untagged'
-            end
-            unless CellSpaceAutoConversionPolicy.enable!(group)
-              raise 'Legacy CellSpace automatic-conversion marker cleanup failed'
-            end
-            group
+          # Primal normalization runs on edit finish and initial model load. These
+          # maintenance paths must never infer a new CellSpace from a SketchUp Tag.
+          # The explicit Create CellSpace workflow still resolves type/category/
+          # storey from the selected Group Tag through CellSpaceLifecycleService.
+          def auto_convert_tagged_primal_entity(_entity)
+            false
           end
 
-          # Legacy marker checks remain so older files saved by the previous
-          # marker-based policy are not automatically reconverted on first open.
-          def auto_convert_tagged_primal_entity(entity)
-            return false if CellSpaceAutoConversionPolicy.disabled?(entity)
-
-            super
+          def auto_convert_direct_tagged_children(_container)
+            false
           end
 
-          def auto_convert_tagged_descendants(container, accumulated_transformation)
-            return false if CellSpaceAutoConversionPolicy.disabled?(container)
-
-            super
+          def auto_convert_tagged_descendants(_container, _accumulated_transformation)
+            false
           end
 
-          def target_for_tagged_child(child, parent_target)
-            return nil if CellSpaceAutoConversionPolicy.disabled?(child)
-
-            super
+          def target_for_tagged_child(_child, _parent_target)
+            nil
           end
 
-          # A successful explicit conversion clears any legacy marker. The outer
-          # Tag itself is consumed earlier by CellSpaceLifecycleTagConsumption.
+          # Old builds could leave an automatic-conversion opt-out marker. A
+          # successful explicit Create makes the marker obsolete, so clean it up
+          # without modifying the Group Tag.
           def register_cell_space(cell_space)
             result = super
             if result != false && cell_space&.sketchup_group
@@ -175,14 +144,6 @@ module ULOL
             false
           end
         end
-      end
-
-      if defined?(CellSpaceLifecycleContext)
-        CellSpaceLifecycleContext.prepend(
-          CellSpaceBehaviorPolicies::CellSpaceLifecycleTagConsumption
-        ) unless CellSpaceLifecycleContext.ancestors.include?(
-          CellSpaceBehaviorPolicies::CellSpaceLifecycleTagConsumption
-        )
       end
 
       if defined?(IndoorModel)
