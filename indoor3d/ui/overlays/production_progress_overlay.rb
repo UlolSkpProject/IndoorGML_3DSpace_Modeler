@@ -21,6 +21,30 @@ module ULOL
           PRIMARY_TEXT_COLOR = Sketchup::Color.new(255, 255, 255, 255)
           SECONDARY_TEXT_COLOR = Sketchup::Color.new(214, 220, 228, 255)
 
+          CELL_SPACE_CREATE_STAGES = [
+            '사전검사/작업 준비',
+            '사전검사/형상 검증',
+            '사전검사/대상 검증',
+            'CellSpace/State 생성',
+            'CellSpace 재질 적용',
+            'Adjacency 상세 판정',
+            'Transition 반영'
+          ].freeze
+          INITIAL_RUNTIME_REFRESH_STAGES = [
+            'IndoorGML 모델 구조 확인',
+            'Runtime 데이터 복원',
+            'CellSpace 위치 정리',
+            'CellSpace 재질 적용',
+            'Adjacency 상세 판정',
+            'Transition 반영'
+          ].freeze
+          RUNTIME_REFRESH_STAGES = [
+            'Runtime 데이터 복원',
+            'CellSpace 위치 정리',
+            'Adjacency 상세 판정',
+            'Transition 반영'
+          ].freeze
+
           attr_reader :snapshot
 
           def initialize
@@ -131,6 +155,7 @@ module ULOL
             return nil unless stage_count.positive?
 
             explicit_index = metadata_value(stage_metadata, :stage_index)
+            explicit_index = default_stage_index(session_metadata, stage[:name]) if explicit_index.nil?
             stage_number = if explicit_index.nil?
                              Array(snapshot[:stages]).length + 1
                            else
@@ -143,14 +168,30 @@ module ULOL
           end
 
           def default_stage_count(session_metadata)
+            stages = default_stage_sequence(session_metadata)
+            stages&.length
+          rescue StandardError
+            nil
+          end
+
+          def default_stage_index(session_metadata, stage_name)
+            stages = default_stage_sequence(session_metadata)
+            stages&.index(stage_name.to_s)
+          rescue StandardError
+            nil
+          end
+
+          def default_stage_sequence(session_metadata)
             operation = metadata_value(session_metadata, :operation).to_s
             case operation
             when 'cell_space_create'
-              7
-            when 'gml_export'
-              5
+              CELL_SPACE_CREATE_STAGES
             when 'runtime_refresh'
-              metadata_value(session_metadata, :initial_model_load) == true ? 6 : 4
+              if metadata_value(session_metadata, :initial_model_load) == true
+                INITIAL_RUNTIME_REFRESH_STAGES
+              else
+                RUNTIME_REFRESH_STAGES
+              end
             end
           rescue StandardError
             nil
