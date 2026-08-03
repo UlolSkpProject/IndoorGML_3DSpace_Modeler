@@ -61,6 +61,8 @@ module ULOL
         end
 
         module AdjacencyServiceProgressContextBridge
+          TARGET_PROGRESS_UPDATES_PER_STAGE = 500
+
           def synchronize_all(*arguments, **keywords)
             delegate_without_progress(arguments, keywords) { |args, filtered| super(*args, **filtered) }
           end
@@ -127,7 +129,44 @@ module ULOL
           def progress_checkpoint?(completed, total)
             return super unless active_progress_sink?
 
-            completed.to_i.positive? && completed.to_i <= total.to_i
+            completed = completed.to_i
+            total = total.to_i
+            return false if completed <= 0 || total <= 0
+            return true if completed == 1 || completed >= total
+
+            (completed % adaptive_progress_update_step(total)).zero?
+          end
+
+          def adaptive_progress_update_step(total)
+            total = total.to_i
+            if @adaptive_progress_total == total
+              return @adaptive_progress_update_step
+            end
+
+            raw_step = [
+              (total.to_f / TARGET_PROGRESS_UPDATES_PER_STAGE).ceil,
+              1
+            ].max
+            @adaptive_progress_total = total
+            @adaptive_progress_update_step = nice_progress_update_step(raw_step)
+          end
+
+          def nice_progress_update_step(raw_step)
+            raw_step = [raw_step.to_i, 1].max
+            magnitude = 1
+            magnitude *= 10 while raw_step > magnitude * 10
+            normalized = raw_step.fdiv(magnitude)
+
+            factor = if normalized <= 1.0
+                       1
+                     elsif normalized <= 2.0
+                       2
+                     elsif normalized <= 5.0
+                       5
+                     else
+                       10
+                     end
+            factor * magnitude
           end
 
           def delegate_without_progress(arguments, keywords)
