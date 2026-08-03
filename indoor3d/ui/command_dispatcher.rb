@@ -24,3 +24,5 @@ module ULOL
     end
   end
 end
+
+require_relative '../application/progress/runtime_refresh_progress_integration'
