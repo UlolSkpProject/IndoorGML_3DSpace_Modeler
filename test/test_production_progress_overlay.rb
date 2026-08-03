@@ -133,7 +133,27 @@ module ULOL
 
           FakeModel = Struct.new(:overlays, :active_view)
 
-          def snapshot(stage_name: 'CellSpace/State 생성', stage_status: :running, completed: 2, total: 5, status: :running, terminal: false)
+          def snapshot(
+            stage_name: 'CellSpace/State 생성',
+            stage_status: :running,
+            completed: 2,
+            total: 5,
+            status: :running,
+            terminal: false,
+            operation: nil,
+            session_stage_count: nil,
+            stage_index: nil,
+            stage_count: nil,
+            archived_stage_count: 0
+          )
+            session_metadata = {}
+            session_metadata[:operation] = operation unless operation.nil?
+            session_metadata[:stage_count] = session_stage_count unless session_stage_count.nil?
+
+            stage_metadata = {}
+            stage_metadata[:stage_index] = stage_index unless stage_index.nil?
+            stage_metadata[:stage_count] = stage_count unless stage_count.nil?
+
             {
               title: 'CellSpace 생성',
               message: 'CellSpace 생성 중',
@@ -141,12 +161,15 @@ module ULOL
               terminal: terminal,
               elapsed: 1.25,
               percent: terminal ? 100.0 : 40.0,
+              metadata: session_metadata,
+              stages: Array.new(archived_stage_count) { { status: :completed } },
               stage: {
                 name: stage_name,
                 status: stage_status,
                 completed: completed,
                 total: total,
-                percent: total.positive? ? completed.fdiv(total) * 100.0 : 0.0
+                percent: total.positive? ? completed.fdiv(total) * 100.0 : 0.0,
+                metadata: stage_metadata
               }
             }.freeze
           end
@@ -167,6 +190,60 @@ module ULOL
             refute_empty view.draw_calls
             assert_equal 2, view.text_calls.length
             assert_includes view.text_calls.first[1], 'CellSpace 생성 중'
+          end
+
+          def test_detail_shows_stage_position_from_session_metadata
+            view = FakeView.new
+            overlay = ProductionProgressOverlay.new
+            overlay.update_snapshot(
+              snapshot(
+                stage_name: 'CellSpace 위치 정리',
+                session_stage_count: 6,
+                archived_stage_count: 2
+              )
+            )
+
+            overlay.draw(view)
+
+            detail = view.text_calls.fetch(1).fetch(1)
+            assert_includes detail, '3 / 6단계'
+            assert_includes detail, 'CellSpace 위치 정리'
+          end
+
+          def test_detail_prefers_explicit_zero_based_stage_index
+            view = FakeView.new
+            overlay = ProductionProgressOverlay.new
+            overlay.update_snapshot(
+              snapshot(
+                stage_name: 'GML 구조 생성',
+                operation: :gml_export,
+                stage_index: 3,
+                stage_count: 5,
+                archived_stage_count: 1
+              )
+            )
+
+            overlay.draw(view)
+
+            detail = view.text_calls.fetch(1).fetch(1)
+            assert_includes detail, '4 / 5단계'
+            assert_includes detail, 'GML 구조 생성'
+          end
+
+          def test_create_workflow_uses_visible_stage_count_fallback
+            view = FakeView.new
+            overlay = ProductionProgressOverlay.new
+            overlay.update_snapshot(
+              snapshot(
+                operation: :cell_space_create,
+                archived_stage_count: 4
+              )
+            )
+
+            overlay.draw(view)
+
+            detail = view.text_calls.fetch(1).fetch(1)
+            assert_includes detail, '5 / 7단계'
           end
 
           def test_update_is_throttled_but_stage_change_forces_refresh
