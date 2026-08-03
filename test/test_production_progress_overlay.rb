@@ -230,11 +230,12 @@ module ULOL
             assert_includes detail, 'GML 구조 생성'
           end
 
-          def test_create_workflow_uses_visible_stage_count_fallback
+          def test_create_workflow_keeps_fixed_position_when_stage_is_skipped
             view = FakeView.new
             overlay = ProductionProgressOverlay.new
             overlay.update_snapshot(
               snapshot(
+                stage_name: 'Transition 반영',
                 operation: :cell_space_create,
                 archived_stage_count: 4
               )
@@ -243,7 +244,7 @@ module ULOL
             overlay.draw(view)
 
             detail = view.text_calls.fetch(1).fetch(1)
-            assert_includes detail, '5 / 7단계'
+            assert_includes detail, '7 / 7단계'
           end
 
           def test_update_is_throttled_but_stage_change_forces_refresh
