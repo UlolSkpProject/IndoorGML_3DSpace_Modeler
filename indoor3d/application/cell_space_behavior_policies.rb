@@ -1,53 +1,17 @@
 # frozen_string_literal: true
 
+require_relative 'cell_space_auto_conversion_policy'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       module CellSpaceBehaviorPolicies
-        module ExplicitDemotionPolicy
-          DICTIONARY_NAME = 'ULOL_Indoor3D_Policy'
-          AUTO_CONVERSION_DISABLED_KEY = 'cell_space_auto_conversion_disabled'
-
-          module_function
-
-          def disabled?(entity)
-            return false unless entity&.respond_to?(:get_attribute)
-
-            entity.get_attribute(
-              DICTIONARY_NAME,
-              AUTO_CONVERSION_DISABLED_KEY,
-              false
-            ) == true
-          rescue StandardError
-            false
-          end
-
-          def disable!(entity)
-            return false unless entity&.respond_to?(:set_attribute)
-
-            entity.set_attribute(
-              DICTIONARY_NAME,
-              AUTO_CONVERSION_DISABLED_KEY,
-              true
-            )
-            disabled?(entity)
-          rescue StandardError
-            false
-          end
-
-          def enable!(entity)
-            return true unless entity
-            return true unless entity.respond_to?(:delete_attribute)
-
-            entity.delete_attribute(
-              DICTIONARY_NAME,
-              AUTO_CONVERSION_DISABLED_KEY
-            )
-            !disabled?(entity)
-          rescue StandardError
-            false
-          end
-        end
+        # Compatibility alias for existing callers/tests. New code should depend
+        # on the standalone policy module directly.
+        ExplicitDemotionPolicy = CellSpaceAutoConversionPolicy unless const_defined?(
+          :ExplicitDemotionPolicy,
+          false
+        )
 
         module IndoorModelCellSpaceBehavior
           private
@@ -60,29 +24,29 @@ module ULOL
             return group unless group&.valid?
 
             if IndoorCore.tag_cell_space_type_and_category(group)
-              unless ExplicitDemotionPolicy.disable!(group)
+              unless CellSpaceAutoConversionPolicy.disable!(group)
                 raise 'CellSpace automatic-conversion opt-out could not be persisted'
               end
             else
-              ExplicitDemotionPolicy.enable!(group)
+              CellSpaceAutoConversionPolicy.enable!(group)
             end
             group
           end
 
           def auto_convert_tagged_primal_entity(entity)
-            return false if ExplicitDemotionPolicy.disabled?(entity)
+            return false if CellSpaceAutoConversionPolicy.disabled?(entity)
 
             super
           end
 
           def auto_convert_tagged_descendants(container, accumulated_transformation)
-            return false if ExplicitDemotionPolicy.disabled?(container)
+            return false if CellSpaceAutoConversionPolicy.disabled?(container)
 
             super
           end
 
           def target_for_tagged_child(child, parent_target)
-            return nil if ExplicitDemotionPolicy.disabled?(child)
+            return nil if CellSpaceAutoConversionPolicy.disabled?(child)
 
             super
           end
@@ -91,7 +55,7 @@ module ULOL
           def register_cell_space(cell_space)
             result = super
             if result != false && cell_space&.sketchup_group
-              unless ExplicitDemotionPolicy.enable!(cell_space.sketchup_group)
+              unless CellSpaceAutoConversionPolicy.enable!(cell_space.sketchup_group)
                 IndoorCore::Logger.puts(
                   '[IndoorGML] CellSpace auto-conversion policy marker cleanup failed'
                 )
