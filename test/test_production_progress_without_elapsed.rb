@@ -13,6 +13,10 @@ module ULOL
             stage = snapshot[:stage]
             stage ? stage[:percent].to_f : snapshot[:percent].to_f
           end
+
+          def stage_position_text(snapshot, _stage)
+            snapshot[:stage_position]
+          end
         end
 
         class SketchupOverlayProgressRenderer
@@ -35,22 +39,43 @@ module ULOL
     module IndoorCore
       module ProductionProgress
         class ProductionProgressWithoutElapsedTest < Minitest::Test
-          def test_running_detail_omits_elapsed_time
+          def test_running_detail_omits_elapsed_time_and_keeps_stage_position
             overlay = ProductionProgressOverlay.allocate
             text = overlay.send(
               :detail_text,
-              stage: {
-                name: 'Adjacency 상세 판정',
-                completed: 250,
-                total: 1000,
-                percent: 25.0
-              },
-              percent: 25.0,
-              elapsed: 99.9
+              {
+                stage_position: '5 / 7단계',
+                stage: {
+                  name: 'Adjacency 상세 판정',
+                  completed: 250,
+                  total: 1000,
+                  percent: 25.0
+                },
+                percent: 25.0,
+                elapsed: 99.9
+              }
             )
 
-            assert_equal 'Adjacency 상세 판정 · 250 / 1000 ·  25.0%', text
+            assert_equal '5 / 7단계 · Adjacency 상세 판정 · 250 / 1000 ·  25.0%', text
             refute_includes text, '초'
+          end
+
+          def test_running_detail_preserves_legacy_format_without_stage_position
+            overlay = ProductionProgressOverlay.allocate
+            text = overlay.send(
+              :detail_text,
+              {
+                stage: {
+                  name: 'CellSpace/State 생성',
+                  completed: 94,
+                  total: 124,
+                  percent: 75.8
+                },
+                percent: 75.8
+              }
+            )
+
+            assert_equal 'CellSpace/State 생성 · 94 / 124 ·  75.8%', text
           end
 
           def test_renderer_signature_changes_when_count_increases
