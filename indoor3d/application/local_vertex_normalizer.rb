@@ -40,3 +40,7 @@ require_relative 'local_vertex_normalizer/grid_patch_incremental_intersection_v2
 
 require_relative 'local_vertex_normalizer/performance_workload_profiler_v2'
 require_relative 'local_vertex_normalizer/debug_profiler_v2'
+
+# Outermost read-only preflight. Complex solids return an explicit skipped report
+# before any operation, definition isolation, or geometry mutation begins.
+require_relative 'local_vertex_normalizer/complex_face_skip_v2'
