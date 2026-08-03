@@ -4,7 +4,7 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       module ProductionProgress
-        class AdaptiveProgressCheckpoint
+        class RuntimeRefreshAdaptiveCheckpoint
           TARGET_UPDATES = 100
 
           def initialize(total, target_updates: TARGET_UPDATES)
@@ -100,7 +100,7 @@ module ULOL
             @stage_name = name.to_s
             @stage_total = [total.to_i, 0].max
             @stage_completed = 0
-            @checkpoint = AdaptiveProgressCheckpoint.new(@stage_total)
+            @checkpoint = RuntimeRefreshAdaptiveCheckpoint.new(@stage_total)
             @stage_started_at = now
             @session.start_stage(
               @stage_name,
@@ -362,9 +362,7 @@ module ULOL
             tracker.with_adjacency_progress { super }
           end
 
-          def runtime_refresh_progress_applicable?(initial_model_load)
-            return false unless initial_model_load == true
-
+          def runtime_refresh_progress_applicable?(_initial_model_load)
             model = @model || (defined?(Sketchup) ? Sketchup.active_model : nil)
             return false unless model&.respond_to?(:entities)
 
@@ -402,8 +400,8 @@ module ULOL
           def build_runtime_refresh_progress_session(initial_model_load)
             model = @model || Sketchup.active_model
             ProductionProgressSession.new(
-              title: 'IndoorGML 모델 열기',
-              total: 5,
+              title: initial_model_load == true ? 'IndoorGML 모델 열기' : 'IndoorGML Runtime Refresh',
+              total: initial_model_load == true ? 6 : 4,
               renderer: SketchupOverlayProgressRenderer.new(model: model),
               cancellable: false,
               metadata: {
