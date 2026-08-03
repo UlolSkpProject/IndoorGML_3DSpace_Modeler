@@ -123,7 +123,11 @@ module ULOL
                          )
                        end
 
-            assert_equal(reference ? true : nil, decision)
+            if reference
+              assert_equal true, decision
+            else
+              assert_nil decision
+            end
             checked += 1
             fast_allowed += 1 if decision
             reference_allowed += 1 if reference
