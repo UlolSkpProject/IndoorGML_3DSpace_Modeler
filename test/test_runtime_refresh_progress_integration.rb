@@ -26,7 +26,7 @@ module ULOL
           end
           self.instances = []
 
-          attr_reader :events, :metadata
+          attr_reader :events, :metadata, :title, :total
 
           def initialize(title:, total:, renderer:, cancellable:, metadata:)
             @title = title
@@ -234,7 +234,11 @@ module ULOL
         def refresh_runtime_data(initial_model_load: false)
           raise 'refresh failed' if @fail_refresh
 
-          prepare_primal_children_for_initial_load if initial_model_load
+          if initial_model_load
+            prepare_primal_children_for_initial_load
+          else
+            @primal_group ||= find_primal_group
+          end
           @runtime_restorer.restore(
             primal_group: @primal_group,
             persist_repaired_ids: true
@@ -249,14 +253,18 @@ module ULOL
         private
 
         def prepare_primal_children_for_initial_load
-          @primal_group = @model.entities.find do |entity|
+          @primal_group = find_primal_group
+          true
+        end
+
+        def find_primal_group
+          @model.entities.find do |entity|
             entity.name == PRIMAL_GROUP_NAME ||
               entity.get_attribute(
                 ATTRIBUTE_DICTIONARY_NAME,
                 'feature'
               ) == PRIMAL_GROUP_FEATURE
           end
-          true
         end
 
         def recenter_runtime_cell_spaces
@@ -340,14 +348,26 @@ module ULOL
           assert_empty Session.instances
         end
 
-        def test_non_initial_refresh_does_not_show_progress
+        def test_non_initial_full_refresh_uses_the_same_progress_pipeline
           primal = build_primal(2)
           model = RuntimeProgressFakeModel.new([primal])
           Sketchup.runtime_progress_active_model = model
           indoor_model = IndoorModel.new(model)
 
           assert indoor_model.refresh_runtime_data(initial_model_load: false)
-          assert_empty Session.instances
+
+          session = Session.instances.fetch(0)
+          stage_names = session.events.filter_map do |event|
+            event[1] if event[0] == :stage_start
+          end
+          assert_equal 'IndoorGML Runtime Refresh', session.title
+          assert_equal 4, session.total
+          assert_equal [
+            'Runtime 데이터 복원',
+            'CellSpace 위치 정리',
+            'Adjacency 상세 판정',
+            'Transition 반영'
+          ], stage_names
         end
 
         def test_initial_load_reports_runtime_cell_and_topology_stages
@@ -362,6 +382,8 @@ module ULOL
           stage_names = session.events.filter_map do |event|
             event[1] if event[0] == :stage_start
           end
+          assert_equal 'IndoorGML 모델 열기', session.title
+          assert_equal 6, session.total
           assert_equal [
             'IndoorGML 모델 구조 확인',
             'Runtime 데이터 복원',
