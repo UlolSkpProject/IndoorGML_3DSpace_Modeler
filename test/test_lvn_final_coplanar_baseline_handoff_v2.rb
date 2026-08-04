@@ -31,7 +31,9 @@ module ULOL
 
           prepend LocalVertexNormalizerFinalCoplanarBaselineHandoffV2
 
-          attr_reader :fallback_calls, :selected_baseline
+          attr_reader :fallback_calls,
+                      :selected_baseline,
+                      :local_vertex_normalizer_debug_profile
 
           def initialize(mode: :full, role: :post_coplanar_cleanup)
             @mode = mode
@@ -56,6 +58,10 @@ module ULOL
 
           def fail_inner!
             @mode = :raise
+          end
+
+          def enable_debug_profile!
+            @local_vertex_normalizer_debug_profile = {}
           end
 
           private
@@ -210,6 +216,18 @@ module ULOL
           handoff = report.fetch(:final_coplanar_baseline_handoff_v2)
           refute handoff[:reused]
           assert_equal [:handoff_missing], handoff[:rejection_reasons]
+        end
+
+        def test_handoff_summary_is_written_to_debug_profile
+          subject = ProbeNormalizer.new
+          subject.enable_debug_profile!
+          subject.send(:normalize_entity, entity)
+
+          summary = subject.local_vertex_normalizer_debug_profile.fetch(
+            :final_coplanar_baseline_handoff_v2
+          )
+          assert summary[:reused]
+          assert_equal :post_coplanar_cleanup, summary[:role]
         end
 
         def test_context_is_restored_when_inner_pipeline_raises
