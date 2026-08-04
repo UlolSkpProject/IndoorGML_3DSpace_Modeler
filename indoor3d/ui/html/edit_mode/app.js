@@ -45,7 +45,6 @@ var cellTypeCounts = document.getElementById('cellTypeCounts');
 var stateCount = document.getElementById('stateCount');
 var totalTransitionCount = document.getElementById('totalTransitionCount');
 
-var currentMode = null;
 var currentSelectionKey = null;
 var fixMode = false;
 var validationBusy = false;
@@ -507,7 +506,6 @@ function updateSelection(snapshot) {
     renderEmpty(snapshot || {});
   }
 
-  currentMode = nextMode;
   currentSelectionKey = nextKey;
   return true;
 }

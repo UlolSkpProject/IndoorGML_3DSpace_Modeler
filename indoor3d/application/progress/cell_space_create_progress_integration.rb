@@ -195,8 +195,6 @@ module ULOL
             result = super
             finish_creation_progress_stage
             result
-          rescue StandardError
-            raise
           ensure
             finish_creation_progress_stage if @production_progress&.active?
           end

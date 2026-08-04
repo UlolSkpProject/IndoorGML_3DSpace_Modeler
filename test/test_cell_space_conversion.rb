@@ -749,7 +749,7 @@ module ULOL
 
         def test_multi_conversion_entrypoints_do_not_use_run_batched
           toolbar_method = method_source('indoor3d/ui/commands/cell_space_commands.rb', 'convert_selected_solid_groups_to_cell_spaces', 'change_selected_cell_space_type')
-          edit_mode_method = method_source('indoor3d/application/indoor_model/editor_control.rb', 'convert_selected_solid_groups_to_cell_spaces', 'set_selected_cell_space_type')
+          edit_mode_method = method_source('indoor3d/application/indoor_model/editor_control.rb', 'convert_selected_solid_groups_to_cell_spaces', 'set_selected_cell_space_classification')
 
           assert_includes toolbar_method, 'convert_cell_space_jobs_bulk'
           assert_includes edit_mode_method, 'convert_cell_space_jobs_bulk'

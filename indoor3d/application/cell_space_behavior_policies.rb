@@ -29,14 +29,6 @@ module ULOL
             false
           end
 
-          def auto_convert_tagged_descendants(_container, _accumulated_transformation)
-            false
-          end
-
-          def target_for_tagged_child(_child, _parent_target)
-            nil
-          end
-
           # Old builds could leave an automatic-conversion opt-out marker. A
           # successful explicit Create makes the marker obsolete, so clean it up
           # without modifying the Group Tag.

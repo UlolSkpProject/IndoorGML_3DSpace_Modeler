@@ -129,8 +129,7 @@ module ULOL
 
           def detail_text(snapshot)
             stage = snapshot[:stage]
-            elapsed = format('%.1f초', snapshot[:elapsed].to_f)
-            return format('%5.1f%% · %s', displayed_percent(snapshot), elapsed) unless stage
+            return format('%5.1f%%', displayed_percent(snapshot)) unless stage
 
             parts = []
             position = stage_position_text(snapshot, stage)
@@ -141,7 +140,6 @@ module ULOL
             total = stage[:total].to_i
             parts << "#{completed} / #{total}" if total.positive?
             parts << format('%5.1f%%', displayed_percent(snapshot))
-            parts << elapsed
             parts.join(' · ')
           end
 
@@ -359,7 +357,13 @@ module ULOL
 
           def stage_signature(snapshot)
             stage = snapshot[:stage]
-            [stage&.dig(:name), stage&.dig(:status), snapshot[:status]]
+            [
+              stage&.dig(:name),
+              stage&.dig(:status),
+              stage&.dig(:completed),
+              stage&.dig(:total),
+              snapshot[:status]
+            ]
           end
 
           def log_error(context, error)

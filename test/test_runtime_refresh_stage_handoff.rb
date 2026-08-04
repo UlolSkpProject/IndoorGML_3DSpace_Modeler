@@ -52,7 +52,7 @@ module ULOL
   end
 end
 
-require_relative '../indoor3d/application/progress/runtime_refresh_stage_handoff'
+require_relative '../indoor3d/application/progress/runtime_refresh_progress_integration'
 
 module ULOL
   module Indoor3DGmlModeler

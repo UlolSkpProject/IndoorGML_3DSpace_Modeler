@@ -228,6 +228,18 @@ module ULOL
           def defer_ui_message(message)
             @deferred_messages << message
           end
+
+          def feature_id_in_use?(id, excluding: nil)
+            @feature_registry.feature_id_in_use?(id, excluding: excluding)
+          end
+
+          def topology_coordinator
+            @topology_coordinator
+          end
+
+          def dirty_topology_queue
+            @topology_coordinator.dirty_queue
+          end
         end
 
         class FakeAdjacencyService

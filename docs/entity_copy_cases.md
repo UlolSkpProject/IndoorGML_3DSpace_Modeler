@@ -17,7 +17,6 @@ It does not calculate transformations, choose the target collection, erase the s
 - `IndoorModel::EntityRelocation#copy_entity_to_entities`
   - Keeps group-only `to_group` and `make_unique`.
   - Keeps name/material copy and IndoorGML attribute copy.
-- `IndoorModel::FeatureLifecycle#convert_primal_child_to_cell_space`
   - Keeps group-only `to_group` and `make_unique`.
   - Keeps name/material/layer/visible copy.
 - `IndoorCore::CellSpaceConversionExecutor`

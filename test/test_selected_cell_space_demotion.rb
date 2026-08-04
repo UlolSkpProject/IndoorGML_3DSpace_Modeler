@@ -31,8 +31,8 @@ module ULOL
 end
 
 require_relative '../indoor3d/infrastructure/persistence/attribute_serializer'
-require_relative '../indoor3d/application/indoor_model/feature_lifecycle'
 require_relative '../indoor3d/application/indoor_model/editor_control'
+require_relative '../indoor3d/application/indoor_model/cell_space_demotion_batch'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -55,7 +55,7 @@ module ULOL
           assert subject.remove_selected_cell_spaces_indoor_gml_attributes
 
           assert group.valid?
-          assert_equal [cell_space, false], subject.erased
+          assert_equal [cell_space], subject.unregistered
           assert_empty group.attributes
           assert_nil group.material
           assert_nil face.material
@@ -82,10 +82,10 @@ module ULOL
         end
 
         class Harness
-          include IndoorModel::FeatureLifecycle
           include IndoorModel::EditorControl
+          include IndoorModel::CellSpaceDemotionBatch
 
-          attr_reader :erased, :change_snapshots,
+          attr_reader :unregistered, :change_snapshots,
                       :editor_session, :lock_policy_count, :restored_snapshot
 
           def scene_group_guard
@@ -107,6 +107,8 @@ module ULOL
             @scene_group_guard = FakeSceneGuard.new
             @primal_entities_observer = FakePrimalObserver.new
             @cell_space_change_snapshots = { cell_space.sketchup_group.object_id => :snapshot }
+            @transitions = []
+            @unregistered = []
             @editor_session = FakeEditorSession.new
             @lock_policy_count = 0
           end
@@ -149,8 +151,25 @@ module ULOL
             yield
           end
 
-          def erase_cell_space(cell_space, erase_sketchup_group: true)
-            @erased = [cell_space, erase_sketchup_group]
+          def erase_guard
+            yield
+          end
+
+          def unregister_cell_space(cell_space)
+            @unregistered << cell_space
+          end
+
+          def erase_adjacency_for_cell_space(_cell_space)
+            true
+          end
+
+          def clear_cell_space_materials(group)
+            group.material = nil
+            group.definition.entities.grep(Sketchup::Face).each do |face|
+              face.material = nil
+              face.back_material = nil
+            end
+            true
           end
 
           def unlock_indoor_entity(_group)
@@ -239,6 +258,10 @@ module ULOL
 
           def valid?
             @sketchup_group.valid?
+          end
+
+          def duality_state
+            nil
           end
         end
 

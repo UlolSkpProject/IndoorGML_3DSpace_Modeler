@@ -17,13 +17,16 @@ module ULOL
     end
 
     module IndoorCore
+      class CellSpaceLifecycleContext; end
+      class CellSpaceLifecycleLocalGridContextV2 < CellSpaceLifecycleContext; end
+
       class IndoorModel
       end
     end
   end
 end
 
-require_relative '../indoor3d/application/indoor_model/feature_lifecycle'
+require_relative '../indoor3d/application/indoor_model/cell_space_batch_lifecycle'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -55,7 +58,7 @@ module ULOL
         end
 
         class FakeIndoorModel
-          include IndoorModel::FeatureLifecycle
+          include IndoorModel::CellSpaceBatchLifecycle
 
           def apply_material(cell_space)
             apply_cell_space_material(cell_space)

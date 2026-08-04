@@ -783,8 +783,7 @@ module ULOL
         def update_overlay_enabled
           overlay_controller.update_enabled(
             editing: @editing,
-            dual_overlay_visible: @dual_overlay_visible,
-            progress_active: progress_active?
+            dual_overlay_visible: @dual_overlay_visible
           )
         end
 

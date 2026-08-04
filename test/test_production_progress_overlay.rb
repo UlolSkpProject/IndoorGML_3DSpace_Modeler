@@ -208,6 +208,7 @@ module ULOL
             detail = view.text_calls.fetch(1).fetch(1)
             assert_includes detail, '3 / 6단계'
             assert_includes detail, 'CellSpace 위치 정리'
+            refute_includes detail, '초'
           end
 
           def test_detail_prefers_explicit_zero_based_stage_index
@@ -247,7 +248,7 @@ module ULOL
             assert_includes detail, '7 / 7단계'
           end
 
-          def test_update_is_throttled_but_stage_change_forces_refresh
+          def test_count_and_stage_changes_force_refresh
             clock = FakeClock.new
             view = FakeView.new
             model = FakeModel.new(FakeOverlays.new, view)
@@ -255,14 +256,14 @@ module ULOL
             renderer.show(snapshot)
 
             renderer.update(snapshot(completed: 3))
-            assert_equal 1, view.refresh_count
+            assert_equal 2, view.refresh_count
 
             clock.advance(0.11)
             renderer.update(snapshot(completed: 4))
-            assert_equal 2, view.refresh_count
+            assert_equal 3, view.refresh_count
 
             renderer.update(snapshot(stage_name: 'Adjacency/Transition 생성', completed: 0, total: 1))
-            assert_equal 3, view.refresh_count
+            assert_equal 4, view.refresh_count
           end
 
           def test_close_removes_overlay_and_is_idempotent

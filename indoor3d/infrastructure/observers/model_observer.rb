@@ -8,7 +8,6 @@ module ULOL
         def initialize(on_delete_model: nil)
           super()
           @on_delete_model = on_delete_model
-          @active_path_keys_by_model_id = {}
           @transaction_generations_by_model_id = {}
         end
 
@@ -43,7 +42,6 @@ module ULOL
           key = model&.object_id
           return if key.nil?
 
-          @active_path_keys_by_model_id.delete(key)
           transaction_generations_by_model_id.delete(key)
         end
 
@@ -55,7 +53,6 @@ module ULOL
           unless indoor_model.transaction_replay_pending?
             indoor_model.active_path_changed(model)
           end
-          remember_active_path(model)
         end
 
         def handle_transaction_replayed(model, source:)
@@ -75,7 +72,6 @@ module ULOL
 
               indoor_model = IndoorModel.for(model)
               indoor_model.reconcile_runtime_after_transaction(source: source, generation: generation)
-              remember_active_path(model)
             rescue StandardError => e
               IndoorCore::Logger.puts "[IndoorGML] Active path #{source} handling failed: #{e.class}: #{e.message}"
             ensure
@@ -102,22 +98,6 @@ module ULOL
           end
         rescue StandardError
           nil
-        end
-
-        def remember_active_path(model)
-          remember_active_path_key(model, active_path_key(model))
-        end
-
-        def remember_active_path_key(model, key)
-          @active_path_keys_by_model_id[model.object_id] = key
-        end
-
-        def remembered_active_path_key(model)
-          @active_path_keys_by_model_id[model.object_id]
-        end
-
-        def remembered_active_path_key?(model)
-          @active_path_keys_by_model_id.key?(model.object_id)
         end
 
         def active_path_key(model)

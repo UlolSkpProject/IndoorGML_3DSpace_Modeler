@@ -13,18 +13,14 @@ module ULOL
 
       class IndoorModel
         attr_reader :base_auto_convert_calls,
-                    :base_recursive_convert_calls,
                     :base_direct_child_convert_calls,
-                    :base_target_calls,
                     :base_register_calls,
                     :legacy_etc_operation_calls,
                     :snapshot_calls
 
         def initialize
           @base_auto_convert_calls = 0
-          @base_recursive_convert_calls = 0
           @base_direct_child_convert_calls = 0
-          @base_target_calls = 0
           @base_register_calls = 0
           @legacy_etc_operation_calls = 0
           @snapshot_calls = 0
@@ -40,16 +36,6 @@ module ULOL
         def auto_convert_direct_tagged_children(_container)
           @base_direct_child_convert_calls += 1
           true
-        end
-
-        def auto_convert_tagged_descendants(_container, _transformation)
-          @base_recursive_convert_calls += 1
-          true
-        end
-
-        def target_for_tagged_child(_child, _parent_target)
-          @base_target_calls += 1
-          :target
         end
 
         def register_cell_space(_cell_space)
@@ -205,17 +191,8 @@ module ULOL
 
           refute @model.send(:auto_convert_tagged_primal_entity, tagged_group)
           refute @model.send(:auto_convert_direct_tagged_children, tagged_group)
-          refute @model.send(
-            :auto_convert_tagged_descendants,
-            tagged_group,
-            :transformation
-          )
-          assert_nil @model.send(:target_for_tagged_child, tagged_group, :parent)
-
           assert_equal 0, @model.base_auto_convert_calls
           assert_equal 0, @model.base_direct_child_convert_calls
-          assert_equal 0, @model.base_recursive_convert_calls
-          assert_equal 0, @model.base_target_calls
           assert_equal 'F01F01_IP_RM_23', tagged_group.layer.name
         end
 

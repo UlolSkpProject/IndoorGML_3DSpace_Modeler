@@ -71,21 +71,18 @@ module ULOL
           )
           controller.ensure_registered(fake_model)
 
-          controller.update_enabled(editing: false, dual_overlay_visible: false, progress_active: false)
+          controller.update_enabled(editing: false, dual_overlay_visible: false)
           assert_equal false, screen_overlay.enabled
           assert_equal false, space_overlay.enabled
 
-          controller.update_enabled(editing: true, dual_overlay_visible: false, progress_active: false)
+          controller.update_enabled(editing: true, dual_overlay_visible: false)
           assert_equal true, screen_overlay.enabled
           assert_equal false, space_overlay.enabled
 
-          controller.update_enabled(editing: false, dual_overlay_visible: true, progress_active: false)
+          controller.update_enabled(editing: false, dual_overlay_visible: true)
           assert_equal false, screen_overlay.enabled
           assert_equal true, space_overlay.enabled
 
-          controller.update_enabled(editing: false, dual_overlay_visible: false, progress_active: true)
-          assert_equal false, screen_overlay.enabled
-          assert_equal false, space_overlay.enabled
         end
 
         def test_invalidate_transition_points_only_targets_space_overlay

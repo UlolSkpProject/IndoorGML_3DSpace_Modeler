@@ -340,31 +340,6 @@ module ULOL
             end
           end
 
-          def topology_coordinator
-            @topology_coordinator ||= TopologyCoordinator.new(
-              adjacency_service: @adjacency_service,
-              dirty_queue: legacy_dirty_topology_queue
-            )
-          end
-
-          def dirty_topology_queue
-            topology_coordinator.dirty_queue
-          end
-
-          def legacy_dirty_topology_queue
-            queue = DirtyTopologyQueue.new
-            return queue unless instance_variable_defined?(:@dirty_cell_space_pids) ||
-                                instance_variable_defined?(:@cell_space_sync_scheduled) ||
-                                instance_variable_defined?(:@dirty_cell_space_sync_generation)
-
-            queue.restore!(
-              persistent_ids: Hash(@dirty_cell_space_pids),
-              scheduled: @cell_space_sync_scheduled == true,
-              generation: @dirty_cell_space_sync_generation.to_i
-            )
-            queue
-          end
-
           def restore_topology_snapshot(snapshot)
             if snapshot[:topology]
               topology_coordinator.restore!(snapshot[:topology])

@@ -70,7 +70,7 @@ module ULOL
             IndoorCore::Logger.puts "[IndoorGML] Edit mode overlay enable failed: #{e.class}: #{e.message}"
           end
 
-          def update_enabled(editing:, dual_overlay_visible:, progress_active:)
+          def update_enabled(editing:, dual_overlay_visible:)
             set_overlay_enabled(@screen_overlay, editing == true)
             set_overlay_enabled(@space_overlay, dual_overlay_visible == true)
             set_overlay_enabled(
@@ -140,8 +140,7 @@ module ULOL
           def update_enabled_from_model
             update_enabled(
               editing: @indoor_model.respond_to?(:editing?) && @indoor_model.editing?,
-              dual_overlay_visible: @indoor_model.respond_to?(:dual_overlay_visible?) && @indoor_model.dual_overlay_visible?,
-              progress_active: false
+              dual_overlay_visible: @indoor_model.respond_to?(:dual_overlay_visible?) && @indoor_model.dual_overlay_visible?
             )
           end
 

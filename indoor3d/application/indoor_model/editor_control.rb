@@ -422,33 +422,6 @@ module ULOL
             end
           end
 
-          def set_selected_cell_space_type(cell_type_label, category_code = nil)
-            return false if validation_focus_recheck_running?
-
-            begin
-              cell_spaces = selected_cell_spaces
-              cell_spaces = [@editor_session.editing_cell_space].compact if cell_spaces.empty?
-              cell_spaces = cell_spaces.select { |cell_space| cell_space&.valid? }
-              return false if cell_spaces.empty?
-
-              model = Sketchup.active_model()
-              with_indoor_model_operation('Change CellSpace Type and Category') do
-                cell_type = CellSpaceType.from_label(cell_type_label)
-                category_code = nil unless CellSpaceCategory.valid_for_type?(cell_type, category_code)
-                cell_spaces.each do |cell_space|
-                  change_cell_space_type(cell_space.sketchup_group, cell_type, category_code)
-                end
-              end
-              @editor_session.refresh_visibility_filter
-              @editor_session.selection_changed()
-              model.active_view().invalidate() if model&.active_view
-              true
-            rescue StandardError => e
-              IndoorCore::Logger.puts "[IndoorGML] Selected CellSpace type update failed: #{e.class}: #{e.message}"
-              false
-            end
-          end
-
           def set_selected_cell_space_classification(selection_value)
             return false if validation_focus_recheck_running?
 
@@ -540,53 +513,6 @@ module ULOL
             UiFeedback.confirm(message, MB_YESNO) do |result|
               callback&.call(result == IDYES)
             end
-          end
-
-          def perform_selected_cell_space_demotion(cell_spaces)
-            cell_spaces = Array(cell_spaces).select { |cell_space| cell_space&.valid? }
-            return false if cell_spaces.empty?
-
-            runtime_snapshot = bulk_conversion_runtime_snapshot
-            groups = cell_spaces.map(&:sketchup_group)
-            begin
-              with_validation_focus_mutation_batch do
-                with_indoor_model_operation('Remove Selected CellSpace IndoorGML Attributes') do
-                  sync do
-                    cell_spaces.each do |cell_space|
-                      demote_cell_space_to_solid_group(cell_space)
-                    end
-                  end
-                end
-              end
-            rescue StandardError => e
-              restore_bulk_conversion_runtime(runtime_snapshot) if runtime_snapshot
-              IndoorCore::Logger.puts(
-                "[IndoorGML] Selected CellSpace demotion failed: #{e.class}: #{e.message}"
-              )
-              UiFeedback.defer_modal("IndoorGML 속성 제거 실패:\n#{e.message}")
-              return false
-            end
-
-            untrack_demoted_primal_entities(groups)
-            refresh_after_selected_cell_space_demotion
-            true
-          end
-
-          def demote_cell_space_to_solid_group(cell_space)
-            group = cell_space&.sketchup_group
-            raise ArgumentError, 'CellSpace group is no longer valid' unless group&.valid?
-
-            erase_cell_space(cell_space, erase_sketchup_group: false)
-            @attribute_serializer.clear_indoor_gml_attributes(group)
-            unless indoor_gml_attribute_dictionary_empty?(group)
-              raise 'IndoorGML AttributeDictionary cleanup was incomplete'
-            end
-            raise 'CellSpace material cleanup failed' unless clear_cell_space_materials(group)
-
-            @scene_group_guard.untrack(group) if @scene_group_guard
-            @cell_space_change_snapshots.delete(entity_observer_key(group)) if @cell_space_change_snapshots
-            unlock_indoor_entity(group)
-            group
           end
 
           def indoor_gml_attribute_dictionary_empty?(entity)

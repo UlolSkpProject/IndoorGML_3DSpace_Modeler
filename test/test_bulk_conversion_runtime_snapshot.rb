@@ -145,6 +145,16 @@ module ULOL
           def sync_scheduled=(value)
             value ? dirty_topology_queue.schedule! : dirty_topology_queue.unschedule!
           end
+
+          private
+
+          def topology_coordinator
+            @topology_coordinator
+          end
+
+          def dirty_topology_queue
+            @topology_coordinator.dirty_queue
+          end
         end
 
         class FakeGroup

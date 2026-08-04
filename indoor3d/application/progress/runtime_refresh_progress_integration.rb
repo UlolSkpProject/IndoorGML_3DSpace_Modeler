@@ -60,11 +60,10 @@ module ULOL
         end
 
         class RuntimeRefreshProgressTracker
-          attr_reader :session, :initial_model_load, :metrics
+          attr_reader :session, :metrics
 
-          def initialize(session, initial_model_load:, logger: IndoorCore::Logger, clock: nil)
+          def initialize(session, logger: IndoorCore::Logger, clock: nil)
             @session = session
-            @initial_model_load = initial_model_load == true
             @logger = logger
             @clock = clock || proc { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
             @stage_open = false
@@ -206,6 +205,35 @@ module ULOL
           end
         end
 
+        # Runtime refresh stages are immediately followed by another stage. Avoid
+        # rendering an intermediate completed frame before the next phase starts.
+        class RuntimeRefreshProgressRenderer < SketchupOverlayProgressRenderer
+          def update(snapshot)
+            return true if defer_intermediate_completion?(snapshot)
+
+            super
+          end
+
+          private
+
+          def defer_intermediate_completion?(snapshot)
+            return false unless snapshot.respond_to?(:[])
+            return false if snapshot[:terminal] == true
+
+            stage = snapshot[:stage]
+            return false unless stage.respond_to?(:[])
+
+            status = stage[:status].to_sym
+            return true if status == :completed
+
+            total = stage[:total].to_i
+            completed = stage[:completed].to_i
+            total.positive? && completed >= total
+          rescue StandardError
+            false
+          end
+        end
+
         module RuntimeRestorerProgressIntegration
           def restore(primal_group:, persist_repaired_ids: false)
             tracker = RuntimeRefreshProgressContext.current
@@ -265,7 +293,6 @@ module ULOL
 
             tracker = RuntimeRefreshProgressTracker.new(
               session,
-              initial_model_load: initial_model_load,
               logger: IndoorCore::Logger
             )
             session.start(message: 'IndoorGML Runtime 준비 중')
@@ -402,14 +429,16 @@ module ULOL
 
           def build_runtime_refresh_progress_session(initial_model_load)
             model = @model || Sketchup.active_model
+            stage_count = initial_model_load == true ? 6 : 4
             ProductionProgressSession.new(
               title: initial_model_load == true ? 'IndoorGML 모델 열기' : 'IndoorGML Runtime Refresh',
-              total: initial_model_load == true ? 6 : 4,
-              renderer: SketchupOverlayProgressRenderer.new(model: model),
+              total: stage_count,
+              renderer: RuntimeRefreshProgressRenderer.new(model: model),
               cancellable: false,
               metadata: {
                 operation: :runtime_refresh,
                 initial_model_load: initial_model_load == true,
+                stage_count: stage_count,
                 model_object_id: model&.object_id
               }
             )
