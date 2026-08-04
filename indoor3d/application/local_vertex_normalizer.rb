@@ -31,6 +31,10 @@ require_relative 'local_vertex_normalizer/surface_descriptor_boundary_graph_v2'
 # correctness pipeline, and final merge must remain outside the fast-path.
 require_relative 'local_vertex_normalizer/normalized_input_fast_path_v2'
 require_relative 'local_vertex_normalizer/final_coplanar_face_merge_v2'
+# Reuse only the exact validated snapshot produced by the current normalize call.
+# Any scope, entity, topology, manifold, or grid mismatch falls back to the
+# independent final-coplanar rollback snapshot above.
+require_relative 'local_vertex_normalizer/final_coplanar_baseline_handoff_v2'
 
 # Semantics-neutral performance layers from refactor/lvn-performance@0654aab.
 require_relative 'local_vertex_normalizer/exact_polygon_triangulation_cache_v2'
