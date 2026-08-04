@@ -39,3 +39,5 @@ module LvnPairResultCacheBenchmark
     LvnStageDetailProfileBenchmark.run(**options)
   end
 end
+
+nil
