@@ -1,47 +1,13 @@
 # frozen_string_literal: true
 
 require_relative '../../export/gml_exporter'
+require_relative 'adaptive_progress_checkpoint'
 
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       module ProductionProgress
-        class GmlExportAdaptiveCheckpoint
-          TARGET_UPDATES = 100
-
-          def initialize(total, target_updates: TARGET_UPDATES)
-            @total = [total.to_i, 0].max
-            @target_updates = [target_updates.to_i, 1].max
-            @step = adaptive_step(@total)
-          end
-
-          def checkpoint?(completed)
-            completed = completed.to_i
-            return false if completed <= 0 || @total <= 0
-            return true if completed == 1 || completed >= @total
-
-            (completed % @step).zero?
-          end
-
-          private
-
-          def adaptive_step(total)
-            raw_step = [(total.to_f / @target_updates).ceil, 1].max
-            magnitude = 1
-            magnitude *= 10 while raw_step > magnitude * 10
-            normalized = raw_step.fdiv(magnitude)
-            factor = if normalized <= 1.0
-                       1
-                     elsif normalized <= 2.0
-                       2
-                     elsif normalized <= 5.0
-                       5
-                     else
-                       10
-                     end
-            factor * magnitude
-          end
-        end
+        class GmlExportAdaptiveCheckpoint < AdaptiveProgressCheckpoint; end
 
         module GmlExportInvocationContext
           THREAD_KEY = :ulol_indoor3d_gml_export_invocation

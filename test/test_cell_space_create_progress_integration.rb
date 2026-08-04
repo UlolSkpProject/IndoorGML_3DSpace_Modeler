@@ -224,6 +224,25 @@ module ULOL
             assert_equal [[:a, :general, nil]], calls
           end
 
+          def test_large_creation_stage_limits_progress_events
+            jobs = Array.new(420) { |index| index }
+            progress = RecordingProgress.new
+            service = BulkCellSpaceConversionService.new(
+              jobs: jobs,
+              converter: proc { |_source, _type, _category, _storey| true },
+              synchronize_all: proc { {} }
+            )
+            service.production_progress = progress
+
+            assert_equal :applied, service.call
+            creation_updates = progress.events.select do |event|
+              event.first == :update_stage && event[2].include?('CellSpace/State')
+            end
+            assert_operator creation_updates.length, :<=, 100
+            assert_equal 1, creation_updates.first[1]
+            assert_equal 420, creation_updates.last[1]
+          end
+
           def test_progress_failures_do_not_change_conversion_result
             converted = []
             logger = FakeLogger.new
