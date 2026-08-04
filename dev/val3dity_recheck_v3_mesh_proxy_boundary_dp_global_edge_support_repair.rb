@@ -32,13 +32,18 @@ module ULOL
             # - incompatible support locations are treated as ambiguous and are
             #   not inserted, leaving the existing hard gates to reject/fallback.
             def boundary_ear_conforming_triangle_soup(triangles)
-              plan = {}
-              report = nil
-              plan_error = nil
               begin
                 plan, report = boundary_dp_global_edge_support_plan(triangles)
               rescue StandardError => e
-                plan_error = "#{e.class}: #{e.message}"
+                return [
+                  nil,
+                  {
+                    'candidate_support_mode' =>
+                      'global_support_plan_exception_original_fallback',
+                    'global_edge_support_error' =>
+                      "#{e.class}: #{e.message}"
+                  }
+                ]
               end
 
               @boundary_dp_global_edge_support_plan = plan
@@ -49,20 +54,11 @@ module ULOL
                 boundary_dp_conforming_triangle_soup_without_global_edge_support(
                   triangles
                 )
-              detail = detail || {}
-              if plan_error
-                detail = detail.merge(
-                  'candidate_support_mode' =>
-                    'global_support_plan_exception_no_candidate_insertion',
-                  'global_edge_support_error' => plan_error
-                )
-              else
-                detail = detail.merge(
-                  'candidate_support_mode' =>
-                    'global_exact_support_precedence_then_single_projection_group',
-                  'global_edge_support' => report
-                )
-              end
+              detail = (detail || {}).merge(
+                'candidate_support_mode' =>
+                  'global_exact_support_precedence_then_single_projection_group',
+                'global_edge_support' => report
+              )
               [repaired, detail]
             ensure
               @boundary_dp_global_edge_support_plan = nil
