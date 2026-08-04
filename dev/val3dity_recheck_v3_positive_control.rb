@@ -267,16 +267,26 @@ module ULOL
                 :model_solid_intersection_for_pair,
                 groups[0], groups[1], ids[0], ids[1]
               )
+              original_policy_intersection = original.send(
+                :resolve_non_solid_intersection,
+                original_result,
+                candidates
+              )
+              v3_policy_intersection = v3.send(
+                :resolve_non_solid_intersection,
+                v3_result,
+                candidates
+              )
               analysis = {
                 status: :ok,
                 cells: ids,
                 adjacency_candidates: candidates
               }
               original_policy = PolicyHarness.new(original).decision(
-                analysis.merge(intersection: original_result)
+                analysis.merge(intersection: original_policy_intersection)
               )
               v3_policy = PolicyHarness.new(v3).decision(
-                analysis.merge(intersection: v3_result)
+                analysis.merge(intersection: v3_policy_intersection)
               )
 
               original_row = base(:normalize_intersection, original_result)
