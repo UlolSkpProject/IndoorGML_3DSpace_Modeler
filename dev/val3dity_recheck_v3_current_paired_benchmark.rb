@@ -231,7 +231,10 @@ module ULOL
             end
 
             def value(hash, key)
-              hash[key] || hash[key.to_sym]
+              return hash[key] if hash.key?(key)
+
+              symbol = key.to_sym
+              hash.key?(symbol) ? hash[symbol] : nil
             end
 
             def sanitize(value)
