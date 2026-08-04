@@ -66,6 +66,7 @@ module ULOL
 
     require_relative 'validity/validation_run_workspace'
     require_relative 'validity/val3dity_runner'
+    require_relative 'validity/val3dity_runner_v3_recheck_patch'
     require_relative 'validity/validation_session'
 
     require_relative 'ui/commands/conversion_message_formatter'
