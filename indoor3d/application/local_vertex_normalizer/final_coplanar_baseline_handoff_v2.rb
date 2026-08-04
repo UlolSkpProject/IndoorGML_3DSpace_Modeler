@@ -221,8 +221,6 @@ module ULOL
         end
 
         def attach_final_coplanar_baseline_handoff_report_v2(report, context)
-          return unless report.is_a?(Hash)
-
           selection = context[:selection] || {
             reused: false,
             role: context.dig(:handoff, :role),
@@ -230,11 +228,17 @@ module ULOL
             rejection_reasons: [:baseline_selection_not_reached],
             fallback_snapshot_available: nil
           }
-          report[:final_coplanar_baseline_handoff_v2] = selection.merge(
+          summary = selection.merge(
             capture_error: context[:capture_error],
             exact_hard_gate_preserved: true,
             fallback_snapshot_preserved: true
           )
+          report[:final_coplanar_baseline_handoff_v2] = summary if
+            report.is_a?(Hash)
+
+          profile = @local_vertex_normalizer_debug_profile
+          profile[:final_coplanar_baseline_handoff_v2] = summary.dup if
+            profile.is_a?(Hash)
         rescue StandardError
           nil
         end
