@@ -5,6 +5,8 @@ require_relative '../dev/lvn_final_coplanar_baseline_handoff_probe'
 
 class LvnFinalCoplanarBaselineHandoffProbeTest < Minitest::Test
   Point = Struct.new(:x, :y, :z)
+  Definition = Struct.new(:entities)
+  Entity = Struct.new(:definition)
 
   def setup
     @material = Object.new
@@ -93,6 +95,98 @@ class LvnFinalCoplanarBaselineHandoffProbeTest < Minitest::Test
     assert comparison[:fully_equivalent]
   end
 
+  def test_extension_captures_and_attaches_full_pipeline_comparison
+    records = [
+      record([point(0, 0, 0), point(10, 0, 0), point(0, 10, 0)])
+    ]
+    normalizer_class = Class.new do
+      prepend LvnFinalCoplanarBaselineHandoffProbe::Extensions
+
+      attr_reader :local_vertex_normalizer_debug_profile
+
+      define_method(:initialize) do |triangle_records|
+        @triangle_records = triangle_records
+        @local_vertex_normalizer_debug_profile = {}
+      end
+
+      private
+
+      define_method(:normalize_entity) do |entity|
+        max_grid_residual_mm([])
+        final_normalized_mesh_state(
+          entity.definition.entities,
+          @triangle_records,
+          { attempted: false },
+          geometry_counts(entity.definition.entities),
+          nil,
+          {}
+        )
+        snapshot_final_coplanar_baseline(entity.definition.entities)
+        { ok: true }
+      end
+
+      define_method(:final_normalized_mesh_state) do |*arguments|
+        [
+          @triangle_records,
+          {},
+          { triangle_count: @triangle_records.length },
+          { equivalent: true },
+          { reused: false }
+        ]
+      end
+
+      define_method(:snapshot_final_coplanar_baseline) do |_entities|
+        @triangle_records
+      end
+
+      define_method(:max_grid_residual_mm) do |_vertices|
+        0.0
+      end
+
+      define_method(:geometry_vertices) do |_entities|
+        []
+      end
+
+      define_method(:geometry_counts) do |_entities|
+        {
+          faces: 1,
+          edges: 3,
+          vertices: 3,
+          boundary_edges: 0,
+          wire_edges: 0,
+          overused_edges: 0,
+          orientation_conflicts: 0
+        }
+      end
+
+      define_method(:grid_indices) do |point_value|
+        [point_value.x, point_value.y, point_value.z]
+      end
+
+      define_method(:metadata_identity) do |value|
+        value.nil? ? nil : [:object_id, value.object_id]
+      end
+    end
+
+    normalizer = normalizer_class.new(records)
+    result = normalizer.send(
+      :normalize_entity,
+      Entity.new(Definition.new(Object.new))
+    )
+    profile = normalizer.local_vertex_normalizer_debug_profile
+    probe = profile.fetch(
+      LvnFinalCoplanarBaselineHandoffProbe::PROFILE_KEY
+    )
+
+    assert_equal({ ok: true }, result)
+    assert probe[:candidate_available]
+    assert_equal :final_fallback, probe[:candidate_role]
+    assert probe[:baseline_available]
+    assert probe[:fully_equivalent]
+    assert_equal 1, probe[:comparison_count]
+    assert probe[:existing_baseline_was_not_bypassed]
+  end
+
   def test_aggregate_counts_only_equivalent_baseline_time_as_removable
     samples = [
       {
@@ -146,12 +240,12 @@ class LvnFinalCoplanarBaselineHandoffProbeTest < Minitest::Test
 
     assert LvnFinalCoplanarBaselineHandoffProbe.install!(klass)
     refute LvnFinalCoplanarBaselineHandoffProbe.install!(klass)
-    assert_equal 1,
-                 klass.ancestors.count do |ancestor|
-                   ancestor.equal?(
-                     LvnFinalCoplanarBaselineHandoffProbe::Extensions
-                   )
-                 end
+    count = klass.ancestors.count do |ancestor|
+      ancestor.equal?(
+        LvnFinalCoplanarBaselineHandoffProbe::Extensions
+      )
+    end
+    assert_equal 1, count
   end
 
   private
