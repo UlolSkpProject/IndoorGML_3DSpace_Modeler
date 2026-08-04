@@ -39,12 +39,19 @@ module ULOL
               detail = detail || {}
 
               if repaired
-                diagnostic = boundary_dp_build_repaired_edge_fan_diagnostic(
-                  repaired
-                )
-                detail = detail.merge(
-                  'repaired_edge_fan_diagnostic' => diagnostic
-                )
+                begin
+                  diagnostic = boundary_dp_build_repaired_edge_fan_diagnostic(
+                    repaired
+                  )
+                  detail = detail.merge(
+                    'repaired_edge_fan_diagnostic' => diagnostic
+                  )
+                rescue StandardError => e
+                  detail = detail.merge(
+                    'repaired_edge_fan_diagnostic_error' =>
+                      "#{e.class}: #{e.message}"
+                  )
+                end
               end
 
               [repaired, detail]
@@ -69,57 +76,73 @@ module ULOL
                 )
               return result unless result
 
-              subdivided = !(
-                result.length == 1 &&
-                boundary_ear_same_triangle?(result.first, triangle)
-              )
-              result.each_with_index do |output_triangle, local_index|
+              begin
+                subdivided = !(
+                  result.length == 1 &&
+                  boundary_ear_same_triangle?(result.first, triangle)
+                )
+                result.each_with_index do |output_triangle, local_index|
+                  @boundary_dp_edge_fan_provenance << {
+                    'output_triangle_index' =>
+                      @boundary_dp_edge_fan_output_index,
+                    'source_triangle_index' => source_index,
+                    'local_output_index' => local_index,
+                    'source_triangle_subdivided' => subdivided,
+                    'source_triangle_points_in' =>
+                      boundary_dp_edge_fan_round_triangle(triangle),
+                    'source_triangle_points_mm' =>
+                      boundary_dp_edge_fan_triangle_mm(triangle),
+                    'output_triangle_points_in' =>
+                      boundary_dp_edge_fan_round_triangle(output_triangle),
+                    'output_triangle_points_mm' =>
+                      boundary_dp_edge_fan_triangle_mm(output_triangle)
+                  }
+                  @boundary_dp_edge_fan_output_index += 1
+                end
+              rescue StandardError => e
                 @boundary_dp_edge_fan_provenance << {
-                  'output_triangle_index' =>
-                    @boundary_dp_edge_fan_output_index,
                   'source_triangle_index' => source_index,
-                  'local_output_index' => local_index,
-                  'source_triangle_subdivided' => subdivided,
-                  'source_triangle_points_in' =>
-                    boundary_dp_edge_fan_round_triangle(triangle),
-                  'source_triangle_points_mm' =>
-                    boundary_dp_edge_fan_triangle_mm(triangle),
-                  'output_triangle_points_in' =>
-                    boundary_dp_edge_fan_round_triangle(output_triangle),
-                  'output_triangle_points_mm' =>
-                    boundary_dp_edge_fan_triangle_mm(output_triangle)
+                  'diagnostic_error' => "#{e.class}: #{e.message}"
                 }
-                @boundary_dp_edge_fan_output_index += 1
               end
 
               result
             end
 
             def boundary_dp_build_boundary(triangle, candidate_vertices)
-              @boundary_dp_edge_fan_candidate_vertices ||= candidate_vertices
-              source_index = @boundary_dp_edge_fan_source_index
-              projection_rows = boundary_dp_edge_fan_projection_rows_for(
-                triangle,
-                candidate_vertices,
-                source_index
-              )
-
               boundary, report =
                 boundary_dp_build_boundary_without_edge_fan_diagnostic(
                   triangle,
                   candidate_vertices
                 )
-              @boundary_dp_edge_fan_projection_rows.concat(projection_rows)
-              @boundary_dp_edge_fan_boundary_rows << {
-                'source_triangle_index' => source_index,
-                'boundary_points_in' => boundary.map do |point|
-                  boundary_dp_edge_fan_round_point(point)
-                end,
-                'boundary_points_mm' => boundary.map do |point|
-                  boundary_dp_edge_fan_point_mm(point)
-                end,
-                'boundary_report' => report
-              }
+
+              begin
+                @boundary_dp_edge_fan_candidate_vertices ||= candidate_vertices
+                source_index = @boundary_dp_edge_fan_source_index
+                projection_rows = boundary_dp_edge_fan_projection_rows_for(
+                  triangle,
+                  candidate_vertices,
+                  source_index
+                )
+                @boundary_dp_edge_fan_projection_rows.concat(projection_rows)
+                @boundary_dp_edge_fan_boundary_rows << {
+                  'source_triangle_index' => source_index,
+                  'boundary_points_in' => boundary.map do |point|
+                    boundary_dp_edge_fan_round_point(point)
+                  end,
+                  'boundary_points_mm' => boundary.map do |point|
+                    boundary_dp_edge_fan_point_mm(point)
+                  end,
+                  'boundary_report' => report
+                }
+              rescue StandardError => e
+                @boundary_dp_edge_fan_boundary_rows << {
+                  'source_triangle_index' =>
+                    @boundary_dp_edge_fan_source_index,
+                  'diagnostic_error' => "#{e.class}: #{e.message}"
+                }
+              end
+
               [boundary, report]
             end
 
