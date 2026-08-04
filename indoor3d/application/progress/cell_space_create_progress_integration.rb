@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'adaptive_progress_checkpoint'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -186,6 +188,8 @@ module ULOL
           def apply_plan(plan)
             @production_progress_creation_total = plan.length
             @production_progress_creation_completed = 0
+            @production_progress_creation_checkpoint =
+              AdaptiveProgressCheckpoint.new(@production_progress_creation_total)
             @production_progress_creation_stage_open = true
             progress_start_stage(
               'CellSpace/State 생성',
@@ -251,6 +255,10 @@ module ULOL
               @production_progress_creation_completed.to_i + 1,
               total
             ].min
+            return unless @production_progress_creation_checkpoint&.checkpoint?(
+              @production_progress_creation_completed
+            )
+
             progress_update_stage(
               completed: @production_progress_creation_completed,
               message: "CellSpace/State 생성: #{@production_progress_creation_completed} / #{total}"
@@ -261,6 +269,7 @@ module ULOL
             return unless @production_progress_creation_stage_open
 
             @production_progress_creation_stage_open = false
+            @production_progress_creation_checkpoint = nil
             progress_finish_stage(
               message: "CellSpace/State 생성 완료: #{@production_progress_creation_completed.to_i}개"
             )

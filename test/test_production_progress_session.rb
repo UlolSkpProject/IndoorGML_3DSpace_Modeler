@@ -117,6 +117,32 @@ module ULOL
             assert_equal 'apply', second[:stage][:name]
           end
 
+          def test_all_large_stages_limit_renderer_progress_updates
+            session, _, renderer = build_session
+            session.start
+            session.start_stage('CellSpace/State creation', total: 420)
+
+            420.times do |index|
+              snapshot = session.update_stage(
+                completed: index + 1,
+                message: "#{index + 1} / 420"
+              )
+              assert_equal index + 1, snapshot[:stage][:completed]
+            end
+            session.finish_stage
+
+            progress_frames = renderer.events.filter_map do |method_name, snapshot|
+              next unless method_name == :update
+              next unless snapshot[:stage]&.dig(:status) == :running
+              next unless snapshot[:stage][:completed].positive?
+
+              snapshot[:stage][:completed]
+            end
+            assert_operator progress_frames.length, :<=, 100
+            assert_equal 1, progress_frames.first
+            assert_equal 420, progress_frames.last
+          end
+
           def test_stage_transition_requires_explicit_finish
             session, = build_session
             session.start

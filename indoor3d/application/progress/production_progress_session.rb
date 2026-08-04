@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'null_progress_renderer'
+require_relative 'adaptive_progress_checkpoint'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -38,6 +39,8 @@ module ULOL
             @cancellable = false
             @stage = nil
             @stages = []
+            @stage_progress_checkpoint = nil
+            @stage_last_published_completed = nil
             @telemetry = {}
             @error = nil
             @renderer_error_count = 0
@@ -72,10 +75,11 @@ module ULOL
             end
 
             started_at = now
+            stage_total = normalize_total(total)
             @stage = {
               name: name.to_s,
               status: :running,
-              total: normalize_total(total),
+              total: stage_total,
               completed: 0,
               message: message.nil? ? '' : message.to_s,
               started_at: started_at,
@@ -84,6 +88,8 @@ module ULOL
               metadata: deep_copy(metadata),
               telemetry: {}
             }
+            @stage_progress_checkpoint = AdaptiveProgressCheckpoint.new(stage_total)
+            @stage_last_published_completed = 0
             @cancellable = @stage[:cancellable]
             @message = @stage[:message] unless @stage[:message].empty?
             publish(:update)
@@ -98,7 +104,10 @@ module ULOL
             @stage[:message] = message.to_s unless message.nil?
             @message = @stage[:message] unless message.nil?
             merge_telemetry!(@stage[:telemetry], telemetry)
-            publish(:update)
+            if publish_stage_progress?(@stage[:completed])
+              publish(:update)
+              @stage_last_published_completed = @stage[:completed]
+            end
             snapshot
           end
 
@@ -262,6 +271,14 @@ module ULOL
 
             @stages << deep_copy(@stage)
             @stage = nil
+            @stage_progress_checkpoint = nil
+            @stage_last_published_completed = nil
+          end
+
+          def publish_stage_progress?(completed)
+            return false if completed == @stage_last_published_completed
+
+            @stage_progress_checkpoint&.checkpoint?(completed) == true
           end
 
           def stage_snapshot(current_time)

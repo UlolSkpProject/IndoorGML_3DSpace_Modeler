@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'adaptive_progress_checkpoint'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -61,7 +63,7 @@ module ULOL
         end
 
         module AdjacencyServiceProgressContextBridge
-          TARGET_PROGRESS_UPDATES_PER_STAGE = 100
+          TARGET_PROGRESS_UPDATES_PER_STAGE = AdaptiveProgressCheckpoint::TARGET_UPDATES
           HIDDEN_OVERLAY_STAGES = %i[snapshot candidate_generation].freeze
 
           def synchronize_all(*arguments, **keywords)
@@ -150,30 +152,15 @@ module ULOL
               return @adaptive_progress_update_step
             end
 
-            raw_step = [
-              (total.to_f / TARGET_PROGRESS_UPDATES_PER_STAGE).ceil,
-              1
-            ].max
             @adaptive_progress_total = total
-            @adaptive_progress_update_step = nice_progress_update_step(raw_step)
+            @adaptive_progress_update_step = AdaptiveProgressCheckpoint.step_for(
+              total,
+              target_updates: TARGET_PROGRESS_UPDATES_PER_STAGE
+            )
           end
 
           def nice_progress_update_step(raw_step)
-            raw_step = [raw_step.to_i, 1].max
-            magnitude = 1
-            magnitude *= 10 while raw_step > magnitude * 10
-            normalized = raw_step.fdiv(magnitude)
-
-            factor = if normalized <= 1.0
-                       1
-                     elsif normalized <= 2.0
-                       2
-                     elsif normalized <= 5.0
-                       5
-                     else
-                       10
-                     end
-            factor * magnitude
+            AdaptiveProgressCheckpoint.nice_step(raw_step)
           end
 
           def hidden_overlay_stage?(stage)
