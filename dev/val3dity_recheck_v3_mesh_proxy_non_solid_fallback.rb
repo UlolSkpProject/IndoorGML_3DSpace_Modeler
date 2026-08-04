@@ -6,50 +6,15 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       module IndoorGmlConverter
-        class Val3dityOverlapGeometryRechecker
-          unless private_method_defined?(:cache_intersection_overlay_geometry_without_overlap_tolerance_capture)
-            alias_method :cache_intersection_overlay_geometry_without_overlap_tolerance_capture,
-                         :cache_intersection_overlay_geometry
-          end
-
-          unless private_method_defined?(:model_solid_intersection_for_pair_without_explicit_overlap_tolerance)
-            alias_method :model_solid_intersection_for_pair_without_explicit_overlap_tolerance,
-                         :model_solid_intersection_for_pair
-          end
-
+        module Val3dityExplicitOverlapToleranceHelpers
           private
 
-          # Capture the actual Boolean result vertices before the temporary result
-          # group is erased. The capture is diagnostics-only until a valid manifold
-          # positive result is returned, and does not modify the overlay cache.
-          def cache_intersection_overlay_geometry(result, cell_ids, volume)
-            capture_overlap_tolerance_intersection_points(result, cell_ids)
-            cache_intersection_overlay_geometry_without_overlap_tolerance_capture(
-              result,
-              cell_ids,
-              volume
-            )
-          end
-
-          # Apply the extension's explicit overlap tolerance to a positive Boolean
-          # result. SketchUp can produce small closed artifact shells around dense
-          # coplanar subdivisions. A result is tolerated only when its complete
-          # vertex set lies inside one opposite-normal candidate slab and its full
-          # thickness along that slab normal is within @tolerance.
-          #
-          # Any missing geometry, deep point, or ambiguous condition preserves the
-          # original reproduced result. This is intentionally conservative.
-          def model_solid_intersection_for_pair(group1, group2, cell_id1, cell_id2)
-            key = pair_key(cell_id1, cell_id2)
-            overlap_tolerance_point_cache.delete(key)
-
-            result =
-              model_solid_intersection_for_pair_without_explicit_overlap_tolerance(
-                group1,
-                group2,
-                cell_id1,
-                cell_id2
-              )
+          def apply_explicit_overlap_tolerance_to_pair_result(
+            result,
+            group1,
+            group2,
+            key
+          )
             points = overlap_tolerance_point_cache.delete(key)
             return result unless result.is_a?(Hash)
             return result unless result[:status].to_s == 'reproduced'
@@ -63,8 +28,6 @@ module ULOL
               candidates,
               points
             )
-          ensure
-            overlap_tolerance_point_cache.delete(key) if defined?(key) && key
           end
 
           def capture_overlap_tolerance_intersection_points(result, cell_ids)
@@ -152,7 +115,8 @@ module ULOL
             slab2 = plane2.to_f / magnitude
             slab_min, slab_max = [slab1, slab2].minmax
             penetration_depth = candidate[:penetration_depth].to_f
-            return nil if penetration_depth > @tolerance.to_f + overlap_tolerance_numeric_epsilon
+            return nil if penetration_depth >
+                          @tolerance.to_f + overlap_tolerance_numeric_epsilon
 
             projections = points.map do |point|
               (unit[0] * point.x.to_f) +
@@ -185,114 +149,135 @@ module ULOL
           end
         end
 
-        module Val3dityRecheckV3MeshProxy
-          class Rechecker
-            unless private_method_defined?(:direct_proxy_intersection_without_non_solid_fallback)
-              alias_method :direct_proxy_intersection_without_non_solid_fallback,
-                           :direct_proxy_intersection
-            end
+        # Applies the extension's explicit overlap tolerance to the unchanged
+        # full-Solid rechecker. This is a prepend wrapper rather than an alias so
+        # it composes safely with existing diagnostic prepend modules.
+        module Val3dityExplicitOverlapToleranceBasePatch
+          include Val3dityExplicitOverlapToleranceHelpers
 
-            unless private_method_defined?(:model_solid_intersection_for_pair_without_v3_overlap_tolerance)
-              alias_method :model_solid_intersection_for_pair_without_v3_overlap_tolerance,
-                           :model_solid_intersection_for_pair
-            end
+          private
 
-            private
-
-            # Conservative final-Boolean safety gates.
-            #
-            # The clipped proxy is used as a fast negative recheck. A valid empty
-            # result can therefore be accepted directly. Any result that claims a
-            # positive volumetric intersection must be confirmed by the unchanged
-            # original full-Solid recheck, because SketchUp can occasionally close
-            # a small artifact shell around dense coplanar subdivisions. Likewise,
-            # a non-solid result is incomplete and must fall back.
-            #
-            # This policy is geometry-agnostic:
-            # - not_reproduced: accept the v3 negative result;
-            # - non_solid: original full-recheck fallback;
-            # - reproduced: original full-recheck confirmation;
-            # - existing fallback requests: preserve unchanged.
-            def direct_proxy_intersection(source, target, cell_ids, geometry, record)
-              result = direct_proxy_intersection_without_non_solid_fallback(
-                source,
-                target,
-                cell_ids,
-                geometry,
-                record
-              )
-              return result unless result.is_a?(Hash)
-              return result if result[:fallback]
-
-              case result[:status].to_s
-              when 'non_solid'
-                record['non_solid_safety_gate'] = {
-                  'applied' => true,
-                  'proxy_status' => result[:status].to_s,
-                  'proxy_reason' => result[:reason].to_s,
-                  'proxy_volume_in3' => result[:volume],
-                  'proxy_component_count' => result[:component_count],
-                  'proxy_face_count' => result[:face_count],
-                  'proxy_edge_count' => result[:edge_count],
-                  'proxy_boundary_edge_count' => result[:boundary_edge_count],
-                  'proxy_nonmanifold_edge_count' =>
-                    result[:nonmanifold_edge_count]
-                }
-                fallback_result('target_boolean_non_solid')
-              when 'reproduced'
-                record['positive_result_confirmation_gate'] = {
-                  'applied' => true,
-                  'proxy_status' => result[:status].to_s,
-                  'proxy_reason' => result[:reason].to_s,
-                  'proxy_volume_in3' => result[:volume],
-                  'proxy_component_count' => result[:component_count],
-                  'proxy_face_count' => result[:face_count],
-                  'proxy_edge_count' => result[:edge_count],
-                  'proxy_boundary_edge_count' => result[:boundary_edge_count],
-                  'proxy_nonmanifold_edge_count' =>
-                    result[:nonmanifold_edge_count]
-                }
-                fallback_result(
-                  'target_boolean_reproduced_requires_original_confirmation'
-                )
-              else
-                result
-              end
-            end
-
-            # Rechecker overrides the base pair method. Apply the same explicit
-            # tolerance policy after the v3/fallback path has produced its final
-            # status. A base fallback may already have applied the gate; this
-            # wrapper is therefore idempotent.
-            def model_solid_intersection_for_pair(group1, group2, cell_id1, cell_id2)
-              key = pair_key(cell_id1, cell_id2)
-              overlap_tolerance_point_cache.delete(key)
-
-              result =
-                model_solid_intersection_for_pair_without_v3_overlap_tolerance(
-                  group1,
-                  group2,
-                  cell_id1,
-                  cell_id2
-                )
-              points = overlap_tolerance_point_cache.delete(key)
-              return result unless result.is_a?(Hash)
-              return result unless result[:status].to_s == 'reproduced'
-
-              candidates = shared_face_candidates(
-                entity_faces(group1),
-                entity_faces(group2)
-              )
-              resolve_reproduced_intersection_with_overlap_tolerance(
-                result,
-                candidates,
-                points
-              )
-            ensure
-              overlap_tolerance_point_cache.delete(key) if defined?(key) && key
-            end
+          def cache_intersection_overlay_geometry(result, cell_ids, volume)
+            capture_overlap_tolerance_intersection_points(result, cell_ids)
+            super
           end
 
+          def model_solid_intersection_for_pair(
+            group1,
+            group2,
+            cell_id1,
+            cell_id2
+          )
+            key = pair_key(cell_id1, cell_id2)
+            overlap_tolerance_point_cache.delete(key)
+            result = super
+            apply_explicit_overlap_tolerance_to_pair_result(
+              result,
+              group1,
+              group2,
+              key
+            )
+          ensure
+            overlap_tolerance_point_cache.delete(key) if defined?(key) && key
+          end
+        end
+
+        # Rechecker defines its own pair method above the base class. Wrap that
+        # method independently, again with prepend, so direct-v3 and fallback
+        # results receive the same policy without alias/super recursion.
+        module Val3dityExplicitOverlapToleranceV3Patch
+          include Val3dityExplicitOverlapToleranceHelpers
+
+          private
+
+          def model_solid_intersection_for_pair(
+            group1,
+            group2,
+            cell_id1,
+            cell_id2
+          )
+            key = pair_key(cell_id1, cell_id2)
+            overlap_tolerance_point_cache.delete(key)
+            result = super
+            apply_explicit_overlap_tolerance_to_pair_result(
+              result,
+              group1,
+              group2,
+              key
+            )
+          ensure
+            overlap_tolerance_point_cache.delete(key) if defined?(key) && key
+          end
+        end
+
+        module Val3dityRecheckV3PositiveSafetyPatch
+          private
+
+          # The clipped proxy is a fast negative recheck. Empty results can be
+          # accepted directly, while positive or non-solid results are delegated
+          # to the unchanged full-Solid path for final classification.
+          def direct_proxy_intersection(
+            source,
+            target,
+            cell_ids,
+            geometry,
+            record
+          )
+            result = super
+            return result unless result.is_a?(Hash)
+            return result if result[:fallback]
+
+            case result[:status].to_s
+            when 'non_solid'
+              record['non_solid_safety_gate'] = {
+                'applied' => true,
+                'proxy_status' => result[:status].to_s,
+                'proxy_reason' => result[:reason].to_s,
+                'proxy_volume_in3' => result[:volume],
+                'proxy_component_count' => result[:component_count],
+                'proxy_face_count' => result[:face_count],
+                'proxy_edge_count' => result[:edge_count],
+                'proxy_boundary_edge_count' => result[:boundary_edge_count],
+                'proxy_nonmanifold_edge_count' =>
+                  result[:nonmanifold_edge_count]
+              }
+              fallback_result('target_boolean_non_solid')
+            when 'reproduced'
+              record['positive_result_confirmation_gate'] = {
+                'applied' => true,
+                'proxy_status' => result[:status].to_s,
+                'proxy_reason' => result[:reason].to_s,
+                'proxy_volume_in3' => result[:volume],
+                'proxy_component_count' => result[:component_count],
+                'proxy_face_count' => result[:face_count],
+                'proxy_edge_count' => result[:edge_count],
+                'proxy_boundary_edge_count' => result[:boundary_edge_count],
+                'proxy_nonmanifold_edge_count' =>
+                  result[:nonmanifold_edge_count]
+              }
+              fallback_result(
+                'target_boolean_reproduced_requires_original_confirmation'
+              )
+            else
+              result
+            end
+          end
+        end
+
+        base_rechecker = Val3dityOverlapGeometryRechecker
+        base_patch = Val3dityExplicitOverlapToleranceBasePatch
+        base_rechecker.prepend(base_patch) unless
+          base_rechecker.ancestors.include?(base_patch)
+
+        v3_rechecker = Val3dityRecheckV3MeshProxy::Rechecker
+        v3_tolerance_patch = Val3dityExplicitOverlapToleranceV3Patch
+        v3_positive_patch = Val3dityRecheckV3PositiveSafetyPatch
+        v3_rechecker.prepend(v3_tolerance_patch) unless
+          v3_rechecker.ancestors.include?(v3_tolerance_patch)
+        v3_rechecker.prepend(v3_positive_patch) unless
+          v3_rechecker.ancestors.include?(v3_positive_patch)
+
+        module Val3dityRecheckV3MeshProxy
           class << self
             def non_solid_fallback_enabled?
               true
