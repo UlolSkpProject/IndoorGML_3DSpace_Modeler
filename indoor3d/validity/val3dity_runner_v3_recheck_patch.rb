@@ -16,7 +16,7 @@ module ULOL
 
             def available?
               enabled? && @loaded == true &&
-                defined?(Val3dityRecheckV3MeshProxy::Rechecker)
+                !defined?(Val3dityRecheckV3MeshProxy::Rechecker).nil?
             end
 
             def mark_loaded!
