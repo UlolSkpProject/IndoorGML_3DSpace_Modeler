@@ -15,16 +15,20 @@ module ULOL
 
             private
 
-            # Dev-only conservative safety gate.
+            # Conservative final-Boolean safety gates.
             #
-            # A non-solid result from SketchUp's final proxy-versus-target Boolean
-            # is not a valid volumetric intersection result. Do not classify the
-            # pair from that incomplete result; delegate the same pair to the
-            # unchanged original full recheck instead.
+            # The clipped proxy is used as a fast negative recheck. A valid empty
+            # result can therefore be accepted directly. Any result that claims a
+            # positive volumetric intersection must be confirmed by the unchanged
+            # original full-Solid recheck, because SketchUp can occasionally close
+            # a small artifact shell around dense coplanar subdivisions. Likewise,
+            # a non-solid result is incomplete and must fall back.
             #
-            # This rule is geometry-agnostic and changes only the non-solid result
-            # path. Valid empty intersections, valid solid intersections, and all
-            # existing pre-Boolean fallback paths remain untouched.
+            # This policy is geometry-agnostic:
+            # - not_reproduced: accept the v3 negative result;
+            # - non_solid: original full-recheck fallback;
+            # - reproduced: original full-recheck confirmation;
+            # - existing fallback requests: preserve unchanged.
             def direct_proxy_intersection(source, target, cell_ids, geometry, record)
               result = direct_proxy_intersection_without_non_solid_fallback(
                 source,
@@ -35,21 +39,50 @@ module ULOL
               )
               return result unless result.is_a?(Hash)
               return result if result[:fallback]
-              return result unless result[:status].to_s == 'non_solid'
 
-              record['non_solid_safety_gate'] = {
-                'applied' => true,
-                'proxy_status' => result[:status].to_s,
-                'proxy_reason' => result[:reason].to_s,
-                'proxy_volume_in3' => result[:volume],
-                'proxy_component_count' => result[:component_count]
-              }
-              fallback_result('target_boolean_non_solid')
+              case result[:status].to_s
+              when 'non_solid'
+                record['non_solid_safety_gate'] = {
+                  'applied' => true,
+                  'proxy_status' => result[:status].to_s,
+                  'proxy_reason' => result[:reason].to_s,
+                  'proxy_volume_in3' => result[:volume],
+                  'proxy_component_count' => result[:component_count],
+                  'proxy_face_count' => result[:face_count],
+                  'proxy_edge_count' => result[:edge_count],
+                  'proxy_boundary_edge_count' => result[:boundary_edge_count],
+                  'proxy_nonmanifold_edge_count' =>
+                    result[:nonmanifold_edge_count]
+                }
+                fallback_result('target_boolean_non_solid')
+              when 'reproduced'
+                record['positive_result_confirmation_gate'] = {
+                  'applied' => true,
+                  'proxy_status' => result[:status].to_s,
+                  'proxy_reason' => result[:reason].to_s,
+                  'proxy_volume_in3' => result[:volume],
+                  'proxy_component_count' => result[:component_count],
+                  'proxy_face_count' => result[:face_count],
+                  'proxy_edge_count' => result[:edge_count],
+                  'proxy_boundary_edge_count' => result[:boundary_edge_count],
+                  'proxy_nonmanifold_edge_count' =>
+                    result[:nonmanifold_edge_count]
+                }
+                fallback_result(
+                  'target_boolean_reproduced_requires_original_confirmation'
+                )
+              else
+                result
+              end
             end
           end
 
           class << self
             def non_solid_fallback_enabled?
+              true
+            end
+
+            def positive_result_confirmation_enabled?
               true
             end
           end
