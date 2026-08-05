@@ -13,11 +13,12 @@ module ULOL
             return super unless precision_validation_profile?
 
             overlap_recheck_policy.preserve_strict_validation!(raw_report)
+            schema = IndoorGmlConverter::Val3dityReportSchema
             raw_valid = raw_report['validity'] == true
-            raw_report[Val3dityReportSchema::EXTENSION_VALIDITY_KEY] = raw_valid
-            raw_report[Val3dityReportSchema::VALIDATION_STATUS_KEY] =
+            raw_report[schema::EXTENSION_VALIDITY_KEY] = raw_valid
+            raw_report[schema::VALIDATION_STATUS_KEY] =
               raw_valid ? 'exact_valid' : 'invalid'
-            raw_report.delete(Val3dityReportSchema::OVERLAP_RECHECK_REPORT_KEY)
+            raw_report.delete(schema::OVERLAP_RECHECK_REPORT_KEY)
             raw_report
           end
         end
