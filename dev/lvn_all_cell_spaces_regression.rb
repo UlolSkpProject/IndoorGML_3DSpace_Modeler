@@ -7,7 +7,7 @@ require 'time'
 module ULOL
   module Indoor3DGmlModeler
     module Dev
-      module PrecisionValidationAllCellSpacesLvnSmokeTest
+      module LvnAllCellSpacesRegression
         TOLERANCE_MM = IndoorCore::LocalVertexNormalizer::DEFAULT_TOLERANCE_MM
         LENGTH_EPSILON_MM = 0.0001
         TRANSFORM_EPSILON = 1.0e-12
@@ -69,7 +69,7 @@ module ULOL
           anomaly_rows = cell_results.reject { |row| row[:pass] }
 
           result = {
-            schema: 'ulol.precision_validation.all_cell_spaces_lvn_smoke.v1',
+            schema: 'ulol.lvn.all_cell_spaces_regression.v1',
             generated_at: Time.now.iso8601(3),
             tolerance_mm: TOLERANCE_MM,
             elapsed_seconds: elapsed_seconds,
@@ -89,7 +89,7 @@ module ULOL
 
           output_path = write_result(result)
           result[:output_path] = output_path
-          $precision_validation_all_lvn_smoke_report = result
+          $lvn_all_cell_spaces_regression_report = result
           print_result(result)
           result
         end
@@ -345,7 +345,7 @@ module ULOL
           timestamp = Time.now.strftime('%Y%m%d_%H%M%S')
           path = File.join(
             Dir.tmpdir,
-            "indoor_gml_precision_all_lvn_smoke_#{timestamp}.json"
+            "indoor_gml_lvn_all_cell_spaces_regression_#{timestamp}.json"
           )
           File.write(path, JSON.pretty_generate(json_safe(result)))
           path
@@ -355,7 +355,7 @@ module ULOL
         def print_result(result)
           puts
           puts '=' * 90
-          puts '[Precision Validation] All CellSpaces LVN smoke test'
+          puts '[LVN Regression] All CellSpaces'
           puts "overall_pass=#{result[:overall_pass]} targets=#{result[:target_count]} " \
                "elapsed=#{format('%.3f', result[:elapsed_seconds])}s"
           puts "status_counts=#{result[:status_counts].inspect}"
@@ -401,5 +401,5 @@ module ULOL
   end
 end
 
-ULOL::Indoor3DGmlModeler::Dev::PrecisionValidationAllCellSpacesLvnSmokeTest.run
+ULOL::Indoor3DGmlModeler::Dev::LvnAllCellSpacesRegression.run
 nil
