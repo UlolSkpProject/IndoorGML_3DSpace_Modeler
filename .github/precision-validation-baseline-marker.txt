@@ -1,0 +1,2 @@
+CI baseline marker for precision validation comparison.
+Base commit: c7275bbfb87859eb2a6ac9c2d0ccdd2fc8216d97
