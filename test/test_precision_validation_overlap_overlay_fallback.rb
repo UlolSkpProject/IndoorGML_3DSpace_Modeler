@@ -19,7 +19,7 @@ module ULOL
             geometry_refs: {}
           }
 
-          assert @resolver.send(:positive_overlap_recheck?, row, %w[cell_a cell_b])
+          assert @resolver.send(:positive_overlap_recheck?, row, %w[alpha beta])
         end
 
         def test_raw_704_without_extension_recheck_does_not_authorize_overlap_overlay
@@ -28,7 +28,7 @@ module ULOL
             geometry_refs: {}
           }
 
-          refute @resolver.send(:positive_overlap_recheck?, row, %w[cell_a cell_b])
+          refute @resolver.send(:positive_overlap_recheck?, row, %w[alpha beta])
         end
 
         def test_explicit_tolerated_recheck_remains_authoritative
@@ -36,14 +36,14 @@ module ULOL
             code: 701,
             geometry_refs: {
               overlap_recheck: {
-                cells: %w[cell_a cell_b],
+                cells: %w[alpha beta],
                 tolerated: true,
                 actual_overlap_volume_mm3: 12.5
               }
             }
           }
 
-          refute @resolver.send(:positive_overlap_recheck?, row, %w[cell_a cell_b])
+          refute @resolver.send(:positive_overlap_recheck?, row, %w[alpha beta])
         end
 
         def test_explicit_positive_matching_recheck_keeps_existing_behavior
@@ -51,14 +51,14 @@ module ULOL
             code: 701,
             geometry_refs: {
               overlap_recheck: {
-                cells: %w[cell_a cell_b],
+                cells: %w[alpha beta],
                 tolerated: false,
                 actual_overlap_volume_mm3: 12.5
               }
             }
           }
 
-          assert @resolver.send(:positive_overlap_recheck?, row, %w[cell_a cell_b])
+          assert @resolver.send(:positive_overlap_recheck?, row, %w[alpha beta])
         end
 
         def test_explicit_nonpositive_or_mismatched_recheck_is_not_overridden
@@ -66,7 +66,7 @@ module ULOL
             code: 701,
             geometry_refs: {
               overlap_recheck: {
-                cells: %w[cell_a cell_b],
+                cells: %w[alpha beta],
                 tolerated: false,
                 actual_overlap_volume_mm3: 0.0
               }
@@ -76,15 +76,15 @@ module ULOL
             code: 701,
             geometry_refs: {
               overlap_recheck: {
-                cells: %w[cell_a cell_c],
+                cells: %w[alpha gamma],
                 tolerated: false,
                 actual_overlap_volume_mm3: 12.5
               }
             }
           }
 
-          refute @resolver.send(:positive_overlap_recheck?, zero_volume, %w[cell_a cell_b])
-          refute @resolver.send(:positive_overlap_recheck?, mismatched_pair, %w[cell_a cell_b])
+          refute @resolver.send(:positive_overlap_recheck?, zero_volume, %w[alpha beta])
+          refute @resolver.send(:positive_overlap_recheck?, mismatched_pair, %w[alpha beta])
         end
       end
     end
