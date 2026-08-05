@@ -6,16 +6,21 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class IndoorModel
-        attr_accessor :operation_names, :raise_after_operations
+        attr_accessor :operation_names, :raise_after_operations, :nested_runner
         attr_reader :operation_calls
 
         def initialize
           @operation_names = []
           @operation_calls = []
           @raise_after_operations = false
+          @nested_runner = nil
         end
 
         def local_vertex_normalize(*_args, **_options)
+          runner = @nested_runner
+          @nested_runner = nil
+          runner.call if runner
+
           operation_names.each do |name|
             with_indoor_model_operation(name) { true }
           end
@@ -88,27 +93,18 @@ module ULOL
         def test_nested_continue_scopes_restore_depth
           model = IndoorModel.new
           model.operation_names = ['IndoorGML LVN A']
-
-          model.singleton_class.class_eval do
-            alias_method :baseline_local_vertex_normalize, :local_vertex_normalize
-
-            define_method(:local_vertex_normalize) do |*args, **options|
-              if options.delete(:nested)
-                baseline_local_vertex_normalize(*args, **options) do
-                  baseline_local_vertex_normalize(*args, **options)
-                end
-              else
-                baseline_local_vertex_normalize(*args, **options)
-              end
-            end
+          model.nested_runner = lambda do
+            model.local_vertex_normalize(failure_policy: :continue)
           end
 
           assert_equal :baseline,
-                       model.local_vertex_normalize(
-                         failure_policy: :continue,
-                         nested: false
-                       )
-          assert_equal true, model.operation_calls.last[1][:force]
+                       model.local_vertex_normalize(failure_policy: :continue)
+          assert_equal [true, true],
+                       model.operation_calls.map { |_name, options| options[:force] }
+
+          model.operation_calls.clear
+          model.with_indoor_model_operation('IndoorGML LVN A') { true }
+          refute model.operation_calls.last[1].key?(:force)
         end
       end
     end
