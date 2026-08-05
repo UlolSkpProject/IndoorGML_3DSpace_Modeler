@@ -28,8 +28,10 @@ require_relative 'local_vertex_normalizer/rebuild_omission_vertex_collapse_v2'
 require_relative 'local_vertex_normalizer/surface_descriptor_boundary_graph_v2'
 
 # Alias-based normalize_entity wrappers. Fast-path must capture the completed
-# correctness pipeline, and final merge must remain outside the fast-path.
+# correctness pipeline. The experimental horizontal Z unification runs on the
+# completed normalized surface immediately before final coplanar Face merge.
 require_relative 'local_vertex_normalizer/normalized_input_fast_path_v2'
+require_relative 'local_vertex_normalizer/horizontal_face_z_unification_v2'
 require_relative 'local_vertex_normalizer/final_coplanar_face_merge_v2'
 # Reuse only the exact validated snapshot produced by the current normalize call.
 # Any scope, entity, topology, manifold, or grid mismatch falls back to the
