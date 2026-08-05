@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require_relative '../definition'
 require_relative 'val3dity_report_schema'
 
 module ULOL
@@ -13,7 +12,6 @@ module ULOL
           STRICT_VALIDITY_KEY = Val3dityReportSchema::STRICT_VALIDITY_KEY
           EXTENSION_VALIDITY_KEY = Val3dityReportSchema::EXTENSION_VALIDITY_KEY
           VALIDATION_STATUS_KEY = Val3dityReportSchema::VALIDATION_STATUS_KEY
-          APPLICATION_PROFILE_KEY = Val3dityReportSchema::APPLICATION_PROFILE_KEY
           OVERLAP_TOLERANCE_KEY = Val3dityReportSchema::OVERLAP_TOLERANCE_KEY
 
           def render(raw_report)
@@ -199,19 +197,10 @@ module ULOL
           end
 
           def report_top_meta_section(raw_report)
-            profile = raw_report[APPLICATION_PROFILE_KEY] || {}
-            profile_status = if profile.empty?
-                               'not checked'
-                             elsif profile['validity'] == true
-                               'valid'
-                             else
-                               'invalid'
-                             end
             <<~HTML
               <div class="top-meta">
                 <div>#{html_escape(report_checked_at(raw_report['time']))}</div>
                 <div>strict: #{html_escape(raw_report[STRICT_VALIDITY_KEY] == true ? 'valid' : 'invalid')} · extension policy: #{html_escape(raw_report[EXTENSION_VALIDITY_KEY] == true ? 'valid' : 'invalid')} · features #{valid_count(raw_report['features_overview'])}/#{total_count(raw_report['features_overview'])}</div>
-                <div>profile: #{html_escape(profile['name'] || Definition::APPLICATION_PROFILE_NAME)} · #{html_escape(profile_status)}</div>
               </div>
             HTML
           end

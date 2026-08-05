@@ -14,7 +14,6 @@ module ULOL
           [:temp_file, '임시파일 생성'],
           [:val3dity, 'val3dity 실행 (version2.2.0)'],
           [:extension_recheck, '2차 overlap recheck'],
-          [:application_profile, 'Application Profile'],
           [:report, 'Report 생성']
         ].freeze
 
@@ -22,7 +21,6 @@ module ULOL
           [:lvn, 'CellSpace Normalize'],
           [:temp_file, '임시파일 생성'],
           [:val3dity, 'val3dity 실행 (overlap_tol 0.01 mm)'],
-          [:application_profile, 'Application Profile'],
           [:report, 'Report 생성']
         ].freeze
 

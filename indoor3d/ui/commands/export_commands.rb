@@ -384,7 +384,7 @@ module ULOL
             progress&.result(
               status: :success,
               title: 'Exact Valid',
-              message: 'Strict val3dity and application profile checks passed.',
+              message: 'Strict val3dity checks passed.',
               actions: [:openReport, :close]
             )
           when :extension_policy_valid

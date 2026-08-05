@@ -9,7 +9,6 @@ var defaultSteps = [
   { key: 'temp_file', label: '\uC784\uC2DC\uD30C\uC77C \uC0DD\uC131' },
   { key: 'val3dity', label: 'val3dity \uC2E4\uD589 (version2.2.0)' },
   { key: 'extension_recheck', label: '2\uCC28 overlap recheck' },
-  { key: 'application_profile', label: 'Application Profile' },
   { key: 'report', label: 'Report \uC0DD\uC131' }
 ];
 

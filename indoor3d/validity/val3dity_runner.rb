@@ -11,7 +11,6 @@ require_relative 'val3dity_overlap_recheck_policy'
 require_relative 'val3dity_overlap_geometry_rechecker'
 require_relative 'val3dity_run_orchestration'
 require_relative 'xml_input_validator'
-require_relative 'application_profile_validator'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -158,10 +157,9 @@ module ULOL
           end
 
           def start(progress: nil, progress_step: :val3dity, recheck_step: :extension_recheck,
-                    profile_step: :application_profile, report_step: :report, active: nil, &callback)
+                    report_step: :report, active: nil, &callback)
             raise ArgumentError, 'callback is required' unless callback
 
-            @profile_step = profile_step
             ensure_supported_platform!
             ensure_runtime_files!
             FileUtils.rm_f(@report_json_path)
@@ -179,7 +177,6 @@ module ULOL
               progress&.fail(progress_step)
               result = build_preflight_invalid_result(
                 input_result.errors,
-                stage: 'input_parsing',
                 progress: progress,
                 report_step: report_step
               )
@@ -336,8 +333,7 @@ module ULOL
           end
 
           def build_result_after_process(exit_code, progress = nil, recheck_step: :extension_recheck,
-                                         profile_step: :application_profile, report_step: :report)
-            profile_step = @profile_step if instance_variable_defined?(:@profile_step)
+                                         report_step: :report)
             raise "val3dity failed: exit code #{exit_code}" unless exit_code == 0
             raise 'val3dity failed to create report.json.' unless File.exist?(@report_json_path)
 
@@ -372,7 +368,6 @@ module ULOL
               progress&.complete(recheck_step)
             end
 
-            apply_application_profile!(raw_report, progress: progress, progress_step: profile_step)
             attach_overlap_tolerance_metadata!(raw_report)
 
             if report_step
@@ -428,7 +423,7 @@ module ULOL
             File.write(@report_html_path, Val3dityReportRenderer.new.render(raw_report), encoding: 'UTF-8')
           end
 
-          def build_preflight_invalid_result(errors, stage:, progress:, report_step:)
+          def build_preflight_invalid_result(errors, progress:, report_step:)
             raw_report = {
               'input_file' => File.basename(@gml_path),
               'validity' => false,
@@ -440,13 +435,7 @@ module ULOL
               'primitives_overview' => [],
               Val3dityReportSchema::STRICT_VALIDITY_KEY => false,
               Val3dityReportSchema::EXTENSION_VALIDITY_KEY => false,
-              Val3dityReportSchema::VALIDATION_STATUS_KEY => 'invalid',
-              Val3dityReportSchema::APPLICATION_PROFILE_KEY => {
-                'id' => Definition::APPLICATION_PROFILE_ID,
-                'name' => Definition::APPLICATION_PROFILE_NAME,
-                'validity' => false,
-                'not_run_reason' => stage
-              }
+              Val3dityReportSchema::VALIDATION_STATUS_KEY => 'invalid'
             }
             attach_overlap_tolerance_metadata!(raw_report)
             write_report(raw_report, progress: progress, report_step: report_step)
@@ -457,44 +446,6 @@ module ULOL
               report_html_path: @report_html_path,
               error: nil
             )
-          end
-
-          def apply_application_profile!(raw_report, progress:, progress_step:)
-            progress&.running(progress_step) if progress_step
-            progress&.detail(
-              progress_step,
-              percent: 0,
-              phase: 'Application Profile',
-              message: 'Checking the declared ULOL application profile',
-              current: File.basename(@gml_path)
-            ) if progress_step
-
-            result = ApplicationProfileValidator.new.validate(@gml_path)
-            raw_report[Val3dityReportSchema::APPLICATION_PROFILE_KEY] = {
-              'id' => result.profile_id,
-              'name' => result.profile_name,
-              'validity' => result.valid?
-            }
-            unless result.valid?
-              raw_report['dataset_errors'] = Array(raw_report['dataset_errors']) + Array(result.errors)
-              raw_report['validity'] = false
-              raw_report[Val3dityReportSchema::VALIDATION_STATUS_KEY] = 'invalid'
-              raw_report['all_errors'] = Val3dityReportSchema.error_item_rows(raw_report)
-                                                                 .map { |row| row[:code] }
-                                                                 .uniq
-              progress&.fail(progress_step) if progress_step
-              return false
-            end
-
-            progress&.detail(
-              progress_step,
-              percent: 100,
-              phase: 'Application Profile',
-              message: 'Application profile checks passed',
-              current: File.basename(@gml_path)
-            ) if progress_step
-            progress&.complete(progress_step) if progress_step
-            true
           end
 
           def attach_overlap_tolerance_metadata!(raw_report)

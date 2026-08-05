@@ -126,10 +126,10 @@ module ULOL
           precision_keys = PrecisionValidation.steps_for(:precision).map(&:first)
 
           assert_includes fast_keys, :extension_recheck
-          assert_includes fast_keys, :application_profile
           refute_includes precision_keys, :extension_recheck
           assert_includes precision_keys, :lvn
-          assert_includes precision_keys, :application_profile
+          refute_includes fast_keys, :application_profile
+          refute_includes precision_keys, :application_profile
         end
 
         def test_precision_dialog_uses_precision_steps
@@ -140,7 +140,7 @@ module ULOL
 
           assert_includes script, 'lvn'
           assert_includes script, 'overlap_tol 0.01 mm'
-          assert_includes script, 'application_profile'
+          refute_includes script, 'application_profile'
           refute_includes script, 'extension_recheck'
         end
 
