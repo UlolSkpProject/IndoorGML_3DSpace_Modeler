@@ -187,7 +187,7 @@ module ULOL
           renderer = renderer_for([])
 
           assert_equal 12, renderer.overlay_state_point_size(state_radius_scale: 1.0)
-          assert_equal 10, renderer.overlay_state_point_size(state_radius_scale: 0.1)
+          assert_equal 2, renderer.overlay_state_point_size(state_radius_scale: 0.1)
           assert_equal 24, renderer.overlay_state_point_size(state_radius_scale: 10.0)
         end
 
