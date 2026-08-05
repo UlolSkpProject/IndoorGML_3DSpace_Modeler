@@ -15,14 +15,30 @@ module ULOL
         def run
           model = Sketchup.active_model
           indoor_model = IndoorCore::IndoorModel.current
-          targets = selected_cell_spaces(model, indoor_model)
+          selected_targets = selected_cell_spaces(model, indoor_model)
 
-          raise '선택된 CellSpace가 없습니다. CellSpace 그룹 자체를 선택하세요.' if targets.empty?
-          raise 'IndoorGML Edit Mode를 종료한 뒤 실행하세요.' if indoor_model.editing?
-          raise 'Root context에서 실행하세요. 현재 active_path를 닫아 주세요.' unless root_context?(model)
+          raise '선택된 CellSpace가 없습니다. Edit Mode에서 CellSpace 그룹 자체를 선택하세요.' if selected_targets.empty?
+
+          selected_ids = selected_targets.map { |cell_space| cell_space.id.to_s }
+          capture_context = context_snapshot(model, indoor_model)
+          finish_editing_performed = indoor_model.editing? == true
+
+          if finish_editing_performed
+            finished = indoor_model.finish_editing
+            raise 'IndoorGML Edit Mode 종료에 실패했습니다.' unless finished
+          end
+
+          raise 'Edit Mode 종료 후 Root context로 전환되지 않았습니다.' unless root_context?(model)
+
+          targets = resolve_cell_spaces(indoor_model, selected_ids)
+          resolved_ids = targets.map { |cell_space| cell_space.id.to_s }
+          missing_ids = selected_ids - resolved_ids
+          unless missing_ids.empty?
+            raise "Edit Mode 종료 후 CellSpace 대상을 다시 찾지 못했습니다: #{missing_ids.join(', ')}"
+          end
 
           before_context = context_snapshot(model, indoor_model)
-          before_cells = targets.to_h { |cell_space| [cell_space.id, cell_snapshot(cell_space)] }
+          before_cells = targets.to_h { |cell_space| [cell_space.id.to_s, cell_snapshot(cell_space)] }
 
           started_at = monotonic_time
           report = indoor_model.local_vertex_normalize(
@@ -35,11 +51,17 @@ module ULOL
           elapsed_seconds = monotonic_time - started_at
 
           after_context = context_snapshot(model, indoor_model)
-          after_cells = targets.to_h { |cell_space| [cell_space.id, cell_snapshot(cell_space)] }
+          after_cells = targets.to_h { |cell_space| [cell_space.id.to_s, cell_snapshot(cell_space)] }
           report_rows = Array(report[:cell_spaces]).to_h do |row|
             [row[:cell_space_id].to_s, row]
           end
 
+          preflight_checks = {
+            selected_targets_captured: selected_ids.length == selected_targets.length,
+            selected_targets_resolved_after_finish: missing_ids.empty?,
+            root_context_before_lvn: root_context?(model),
+            edit_mode_closed_before_lvn: before_context[:editing] == false
+          }
           context_checks = compare_context(before_context, after_context)
           cell_results = targets.map do |cell_space|
             id = cell_space.id.to_s
@@ -52,14 +74,20 @@ module ULOL
           end
 
           result = {
-            schema: 'ulol.precision_validation.selected_cell_spaces_lvn_smoke.v1',
+            schema: 'ulol.precision_validation.selected_cell_spaces_lvn_smoke.v2',
             tolerance_mm: TOLERANCE_MM,
             elapsed_seconds: elapsed_seconds,
             target_count: targets.length,
-            overall_pass: context_checks.values.all? && cell_results.all? { |row| row[:pass] },
+            selected_target_ids: selected_ids,
+            finish_editing_performed: finish_editing_performed,
+            overall_pass: preflight_checks.values.all? &&
+                          context_checks.values.all? &&
+                          cell_results.all? { |row| row[:pass] },
+            preflight_checks: preflight_checks,
+            capture_context: capture_context,
             context_checks: context_checks,
-            context_before: before_context,
-            context_after: after_context,
+            context_before_lvn: before_context,
+            context_after_lvn: after_context,
             aggregate_report: compact_aggregate_report(report),
             cell_spaces: cell_results
           }
@@ -77,6 +105,16 @@ module ULOL
           end
         end
         private_class_method :selected_cell_spaces
+
+        def resolve_cell_spaces(indoor_model, ids)
+          by_id = Array(indoor_model.cell_spaces).each_with_object({}) do |cell_space, memo|
+            next unless cell_space&.valid?
+
+            memo[cell_space.id.to_s] = cell_space
+          end
+          ids.filter_map { |id| by_id[id.to_s] }
+        end
+        private_class_method :resolve_cell_spaces
 
         def root_context?(model)
           path = model.active_path
@@ -191,9 +229,9 @@ module ULOL
 
         def compare_context(before, after)
           {
-            active_path_preserved: before[:active_path] == after[:active_path],
-            selection_preserved: before[:selection] == after[:selection],
-            edit_mode_preserved: before[:editing] == after[:editing]
+            active_path_preserved_during_lvn: before[:active_path] == after[:active_path],
+            selection_preserved_during_lvn: before[:selection] == after[:selection],
+            edit_mode_preserved_during_lvn: before[:editing] == after[:editing]
           }
         end
         private_class_method :compare_context
@@ -317,7 +355,9 @@ module ULOL
           puts '=' * 90
           puts '[Precision Validation] Selected CellSpace LVN smoke test'
           puts "overall_pass=#{result[:overall_pass]} targets=#{result[:target_count]} " \
+               "finish_editing=#{result[:finish_editing_performed]} " \
                "elapsed=#{format('%.3f', result[:elapsed_seconds])}s"
+          puts "preflight=#{result[:preflight_checks].inspect}"
           puts "context=#{result[:context_checks].inspect}"
           result[:cell_spaces].each do |row|
             failed_checks = row[:checks].select { |_key, value| value != true }.keys
