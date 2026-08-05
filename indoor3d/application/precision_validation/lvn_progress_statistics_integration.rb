@@ -17,14 +17,18 @@ module ULOL
             previous_failure = data[:skipped_previous_failure_cell_space_count].to_i
             calculated_total = normalized + failed + already + previous_failure
             target_total = data[:target_cell_space_count].to_i
+            total = target_total.positive? ? target_total : calculated_total
+            skipped = already + previous_failure
+            pending = [total - normalized - failed - skipped, 0].max
 
             {
-              total: target_total.positive? ? target_total : calculated_total,
+              total: total,
               normalized: normalized,
               failed: failed,
               already: already,
               previous_failure: previous_failure,
-              skipped: already + previous_failure
+              skipped: skipped,
+              pending: pending
             }
           end
 
@@ -38,16 +42,16 @@ module ULOL
 
           def step_summary_message(report)
             values = counts(report)
-            "전체 #{format_count(values[:total])}개 중 " \
-              "성공 #{format_count(values[:normalized])}개" \
-              " · 실패 #{format_count(values[:failed])}개" \
-              " · Skip #{format_count(values[:skipped])}개 " \
-              "(기존 완료 #{format_count(values[:already])}개, " \
-              "이전 실패 #{format_count(values[:previous_failure])}개)"
+            "전체 #{format_count(values[:total])}개 " \
+              "Skip #{format_count(values[:skipped])}개\n" \
+              "성공 #{format_count(values[:normalized])}개 " \
+              "실패 #{format_count(values[:failed])}개 " \
+              "대기 #{format_count(values[:pending])}개"
           end
 
           def step_summary_tone(report)
-            counts(report)[:failed].positive? ? :warning : :success
+            values = counts(report)
+            values[:failed].positive? || values[:pending].positive? ? :warning : :success
           end
 
           def format_count(value)

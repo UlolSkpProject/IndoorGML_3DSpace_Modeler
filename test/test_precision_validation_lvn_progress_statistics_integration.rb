@@ -83,7 +83,7 @@ module ULOL
           )
         end
 
-        def test_finish_persists_statistics_below_lvn_step
+        def test_finish_persists_two_line_statistics_below_lvn_step
           report = {
             target_cell_space_count: 1_243,
             cell_space_count: 431,
@@ -98,7 +98,7 @@ module ULOL
           assert_equal(
             {
               step: :lvn,
-              message: '전체 1,243개 중 성공 431개 · 실패 8개 · Skip 804개 (기존 완료 781개, 이전 실패 23개)',
+              message: "전체 1,243개 Skip 804개\n성공 431개 실패 8개 대기 0개",
               tone: :warning
             },
             @progress.step_summaries.last
@@ -113,7 +113,25 @@ module ULOL
           )
         end
 
-        def test_zero_failure_summary_uses_success_tone
+        def test_pending_is_remaining_unclassified_target_count
+          report = {
+            target_cell_space_count: 10,
+            cell_space_count: 3,
+            normalization_failed_cell_space_count: 1,
+            already_normalized_cell_space_count: 3,
+            skipped_previous_failure_cell_space_count: 1
+          }
+
+          @tracker.finish(report)
+
+          assert_equal(
+            "전체 10개 Skip 4개\n성공 3개 실패 1개 대기 2개",
+            @progress.step_summaries.last[:message]
+          )
+          assert_equal :warning, @progress.step_summaries.last[:tone]
+        end
+
+        def test_zero_failure_and_zero_pending_summary_uses_success_tone
           report = {
             target_cell_space_count: 5,
             cell_space_count: 3,
@@ -126,7 +144,7 @@ module ULOL
 
           assert_equal :success, @progress.step_summaries.last[:tone]
           assert_equal(
-            '전체 5개 중 성공 3개 · 실패 0개 · Skip 2개 (기존 완료 2개, 이전 실패 0개)',
+            "전체 5개 Skip 2개\n성공 3개 실패 0개 대기 0개",
             @progress.step_summaries.last[:message]
           )
         end
