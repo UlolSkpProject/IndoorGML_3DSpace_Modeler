@@ -10,7 +10,6 @@ module ULOL
     module Dev
       module PrecisionValidationLvnSingleUndoProbe
         TOLERANCE_MM = IndoorCore::LocalVertexNormalizer::DEFAULT_TOLERANCE_MM
-        TIMER_DELAY_SECONDS = 0.25
 
         module_function
 
@@ -31,7 +30,9 @@ module ULOL
 
           before = model_snapshot(indoor_model, targets)
           unnormalized_before = before[:cell_spaces].count { |_id, row| row[:normalized] != true }
-          raise '모든 CellSpace가 이미 normalized 상태라 Undo 단일성을 검증할 수 없습니다.' if unnormalized_before.zero?
+          if unnormalized_before.zero?
+            raise '모든 CellSpace가 이미 normalized 상태입니다. LVN 전 원본 복사본에서 실행하세요.'
+          end
 
           started_at = monotonic_time
           lvn_report = indoor_model.local_vertex_normalize(
@@ -57,14 +58,20 @@ module ULOL
               before[:cell_spaces].keys.sort == after_lvn[:cell_spaces].keys.sort
           }
 
+          state = {
+            finish_editing_performed: finish_editing_performed,
+            before: before,
+            after_lvn: after_lvn,
+            lvn_report: compact_lvn_report(lvn_report),
+            lvn_seconds: lvn_seconds,
+            initial_checks: initial_checks,
+            target_ids: targets.map { |cell_space| cell_space.id.to_s },
+            phase: :awaiting_manual_undo
+          }
+          $precision_validation_lvn_single_undo_probe_state = state
+
           unless initial_checks.values.all?
-            result = base_result(
-              finish_editing_performed,
-              before,
-              after_lvn,
-              lvn_report,
-              lvn_seconds
-            ).merge(
+            result = result_from_state(state).merge(
               overall_pass: false,
               phase: :before_undo,
               checks: initial_checks,
@@ -74,75 +81,62 @@ module ULOL
             return result
           end
 
-          state = {
-            finish_editing_performed: finish_editing_performed,
-            before: before,
-            after_lvn: after_lvn,
-            lvn_report: compact_lvn_report(lvn_report),
-            lvn_seconds: lvn_seconds,
-            initial_checks: initial_checks,
-            target_ids: targets.map { |cell_space| cell_space.id.to_s }
-          }
-          $precision_validation_lvn_single_undo_probe_state = state
-
-          undo_dispatched = Sketchup.send_action('editUndo:')
-          state[:undo_dispatched] = undo_dispatched != false
-          unless state[:undo_dispatched]
-            result = result_from_state(state).merge(
-              overall_pass: false,
-              phase: :undo_dispatch,
-              checks: initial_checks.merge(undo_dispatched: false),
-              failed_checks: [:undo_dispatched]
-            )
-            finish_result(result)
-            return result
-          end
-
-          UI.start_timer(TIMER_DELAY_SECONDS, false) { inspect_after_undo }
-          puts '[Precision Validation] LVN 단일 Undo probe: Undo 결과 확인 예약됨'
-          :scheduled
+          print_manual_undo_instruction(state)
+          :awaiting_manual_undo
         end
 
         def inspect_after_undo
-          state = $precision_validation_lvn_single_undo_probe_state
-          return unless state
-
+          state = require_state!(:awaiting_manual_undo)
           indoor_model = IndoorCore::IndoorModel.current
           after_undo = model_snapshot_by_ids(indoor_model, state[:target_ids])
-          state[:after_undo] = after_undo
-          state[:undo_checks] = compare_snapshots(
+
+          undo_checks = compare_snapshots(
             state[:before],
             after_undo,
             prefix: :undo,
             compare_normalized: true
           )
+          undo_effect_observed = !snapshots_equivalent?(
+            state[:after_lvn],
+            after_undo,
+            compare_normalized: true
+          )
+          undo_checks[:undo_effect_observed] = undo_effect_observed
 
-          redo_dispatched = Sketchup.send_action('editRedo:')
-          state[:redo_dispatched] = redo_dispatched != false
-          unless state[:redo_dispatched]
-            result = result_from_state(state).merge(
-              overall_pass: false,
-              phase: :redo_dispatch,
-              checks: merged_checks(state).merge(redo_dispatched: false),
-              failed_checks: failed_check_keys(merged_checks(state).merge(redo_dispatched: false))
-            )
-            finish_result(result)
-            return
+          unless undo_effect_observed
+            puts
+            puts '[Precision Validation] Undo 변화가 아직 관측되지 않았습니다.'
+            puts 'SketchUp 모델 창에서 Ctrl+Z를 1회 실행한 뒤 같은 확인 명령을 다시 실행하세요.'
+            return :awaiting_manual_undo
           end
 
-          UI.start_timer(TIMER_DELAY_SECONDS, false) { inspect_after_redo }
+          state[:after_undo] = after_undo
+          state[:undo_checks] = undo_checks
+
+          unless undo_checks.values.all?
+            result = result_from_state(state).merge(
+              overall_pass: false,
+              phase: :after_manual_undo,
+              checks: merged_checks(state),
+              failed_checks: failed_check_keys(merged_checks(state))
+            )
+            finish_result(result)
+            return result
+          end
+
+          state[:phase] = :awaiting_manual_redo
+          print_manual_redo_instruction
+          :awaiting_manual_redo
         rescue StandardError => error
-          finish_exception(:after_undo, error)
+          finish_exception(:after_manual_undo, error)
         end
 
         def inspect_after_redo
-          state = $precision_validation_lvn_single_undo_probe_state
-          return unless state
-
+          state = require_state!(:awaiting_manual_redo)
           indoor_model = IndoorCore::IndoorModel.current
           after_redo = model_snapshot_by_ids(indoor_model, state[:target_ids])
-          state[:after_redo] = after_redo
-          state[:redo_checks] = compare_snapshots(
+
+          redo_checks = compare_snapshots(
             state[:after_lvn],
             after_redo,
             prefix: :redo,
@@ -151,11 +145,25 @@ module ULOL
             redo_all_normalized:
               after_redo[:cell_spaces].values.all? { |row| row[:normalized] == true }
           )
-
-          checks = merged_checks(state).merge(
-            undo_dispatched: state[:undo_dispatched] == true,
-            redo_dispatched: state[:redo_dispatched] == true
+          redo_effect_observed = !snapshots_equivalent?(
+            state[:after_undo],
+            after_redo,
+            compare_normalized: true
           )
+          redo_checks[:redo_effect_observed] = redo_effect_observed
+
+          unless redo_effect_observed
+            puts
+            puts '[Precision Validation] Redo 변화가 아직 관측되지 않았습니다.'
+            puts 'SketchUp 모델 창에서 Ctrl+Y 또는 다시 실행을 1회 수행한 뒤 같은 확인 명령을 다시 실행하세요.'
+            return :awaiting_manual_redo
+          end
+
+          state[:after_redo] = after_redo
+          state[:redo_checks] = redo_checks
+          state[:phase] = :complete
+
+          checks = merged_checks(state)
           result = result_from_state(state).merge(
             overall_pass: checks.values.all?,
             phase: :complete,
@@ -164,8 +172,56 @@ module ULOL
           )
           finish_result(result)
         rescue StandardError => error
-          finish_exception(:after_redo, error)
+          finish_exception(:after_manual_redo, error)
         end
+
+        def reset
+          $precision_validation_lvn_single_undo_probe_state = nil
+          $precision_validation_lvn_single_undo_report = nil
+          true
+        end
+
+        def require_state!(expected_phase)
+          state = $precision_validation_lvn_single_undo_probe_state
+          raise '진행 중인 LVN 단일 Undo probe가 없습니다.' unless state
+          unless state[:phase] == expected_phase
+            raise "probe 단계가 맞지 않습니다: expected=#{expected_phase} actual=#{state[:phase]}"
+          end
+
+          state
+        end
+        private_class_method :require_state!
+
+        def print_manual_undo_instruction(state)
+          puts
+          puts '=' * 90
+          puts '[Precision Validation] LVN single Undo probe v2'
+          puts "LVN 완료: targets=#{state[:target_ids].length} " \
+               "undo_mode=#{state[:lvn_report][:undo_mode].inspect} " \
+               "elapsed=#{format('%.3f', state[:lvn_seconds].to_f)}s"
+          puts '1) SketchUp 모델 창을 클릭합니다.'
+          puts '2) Ctrl+Z를 정확히 1회 실행합니다.'
+          puts '3) Ruby Console에서 아래 명령을 실행합니다.'
+          puts
+          puts 'ULOL::Indoor3DGmlModeler::Dev::PrecisionValidationLvnSingleUndoProbe.inspect_after_undo'
+          puts 'nil'
+          puts '=' * 90
+        end
+        private_class_method :print_manual_undo_instruction
+
+        def print_manual_redo_instruction
+          puts
+          puts '=' * 90
+          puts '[Precision Validation] Undo 1회 복원 통과'
+          puts '1) SketchUp 모델 창을 클릭합니다.'
+          puts '2) Ctrl+Y 또는 편집 > 다시 실행을 정확히 1회 수행합니다.'
+          puts '3) Ruby Console에서 아래 명령을 실행합니다.'
+          puts
+          puts 'ULOL::Indoor3DGmlModeler::Dev::PrecisionValidationLvnSingleUndoProbe.inspect_after_redo'
+          puts 'nil'
+          puts '=' * 90
+        end
+        private_class_method :print_manual_redo_instruction
 
         def compare_snapshots(expected, actual, prefix:, compare_normalized:)
           expected_cells = expected[:cell_spaces]
@@ -200,6 +256,17 @@ module ULOL
           checks
         end
         private_class_method :compare_snapshots
+
+        def snapshots_equivalent?(first, second, compare_normalized:)
+          checks = compare_snapshots(
+            first,
+            second,
+            prefix: :equivalent,
+            compare_normalized: compare_normalized
+          )
+          checks.values.all?
+        end
+        private_class_method :snapshots_equivalent?
 
         def model_snapshot(indoor_model, targets)
           cells = Array(targets).to_h do |cell_space|
@@ -348,30 +415,22 @@ module ULOL
         end
         private_class_method :compact_lvn_report
 
-        def base_result(finish_editing_performed, before, after_lvn, lvn_report, lvn_seconds)
+        def base_result(state)
           {
-            schema: 'ulol.precision_validation.lvn_single_undo_probe.v1',
+            schema: 'ulol.precision_validation.lvn_single_undo_probe.v2',
             generated_at: Time.now.iso8601(3),
             tolerance_mm: TOLERANCE_MM,
-            finish_editing_performed: finish_editing_performed,
-            lvn_seconds: lvn_seconds,
-            lvn_report: compact_lvn_report(lvn_report),
-            before: before,
-            after_lvn: after_lvn
+            finish_editing_performed: state[:finish_editing_performed],
+            lvn_seconds: state[:lvn_seconds],
+            lvn_report: state[:lvn_report],
+            before: state[:before],
+            after_lvn: state[:after_lvn]
           }
         end
         private_class_method :base_result
 
         def result_from_state(state)
-          base_result(
-            state[:finish_editing_performed],
-            state[:before],
-            state[:after_lvn],
-            state[:lvn_report],
-            state[:lvn_seconds]
-          ).merge(
-            undo_dispatched: state[:undo_dispatched],
-            redo_dispatched: state[:redo_dispatched],
+          base_result(state).merge(
             after_undo: state[:after_undo],
             after_redo: state[:after_redo]
           )
@@ -421,14 +480,12 @@ module ULOL
         def print_result(result)
           puts
           puts '=' * 90
-          puts '[Precision Validation] LVN single Undo probe'
+          puts '[Precision Validation] LVN single Undo probe v2'
           puts "overall_pass=#{result[:overall_pass]} phase=#{result[:phase]}"
           report = result[:lvn_report] || {}
           puts "undo_mode=#{report[:undo_mode].inspect} " \
                "atomic=#{report[:atomic_attempted].inspect}/#{report[:atomic_fallback].inspect} " \
                "elapsed=#{format('%.3f', result[:lvn_seconds].to_f)}s"
-          puts "undo_dispatched=#{result[:undo_dispatched].inspect} " \
-               "redo_dispatched=#{result[:redo_dispatched].inspect}"
           puts "failed_checks=#{Array(result[:failed_checks]).join(',')}"
           if result[:before] && result[:after_undo] && result[:after_redo]
             puts "transitions=#{result[:before][:transition_count]}->" \
