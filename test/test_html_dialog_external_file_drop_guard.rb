@@ -5,13 +5,6 @@ require 'minitest/autorun'
 class HtmlDialogExternalFileDropGuardTest < Minitest::Test
   ROOT = File.expand_path('..', __dir__)
 
-  def test_repository_has_three_html_dialog_constructors
-    sources = Dir.glob(File.join(ROOT, 'indoor3d', '**', '*.rb')).map { |path| File.read(path) }
-    count = sources.sum { |source| source.scan('UI::HtmlDialog.new').length }
-
-    assert_equal 3, count
-  end
-
   def test_guard_detects_files_from_files_collection_and_types
     source = File.read(
       File.join(ROOT, 'indoor3d/ui/html/shared/external_file_drop_guard.js')
@@ -35,15 +28,17 @@ class HtmlDialogExternalFileDropGuardTest < Minitest::Test
     assert_includes source, 'window.__indoorGmlExternalFileDropGuardInitialized'
   end
 
-  def test_set_file_dialog_entries_load_and_initialize_shared_guard
-    %w[
-      indoor3d/ui/html/edit_mode/index.html
-      indoor3d/ui/html/export_progress/index.html
-    ].each do |relative_path|
-      source = File.read(File.join(ROOT, relative_path))
+  def test_all_file_backed_html_dialog_entries_load_and_initialize_shared_guard
+    entries = Dir.glob(
+      File.join(ROOT, 'indoor3d/ui/html/*/index.html')
+    ).sort
 
-      assert_includes source, '../shared/external_file_drop_guard.js'
-      assert_includes source, 'initExternalFileDropGuard();'
+    refute_empty entries
+    entries.each do |path|
+      source = File.read(path)
+
+      assert_includes source, '../shared/external_file_drop_guard.js', path
+      assert_includes source, 'initExternalFileDropGuard();', path
     end
   end
 
