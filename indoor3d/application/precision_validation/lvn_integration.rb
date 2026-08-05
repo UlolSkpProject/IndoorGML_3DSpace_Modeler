@@ -7,7 +7,7 @@ module ULOL
     module IndoorCore
       module PrecisionValidation
         module CellSpaceLifecycleContextPatch
-          def register_created(cell_space, state, **options)
+          def initialize_scene(cell_space, **options)
             result = super
             LvnState.set_failed(cell_space, false)
             result
