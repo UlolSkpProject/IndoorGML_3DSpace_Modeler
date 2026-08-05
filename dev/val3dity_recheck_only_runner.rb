@@ -7,16 +7,15 @@ require 'fileutils'
 
 require_relative '../indoor3d/validity/val3dity_runner'
 require_relative 'val3dity_recheck_benchmark'
-require_relative 'val3dity_recheck_clipped_operand_probe_v2'
 
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       module IndoorGmlConverter
-        # Development-only harness that replays the exact 701/704 request list
-        # against the currently opened SketchUp model. GML export and val3dity
-        # execution are intentionally skipped. Production validation code and
-        # decisions are not modified.
+        # Development-only harness that replays exact 701/704 requests against
+        # the currently opened SketchUp model. GML export and val3dity execution
+        # are intentionally skipped. Production validation decisions are not
+        # modified.
         module Val3dityRecheckOnlyRunner
           REQUEST_SCHEMA_VERSION = 1
           RESULT_SCHEMA_VERSION = 1
@@ -83,7 +82,13 @@ module ULOL
               timestamp = Time.now.strftime('%Y%m%d-%H%M%S')
               base_name = sanitize_name(report_name || "recheck_only_#{timestamp}")
               output_dir = File.expand_path(
-                work_dir || File.join(Dir.tmpdir, 'ulol', 'indoorgml', 'recheck-only', timestamp)
+                work_dir || File.join(
+                  Dir.tmpdir,
+                  'ulol',
+                  'indoorgml',
+                  'recheck-only',
+                  timestamp
+                )
               )
               FileUtils.mkdir_p(output_dir)
 
@@ -97,7 +102,8 @@ module ULOL
               runs = []
               replaying do
                 repeat_count.times do |index|
-                  run_name = repeat_count == 1 ? base_name : "#{base_name}_r#{index + 1}"
+                  run_name = repeat_count == 1 ?
+                    base_name : "#{base_name}_r#{index + 1}"
                   runs << run_once(
                     requests: normalized,
                     source_path: source_path,
@@ -124,14 +130,21 @@ module ULOL
                 'repetitions' => repeat_count,
                 'runs' => runs
               }
-              result_path = File.join(output_dir, "#{base_name}_recheck_only.json")
-              File.write(result_path, JSON.pretty_generate(snapshot), encoding: 'UTF-8')
+              result_path = File.join(
+                output_dir,
+                "#{base_name}_recheck_only.json"
+              )
+              File.write(
+                result_path,
+                JSON.pretty_generate(snapshot),
+                encoding: 'UTF-8'
+              )
               @last_snapshot = snapshot
               @last_result_path = result_path
 
               log(
-                "finished: requests=#{normalized.length}, repetitions=#{repeat_count}, " \
-                "result=#{result_path}"
+                "finished: requests=#{normalized.length}, " \
+                "repetitions=#{repeat_count}, result=#{result_path}"
               )
               snapshot
             end
@@ -152,7 +165,9 @@ module ULOL
               rows = requests_from_recheck_results(raw_report)
               rows = requests_from_raw_errors(raw_report) if rows.empty?
               normalized = normalize_requests(rows)
-              raise "No valid 701/704 requests found in validation report: #{path}" if normalized.empty?
+              if normalized.empty?
+                raise "No valid 701/704 requests found in validation report: #{path}"
+              end
 
               @last_requests = deep_copy(normalized)
               @last_request_path = File.expand_path(path)
@@ -161,23 +176,16 @@ module ULOL
 
             def latest_validation_report_path
               candidates = []
-
               benchmark = benchmark_probe
               if benchmark&.last_snapshot
                 metadata = benchmark.last_snapshot['metadata'] || {}
                 work_dir = metadata['work_dir']
                 report_name = metadata['report_name'] || 'report'
-                candidates << File.join(work_dir, "#{report_name}.json") if work_dir
+                candidates << File.join(
+                  work_dir,
+                  "#{report_name}.json"
+                ) if work_dir
               end
-
-              clipped = clipped_probe
-              if clipped&.last_snapshot
-                metadata = clipped.last_snapshot['metadata'] || {}
-                gml_path = metadata['gml_path']
-                report_name = metadata['report_name'] || 'report'
-                candidates << File.join(File.dirname(gml_path), "#{report_name}.json") if gml_path
-              end
-
               candidates.find { |path| File.file?(path) }
             rescue StandardError => e
               log("latest report lookup failed: #{e.class}: #{e.message}")
@@ -215,11 +223,15 @@ module ULOL
               requests = normalize_requests(session[:requests])
               @last_requests = deep_copy(requests)
               work_dir = runner.instance_variable_get(:@work_dir)
-              report_name = runner.instance_variable_get(:@report_name) || 'report'
+              report_name =
+                runner.instance_variable_get(:@report_name) || 'report'
               FileUtils.mkdir_p(work_dir)
               @last_request_path = write_request_file(
                 requests,
-                File.join(work_dir, "#{report_name}_recheck_requests.json"),
+                File.join(
+                  work_dir,
+                  "#{report_name}_recheck_requests.json"
+                ),
                 source_path: runner.instance_variable_get(:@report_json_path),
                 started_at: session[:started_at]
               )
@@ -230,7 +242,8 @@ module ULOL
 
             def log(message)
               text = "[IndoorGML][RecheckOnly] #{message}"
-              if defined?(IndoorCore::Logger) && IndoorCore::Logger.respond_to?(:puts)
+              if defined?(IndoorCore::Logger) &&
+                 IndoorCore::Logger.respond_to?(:puts)
                 IndoorCore::Logger.puts(text)
               else
                 puts(text)
@@ -257,7 +270,7 @@ module ULOL
                 indoor_model: indoor_model
               )
 
-              benchmark_recorder = build_benchmark_recorder(
+              recorder = build_benchmark_recorder(
                 source_path: source_path,
                 report_name: report_name,
                 work_dir: work_dir,
@@ -265,16 +278,7 @@ module ULOL
                 repetition: repetition,
                 repetition_count: repetition_count
               )
-              clipped_recorder = build_clipped_recorder(
-                source_path: source_path,
-                report_name: report_name,
-                request_count: requests.length,
-                repetition: repetition,
-                repetition_count: repetition_count
-              )
-
-              benchmark_probe.current = benchmark_recorder if benchmark_recorder
-              clipped_probe.current = clipped_recorder if clipped_recorder
+              benchmark_probe.current = recorder if recorder
 
               started = monotonic_now
               rows = requests.each_with_index.map do |request, index|
@@ -303,12 +307,9 @@ module ULOL
               end
 
               elapsed = elapsed_ms(started)
-              benchmark_path = if benchmark_recorder
-                                 benchmark_probe.write_report(runner, benchmark_recorder)
+              benchmark_path = if recorder
+                                 benchmark_probe.write_report(runner, recorder)
                                end
-              clipped_path = if clipped_recorder
-                               clipped_probe.write_report(runner, clipped_recorder)
-                             end
 
               {
                 'repetition' => repetition,
@@ -317,23 +318,14 @@ module ULOL
                 'error_count' => rows.count { |row| row.key?('error') },
                 'status_counts' => status_counts(rows),
                 'benchmark_report_path' => benchmark_path,
-                'clipped_operand_report_path' => clipped_path,
                 'results' => rows
               }
             ensure
               benchmark_probe.current = nil if benchmark_probe
-              clipped_probe.current = nil if clipped_probe
             end
 
             def build_benchmark_recorder(**metadata)
               probe = benchmark_probe
-              return nil unless probe && probe.const_defined?(:Recorder, false)
-
-              probe::Recorder.new(metadata.merge('mode' => 'recheck_only'))
-            end
-
-            def build_clipped_recorder(**metadata)
-              probe = clipped_probe
               return nil unless probe && probe.const_defined?(:Recorder, false)
 
               probe::Recorder.new(metadata.merge('mode' => 'recheck_only'))
@@ -345,14 +337,10 @@ module ULOL
               Val3dityRecheckBenchmarkProbe
             end
 
-            def clipped_probe
-              return nil unless defined?(Val3dityRecheckClippedOperandProbe)
-
-              Val3dityRecheckClippedOperandProbe
-            end
-
             def requests_from_recheck_results(raw_report)
-              key = if defined?(Val3dityReportSchema::OVERLAP_RECHECK_REPORT_KEY)
+              key = if defined?(
+                Val3dityReportSchema::OVERLAP_RECHECK_REPORT_KEY
+              )
                       Val3dityReportSchema::OVERLAP_RECHECK_REPORT_KEY
                     end
               rows = key ? Array(raw_report[key]) : []
@@ -371,7 +359,11 @@ module ULOL
                 raw_report['input_file']
               )
               Array(raw_report['features']).each do |feature|
-                append_error_requests(requests, Array(feature['errors']), feature['id'])
+                append_error_requests(
+                  requests,
+                  Array(feature['errors']),
+                  feature['id']
+                )
                 Array(feature['primitives']).each do |primitive|
                   append_error_requests(
                     requests,
@@ -424,7 +416,9 @@ module ULOL
               code = error_code_number(row['code'] || row[:code])
               return nil unless RECHECKABLE_CODES.include?(code)
 
-              cells = Array(row['cells'] || row[:cells]).map(&:to_s).reject(&:empty?)
+              cells = Array(row['cells'] || row[:cells])
+                .map(&:to_s)
+                .reject(&:empty?)
               return nil if cells.length < 2
 
               {
@@ -445,14 +439,21 @@ module ULOL
             end
 
             def unique_request_count(requests)
-              requests.map { |row| [row['code'], row['cells'].sort] }.uniq.length
+              requests.map do |row|
+                [row['code'], row['cells'].sort]
+              end.uniq.length
             end
 
             def unique_pair_count(requests)
               requests.map { |row| row['cells'].sort }.uniq.length
             end
 
-            def write_request_file(requests, path, source_path:, started_at: nil)
+            def write_request_file(
+              requests,
+              path,
+              source_path:,
+              started_at: nil
+            )
               payload = {
                 'schema_version' => REQUEST_SCHEMA_VERSION,
                 'generated_at' => Time.now.iso8601(6),
@@ -463,13 +464,18 @@ module ULOL
                 'unique_pair_count' => unique_pair_count(requests),
                 'requests' => requests
               }.compact
-              File.write(path, JSON.pretty_generate(payload), encoding: 'UTF-8')
+              File.write(
+                path,
+                JSON.pretty_generate(payload),
+                encoding: 'UTF-8'
+              )
               path
             end
 
             def status_counts(rows)
               rows.each_with_object(Hash.new(0)) do |row, counts|
-                status = row.dig('result', 'status') || (row['error'] ? 'error' : 'unknown')
+                status = row.dig('result', 'status') ||
+                         (row['error'] ? 'error' : 'unknown')
                 counts[status.to_s] += 1
               end.sort.to_h
             end
@@ -529,7 +535,11 @@ module ULOL
             end
 
             def recheck_cell_pair(code, cell_id1, cell_id2)
-              Val3dityRecheckOnlyRunner.capture_request(code, cell_id1, cell_id2)
+              Val3dityRecheckOnlyRunner.capture_request(
+                code,
+                cell_id1,
+                cell_id2
+              )
               super
             end
           end
@@ -539,7 +549,14 @@ module ULOL
   end
 end
 
-runner = ULOL::Indoor3DGmlModeler::IndoorCore::IndoorGmlConverter::Val3dityRunner
-harness = ULOL::Indoor3DGmlModeler::IndoorCore::IndoorGmlConverter::Val3dityRecheckOnlyRunner
-runner.prepend(harness::RunnerCapturePatch) unless runner.ancestors.include?(harness::RunnerCapturePatch)
-harness.log('loaded: captures exact recheck requests and supports recheck-only replay')
+runner =
+  ULOL::Indoor3DGmlModeler::IndoorCore::IndoorGmlConverter::Val3dityRunner
+harness =
+  ULOL::Indoor3DGmlModeler::IndoorCore::IndoorGmlConverter::Val3dityRecheckOnlyRunner
+
+runner.prepend(harness::RunnerCapturePatch) unless
+  runner.ancestors.include?(harness::RunnerCapturePatch)
+
+harness.log(
+  'loaded: captures exact recheck requests and supports canonical replay'
+)
