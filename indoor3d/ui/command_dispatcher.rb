@@ -6,6 +6,7 @@ require_relative 'commands/cell_space_commands'
 require_relative '../application/progress/adjacency_progress_keyword_guard'
 require_relative '../application/cell_space_behavior_policies'
 require_relative 'commands/export_commands'
+require_relative 'export_progress_cancel_visibility'
 require_relative 'commands/display_commands'
 
 module ULOL
