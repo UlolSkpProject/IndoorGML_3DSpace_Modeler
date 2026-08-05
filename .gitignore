@@ -3,3 +3,4 @@ indoor3d/tmp/
 *.skb
 /scripts/
 /fixtures/
+/dev/recheck_snapshots/
