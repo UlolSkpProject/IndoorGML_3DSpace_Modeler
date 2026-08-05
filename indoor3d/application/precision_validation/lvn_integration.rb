@@ -42,13 +42,25 @@ module ULOL
               )
             end
 
+            atomic_runner = proc do |targets|
+              super(
+                tolerance_mm,
+                cell_spaces: targets,
+                activate_edit_context: activate_edit_context,
+                debug: debug,
+                report: report,
+                report_path: report_path
+              )
+            end
+
             local_vertex_normalize_continue(
               tolerance_mm,
               cell_spaces: cell_spaces,
               activate_edit_context: activate_edit_context,
               debug: debug,
               report: report,
-              report_path: report_path
+              report_path: report_path,
+              atomic_runner: atomic_runner
             )
           end
 
@@ -72,18 +84,167 @@ module ULOL
             activate_edit_context:,
             debug:,
             report:,
-            report_path:
+            report_path:,
+            atomic_runner:
           )
             targets = normalization_targets(cell_spaces)
             raise 'No valid CellSpace found for local vertex normalization' if targets.empty?
 
-            started_at = monotonic_time
+            plan = build_continue_execution_plan(targets, tolerance_mm)
+
+            if plan[:fallback_targets].empty? && plan[:atomic_targets].any?
+              return local_vertex_normalize_continue_atomic(
+                tolerance_mm,
+                targets,
+                plan,
+                activate_edit_context: activate_edit_context,
+                debug: debug,
+                report: report,
+                report_path: report_path,
+                atomic_runner: atomic_runner
+              )
+            end
+
+            if plan[:fallback_targets].empty? && plan[:atomic_targets].empty?
+              return aggregate_continue_report(
+                tolerance_mm,
+                targets,
+                plan[:rows],
+                [],
+                nil,
+                activate_edit_context: activate_edit_context
+              ).merge(
+                undo_mode: :none,
+                atomic_attempted: false,
+                atomic_fallback: false
+              )
+            end
+
+            local_vertex_normalize_continue_per_cell(
+              tolerance_mm,
+              targets,
+              plan[:rows],
+              plan[:atomic_targets] + plan[:fallback_targets],
+              activate_edit_context: activate_edit_context,
+              debug: debug,
+              report: report,
+              report_path: report_path,
+              started_at: monotonic_time,
+              atomic_attempted: false,
+              atomic_error: nil
+            )
+          end
+
+          def build_continue_execution_plan(targets, tolerance_mm)
             rows = []
+            atomic_targets = []
+            fallback_targets = []
+
+            targets.each do |cell_space|
+              group = cell_space.valid_sketchup_group
+              unless group
+                fallback_targets << cell_space
+                next
+              end
+
+              if LvnState.failed_and_unchanged?(group)
+                rows << skipped_previous_failure_row(cell_space, group)
+                next
+              end
+
+              if LocalVertexNormalizer.normalized?(group, tolerance_mm)
+                if LvnState.failed?(group) || LvnState.failure_signature(group)
+                  fallback_targets << cell_space
+                else
+                  rows << already_normalized_row(cell_space, group)
+                end
+                next
+              end
+
+              if LvnState.failed?(group) || LvnState.failure_signature(group)
+                fallback_targets << cell_space
+              else
+                atomic_targets << cell_space
+              end
+            end
+
+            {
+              rows: rows,
+              atomic_targets: atomic_targets,
+              fallback_targets: fallback_targets
+            }
+          end
+
+          def local_vertex_normalize_continue_atomic(
+            tolerance_mm,
+            targets,
+            plan,
+            activate_edit_context:,
+            debug:,
+            report:,
+            report_path:,
+            atomic_runner:
+          )
+            started_at = monotonic_time
+            runtime_snapshot = capture_lvn_runtime_snapshot
+            atomic_report = atomic_runner.call(plan[:atomic_targets])
+            rows = plan[:rows] + atomic_success_rows(atomic_report, plan[:atomic_targets])
+
+            Hash(atomic_report).merge(
+              failure_policy: :continue,
+              target_cell_space_count: targets.length,
+              cell_space_count: rows.count { |row| row[:status] == :normalized },
+              already_normalized_cell_space_count: rows.count do |row|
+                row[:status] == :already_normalized
+              end,
+              normalization_failed_cell_space_count: 0,
+              skipped_previous_failure_cell_space_count: rows.count do |row|
+                row[:status] == :skipped_previous_failure
+              end,
+              failed_cell_space_ids: rows.filter_map do |row|
+                row[:cell_space_id] if row[:status] == :skipped_previous_failure
+              end,
+              cell_spaces: rows,
+              undo_mode: :single_operation,
+              atomic_attempted: true,
+              atomic_fallback: false
+            )
+          rescue StandardError => error
+            restore_lvn_runtime_snapshot!(runtime_snapshot)
+            local_vertex_normalize_continue_per_cell(
+              tolerance_mm,
+              targets,
+              plan[:rows],
+              plan[:atomic_targets],
+              activate_edit_context: activate_edit_context,
+              debug: debug,
+              report: report,
+              report_path: report_path,
+              started_at: started_at,
+              atomic_attempted: true,
+              atomic_error: error
+            )
+          end
+
+          def local_vertex_normalize_continue_per_cell(
+            tolerance_mm,
+            targets,
+            initial_rows,
+            execution_targets,
+            activate_edit_context:,
+            debug:,
+            report:,
+            report_path:,
+            started_at:,
+            atomic_attempted:,
+            atomic_error:
+          )
+            rows = Array(initial_rows).dup
             successful_results = []
             topology_metrics = nil
             topology_sync_seconds = 0.0
 
-            targets.each do |cell_space|
+            Array(execution_targets).each do |cell_space|
               row = normalize_cell_space_continue(
                 cell_space,
                 tolerance_mm,
@@ -115,6 +276,12 @@ module ULOL
               successful_results,
               topology_metrics,
               activate_edit_context: activate_edit_context
+            ).merge(
+              undo_mode: Array(execution_targets).empty? ? :none : :per_cell_fallback,
+              atomic_attempted: atomic_attempted,
+              atomic_fallback: atomic_attempted && !atomic_error.nil?,
+              atomic_error_class: atomic_error&.class&.name,
+              atomic_error: atomic_error&.message
             )
 
             if debug == true || report == true
@@ -144,6 +311,63 @@ module ULOL
             normalization_report
           end
 
+          def atomic_success_rows(report, targets)
+            rows_by_id = Array(report && report[:cell_spaces]).to_h do |row|
+              [row[:cell_space_id].to_s, row]
+            end
+
+            Array(targets).map do |cell_space|
+              group = cell_space.valid_sketchup_group
+              row = Hash(rows_by_id[cell_space.id.to_s]).dup
+              row.merge(
+                status: :normalized,
+                cell_space_id: cell_space.id,
+                persistent_id: persistent_id_for(group),
+                lvn_failed: false
+              )
+            end
+          end
+
+          def capture_lvn_runtime_snapshot
+            return nil unless respond_to?(:bulk_conversion_runtime_snapshot, true)
+
+            send(:bulk_conversion_runtime_snapshot)
+          rescue StandardError => error
+            raise LocalVertexNormalizer::OperationError,
+                  "Atomic LVN runtime snapshot failed: #{error.class}: #{error.message}"
+          end
+
+          def restore_lvn_runtime_snapshot!(snapshot)
+            return true if snapshot.nil?
+            return true unless respond_to?(:restore_bulk_conversion_runtime, true)
+
+            send(:restore_bulk_conversion_runtime, snapshot)
+            true
+          rescue StandardError => error
+            raise LocalVertexNormalizer::OperationError,
+                  "Atomic LVN rollback runtime restore failed: #{error.class}: #{error.message}"
+          end
+
+          def already_normalized_row(cell_space, group)
+            {
+              status: :already_normalized,
+              cell_space_id: cell_space.id,
+              persistent_id: persistent_id_for(group),
+              lvn_failed: false,
+              normalization_complete: true
+            }
+          end
+
+          def skipped_previous_failure_row(cell_space, group)
+            {
+              status: :skipped_previous_failure,
+              cell_space_id: cell_space.id,
+              persistent_id: persistent_id_for(group),
+              lvn_failed: true,
+              normalization_complete: false
+            }
+          end
+
           def normalize_cell_space_continue(
             cell_space,
             tolerance_mm,
@@ -155,24 +379,12 @@ module ULOL
             return failed_row(cell_space, nil, 'CellSpace geometry unavailable') unless group
 
             if LvnState.failed_and_unchanged?(group)
-              return {
-                status: :skipped_previous_failure,
-                cell_space_id: cell_space.id,
-                persistent_id: persistent_id_for(group),
-                lvn_failed: true,
-                normalization_complete: false
-              }
+              return skipped_previous_failure_row(cell_space, group)
             end
 
             if LocalVertexNormalizer.normalized?(group, tolerance_mm)
               clear_lvn_failed_state(cell_space, group)
-              return {
-                status: :already_normalized,
-                cell_space_id: cell_space.id,
-                persistent_id: persistent_id_for(group),
-                lvn_failed: false,
-                normalization_complete: true
-              }
+              return already_normalized_row(cell_space, group)
             end
 
             result = nil
