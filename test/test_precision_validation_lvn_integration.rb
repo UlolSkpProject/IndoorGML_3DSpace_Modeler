@@ -24,6 +24,7 @@ module ULOL
 
       class LocalVertexNormalizer
         DEFAULT_TOLERANCE_MM = 0.001
+        class OperationError < StandardError; end
 
         class << self
           attr_accessor :normalized_predicate
@@ -41,16 +42,23 @@ module ULOL
       end
 
       class IndoorModel
-        attr_reader :baseline_call, :operation_names, :normalization_calls, :topology_sync_count
+        attr_accessor :baseline_handler
+        attr_reader :baseline_call, :baseline_call_count, :operation_names,
+                    :normalization_calls, :topology_sync_count, :runtime_restore_count
 
         def initialize
           @operation_names = []
           @normalization_calls = []
           @topology_sync_count = 0
+          @baseline_call_count = 0
+          @runtime_restore_count = 0
         end
 
         def local_vertex_normalize(*args, **options)
+          @baseline_call_count += 1
           @baseline_call = [args, options]
+          return @baseline_handler.call(*args, **options) if @baseline_handler
+
           :baseline
         end
 
@@ -73,6 +81,10 @@ module ULOL
           @normalization_calls << cell_space.id
           raise 'forced failure' if cell_space.id == 'B'
 
+          normalization_result(cell_space.id)
+        end
+
+        def normalization_result(_cell_space_id)
           {
             normalization_complete: true,
             vertex_count: 3,
@@ -116,6 +128,14 @@ module ULOL
             activate_edit_context: activate_edit_context,
             cell_spaces: results
           }
+        end
+
+        def bulk_conversion_runtime_snapshot
+          { snapshot: true }
+        end
+
+        def restore_bulk_conversion_runtime(_snapshot)
+          @runtime_restore_count += 1
         end
 
         def remember_cell_space_change_snapshot(_group); end
@@ -234,9 +254,42 @@ module ULOL
                        model.baseline_call
         end
 
-        def test_continue_policy_commits_successes_marks_failure_and_continues
+        def test_continue_policy_uses_single_atomic_operation_when_all_targets_succeed
+          cells = %w[A C].map { |id| CellSpace.new(id, Group.new(id)) }
+          model = IndoorModel.new
+          model.baseline_handler = lambda do |_tolerance, cell_spaces:, **_options|
+            rows = cell_spaces.map do |cell_space|
+              model.send(:normalization_result, cell_space.id).merge(
+                cell_space_id: cell_space.id
+              )
+            end
+            {
+              cell_space_count: rows.length,
+              already_normalized_cell_space_count: 0,
+              topology_metrics: { synchronized: true },
+              cell_spaces: rows
+            }
+          end
+
+          report = model.local_vertex_normalize(
+            cell_spaces: cells,
+            failure_policy: :continue
+          )
+
+          assert_equal :single_operation, report[:undo_mode]
+          assert_equal true, report[:atomic_attempted]
+          assert_equal false, report[:atomic_fallback]
+          assert_equal 2, report[:cell_space_count]
+          assert_equal %i[normalized normalized], report[:cell_spaces].map { |row| row[:status] }
+          assert_empty model.normalization_calls
+          assert_equal 1, model.baseline_call_count
+          assert_equal 0, model.runtime_restore_count
+        end
+
+        def test_continue_policy_falls_back_and_preserves_per_cell_failure_isolation
           cells = %w[A B C].map { |id| CellSpace.new(id, Group.new(id)) }
           model = IndoorModel.new
+          model.baseline_handler = ->(*_args, **_options) { raise 'forced atomic failure' }
 
           report = model.local_vertex_normalize(
             cell_spaces: cells,
@@ -248,6 +301,11 @@ module ULOL
           assert_equal 1, report[:normalization_failed_cell_space_count]
           assert_equal ['B'], report[:failed_cell_space_ids]
           assert_equal 1, model.topology_sync_count
+          assert_equal :per_cell_fallback, report[:undo_mode]
+          assert_equal true, report[:atomic_attempted]
+          assert_equal true, report[:atomic_fallback]
+          assert_equal 'RuntimeError', report[:atomic_error_class]
+          assert_equal 1, model.runtime_restore_count
           assert PrecisionValidation::LvnState.failed?(cells[1].group)
           refute PrecisionValidation::LvnState.failed?(cells[0].group)
           refute PrecisionValidation::LvnState.failed?(cells[2].group)
@@ -266,6 +324,8 @@ module ULOL
           assert_empty model.normalization_calls
           assert_equal 1, report[:skipped_previous_failure_cell_space_count]
           assert_equal ['B'], report[:failed_cell_space_ids]
+          assert_equal :none, report[:undo_mode]
+          assert_equal 0, model.baseline_call_count
         end
 
         def test_new_cell_space_is_initialized_with_false_failure_flag
