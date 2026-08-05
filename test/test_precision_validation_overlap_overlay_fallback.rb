@@ -51,7 +51,7 @@ module ULOL
             code: 701,
             geometry_refs: {
               overlap_recheck: {
-                cells: %w[solid_cell_a cell_cell_b],
+                cells: %w[cell_a cell_b],
                 tolerated: false,
                 actual_overlap_volume_mm3: 12.5
               }
