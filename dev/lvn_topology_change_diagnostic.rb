@@ -7,7 +7,7 @@ require 'time'
 module ULOL
   module Indoor3DGmlModeler
     module Dev
-      module PrecisionValidationTransitionDiffProbe
+      module LvnTopologyChangeDiagnostic
         TOLERANCE_MM = IndoorCore::LocalVertexNormalizer::DEFAULT_TOLERANCE_MM
 
         module_function
@@ -53,7 +53,7 @@ module ULOL
           cell_index = targets.to_h { |cell_space| [cell_space.id.to_s, cell_space] }
 
           result = {
-            schema: 'ulol.precision_validation.transition_diff_probe.v2',
+            schema: 'ulol.lvn.topology_change_diagnostic.v2',
             generated_at: Time.now.iso8601(3),
             tolerance_mm: TOLERANCE_MM,
             elapsed_seconds: elapsed_seconds,
@@ -75,11 +75,11 @@ module ULOL
 
           path = File.join(
             Dir.tmpdir,
-            "indoor_gml_precision_transition_diff_#{Time.now.strftime('%Y%m%d_%H%M%S')}.json"
+            "indoor_gml_lvn_topology_change_#{Time.now.strftime('%Y%m%d_%H%M%S')}.json"
           )
           File.write(path, JSON.pretty_generate(json_safe(result)))
           result[:report_path] = path
-          $precision_validation_transition_diff_report = result
+          $lvn_topology_change_diagnostic_report = result
           print_result(result)
           result
         end
@@ -262,7 +262,7 @@ module ULOL
         def print_result(result)
           puts
           puts '=' * 90
-          puts '[Precision Validation] LVN transition diff probe'
+          puts '[LVN Diagnostic] Topology changes'
           puts "targets=#{result[:target_count]} normalized_before=#{result[:normalized_before_count]} " \
                "elapsed=#{format('%.3f', result[:elapsed_seconds])}s"
           puts "transitions=#{result[:before][:transition_count]}->#{result[:after][:transition_count]} " \
@@ -307,5 +307,5 @@ module ULOL
   end
 end
 
-ULOL::Indoor3DGmlModeler::Dev::PrecisionValidationTransitionDiffProbe.run
+ULOL::Indoor3DGmlModeler::Dev::LvnTopologyChangeDiagnostic.run
 nil
