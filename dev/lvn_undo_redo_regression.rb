@@ -8,7 +8,7 @@ require 'time'
 module ULOL
   module Indoor3DGmlModeler
     module Dev
-      module PrecisionValidationLvnSingleUndoProbe
+      module LvnUndoRedoRegression
         TOLERANCE_MM = IndoorCore::LocalVertexNormalizer::DEFAULT_TOLERANCE_MM
 
         module_function
@@ -68,7 +68,7 @@ module ULOL
             target_ids: targets.map { |cell_space| cell_space.id.to_s },
             phase: :awaiting_manual_undo
           }
-          $precision_validation_lvn_single_undo_probe_state = state
+          $lvn_undo_redo_regression_state = state
 
           unless initial_checks.values.all?
             result = result_from_state(state).merge(
@@ -105,7 +105,7 @@ module ULOL
 
           unless undo_effect_observed
             puts
-            puts '[Precision Validation] Undo 변화가 아직 관측되지 않았습니다.'
+            puts '[LVN Regression] Undo 변화가 아직 관측되지 않았습니다.'
             puts 'SketchUp 모델 창에서 Ctrl+Z를 1회 실행한 뒤 같은 확인 명령을 다시 실행하세요.'
             return :awaiting_manual_undo
           end
@@ -154,7 +154,7 @@ module ULOL
 
           unless redo_effect_observed
             puts
-            puts '[Precision Validation] Redo 변화가 아직 관측되지 않았습니다.'
+            puts '[LVN Regression] Redo 변화가 아직 관측되지 않았습니다.'
             puts 'SketchUp 모델 창에서 Ctrl+Y 또는 다시 실행을 1회 수행한 뒤 같은 확인 명령을 다시 실행하세요.'
             return :awaiting_manual_redo
           end
@@ -176,16 +176,16 @@ module ULOL
         end
 
         def reset
-          $precision_validation_lvn_single_undo_probe_state = nil
-          $precision_validation_lvn_single_undo_report = nil
+          $lvn_undo_redo_regression_state = nil
+          $lvn_undo_redo_regression_report = nil
           true
         end
 
         def require_state!(expected_phase)
-          state = $precision_validation_lvn_single_undo_probe_state
-          raise '진행 중인 LVN 단일 Undo probe가 없습니다.' unless state
+          state = $lvn_undo_redo_regression_state
+          raise '진행 중인 LVN Undo/Redo 회귀 검증이 없습니다.' unless state
           unless state[:phase] == expected_phase
-            raise "probe 단계가 맞지 않습니다: expected=#{expected_phase} actual=#{state[:phase]}"
+            raise "회귀 검증 단계가 맞지 않습니다: expected=#{expected_phase} actual=#{state[:phase]}"
           end
 
           state
@@ -195,7 +195,7 @@ module ULOL
         def print_manual_undo_instruction(state)
           puts
           puts '=' * 90
-          puts '[Precision Validation] LVN single Undo probe v2'
+          puts '[LVN Regression] Undo/Redo history'
           puts "LVN 완료: targets=#{state[:target_ids].length} " \
                "undo_mode=#{state[:lvn_report][:undo_mode].inspect} " \
                "elapsed=#{format('%.3f', state[:lvn_seconds].to_f)}s"
@@ -203,7 +203,7 @@ module ULOL
           puts '2) Ctrl+Z를 정확히 1회 실행합니다.'
           puts '3) Ruby Console에서 아래 명령을 실행합니다.'
           puts
-          puts 'ULOL::Indoor3DGmlModeler::Dev::PrecisionValidationLvnSingleUndoProbe.inspect_after_undo'
+          puts 'ULOL::Indoor3DGmlModeler::Dev::LvnUndoRedoRegression.inspect_after_undo'
           puts 'nil'
           puts '=' * 90
         end
@@ -212,12 +212,12 @@ module ULOL
         def print_manual_redo_instruction
           puts
           puts '=' * 90
-          puts '[Precision Validation] Undo 1회 복원 통과'
+          puts '[LVN Regression] Undo 1회 복원 통과'
           puts '1) SketchUp 모델 창을 클릭합니다.'
           puts '2) Ctrl+Y 또는 편집 > 다시 실행을 정확히 1회 수행합니다.'
           puts '3) Ruby Console에서 아래 명령을 실행합니다.'
           puts
-          puts 'ULOL::Indoor3DGmlModeler::Dev::PrecisionValidationLvnSingleUndoProbe.inspect_after_redo'
+          puts 'ULOL::Indoor3DGmlModeler::Dev::LvnUndoRedoRegression.inspect_after_redo'
           puts 'nil'
           puts '=' * 90
         end
@@ -417,7 +417,7 @@ module ULOL
 
         def base_result(state)
           {
-            schema: 'ulol.precision_validation.lvn_single_undo_probe.v2',
+            schema: 'ulol.lvn.undo_redo_regression.v2',
             generated_at: Time.now.iso8601(3),
             tolerance_mm: TOLERANCE_MM,
             finish_editing_performed: state[:finish_editing_performed],
@@ -448,7 +448,7 @@ module ULOL
         private_class_method :failed_check_keys
 
         def finish_exception(phase, error)
-          state = $precision_validation_lvn_single_undo_probe_state || {}
+          state = $lvn_undo_redo_regression_state || {}
           result = result_from_state(state).merge(
             overall_pass: false,
             phase: phase,
@@ -459,7 +459,7 @@ module ULOL
           )
           finish_result(result)
         rescue StandardError => nested_error
-          warn "[Precision Validation] LVN single Undo probe report failure: #{nested_error.class}: #{nested_error.message}"
+          warn "[LVN Regression] Undo/Redo report failure: #{nested_error.class}: #{nested_error.message}"
         end
         private_class_method :finish_exception
 
@@ -467,11 +467,11 @@ module ULOL
           timestamp = Time.now.strftime('%Y%m%d_%H%M%S')
           path = File.join(
             Dir.tmpdir,
-            "indoor_gml_precision_lvn_single_undo_#{timestamp}.json"
+            "indoor_gml_lvn_undo_redo_regression_#{timestamp}.json"
           )
           File.write(path, JSON.pretty_generate(json_safe(result)))
           result[:report_path] = path
-          $precision_validation_lvn_single_undo_report = result
+          $lvn_undo_redo_regression_report = result
           print_result(result)
           result
         end
@@ -480,7 +480,7 @@ module ULOL
         def print_result(result)
           puts
           puts '=' * 90
-          puts '[Precision Validation] LVN single Undo probe v2'
+          puts '[LVN Regression] Undo/Redo history'
           puts "overall_pass=#{result[:overall_pass]} phase=#{result[:phase]}"
           report = result[:lvn_report] || {}
           puts "undo_mode=#{report[:undo_mode].inspect} " \
@@ -524,5 +524,5 @@ module ULOL
   end
 end
 
-ULOL::Indoor3DGmlModeler::Dev::PrecisionValidationLvnSingleUndoProbe.run
+ULOL::Indoor3DGmlModeler::Dev::LvnUndoRedoRegression.run
 nil
