@@ -134,6 +134,26 @@ module ULOL
             assert_includes xml, "xlink:href='#transition_Raw_T'"
           end
 
+          def test_writer_places_shared_face_waypoint_between_transition_endpoints
+            state1 = fake_state('S1')
+            state2 = fake_state('S2')
+            cell1 = fake_cell_space('A', CellSpaceType::GENERAL, nil, state1)
+            cell2 = fake_cell_space('B', CellSpaceType::GENERAL, nil, state2)
+            state1.duality_cell = cell1
+            state2.duality_cell = cell2
+            transition = fake_transition('T1', state1, state2, fake_point(1, 0, 0), fake_point(3, 0, 0))
+            transition.waypoint_position = fake_point(2, 1, 0)
+            snapshot = ExportSnapshot.new(cell_spaces: [cell1, cell2], transitions: [transition])
+
+            doc = REXML::Document.new(GmlWriter.new(
+              snapshot: snapshot,
+              coordinate_unit: { unit: 'in', factor: 1.0, srs_name: 'urn:test:in' }
+            ).to_xml)
+            positions = REXML::XPath.match(doc, '//core:Transition/core:geometry/gml:LineString/gml:pos', namespaces)
+
+            assert_equal ['1 0 0', '2 1 0', '3 0 0'], positions.map(&:text)
+          end
+
           def test_writer_exports_geometry_only_cell_space_as_core_cell_space_without_navi_codes
             state = fake_state('Window State')
             cell = fake_cell_space('Window', CellSpaceType::GEOMETRY_ONLY, 'F01', state, surfaces: [fake_surface], category_code: 'Window')

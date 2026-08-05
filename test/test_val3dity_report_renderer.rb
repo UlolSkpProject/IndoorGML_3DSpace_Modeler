@@ -79,7 +79,20 @@ module ULOL
             )
 
             refute_includes html, 'sketchup.fixValidationErrors'
-            assert_includes html, 'VALID'
+            assert_includes html, 'EXACT VALID'
+          end
+
+          def test_render_distinguishes_extension_policy_valid
+            html = Val3dityReportRenderer.new.render(
+              'validity' => true,
+              'features_overview' => [],
+              'primitives_overview' => [],
+              'parameters' => {},
+              'indoorgml_modeler_validation_status' => 'extension_policy_valid'
+            )
+
+            assert_includes html, 'EXTENSION POLICY VALID'
+            assert_includes html, 'result-badge extension'
           end
 
           def test_render_maps_primitive_solid_cell_id_without_parent_feature

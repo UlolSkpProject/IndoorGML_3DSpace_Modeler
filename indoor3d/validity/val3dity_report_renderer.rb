@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../definition'
 require_relative 'val3dity_report_schema'
 
 module ULOL
@@ -12,6 +13,8 @@ module ULOL
           STRICT_VALIDITY_KEY = Val3dityReportSchema::STRICT_VALIDITY_KEY
           EXTENSION_VALIDITY_KEY = Val3dityReportSchema::EXTENSION_VALIDITY_KEY
           VALIDATION_STATUS_KEY = Val3dityReportSchema::VALIDATION_STATUS_KEY
+          APPLICATION_PROFILE_KEY = Val3dityReportSchema::APPLICATION_PROFILE_KEY
+          OVERLAP_TOLERANCE_KEY = Val3dityReportSchema::OVERLAP_TOLERANCE_KEY
 
           def render(raw_report)
             fallback_report_html(raw_report)
@@ -47,6 +50,7 @@ module ULOL
                   .result-message { margin: 8px 0 0; color: #b9b6ae; font-size: 12px; line-height: 1.5; }
                   .result-badge { display: inline-flex; align-items: center; padding: 5px 13px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
                   .result-badge.valid { color: #3ebc71; background: #12261a; border: 1px solid #327a4f; }
+                  .result-badge.extension { color: #f9b84e; background: #30240f; border: 1px solid #9b762d; }
                   .result-badge.invalid { color: #f97066; background: #351918; border: 1px solid #7a2e2a; }
                   .fix-action { display: inline-flex; align-items: center; padding: 5px 13px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; color: #8ab4f8; background: #17243b; border: 1px solid #315d9b; cursor: pointer; }
                   .fix-action:hover { background: #1d2d4a; border-color: #4278c7; }
@@ -139,12 +143,22 @@ module ULOL
 
           def report_result_hero_section(raw_report)
             final_errors = final_error_count(raw_report)
-            validity = final_errors.zero?
+            status = validation_status(raw_report, final_errors)
+            validity = status != 'invalid'
             suppressed = overlap_recheck_suppressed_count(raw_report)
             kept = overlap_recheck_kept_count(raw_report)
             inconclusive = overlap_recheck_inconclusive_count(raw_report)
             primitive_value = "#{valid_count(raw_report['primitives_overview'])} / #{total_count(raw_report['primitives_overview'])}"
-            badge_class = validity ? 'result-badge valid' : 'result-badge invalid'
+            badge_class = case status
+                          when 'exact_valid' then 'result-badge valid'
+                          when 'extension_policy_valid' then 'result-badge extension'
+                          else 'result-badge invalid'
+                          end
+            badge_label = case status
+                          when 'exact_valid' then 'EXACT VALID'
+                          when 'extension_policy_valid' then 'EXTENSION POLICY VALID'
+                          else 'INVALID'
+                          end
             fix_button = validity ? '' : '<button class="fix-action" type="button" onclick="if (window.sketchup && sketchup.fixValidationErrors) { sketchup.fixValidationErrors(); }">FIX</button>'
             message = result_hero_message(raw_report, final_errors, suppressed, kept, inconclusive)
             <<~HTML
@@ -153,7 +167,7 @@ module ULOL
                   <div>
                     <div class="eyebrow">IndoorGML · val3dity #{html_escape(raw_report['val3dity_version'] || 'unknown')}</div>
                     <div class="hero-title">
-                      <span class="#{badge_class}">#{validity ? 'VALID' : 'INVALID'}</span>
+                      <span class="#{badge_class}">#{badge_label}</span>
                       #{fix_button}
                     </div>
                     <p class="result-message">#{html_escape(message)}</p>
@@ -185,10 +199,19 @@ module ULOL
           end
 
           def report_top_meta_section(raw_report)
+            profile = raw_report[APPLICATION_PROFILE_KEY] || {}
+            profile_status = if profile.empty?
+                               'not checked'
+                             elsif profile['validity'] == true
+                               'valid'
+                             else
+                               'invalid'
+                             end
             <<~HTML
               <div class="top-meta">
                 <div>#{html_escape(report_checked_at(raw_report['time']))}</div>
                 <div>strict: #{html_escape(raw_report[STRICT_VALIDITY_KEY] == true ? 'valid' : 'invalid')} · extension policy: #{html_escape(raw_report[EXTENSION_VALIDITY_KEY] == true ? 'valid' : 'invalid')} · features #{valid_count(raw_report['features_overview'])}/#{total_count(raw_report['features_overview'])}</div>
+                <div>profile: #{html_escape(profile['name'] || Definition::APPLICATION_PROFILE_NAME)} · #{html_escape(profile_status)}</div>
               </div>
             HTML
           end
@@ -226,6 +249,12 @@ module ULOL
           end
 
           def report_summary_section(raw_report)
+            overlap = raw_report[OVERLAP_TOLERANCE_KEY] || {}
+            overlap_value = if overlap['mode'] == 'physical'
+                              "#{overlap['requested_mm']} mm → #{overlap['cli_value']} #{overlap['coordinate_unit']}"
+                            else
+                              raw_report.dig('parameters', 'overlap_tol') || overlap['cli_value'] || '-'
+                            end
             <<~HTML
               <section class="section">
                 <div class="section-head">
@@ -233,7 +262,7 @@ module ULOL
                 </div>
                 <div class="params-grid">
                   #{parameter_html('snap_tol', raw_report.dig('parameters', 'snap_tol') || '-')}
-                  #{parameter_html('overlap_tol', raw_report.dig('parameters', 'overlap_tol') || '-')}
+                  #{parameter_html('overlap_tol', overlap_value)}
                   #{parameter_html('planarity_d2p', raw_report.dig('parameters', 'planarity_d2p_tol') || '-')}
                   #{parameter_html('planarity_n', raw_report.dig('parameters', 'planarity_n_tol') || '-')}
                 </div>
@@ -259,6 +288,13 @@ module ULOL
             return "실제 수정이 필요한 오류가 #{final_errors}건 남아 있습니다." if total_rechecks.zero?
 
             "실제 수정이 필요한 오류가 #{final_errors}건 남아 있습니다. Overlap 재검사 후보 #{total_rechecks}건 중 #{suppressed}건은 억제, #{kept}건은 유지, #{inconclusive}건은 불명확입니다."
+          end
+
+          def validation_status(raw_report, final_errors)
+            status = raw_report[VALIDATION_STATUS_KEY].to_s
+            return status if %w[exact_valid extension_policy_valid invalid].include?(status)
+
+            final_errors.zero? ? 'exact_valid' : 'invalid'
           end
 
           def final_error_count(raw_report)

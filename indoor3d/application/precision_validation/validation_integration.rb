@@ -7,19 +7,22 @@ module ULOL
         PROFILE_THREAD_KEY = :ulol_indoor_gml_validation_profile
         FAST_PROFILE = :fast
         PRECISION_PROFILE = :precision
-        PRECISION_OVERLAP_TOLERANCE = 0.01
+        PRECISION_OVERLAP_TOLERANCE_MM = 0.01
+        PRECISION_OVERLAP_TOLERANCE = PRECISION_OVERLAP_TOLERANCE_MM
 
         FAST_STEPS = [
           [:temp_file, '임시파일 생성'],
           [:val3dity, 'val3dity 실행 (version2.2.0)'],
           [:extension_recheck, '2차 overlap recheck'],
+          [:application_profile, 'Application Profile'],
           [:report, 'Report 생성']
         ].freeze
 
         PRECISION_STEPS = [
           [:lvn, 'CellSpace Normalize'],
           [:temp_file, '임시파일 생성'],
-          [:val3dity, 'val3dity 실행 (overlap_tol 0.01)'],
+          [:val3dity, 'val3dity 실행 (overlap_tol 0.01 mm)'],
+          [:application_profile, 'Application Profile'],
           [:report, 'Report 생성']
         ].freeze
 
@@ -201,7 +204,7 @@ module ULOL
             return if validation_operation_running?
 
             message = <<~MESSAGE
-              정밀검사는 CellSpace Normalize를 시도한 뒤 val3dity --overlap_tol 0.01을 실행합니다.
+              정밀검사는 CellSpace Normalize를 시도한 뒤 0.01 mm를 GML 좌표 단위로 변환해 val3dity --overlap_tol에 전달합니다.
               Normalize 성공 CellSpace의 geometry는 유지되며, 실패 CellSpace는 원복 후 lvn_failed=true로 표시하고 검사를 계속합니다.
 
               계속하시겠습니까?
@@ -231,7 +234,8 @@ module ULOL
 
             state = session.state
             progress = session.progress
-            state[:overlap_tol] = PRECISION_OVERLAP_TOLERANCE
+            state[:overlap_tol] = IndoorGmlConverter::Val3dityRunner::STRICT_OVERLAP_TOL
+            state[:overlap_tol_mm] = PRECISION_OVERLAP_TOLERANCE_MM
             state[:lvn_running] = true
             progress.running(:lvn)
             progress.detail(
@@ -320,7 +324,7 @@ module ULOL
                        else
                          'invalid'
                        end
-            "val3dity: overlap_tol=0.01, result=#{validity}, process=#{status || 'unknown'}, exit_code=#{code_text}"
+            "val3dity: overlap_tol=0.01 mm (converted to GML units), result=#{validity}, process=#{status || 'unknown'}, exit_code=#{code_text}"
           end
         end
 
@@ -349,7 +353,7 @@ module ULOL
           command = UI::Command.new('IndoorGML 정밀검사') do
             ULOL::Indoor3DGmlModeler.command_dispatcher.check_precision_validity
           end
-          command.tooltip = 'CellSpace Normalize 후 val3dity overlap_tol 0.01 정밀검사'
+          command.tooltip = 'CellSpace Normalize 후 val3dity overlap_tol 0.01 mm 정밀검사'
           command.status_bar_text = command.tooltip
           command.set_validation_proc do
             dispatcher = ULOL::Indoor3DGmlModeler.command_dispatcher

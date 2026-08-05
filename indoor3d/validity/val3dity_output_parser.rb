@@ -7,7 +7,7 @@ module ULOL
 
         class Val3dityOutputParser
           PHASE_WEIGHTS = {
-            xsd:          [0.00, 0.02],
+            input_parsing: [0.00, 0.02],
             primitive:    [0.02, 0.07],
             xlinks:       [0.07, 0.10],
             overlap:      [0.10, 0.44],
@@ -20,7 +20,7 @@ module ULOL
             @total_states = total_states
             @total_transitions = total_transitions
             @buffer = +''
-            @phase = :xsd
+            @phase = :input_parsing
             @primitive_done = 0
             @dual_done = 0
             @link_done = 0
@@ -50,8 +50,8 @@ module ULOL
           def parse_line(line)
             case line
             when /XSD|schema/i
-              @phase = :xsd
-              emit(force: true, message: 'Validating IndoorGML schema')
+              @phase = :input_parsing
+              emit(force: true, message: 'Reading IndoorGML input')
             when /======== Validating Primitive ========/
               @phase = :primitive
               emit(force: true, message: 'Validating CellSpace solids')
@@ -117,8 +117,8 @@ module ULOL
 
           def current_ratio
             case @phase
-            when :xsd
-              phase_ratio(:xsd, 0.50)
+            when :input_parsing
+              phase_ratio(:input_parsing, 0.50)
             when :primitive
               start, finish = PHASE_WEIGHTS[:primitive]
               bounded_ratio(start + @primitive_done * 0.01, start, finish)
@@ -160,7 +160,7 @@ module ULOL
 
           def phase_label
             case @phase
-            when :xsd then '1. XSD Validation'
+            when :input_parsing then '1. Input Parsing'
             when :primitive then '2. Geometry Primal Cells'
             when :xlinks then '3. XLinks Errors'
             when :overlap then '4. Overlap Primal Cells'

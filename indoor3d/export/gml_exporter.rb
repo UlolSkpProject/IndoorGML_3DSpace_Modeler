@@ -21,11 +21,13 @@ module ULOL
             3 => { unit: 'cm', factor: 2.54, srs_name: 'urn:ulol:def:crs:local-cm' },
             4 => { unit: 'm', factor: 0.0254, srs_name: 'urn:ulol:def:crs:local-m' }
           }.freeze
-          def initialize(indoor_model, refresh_runtime_data: true, cell_spaces: nil, transitions: nil)
+          def initialize(indoor_model, refresh_runtime_data: true, cell_spaces: nil, transitions: nil,
+                         transition_geometry_mode: ExportSnapshot::TRANSITION_GEOMETRY_ENDPOINTS)
             @indoor_model = indoor_model
             @refresh_runtime_data = refresh_runtime_data
             @requested_cell_spaces = cell_spaces
             @requested_transitions = transitions
+            @transition_geometry_mode = transition_geometry_mode
           end
 
           def export(output_path: self.class.default_temp_gml_path)
@@ -50,6 +52,23 @@ module ULOL
 
           def self.default_temp_gml_path
             File.join(output_root, "temp-#{$$}.gml")
+          end
+
+          def self.coordinate_unit_for_model(model)
+            unit_key = model&.options&.[]('UnitsOptions')&.[]('LengthUnit').to_i
+            EXPORT_COORDINATE_UNITS[unit_key] || EXPORT_COORDINATE_UNITS[0]
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Export unit lookup failed: #{e.class}: #{e.message}" if defined?(IndoorCore::Logger)
+            EXPORT_COORDINATE_UNITS[0]
+          end
+
+          def self.millimeters_to_coordinate_units(value_mm, model:)
+            value = Float(value_mm)
+            raise ArgumentError, 'Physical tolerance must not be negative.' if value.negative?
+
+            value * coordinate_unit_for_model(model)[:factor].to_f / 25.4
+          rescue ArgumentError, TypeError
+            raise ArgumentError, "Invalid physical tolerance in millimeters: #{value_mm.inspect}"
           end
 
           private
@@ -120,18 +139,14 @@ module ULOL
             @export_snapshot ||= ExportSnapshot.build(
               indoor_model: @indoor_model,
               cell_spaces: @requested_cell_spaces,
-              transitions: @requested_transitions
+              transitions: @requested_transitions,
+              transition_geometry_mode: @transition_geometry_mode
             )
           end
 
           def export_coordinate_unit
             @export_coordinate_unit ||= begin
-              model = export_model
-              unit_key = model&.options&.[]('UnitsOptions')&.[]('LengthUnit').to_i
-              EXPORT_COORDINATE_UNITS[unit_key] || EXPORT_COORDINATE_UNITS[0]
-            rescue StandardError => e
-              IndoorCore::Logger.puts "[IndoorGML] Export unit lookup failed: #{e.class}: #{e.message}"
-              EXPORT_COORDINATE_UNITS[0]
+              self.class.coordinate_unit_for_model(export_model)
             end
           end
 

@@ -32,12 +32,35 @@ module ULOL
             :navigation_usage_code_space,
             keyword_init: true
           )
-          TransitionSnapshot = Struct.new(:id, :state1, :state2, :state1_position, :state2_position, keyword_init: true)
+          TransitionSnapshot = Struct.new(
+            :id,
+            :state1,
+            :state2,
+            :state1_position,
+            :waypoint_position,
+            :state2_position,
+            keyword_init: true
+          )
+
+          TRANSITION_GEOMETRY_ENDPOINTS = :endpoints
+          TRANSITION_GEOMETRY_SHARED_FACE_WAYPOINT = :shared_face_waypoint
+          TRANSITION_GEOMETRY_MODES = [
+            TRANSITION_GEOMETRY_ENDPOINTS,
+            TRANSITION_GEOMETRY_SHARED_FACE_WAYPOINT
+          ].freeze
+
+          class UnsupportedCellSpaceGeometryError < ArgumentError; end
 
           attr_reader :cell_spaces, :transitions
 
-          def self.build(indoor_model:, cell_spaces: nil, transitions: nil)
-            Builder.new(indoor_model: indoor_model, cell_spaces: cell_spaces, transitions: transitions).build
+          def self.build(indoor_model:, cell_spaces: nil, transitions: nil,
+                         transition_geometry_mode: TRANSITION_GEOMETRY_ENDPOINTS)
+            Builder.new(
+              indoor_model: indoor_model,
+              cell_spaces: cell_spaces,
+              transitions: transitions,
+              transition_geometry_mode: transition_geometry_mode
+            ).build
           end
 
           def initialize(cell_spaces:, transitions:)
@@ -46,10 +69,11 @@ module ULOL
           end
 
           class Builder
-            def initialize(indoor_model:, cell_spaces:, transitions:)
+            def initialize(indoor_model:, cell_spaces:, transitions:, transition_geometry_mode:)
               @indoor_model = indoor_model
               @source_cell_spaces = cell_spaces || indoor_model.cell_spaces
               @source_transitions = transitions || indoor_model.transitions
+              @transition_geometry_mode = normalize_transition_geometry_mode(transition_geometry_mode)
             end
 
             def build
@@ -92,6 +116,7 @@ module ULOL
             def build_cell_space_snapshot(cell_space)
               state = cell_space.duality_state
               group = cell_space.valid_sketchup_group
+              validate_supported_cell_geometry!(cell_space, group)
               cell_snapshot = CellSpaceSnapshot.new(
                 id: cell_space.id,
                 cell_type: cell_space.cell_type,
@@ -122,8 +147,52 @@ module ULOL
                 state1: state1,
                 state2: state2,
                 state1_position: transition_point_model_position(transition.state1_point) || state1.position,
+                waypoint_position: transition_waypoint_model_position(transition),
                 state2_position: transition_point_model_position(transition.state2_point) || state2.position
               )
+            end
+
+            def normalize_transition_geometry_mode(value)
+              mode = value.to_sym
+              return mode if TRANSITION_GEOMETRY_MODES.include?(mode)
+
+              raise ArgumentError, "Unsupported transition_geometry_mode: #{value.inspect}"
+            rescue NoMethodError
+              raise ArgumentError, "Unsupported transition_geometry_mode: #{value.inspect}"
+            end
+
+            def transition_waypoint_model_position(transition)
+              return nil unless @transition_geometry_mode == TRANSITION_GEOMETRY_SHARED_FACE_WAYPOINT
+              return nil unless transition.respond_to?(:selected_waypoint)
+
+              waypoint = transition_point_model_position(transition.selected_waypoint)
+              return nil if same_point?(waypoint, transition_point_model_position(transition.state1_point))
+              return nil if same_point?(waypoint, transition_point_model_position(transition.state2_point))
+
+              waypoint
+            end
+
+            def same_point?(first, second)
+              return false unless first && second
+
+              (first.x.to_f - second.x.to_f).abs <= 1.0e-9 &&
+                (first.y.to_f - second.y.to_f).abs <= 1.0e-9 &&
+                (first.z.to_f - second.z.to_f).abs <= 1.0e-9
+            end
+
+            def validate_supported_cell_geometry!(cell_space, group)
+              return unless group&.respond_to?(:definition) && defined?(Sketchup::Face)
+              return unless defined?(Utils::Geometry) && Utils::Geometry.respond_to?(:validate_cell_space_source_group)
+
+              result = Utils::Geometry.validate_cell_space_source_group(group)
+              return if result[:valid]
+
+              reason = result[:reason] || 'unsupported CellSpace solid geometry'
+              if result[:component_count].to_i > 1
+                reason = "cavities and disconnected solid shells are unsupported (#{reason})"
+              end
+              raise UnsupportedCellSpaceGeometryError,
+                    "CellSpace #{cell_space.id} cannot be exported: #{reason}."
             end
 
             def value_for(object, name)
@@ -191,7 +260,8 @@ module ULOL
             end
 
             def transition_point_model_position(point)
-              return nil unless defined?(Geom::Point3d) && point.is_a?(Geom::Point3d)
+              return nil unless point
+              return copy_point(point) unless defined?(Geom::Point3d) && point.is_a?(Geom::Point3d)
 
               copy_point(Utils::Transformation.root_local_point_to_model(point, @indoor_model.primal_group))
             rescue StandardError

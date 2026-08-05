@@ -156,6 +156,9 @@ module ULOL
               line.add_attribute('gml:id', "line_#{transition_gml_id(transition)}")
               append_local_crs_attributes(line)
               line.add_element('gml:pos').text = format_point(transition.state1_position)
+              if transition.respond_to?(:waypoint_position) && transition.waypoint_position
+                line.add_element('gml:pos').text = format_point(transition.waypoint_position)
+              end
               line.add_element('gml:pos').text = format_point(transition.state2_position)
             end
           end

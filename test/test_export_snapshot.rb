@@ -94,6 +94,35 @@ module ULOL
             assert_equal [transition.id], snapshot.cell_spaces.first.duality_state.transition_ids
           end
 
+          def test_waypoint_export_is_opt_in_and_preserves_endpoint_mode
+            cell_a = fake_cell_space(valid_group: true, state_valid: true)
+            cell_b = fake_cell_space(valid_group: true, state_valid: true)
+            transition = fake_transition(cell_a.duality_state, cell_b.duality_state)
+            transition.state1_point = point(1, 0, 0)
+            transition.state2_point = point(3, 0, 0)
+            transition.selected_waypoint = point(2, 1, 0)
+            indoor_model = fake_indoor_model(cell_spaces: [cell_a, cell_b], transitions: [transition])
+
+            endpoints = ExportSnapshot.build(indoor_model: indoor_model)
+            waypoint = ExportSnapshot.build(
+              indoor_model: indoor_model,
+              transition_geometry_mode: ExportSnapshot::TRANSITION_GEOMETRY_SHARED_FACE_WAYPOINT
+            )
+
+            assert_nil endpoints.transitions.first.waypoint_position
+            assert_equal [2, 1, 0], %i[x y z].map { |axis| waypoint.transitions.first.waypoint_position.public_send(axis) }
+          end
+
+          def test_rejects_unknown_transition_geometry_mode
+            indoor_model = fake_indoor_model(cell_spaces: [], transitions: [])
+
+            error = assert_raises(ArgumentError) do
+              ExportSnapshot.build(indoor_model: indoor_model, transition_geometry_mode: :curved)
+            end
+
+            assert_includes error.message, 'Unsupported transition_geometry_mode'
+          end
+
           private
 
           def fake_indoor_model(cell_spaces:, transitions:)
@@ -115,8 +144,8 @@ module ULOL
 
           def fake_transition(state1, state2, valid: true)
             @transition_index = @transition_index.to_i + 1
-            Struct.new(:id, :state1, :state2, :valid?, :state1_point, :state2_point) do
-            end.new("transition_#{@transition_index}", state1, state2, valid, nil, nil)
+            Struct.new(:id, :state1, :state2, :valid?, :state1_point, :state2_point, :selected_waypoint) do
+            end.new("transition_#{@transition_index}", state1, state2, valid, nil, nil, nil)
           end
 
           def point(x, y, z)

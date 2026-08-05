@@ -89,6 +89,26 @@ module ULOL
             end
           end
 
+          def test_runner_default_overlap_tolerance_is_strict
+            runner = Val3dityRunner.new(__FILE__)
+
+            assert_equal Val3dityRunner::STRICT_OVERLAP_TOL, Val3dityRunner::DEFAULT_OVERLAP_TOL
+            assert_equal Val3dityRunner::STRICT_OVERLAP_TOL, runner.instance_variable_get(:@overlap_tol)
+          end
+
+          def test_result_exposes_three_validation_outcomes
+            result_class = Val3dityRunner::Val3dityResult
+            paths = { report_json_path: nil, report_html_path: nil, error: nil }
+
+            exact = result_class.new(valid: true, report: { 'indoorgml_modeler_validation_status' => 'exact_valid' }, **paths)
+            extension = result_class.new(valid: true, report: { 'indoorgml_modeler_validation_status' => 'extension_policy_valid' }, **paths)
+            invalid = result_class.new(valid: false, report: { 'indoorgml_modeler_validation_status' => 'invalid' }, **paths)
+
+            assert_equal :exact_valid, exact.outcome
+            assert_equal :extension_policy_valid, extension.outcome
+            assert_equal :invalid, invalid.outcome
+          end
+
           def test_701_boundary_contact_reason_is_preserved_when_suppressed
             runner = Val3dityRunner.allocate
             runner.instance_variable_set(:@indoor_model, FakeIndoorModel.new(nil))

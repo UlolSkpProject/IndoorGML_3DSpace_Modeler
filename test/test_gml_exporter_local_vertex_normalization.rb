@@ -62,6 +62,24 @@ module ULOL
               refute exporter.respond_to?(:ensure_local_vertices_normalized!, true)
             end
           end
+
+          def test_physical_tolerance_is_converted_to_each_export_coordinate_unit
+            expected = {
+              0 => 1.0 / 25.4,
+              1 => 1.0 / 304.8,
+              2 => 1.0,
+              3 => 0.1,
+              4 => 0.001
+            }
+
+            expected.each do |unit_key, coordinate_value|
+              model = Struct.new(:options).new({ 'UnitsOptions' => { 'LengthUnit' => unit_key } })
+
+              actual = GmlExporter.millimeters_to_coordinate_units(1.0, model: model)
+
+              assert_in_delta coordinate_value, actual, 1.0e-12, "LengthUnit=#{unit_key}"
+            end
+          end
         end
       end
     end

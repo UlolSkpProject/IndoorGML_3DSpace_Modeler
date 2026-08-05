@@ -38,7 +38,8 @@ module ULOL
           def test_split_chunks_are_buffered_before_parsing
             events = parse_chunks(['X', 'SD validation', "\nERROR 701: OVERLAP\n"])
 
-            assert_equal 'Validating IndoorGML schema', events[0][:message]
+            assert_equal 'Reading IndoorGML input', events[0][:message]
+            assert_equal '1. Input Parsing', events[0][:phase]
             assert_equal 'ERROR 701: OVERLAP', events[1][:message]
             assert_equal 'Finished', events.last[:phase]
           end

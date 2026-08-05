@@ -193,6 +193,7 @@ module ULOL
           validator = IndoorGmlConverter::Val3dityRunner.new(
             temp_path,
             overlap_tol: state[:overlap_tol],
+            overlap_tol_mm: state[:overlap_tol_mm],
             work_dir: session.workspace&.root_dir,
             indoor_model: indoor_model
           )
@@ -378,17 +379,25 @@ module ULOL
             return
           end
 
-          if result.valid?
+          case result.outcome
+          when :exact_valid
             progress&.result(
               status: :success,
-              title: 'IndoorGML validation succeeded',
-              message: 'Validation completed. Open the report when ready.',
+              title: 'Exact Valid',
+              message: 'Strict val3dity and application profile checks passed.',
+              actions: [:openReport, :close]
+            )
+          when :extension_policy_valid
+            progress&.result(
+              status: :extension,
+              title: 'Extension Policy Valid',
+              message: 'Strict val3dity reported 701/704 issues that the extension policy accepted.',
               actions: [:openReport, :close]
             )
           else
             progress&.result(
               status: :failed,
-              title: 'IndoorGML validation failed',
+              title: 'Invalid',
               message: 'Validation completed with errors. Open the report for details.',
               actions: [:openReport, :close]
             )

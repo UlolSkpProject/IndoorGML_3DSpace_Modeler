@@ -13,6 +13,8 @@ module ULOL
           EXTENSION_VALIDITY_KEY = 'extension_policy_validity'
           VALIDATION_STATUS_KEY = 'indoorgml_modeler_validation_status'
           STRICT_ERRORS_REPORT_KEY = 'indoorgml_modeler_strict_errors'
+          APPLICATION_PROFILE_KEY = 'indoorgml_modeler_application_profile'
+          OVERLAP_TOLERANCE_KEY = 'indoorgml_modeler_overlap_tolerance'
           OVERLAP_RECHECK_CODES = [701, 704].freeze
 
           module_function
