@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'fileutils'
 require 'json'
 require 'tmpdir'
 
@@ -14,19 +15,12 @@ module ULOL
             def run(root: default_root)
               root = File.expand_path(root)
               production_files = expected_production_files(root)
-              benchmark_file = File.join(
-                root,
-                'dev',
-                'val3dity_recheck_integration_benchmark.rb'
-              )
-              compile_files = production_files + [benchmark_file, __FILE__]
-              checks = []
-
-              compile_files.each do |path|
-                checks << compile_check(path)
-              end
-
-              checks.concat(file_layout_checks(root, production_files))
+              compile_files = production_files + [
+                File.join(root, 'dev', 'val3dity_recheck_integration_benchmark.rb'),
+                __FILE__
+              ]
+              checks = compile_files.map { |path| compile_check(path) }
+              checks.concat(repository_layout_checks(root, production_files))
 
               require File.join(
                 root,
@@ -42,7 +36,7 @@ module ULOL
               )
 
               checks.concat(class_architecture_checks)
-              checks << runner_default_check(root)
+              checks << runner_default_check
 
               failures = checks.reject { |row| row['pass'] == true }
               @last_result = {
@@ -85,29 +79,26 @@ module ULOL
             end
 
             def expected_production_files(root)
-              relative = [
-                'indoor3d/validity/val3dity_full_intersection_rechecker.rb',
-                'indoor3d/validity/val3dity_overlap_geometry_rechecker.rb',
-                'indoor3d/validity/overlap_recheck/clipped_operand_analyzer.rb',
-                'indoor3d/validity/overlap_recheck/clipped_mesh_rechecker.rb',
-                'indoor3d/validity/overlap_recheck/interior_loop_cap.rb',
-                'indoor3d/validity/overlap_recheck/boundary_ear_repair.rb',
-                'indoor3d/validity/overlap_recheck/boundary_dp_repair.rb',
-                'indoor3d/validity/overlap_recheck/boundary_edge_projection.rb',
-                'indoor3d/validity/overlap_recheck/boundary_global_edge_support.rb',
-                'indoor3d/validity/overlap_recheck/safety_confirmation.rb'
-              ]
-              relative.map { |path| File.join(root, path) }
+              %w[
+                indoor3d/validity/val3dity_full_intersection_rechecker.rb
+                indoor3d/validity/val3dity_overlap_geometry_rechecker.rb
+                indoor3d/validity/overlap_recheck/clipped_operand_analyzer.rb
+                indoor3d/validity/overlap_recheck/clipped_mesh_rechecker.rb
+                indoor3d/validity/overlap_recheck/interior_loop_cap.rb
+                indoor3d/validity/overlap_recheck/boundary_ear_repair.rb
+                indoor3d/validity/overlap_recheck/boundary_dp_repair.rb
+                indoor3d/validity/overlap_recheck/boundary_edge_projection.rb
+                indoor3d/validity/overlap_recheck/boundary_global_edge_support.rb
+                indoor3d/validity/overlap_recheck/safety_confirmation.rb
+              ].map { |path| File.join(root, path) }
             end
 
             def compile_check(path)
-              unless File.file?(path)
-                return check(
-                  "file exists: #{relative_path(path)}",
-                  false,
-                  path
-                )
-              end
+              return check(
+                "file exists: #{relative_path(path)}",
+                false,
+                path
+              ) unless File.file?(path)
 
               if defined?(RubyVM::InstructionSequence)
                 RubyVM::InstructionSequence.compile_file(path)
@@ -116,16 +107,10 @@ module ULOL
                 check(
                   "syntax: #{relative_path(path)}",
                   true,
-                  'RubyVM unavailable; file was already parsed by SketchUp load'
+                  'RubyVM unavailable; SketchUp already parsed loaded files'
                 )
               end
-            rescue SyntaxError => e
-              check(
-                "syntax: #{relative_path(path)}",
-                false,
-                "#{e.class}: #{e.message}"
-              )
-            rescue StandardError => e
+            rescue SyntaxError, StandardError => e
               check(
                 "syntax: #{relative_path(path)}",
                 false,
@@ -133,30 +118,35 @@ module ULOL
               )
             end
 
-            def file_layout_checks(root, production_files)
-              active_files = production_files + [
-                File.join(root, 'indoor3d', 'core.rb'),
-                File.join(root, 'indoor3d', 'validity', 'val3dity_runner.rb')
-              ]
-              source = active_files.filter_map do |path|
-                next unless File.file?(path)
-
-                [path, File.read(path, encoding: 'UTF-8')]
+            def repository_layout_checks(root, production_files)
+              ruby_files = %w[indoor3d dev test].flat_map do |directory|
+                Dir.glob(File.join(root, directory, '**', '*.rb'))
+              end.uniq.reject { |path| File.expand_path(path) == File.expand_path(__FILE__) }
+              sources = ruby_files.filter_map do |path|
+                [path, File.read(path, encoding: 'UTF-8')] if File.file?(path)
+              rescue EncodingError
+                nil
               end
 
-              forbidden = {
-                'legacy V3 constant' => 'Val3dityRecheckV3',
-                'legacy v3 filename reference' => 'val3dity_recheck_v3',
-                'legacy v3 kill switch' => 'INDOORGML_DISABLE_V3_RECHECK'
+              forbidden_tokens = {
+                'legacy V3 recheck constant removed' =>
+                  ['Val3dity', 'Recheck', 'V3'].join,
+                'legacy v3 recheck filename reference removed' =>
+                  ['val3dity', '_recheck_', 'v3'].join,
+                'legacy v3 kill switch removed' =>
+                  ['INDOORGML', '_DISABLE_', 'V3_RECHECK'].join
               }
-              checks = forbidden.map do |label, token|
-                matches = source.filter_map do |path, content|
+              checks = forbidden_tokens.map do |label, token|
+                matches = sources.filter_map do |path, content|
                   relative_path(path) if content.include?(token)
                 end
                 check(label, matches.empty?, matches.join(', '))
               end
 
-              dev_requires = source.filter_map do |path, content|
+              production_sources = production_files.filter_map do |path|
+                [path, File.read(path, encoding: 'UTF-8')] if File.file?(path)
+              end
+              dev_requires = production_sources.filter_map do |path, content|
                 relative_path(path) if content.match?(
                   /require(?:_relative)?\s+['\"][^'\"]*dev\//
                 )
@@ -179,18 +169,11 @@ module ULOL
                 relative_path(obsolete_patch)
               )
 
-              recheck_v3_files = Dir.glob(
+              forbidden_files = Dir.glob(
                 File.join(root, 'dev', 'val3dity_recheck_v3*')
               ) + Dir.glob(
                 File.join(root, 'indoor3d', '**', '*recheck*v3*')
-              )
-              checks << check(
-                'recheck v3 files removed',
-                recheck_v3_files.empty?,
-                recheck_v3_files.map { |path| relative_path(path) }.join(', ')
-              )
-
-              old_probe_files = Dir.glob(
+              ) + Dir.glob(
                 File.join(
                   root,
                   'dev',
@@ -198,9 +181,9 @@ module ULOL
                 )
               )
               checks << check(
-                'old clipped operand probes removed',
-                old_probe_files.empty?,
-                old_probe_files.map { |path| relative_path(path) }.join(', ')
+                'obsolete recheck version files removed',
+                forbidden_files.empty?,
+                forbidden_files.map { |path| relative_path(path) }.join(', ')
               )
 
               checks
@@ -210,28 +193,29 @@ module ULOL
               canonical = Val3dityOverlapGeometryRechecker
               engine = Val3dityClippedMeshRecheck::Rechecker
               safety = Val3dityClippedMeshRecheck::SafetyConfirmation
-              full = Val3dityFullIntersectionRechecker
+              confirmation = Val3dityFullIntersectionRechecker
               ancestors = canonical.ancestors
+              chain = ancestors.first(8).map(&:to_s).join(' -> ')
 
               [
                 check(
                   'canonical class inherits clipped-mesh engine',
-                  canonical < engine,
-                  ancestors.first(8).map(&:to_s).join(' -> ')
+                  !!(canonical < engine),
+                  chain
                 ),
                 check(
-                  'safety confirmation is prepended before engine',
+                  'safety confirmation precedes clipped-mesh engine',
                   ancestors.index(safety) && ancestors.index(engine) &&
                     ancestors.index(safety) < ancestors.index(engine),
-                  ancestors.first(8).map(&:to_s).join(' -> ')
+                  chain
                 ),
                 check(
-                  'full geometry engine is internal ancestor only',
-                  canonical < full && canonical != full,
-                  ancestors.first(8).map(&:to_s).join(' -> ')
+                  'full geometry is internal confirmation ancestor only',
+                  !!(canonical < confirmation) && canonical != confirmation,
+                  chain
                 ),
                 check(
-                  'canonical class exposes primary path records',
+                  'canonical class exposes recheck path records',
                   canonical.public_instance_methods.include?(:proxy_record),
                   canonical.public_instance_methods(false).sort.inspect
                 ),
@@ -244,15 +228,13 @@ module ULOL
               ]
             end
 
-            def runner_default_check(root)
+            def runner_default_check
               indoor_model = IndoorCore::IndoorModel.current
-              unless indoor_model&.model == Sketchup.active_model
-                return check(
-                  'runner default rechecker is canonical',
-                  false,
-                  'IndoorModel.current is not bound to active model'
-                )
-              end
+              return check(
+                'runner default rechecker is canonical',
+                false,
+                'IndoorModel.current is not bound to active model'
+              ) unless indoor_model&.model == Sketchup.active_model
 
               work_dir = Dir.mktmpdir('indoor_gml_recheck_smoke')
               runner = Val3dityRunner.new(
@@ -294,10 +276,4 @@ module ULOL
       end
     end
   end
-end
-
-if __FILE__ == $PROGRAM_NAME
-  tool = ULOL::Indoor3DGmlModeler::IndoorCore::IndoorGmlConverter::
-    Val3dityRecheckIntegrationSmoke
-  tool.print_report(tool.run)
 end
