@@ -35,8 +35,8 @@ module ULOL
       end
 
       class CellSpaceLifecycleContext
-        def register_created(_cell_space, _state, **_options)
-          :created
+        def initialize_scene(_cell_space, **_options)
+          :initialized
         end
       end
 
@@ -272,7 +272,7 @@ module ULOL
           cell = CellSpace.new('new', Group.new('new'))
           context = CellSpaceLifecycleContext.new
 
-          assert_equal :created, context.register_created(cell, Object.new)
+          assert_equal :initialized, context.initialize_scene(cell)
           assert_equal false,
                        cell.group.get_attribute('IndoorGml', 'lvn_failed')
         end
