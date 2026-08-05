@@ -5,7 +5,7 @@ require 'json'
 module ULOL
   module Indoor3DGmlModeler
     module Dev
-      module PrecisionValidationSelectedCellSpacesLvnSmokeTest
+      module LvnSelectedCellSpacesRegression
         TOLERANCE_MM = IndoorCore::LocalVertexNormalizer::DEFAULT_TOLERANCE_MM
         LENGTH_EPSILON_MM = 0.0001
         TRANSFORM_EPSILON = 1.0e-12
@@ -74,7 +74,7 @@ module ULOL
           end
 
           result = {
-            schema: 'ulol.precision_validation.selected_cell_spaces_lvn_smoke.v2',
+            schema: 'ulol.lvn.selected_cell_spaces_regression.v2',
             tolerance_mm: TOLERANCE_MM,
             elapsed_seconds: elapsed_seconds,
             target_count: targets.length,
@@ -92,7 +92,7 @@ module ULOL
             cell_spaces: cell_results
           }
 
-          $precision_validation_selected_lvn_smoke_report = result
+          $lvn_selected_cell_spaces_regression_report = result
           print_result(result)
           result
         end
@@ -353,7 +353,7 @@ module ULOL
         def print_result(result)
           puts
           puts '=' * 90
-          puts '[Precision Validation] Selected CellSpace LVN smoke test'
+          puts '[LVN Regression] Selected CellSpaces'
           puts "overall_pass=#{result[:overall_pass]} targets=#{result[:target_count]} " \
                "finish_editing=#{result[:finish_editing_performed]} " \
                "elapsed=#{format('%.3f', result[:elapsed_seconds])}s"
@@ -395,5 +395,5 @@ module ULOL
   end
 end
 
-ULOL::Indoor3DGmlModeler::Dev::PrecisionValidationSelectedCellSpacesLvnSmokeTest.run
+ULOL::Indoor3DGmlModeler::Dev::LvnSelectedCellSpacesRegression.run
 nil

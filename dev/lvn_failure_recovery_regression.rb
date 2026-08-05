@@ -7,7 +7,7 @@ require 'time'
 module ULOL
   module Indoor3DGmlModeler
     module Dev
-      module PrecisionValidationLvnFailureRecoveryProbe
+      module LvnFailureRecoveryRegression
         TOLERANCE_MM = IndoorCore::LocalVertexNormalizer::DEFAULT_TOLERANCE_MM
         GEOMETRY_CHANGE_MM = 0.0004
         BOUNDS_EPSILON_MM = 0.000001
@@ -62,7 +62,7 @@ module ULOL
             indoor_model.define_singleton_method(:normalize_cell_space_group) do |candidate, candidate_group, tolerance_mm, **options|
               if candidate&.id.to_s == target_id && injection_count < REQUIRED_INJECTION_COUNT
                 injection_count += 1
-                Dev::PrecisionValidationLvnFailureRecoveryProbe.translate_definition_geometry(
+                Dev::LvnFailureRecoveryRegression.translate_definition_geometry(
                   candidate_group,
                   GEOMETRY_CHANGE_MM
                 )
@@ -88,7 +88,7 @@ module ULOL
             group = cell_space.valid_sketchup_group
             after_skip = cell_snapshot(group)
 
-            indoor_model.with_indoor_model_operation("LVN failure retry geometry change #{target_id}") do
+            indoor_model.with_indoor_model_operation("LVN failure recovery geometry change #{target_id}") do
               indoor_model.send(:sync) do
                 translate_definition_geometry(group, GEOMETRY_CHANGE_MM)
                 indoor_model.send(:remember_cell_space_change_snapshot, group)
@@ -157,7 +157,7 @@ module ULOL
           }
 
           result = {
-            schema: 'ulol.precision_validation.lvn_failure_recovery_probe.v2',
+            schema: 'ulol.lvn.failure_recovery_regression.v2',
             generated_at: Time.now.iso8601(3),
             tolerance_mm: TOLERANCE_MM,
             geometry_change_mm: GEOMETRY_CHANGE_MM,
@@ -202,7 +202,7 @@ module ULOL
 
           output_path = write_result(result)
           result[:output_path] = output_path
-          $precision_validation_lvn_failure_recovery_report = result
+          $lvn_failure_recovery_regression_report = result
           print_result(result)
           result
         end
@@ -410,7 +410,7 @@ module ULOL
           timestamp = Time.now.strftime('%Y%m%d_%H%M%S')
           path = File.join(
             Dir.tmpdir,
-            "indoor_gml_precision_lvn_failure_recovery_#{timestamp}.json"
+            "indoor_gml_lvn_failure_recovery_regression_#{timestamp}.json"
           )
           File.write(path, JSON.pretty_generate(json_safe(result)))
           path
@@ -420,7 +420,7 @@ module ULOL
         def print_result(result)
           puts
           puts '=' * 90
-          puts '[Precision Validation] LVN failure recovery probe'
+          puts '[LVN Regression] Failure recovery'
           puts "overall_pass=#{result[:overall_pass]} cell=#{result[:cell_space_id]} " \
                "name=#{result[:cell_space_name]}"
           puts "statuses=#{result[:phase_statuses].inspect} " \
@@ -455,5 +455,5 @@ module ULOL
   end
 end
 
-ULOL::Indoor3DGmlModeler::Dev::PrecisionValidationLvnFailureRecoveryProbe.run
+ULOL::Indoor3DGmlModeler::Dev::LvnFailureRecoveryRegression.run
 nil
