@@ -6,6 +6,67 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       module PrecisionValidation
+        module LvnStatisticsFormatter
+          module_function
+
+          def counts(report)
+            data = report.respond_to?(:to_h) ? report.to_h : {}
+            normalized = data[:cell_space_count].to_i
+            failed = data[:normalization_failed_cell_space_count].to_i
+            already = data[:already_normalized_cell_space_count].to_i
+            previous_failure = data[:skipped_previous_failure_cell_space_count].to_i
+            calculated_total = normalized + failed + already + previous_failure
+            target_total = data[:target_cell_space_count].to_i
+
+            {
+              total: target_total.positive? ? target_total : calculated_total,
+              normalized: normalized,
+              failed: failed,
+              already: already,
+              previous_failure: previous_failure,
+              skipped: already + previous_failure
+            }
+          end
+
+          def result_message(report)
+            values = counts(report)
+            "LVN 결과: 성공 #{format_count(values[:normalized])}" \
+              " · 이번 실패 #{format_count(values[:failed])}" \
+              " · 기존 완료 #{format_count(values[:already])}" \
+              " · 이전 실패 생략 #{format_count(values[:previous_failure])}"
+          end
+
+          def step_summary_message(report)
+            values = counts(report)
+            "전체 #{format_count(values[:total])}개 중 " \
+              "성공 #{format_count(values[:normalized])}개" \
+              " · 실패 #{format_count(values[:failed])}개" \
+              " · Skip #{format_count(values[:skipped])}개 " \
+              "(기존 완료 #{format_count(values[:already])}개, " \
+              "이전 실패 #{format_count(values[:previous_failure])}개)"
+          end
+
+          def step_summary_tone(report)
+            counts(report)[:failed].positive? ? :warning : :success
+          end
+
+          def format_count(value)
+            value.to_i.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse
+          end
+        end
+
+        module ValidationLvnProgressStatisticsAdapterPatch
+          def step_summary(message:, tone: :neutral)
+            return false unless @progress&.respond_to?(:set_step_summary)
+
+            @progress.set_step_summary(@step, message, tone: tone)
+            true
+          rescue StandardError => error
+            log_error('step summary', error)
+            false
+          end
+        end
+
         module LvnProgressStatisticsTrackerPatch
           def plan_ready(rows:, execution_targets:)
             records = Array(rows)
@@ -44,20 +105,15 @@ module ULOL
           end
 
           def finish(report = nil)
-            data = report.respond_to?(:to_h) ? report.to_h : {}
-            normalized = data[:cell_space_count].to_i
-            failed = data[:normalization_failed_cell_space_count].to_i
-            already = data[:already_normalized_cell_space_count].to_i
-            previous_failure = data[:skipped_previous_failure_cell_space_count].to_i
+            summary = LvnStatisticsFormatter.step_summary_message(report)
+            @adapter&.step_summary(
+              message: summary,
+              tone: LvnStatisticsFormatter.step_summary_tone(report)
+            )
 
             emit(
               percent: LvnProgressTracker::FINISH_PERCENT,
-              message: lvn_result_statistics_message(
-                normalized: normalized,
-                failed: failed,
-                already: already,
-                previous_failure: previous_failure
-              )
+              message: LvnStatisticsFormatter.result_message(report)
             )
           end
 
@@ -83,33 +139,22 @@ module ULOL
               " · 기존 완료 #{@already_normalized_count}" \
               " · 이전 실패 생략 #{@previous_failure_count}"
           end
-
-          def lvn_result_statistics_message(normalized:, failed:, already:, previous_failure:)
-            "LVN 결과: 성공 #{normalized}" \
-              " · 이번 실패 #{failed}" \
-              " · 기존 완료 #{already}" \
-              " · 이전 실패 생략 #{previous_failure}"
-          end
         end
 
         module LvnProgressStatisticsCommandDispatcherPatch
           private
 
           def precision_lvn_summary(report)
-            data = report || {}
-            normalized = data[:cell_space_count].to_i
-            failed = data[:normalization_failed_cell_space_count].to_i
-            already = data[:already_normalized_cell_space_count].to_i
-            previous_failure = data[:skipped_previous_failure_cell_space_count].to_i
-
-            "LVN 결과: 성공 #{normalized}" \
-              " · 이번 실패 #{failed}" \
-              " · 기존 완료 #{already}" \
-              " · 이전 실패 생략 #{previous_failure}"
+            LvnStatisticsFormatter.result_message(report)
           end
         end
 
         def self.install_lvn_progress_statistics!
+          adapter_class = ValidationLvnProgressAdapter
+          unless adapter_class.ancestors.include?(ValidationLvnProgressStatisticsAdapterPatch)
+            adapter_class.prepend(ValidationLvnProgressStatisticsAdapterPatch)
+          end
+
           tracker_class = LvnProgressTracker
           unless tracker_class.ancestors.include?(LvnProgressStatisticsTrackerPatch)
             tracker_class.prepend(LvnProgressStatisticsTrackerPatch)

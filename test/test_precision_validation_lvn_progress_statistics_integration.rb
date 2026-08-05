@@ -30,14 +30,23 @@ module ULOL
     module IndoorCore
       class PrecisionValidationLvnProgressStatisticsIntegrationTest < Minitest::Test
         class Progress
-          attr_reader :details
+          attr_reader :details, :step_summaries
 
           def initialize
             @details = []
+            @step_summaries = []
           end
 
           def detail(step, **payload)
             @details << payload.merge(step: step)
+          end
+
+          def set_step_summary(step, message, tone: :neutral)
+            @step_summaries << {
+              step: step,
+              message: message,
+              tone: tone
+            }
           end
         end
 
@@ -74,22 +83,51 @@ module ULOL
           )
         end
 
-        def test_finish_and_final_summary_use_same_statistics_format
+        def test_finish_persists_statistics_below_lvn_step
           report = {
-            cell_space_count: 5,
-            normalization_failed_cell_space_count: 1,
-            already_normalized_cell_space_count: 2,
-            skipped_previous_failure_cell_space_count: 1
+            target_cell_space_count: 1_243,
+            cell_space_count: 431,
+            normalization_failed_cell_space_count: 8,
+            already_normalized_cell_space_count: 781,
+            skipped_previous_failure_cell_space_count: 23
           }
-          expected = 'LVN 결과: 성공 5 · 이번 실패 1 · 기존 완료 2 · 이전 실패 생략 1'
 
-          @tracker.start(total: 9)
+          @tracker.start(total: 1_243)
           @tracker.finish(report)
 
-          assert_equal expected, @progress.details.last[:message]
           assert_equal(
-            expected,
+            {
+              step: :lvn,
+              message: '전체 1,243개 중 성공 431개 · 실패 8개 · Skip 804개 (기존 완료 781개, 이전 실패 23개)',
+              tone: :warning
+            },
+            @progress.step_summaries.last
+          )
+          assert_equal(
+            'LVN 결과: 성공 431 · 이번 실패 8 · 기존 완료 781 · 이전 실패 생략 23',
+            @progress.details.last[:message]
+          )
+          assert_equal(
+            'LVN 결과: 성공 431 · 이번 실패 8 · 기존 완료 781 · 이전 실패 생략 23',
             CommandDispatcher.new.send(:precision_lvn_summary, report)
+          )
+        end
+
+        def test_zero_failure_summary_uses_success_tone
+          report = {
+            target_cell_space_count: 5,
+            cell_space_count: 3,
+            normalization_failed_cell_space_count: 0,
+            already_normalized_cell_space_count: 2,
+            skipped_previous_failure_cell_space_count: 0
+          }
+
+          @tracker.finish(report)
+
+          assert_equal :success, @progress.step_summaries.last[:tone]
+          assert_equal(
+            '전체 5개 중 성공 3개 · 실패 0개 · Skip 2개 (기존 완료 2개, 이전 실패 0개)',
+            @progress.step_summaries.last[:message]
           )
         end
       end
