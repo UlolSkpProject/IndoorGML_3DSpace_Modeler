@@ -39,7 +39,7 @@ module ULOL
 
               failures = checks.reject { |row| row['pass'] == true }
               @last_result = {
-                'schema_version' => 2,
+                'schema_version' => 3,
                 'root' => root,
                 'production_file_count' => production_files.length,
                 'dev_chain_file_count' => dev_chain_files.length,
@@ -91,6 +91,7 @@ module ULOL
                 indoor3d/validity/overlap_recheck/boundary_edge_projection.rb
                 indoor3d/validity/overlap_recheck/boundary_global_edge_support.rb
                 indoor3d/validity/overlap_recheck/safety_confirmation.rb
+                indoor3d/validity/overlap_recheck/adaptive_routing.rb
               ].map { |path| File.join(root, path) }
             end
 
@@ -230,10 +231,11 @@ module ULOL
             def class_architecture_checks
               canonical = Val3dityOverlapGeometryRechecker
               engine = Val3dityClippedMeshRecheck::Rechecker
+              adaptive = Val3dityClippedMeshRecheck::AdaptiveRouting
               safety = Val3dityClippedMeshRecheck::SafetyConfirmation
               confirmation = Val3dityFullIntersectionRechecker
               ancestors = canonical.ancestors
-              chain = ancestors.first(8).map(&:to_s).join(' -> ')
+              chain = ancestors.first(10).map(&:to_s).join(' -> ')
 
               [
                 check(
@@ -242,10 +244,21 @@ module ULOL
                   chain
                 ),
                 check(
+                  'adaptive routing precedes clipped-mesh engine',
+                  ancestors.index(adaptive) && ancestors.index(engine) &&
+                    ancestors.index(adaptive) < ancestors.index(engine),
+                  chain
+                ),
+                check(
                   'safety confirmation precedes clipped-mesh engine',
                   ancestors.index(safety) && ancestors.index(engine) &&
                     ancestors.index(safety) < ancestors.index(engine),
                   chain
+                ),
+                check(
+                  'adaptive threshold is 300 faces',
+                  Val3dityClippedMeshRecheck.simple_solid_face_threshold == 300,
+                  Val3dityClippedMeshRecheck.simple_solid_face_threshold.inspect
                 ),
                 check(
                   'full geometry is internal confirmation ancestor only',
