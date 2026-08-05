@@ -6,7 +6,10 @@ require 'rbconfig'
 test_files = Dir[File.join(__dir__, 'test_*.rb')].sort
 failures = []
 
-test_files.each do |file|
+test_files.each_with_index do |file, index|
+  puts "RUN #{index + 1}/#{test_files.length} #{File.basename(file)}"
+  $stdout.flush
+
   stdout, stderr, status = Open3.capture3(RbConfig.ruby, file, *ARGV)
   next if status.success?
 
