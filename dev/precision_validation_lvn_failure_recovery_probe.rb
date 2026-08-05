@@ -13,6 +13,7 @@ module ULOL
         BOUNDS_EPSILON_MM = 0.000001
         VOLUME_EPSILON_MM3 = 0.001
         TRANSFORM_EPSILON = 1.0e-12
+        REQUIRED_INJECTION_COUNT = 2
 
         class InjectedFailure < StandardError; end
 
@@ -54,19 +55,20 @@ module ULOL
           after_failure = nil
           after_skip = nil
           after_change = nil
-          final = nil
 
           begin
             install_normalized_override(original_normalized, target_pid)
 
             indoor_model.define_singleton_method(:normalize_cell_space_group) do |candidate, candidate_group, tolerance_mm, **options|
-              if candidate&.id.to_s == target_id && injection_count.zero?
+              if candidate&.id.to_s == target_id && injection_count < REQUIRED_INJECTION_COUNT
                 injection_count += 1
                 Dev::PrecisionValidationLvnFailureRecoveryProbe.translate_definition_geometry(
                   candidate_group,
                   GEOMETRY_CHANGE_MM
                 )
-                raise InjectedFailure, 'Intentional LVN failure injection after geometry mutation'
+                raise InjectedFailure,
+                      "Intentional LVN failure injection #{injection_count}/#{REQUIRED_INJECTION_COUNT} " \
+                      'after geometry mutation'
               end
 
               original_normalize_group.call(
@@ -100,9 +102,10 @@ module ULOL
             third_report = run_lvn(indoor_model, cell_space)
           ensure
             restore_normalized_override(original_normalized)
-            singleton_class.send(:remove_method, :normalize_cell_space_group) if
-              singleton_class.instance_methods(false).include?(:normalize_cell_space_group) ||
-              singleton_class.private_instance_methods(false).include?(:normalize_cell_space_group)
+            if singleton_class.instance_methods(false).include?(:normalize_cell_space_group) ||
+               singleton_class.private_instance_methods(false).include?(:normalize_cell_space_group)
+              singleton_class.send(:remove_method, :normalize_cell_space_group)
+            end
           end
 
           group = cell_space.valid_sketchup_group
@@ -115,7 +118,10 @@ module ULOL
 
           checks = {
             target_group_unique: baseline[:definition_instance_count] == 1,
-            injected_once: injection_count == 1,
+            injected_atomic_and_fallback: injection_count == REQUIRED_INJECTION_COUNT,
+            first_atomic_attempted: first_report[:atomic_attempted] == true,
+            first_atomic_fallback: first_report[:atomic_fallback] == true,
+            first_undo_mode_per_cell_fallback: first_report[:undo_mode] == :per_cell_fallback,
             first_status_failed: first_row[:status] == :failed,
             rollback_geometry_signature_preserved:
               baseline[:geometry_signature] == after_failure[:geometry_signature],
@@ -132,6 +138,7 @@ module ULOL
             failure_signature_matches_geometry:
               after_failure[:failure_signature] == after_failure[:geometry_signature],
             second_status_skipped: second_row[:status] == :skipped_previous_failure,
+            second_undo_mode_none: second_report[:undo_mode] == :none,
             skip_geometry_signature_preserved:
               after_failure[:geometry_signature] == after_skip[:geometry_signature],
             skip_failure_state_preserved: after_skip[:lvn_failed] == true,
@@ -139,6 +146,7 @@ module ULOL
               after_change[:geometry_signature] != after_skip[:geometry_signature],
             geometry_change_detected: after_change[:changed_since_failure] == true,
             third_status_normalized: third_row[:status] == :normalized,
+            third_undo_mode_per_cell_fallback: third_report[:undo_mode] == :per_cell_fallback,
             final_failure_cleared: final[:lvn_failed] == false,
             final_failure_signature_cleared: final[:failure_signature].nil?,
             final_normalized: final[:normalized] == true,
@@ -149,10 +157,11 @@ module ULOL
           }
 
           result = {
-            schema: 'ulol.precision_validation.lvn_failure_recovery_probe.v1',
+            schema: 'ulol.precision_validation.lvn_failure_recovery_probe.v2',
             generated_at: Time.now.iso8601(3),
             tolerance_mm: TOLERANCE_MM,
             geometry_change_mm: GEOMETRY_CHANGE_MM,
+            required_injection_count: REQUIRED_INJECTION_COUNT,
             cell_space_id: target_id,
             cell_space_name: group.respond_to?(:name) ? group.name.to_s : nil,
             finish_editing_performed: finish_editing_performed,
@@ -164,6 +173,17 @@ module ULOL
               failure: first_row[:status],
               unchanged_retry: second_row[:status],
               changed_retry: third_row[:status]
+            },
+            phase_undo_modes: {
+              failure: first_report[:undo_mode],
+              unchanged_retry: second_report[:undo_mode],
+              changed_retry: third_report[:undo_mode]
+            },
+            phase_atomic: {
+              failure_attempted: first_report[:atomic_attempted],
+              failure_fallback: first_report[:atomic_fallback],
+              failure_error_class: first_report[:atomic_error_class],
+              failure_error: first_report[:atomic_error]
             },
             phase_errors: {
               failure: compact_error(first_row),
@@ -204,14 +224,14 @@ module ULOL
           end
 
           if cell_space_id
-            target = candidates.find { |cell_space| cell_space.id.to_s == cell_space_id.to_s }
+            target = candidates.find { |candidate| candidate.id.to_s == cell_space_id.to_s }
             raise "검사 가능한 CellSpace를 찾지 못했습니다: #{cell_space_id}" unless target
 
             return target
           end
 
-          target = candidates.min_by do |cell_space|
-            group = cell_space.valid_sketchup_group
+          target = candidates.min_by do |candidate|
+            group = candidate.valid_sketchup_group
             group.definition.entities.grep(Sketchup::Face).length
           rescue StandardError
             Float::INFINITY
@@ -403,7 +423,10 @@ module ULOL
           puts '[Precision Validation] LVN failure recovery probe'
           puts "overall_pass=#{result[:overall_pass]} cell=#{result[:cell_space_id]} " \
                "name=#{result[:cell_space_name]}"
-          puts "statuses=#{result[:phase_statuses].inspect} injection_count=#{result[:injection_count]}"
+          puts "statuses=#{result[:phase_statuses].inspect} " \
+               "undo_modes=#{result[:phase_undo_modes].inspect}"
+          puts "injection_count=#{result[:injection_count]}/#{result[:required_injection_count]}"
+          puts "atomic=#{result[:phase_atomic].inspect}"
           puts "failed_checks=#{result[:failed_checks].join(',')}"
           puts "transition_count=#{result[:transition_count_before]}->#{result[:transition_count_after]} " \
                "delta=#{result[:transition_count_delta]} (diagnostic only)"
