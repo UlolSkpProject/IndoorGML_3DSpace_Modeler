@@ -15,10 +15,8 @@ module ULOL
             def run(root: default_root)
               root = File.expand_path(root)
               production_files = expected_production_files(root)
-              compile_files = production_files + [
-                File.join(root, 'dev', 'val3dity_recheck_integration_benchmark.rb'),
-                __FILE__
-              ]
+              dev_chain_files = expected_dev_chain_files(root)
+              compile_files = production_files + dev_chain_files + [__FILE__]
               checks = compile_files.map { |path| compile_check(path) }
               checks.concat(repository_layout_checks(root, production_files))
 
@@ -34,15 +32,17 @@ module ULOL
                 'validity',
                 'val3dity_runner'
               )
+              checks << require_chain_check(root)
 
               checks.concat(class_architecture_checks)
               checks << runner_default_check
 
               failures = checks.reject { |row| row['pass'] == true }
               @last_result = {
-                'schema_version' => 1,
+                'schema_version' => 2,
                 'root' => root,
                 'production_file_count' => production_files.length,
+                'dev_chain_file_count' => dev_chain_files.length,
                 'check_count' => checks.length,
                 'failure_count' => failures.length,
                 'checks' => checks,
@@ -60,6 +60,7 @@ module ULOL
               puts('=' * 110)
               puts "root                  : #{result['root']}"
               puts "production_file_count : #{result['production_file_count']}"
+              puts "dev_chain_file_count  : #{result['dev_chain_file_count']}"
               puts "check_count           : #{result['check_count']}"
               puts "failure_count         : #{result['failure_count']}"
               Array(result['checks']).each do |row|
@@ -93,6 +94,15 @@ module ULOL
               ].map { |path| File.join(root, path) }
             end
 
+            def expected_dev_chain_files(root)
+              %w[
+                dev/val3dity_recheck_benchmark.rb
+                dev/val3dity_recheck_only_runner.rb
+                dev/val3dity_recheck_snapshot_store.rb
+                dev/val3dity_recheck_integration_benchmark.rb
+              ].map { |path| File.join(root, path) }
+            end
+
             def compile_check(path)
               return check(
                 "file exists: #{relative_path(path)}",
@@ -121,7 +131,9 @@ module ULOL
             def repository_layout_checks(root, production_files)
               ruby_files = %w[indoor3d dev test].flat_map do |directory|
                 Dir.glob(File.join(root, directory, '**', '*.rb'))
-              end.uniq.reject { |path| File.expand_path(path) == File.expand_path(__FILE__) }
+              end.uniq.reject do |path|
+                File.expand_path(path) == File.expand_path(__FILE__)
+              end
               sources = ruby_files.filter_map do |path|
                 [path, File.read(path, encoding: 'UTF-8')] if File.file?(path)
               rescue EncodingError
@@ -133,6 +145,10 @@ module ULOL
                   ['Val3dity', 'Recheck', 'V3'].join,
                 'legacy v3 recheck filename reference removed' =>
                   ['val3dity', '_recheck_', 'v3'].join,
+                'legacy clipped-operand probe reference removed' =>
+                  ['val3dity_recheck_', 'clipped_operand_probe'].join,
+                'legacy clipped-operand probe constant removed' =>
+                  ['Val3dityRecheck', 'ClippedOperandProbe'].join,
                 'legacy v3 kill switch removed' =>
                   ['INDOORGML', '_DISABLE_', 'V3_RECHECK'].join
               }
@@ -187,6 +203,28 @@ module ULOL
               )
 
               checks
+            end
+
+            def require_chain_check(root)
+              require File.join(
+                root,
+                'dev',
+                'val3dity_recheck_integration_benchmark'
+              )
+              required = defined?(Val3dityRecheckIntegrationBenchmark) &&
+                         defined?(Val3dityRecheckSnapshotStore) &&
+                         defined?(Val3dityRecheckOnlyRunner)
+              check(
+                'integration benchmark require chain loads',
+                !!required,
+                'benchmark -> snapshot store -> replay runner'
+              )
+            rescue LoadError, StandardError => e
+              check(
+                'integration benchmark require chain loads',
+                false,
+                "#{e.class}: #{e.message}"
+              )
             end
 
             def class_architecture_checks
