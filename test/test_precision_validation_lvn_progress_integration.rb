@@ -36,7 +36,12 @@ module ULOL
         def local_vertex_normalize(_tolerance = 0.001, cell_spaces: nil, **_options)
           targets = normalization_targets(cell_spaces)
           plan = build_continue_execution_plan(targets, 0.001)
-          local_vertex_normalize_continue_atomic(0.001, targets, plan)
+          local_vertex_normalize_continue_per_cell(
+            0.001,
+            targets,
+            plan[:rows],
+            plan[:execution_targets]
+          )
         end
 
         private
@@ -46,27 +51,34 @@ module ULOL
         end
 
         def build_continue_execution_plan(targets, _tolerance)
-          { rows: [], atomic_targets: targets, fallback_targets: [] }
+          { rows: [], execution_targets: targets }
         end
 
-        def local_vertex_normalize_continue_atomic(_tolerance, _targets, plan)
-          rows = plan[:atomic_targets].map do |cell_space|
-            normalize_cell_space_group(cell_space, Object.new, 0.001)
+        def local_vertex_normalize_continue_per_cell(
+          _tolerance,
+          _targets,
+          initial_rows,
+          execution_targets
+        )
+          rows = Array(initial_rows).dup
+          execution_targets.each do |cell_space|
+            rows << normalize_cell_space_continue(cell_space)
           end
-          topology = topology_coordinator.synchronize_all
+          successful = rows.count { |row| row[:status] == :normalized }
+          topology = topology_coordinator.synchronize_all if successful.positive?
           {
-            cell_space_count: rows.length,
+            cell_space_count: successful,
             already_normalized_cell_space_count: 0,
-            normalization_failed_cell_space_count: 0,
+            normalization_failed_cell_space_count: rows.count { |row| row[:status] == :failed },
             skipped_previous_failure_cell_space_count: 0,
-            atomic_fallback: false,
             topology_metrics: topology,
             cell_spaces: rows
           }
         end
 
-        def normalize_cell_space_group(cell_space, *_arguments, **_options)
-          { cell_space_id: cell_space.id }
+        def normalize_cell_space_continue(cell_space)
+          status = cell_space.id == 'B' ? :failed : :normalized
+          { status: status, cell_space_id: cell_space.id }
         end
       end
 
@@ -141,7 +153,8 @@ module ULOL
           assert_equal percentages.sort, percentages
           assert_equal %w[A B C], progress.details.filter_map { |payload| payload[:current] }.uniq
           assert progress.details.any? { |payload| payload[:phase] == 'Topology Synchronize' }
-          assert_equal 3, report[:cell_space_count]
+          assert_equal 2, report[:cell_space_count]
+          assert_equal 1, report[:normalization_failed_cell_space_count]
           assert_equal 1, model.topology_coordinator.calls
           assert_nil PrecisionValidation::LvnProgressContext.current
         end
@@ -164,7 +177,7 @@ module ULOL
           Thread.current[key] = nil if key
         end
 
-        def test_atomic_failure_can_continue_with_monotonic_fallback_progress
+        def test_failed_cell_keeps_progress_monotonic_and_continues
           progress = Progress.new
           tracker = PrecisionValidation::LvnProgressTracker.new(
             PrecisionValidation::ValidationLvnProgressAdapter.new(progress)
@@ -172,21 +185,20 @@ module ULOL
           cells = %w[A B C].map { |id| CellSpace.new(id) }
 
           tracker.start(total: cells.length)
-          tracker.plan_ready(rows: [], atomic_targets: cells, fallback_targets: [])
-          tracker.begin_atomic(total: cells.length)
+          tracker.plan_ready(rows: [], execution_targets: cells)
+          tracker.begin_cells(total: cells.length)
           tracker.cell_finished(cells[0])
           tracker.cell_finished(cells[1], status: :failed)
-          tracker.begin_fallback(total: cells.length, atomic_attempted: true)
-          cells.each { |cell| tracker.cell_finished(cell) }
-          tracker.fallback_completed
+          tracker.cell_finished(cells[2])
+          tracker.cells_completed
           tracker.topology_started
           tracker.topology_finished
-          tracker.finish(cell_space_count: 3)
+          tracker.finish(cell_space_count: 2, normalization_failed_cell_space_count: 1)
 
           percentages = progress.details.map { |payload| payload[:percent] }
           assert_equal percentages.sort, percentages
           assert progress.details.any? do |payload|
-            payload[:message].to_s.include?('retrying CellSpaces individually')
+            payload[:message].to_s.include?('failed; rollback completed')
           end
           assert_operator percentages.last, :<, 100
         end
@@ -197,14 +209,14 @@ module ULOL
             PrecisionValidation::ValidationLvnProgressAdapter.new(progress)
           )
           tracker.start(total: 1000)
-          tracker.plan_ready(rows: [], atomic_targets: Array.new(1000), fallback_targets: [])
-          tracker.begin_atomic(total: 1000)
+          tracker.plan_ready(rows: [], execution_targets: Array.new(1000))
+          tracker.begin_cells(total: 1000)
           1000.times do |index|
             tracker.cell_finished(CellSpace.new(index.to_s))
           end
 
           cell_updates = progress.details.count do |payload|
-            payload[:message].to_s.start_with?('Atomic CellSpace Normalize:')
+            payload[:message].to_s.start_with?('CellSpace Normalize:')
           end
           assert_operator cell_updates, :<=, 102
         end

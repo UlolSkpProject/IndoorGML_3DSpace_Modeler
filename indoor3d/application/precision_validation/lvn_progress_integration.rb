@@ -65,8 +65,7 @@ module ULOL
 
         class LvnProgressTracker
           PLAN_PERCENT = 5
-          ATOMIC_END_PERCENT = 80
-          FALLBACK_END_PERCENT = 90
+          CELL_END_PERCENT = 90
           TOPOLOGY_START_PERCENT = 92
           TOPOLOGY_END_PERCENT = 98
           FINISH_PERCENT = 99
@@ -90,56 +89,33 @@ module ULOL
             )
           end
 
-          def plan_ready(rows:, atomic_targets:, fallback_targets:)
+          def plan_ready(rows:, execution_targets:)
             skipped = Array(rows).length
-            atomic = Array(atomic_targets).length
-            fallback = Array(fallback_targets).length
+            execution = Array(execution_targets).length
             emit(
               percent: PLAN_PERCENT,
-              message: "LVN plan: normalize #{atomic + fallback}, skip #{skipped}"
+              message: "LVN plan: normalize #{execution}, skip #{skipped}"
             )
           end
 
-          def begin_atomic(total:)
-            begin_phase(
-              :atomic,
-              total: total,
-              start_percent: [@last_percent, PLAN_PERCENT].max,
-              end_percent: ATOMIC_END_PERCENT,
-              message: 'Normalizing CellSpaces in one Undo operation'
+          def begin_cells(total:)
+            @phase = :cells
+            @phase_total = [total.to_i, 0].max
+            @phase_completed = 0
+            @phase_start_percent = [@last_percent, PLAN_PERCENT].max
+            @phase_end_percent = [CELL_END_PERCENT, @phase_start_percent].max
+            @checkpoint = ProductionProgress::AdaptiveProgressCheckpoint.new(@phase_total)
+            emit(
+              percent: @phase_start_percent,
+              message: 'Normalizing CellSpaces with independent Undo operations'
             )
           end
 
-          def atomic_completed(report = nil)
-            return false unless @phase == :atomic
-            return false if report.respond_to?(:[]) && report[:atomic_fallback] == true
+          def cells_completed
+            return false unless @phase == :cells
 
             emit(
-              percent: [@last_percent, FALLBACK_END_PERCENT].max,
-              message: 'CellSpace Normalize operation completed'
-            )
-          end
-
-          def begin_fallback(total:, atomic_attempted: false)
-            message = if atomic_attempted
-                        'Atomic Normalize failed; retrying CellSpaces individually'
-                      else
-                        'Normalizing CellSpaces individually'
-                      end
-            begin_phase(
-              :fallback,
-              total: total,
-              start_percent: [@last_percent, PLAN_PERCENT].max,
-              end_percent: FALLBACK_END_PERCENT,
-              message: message
-            )
-          end
-
-          def fallback_completed
-            return false unless @phase == :fallback
-
-            emit(
-              percent: [@last_percent, FALLBACK_END_PERCENT].max,
+              percent: [@last_percent, CELL_END_PERCENT].max,
               message: 'CellSpace Normalize attempts completed'
             )
           end
@@ -195,7 +171,7 @@ module ULOL
             emit(
               percent: @last_percent,
               phase: 'Topology Synchronize',
-              message: "Topology synchronization failed; LVN recovery will continue (#{error.class})"
+              message: "Topology synchronization failed (#{error.class})"
             )
           end
 
@@ -232,18 +208,8 @@ module ULOL
             @last_percent = 0
           end
 
-          def begin_phase(name, total:, start_percent:, end_percent:, message:)
-            @phase = name
-            @phase_total = [total.to_i, 0].max
-            @phase_completed = 0
-            @phase_start_percent = [start_percent.to_i, @last_percent].max
-            @phase_end_percent = [end_percent.to_i, @phase_start_percent].max
-            @checkpoint = ProductionProgress::AdaptiveProgressCheckpoint.new(@phase_total)
-            emit(percent: @phase_start_percent, message: message)
-          end
-
           def active_phase?
-            active? && %i[atomic fallback].include?(@phase) && @phase_total.positive?
+            active? && @phase == :cells && @phase_total.positive?
           end
 
           def phase_percent
@@ -254,9 +220,8 @@ module ULOL
           end
 
           def phase_message(completed, status: nil)
-            prefix = @phase == :atomic ? 'Atomic CellSpace Normalize' : 'CellSpace Normalize retry'
-            suffix = status == :failed ? ' (failed; rollback/recovery)' : ''
-            "#{prefix}: #{completed} / #{@phase_total}#{suffix}"
+            suffix = status == :failed ? ' (failed; rollback completed)' : ''
+            "CellSpace Normalize: #{completed} / #{@phase_total}#{suffix}"
           end
 
           def cell_space_id(cell_space)
@@ -335,40 +300,24 @@ module ULOL
             tracker = LvnProgressContext.current
             tracker&.plan_ready(
               rows: plan[:rows],
-              atomic_targets: plan[:atomic_targets],
-              fallback_targets: plan[:fallback_targets]
+              execution_targets: plan[:execution_targets]
             )
             plan
           end
 
-          def local_vertex_normalize_continue_atomic(*arguments, **options)
-            plan = arguments[2] || options[:plan] || {}
-            tracker = LvnProgressContext.current
-            tracker&.begin_atomic(total: Array(plan[:atomic_targets]).length)
-            report = super
-            tracker&.atomic_completed(report)
-            report
-          end
-
           def local_vertex_normalize_continue_per_cell(*arguments, **options)
             execution_targets = arguments[3] || options[:execution_targets]
-            atomic_attempted = options[:atomic_attempted] == true
             tracker = LvnProgressContext.current
-            tracker&.begin_fallback(
-              total: Array(execution_targets).length,
-              atomic_attempted: atomic_attempted
-            )
-            report = super
-            tracker&.fallback_completed
-            report
+            tracker&.begin_cells(total: Array(execution_targets).length)
+            super
           end
 
-          def normalize_cell_space_group(cell_space, *arguments, **options)
+          def normalize_cell_space_continue(cell_space, *arguments, **options)
             tracker = LvnProgressContext.current
             tracker&.cell_started(cell_space)
-            result = super
-            tracker&.cell_finished(cell_space, status: :normalized)
-            result
+            row = super
+            tracker&.cell_finished(cell_space, status: row[:status])
+            row
           rescue StandardError
             tracker&.cell_finished(cell_space, status: :failed)
             raise

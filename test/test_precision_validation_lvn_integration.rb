@@ -26,12 +26,8 @@ module ULOL
         DEFAULT_TOLERANCE_MM = 0.001
         class OperationError < StandardError; end
 
-        class << self
-          attr_accessor :normalized_predicate
-
-          def normalized?(group, tolerance)
-            normalized_predicate ? normalized_predicate.call(group, tolerance) : false
-          end
+        def self.normalized?(group, _tolerance)
+          group.normalized == true
         end
       end
 
@@ -42,16 +38,20 @@ module ULOL
       end
 
       class IndoorModel
-        attr_accessor :baseline_handler
+        attr_accessor :baseline_handler, :result_overrides, :normalized_effects
         attr_reader :baseline_call, :baseline_call_count, :operation_names,
-                    :normalization_calls, :topology_sync_count, :runtime_restore_count
+                    :normalization_calls, :topology_sync_count,
+                    :committed_operations, :aborted_operations
 
         def initialize
           @operation_names = []
           @normalization_calls = []
           @topology_sync_count = 0
           @baseline_call_count = 0
-          @runtime_restore_count = 0
+          @committed_operations = []
+          @aborted_operations = []
+          @result_overrides = {}
+          @normalized_effects = {}
         end
 
         def local_vertex_normalize(*args, **options)
@@ -62,6 +62,10 @@ module ULOL
           :baseline
         end
 
+        def cell_space_changed(_entity)
+          true
+        end
+
         private
 
         def normalization_targets(cell_spaces)
@@ -70,18 +74,24 @@ module ULOL
 
         def with_indoor_model_operation(name)
           @operation_names << name
-          yield
+          result = yield
+          @committed_operations << name
+          result
+        rescue StandardError
+          @aborted_operations << name
+          raise
         end
 
         def sync
           yield
         end
 
-        def normalize_cell_space_group(cell_space, _group, _tolerance, **_options)
+        def normalize_cell_space_group(cell_space, group, _tolerance, **_options)
           @normalization_calls << cell_space.id
           raise 'forced failure' if cell_space.id == 'B'
 
-          normalization_result(cell_space.id)
+          group.normalized = @normalized_effects.fetch(cell_space.id, true)
+          @result_overrides.fetch(cell_space.id, normalization_result(cell_space.id))
         end
 
         def normalization_result(_cell_space_id)
@@ -130,16 +140,10 @@ module ULOL
           }
         end
 
-        def bulk_conversion_runtime_snapshot
-          { snapshot: true }
-        end
-
-        def restore_bulk_conversion_runtime(_snapshot)
-          @runtime_restore_count += 1
-        end
-
         def remember_cell_space_change_snapshot(_group); end
         def invalidate_overlay_transition_points; end
+        def observer_routing_suppressed?; false; end
+        def guard_active?(_name); false; end
       end
     end
   end
@@ -151,71 +155,18 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class PrecisionValidationLvnIntegrationTest < Minitest::Test
-        Point = Struct.new(:x, :y, :z)
-        Vector = Struct.new(:x, :y, :z)
-        Vertex = Struct.new(:position)
-
-        class Edge < Sketchup::Edge
-          attr_reader :vertices
-
-          def initialize(first, second)
-            @vertices = [first, second]
-          end
-        end
-
-        class Loop
-          attr_reader :vertices
-
-          def initialize(vertices)
-            @vertices = vertices
-          end
-        end
-
-        class Face < Sketchup::Face
-          attr_reader :loops, :outer_loop, :normal
-
-          def initialize(vertices)
-            @outer_loop = Loop.new(vertices)
-            @loops = [@outer_loop]
-            @normal = Vector.new(0.0, 0.0, 1.0)
-          end
-
-          def vertices
-            @outer_loop.vertices
-          end
-        end
-
-        Definition = Struct.new(:entities, :guid)
-
         class Group
-          attr_reader :definition
+          attr_accessor :normalized
+          attr_reader :name
 
           def initialize(name)
-            vertices = [
-              Vertex.new(Point.new(0.0, 0.0, 0.0)),
-              Vertex.new(Point.new(1.0, 0.0, 0.0)),
-              Vertex.new(Point.new(0.0, 1.0, 0.0))
-            ]
-            @definition = Definition.new(
-              [
-                Edge.new(vertices[0], vertices[1]),
-                Edge.new(vertices[1], vertices[2]),
-                Edge.new(vertices[2], vertices[0]),
-                Face.new(vertices)
-              ],
-              "definition-#{name}"
-            )
-            @attributes = {}
             @name = name
+            @normalized = false
+            @attributes = {}
           end
 
-          def valid?
-            true
-          end
-
-          def persistent_id
-            @name.hash
-          end
+          def valid?; true; end
+          def persistent_id; @name.hash; end
 
           def get_attribute(dictionary, key, default = nil)
             @attributes.fetch([dictionary, key], default)
@@ -231,17 +182,8 @@ module ULOL
         end
 
         CellSpace = Struct.new(:id, :group) do
-          def valid?
-            true
-          end
-
-          def valid_sketchup_group
-            group
-          end
-        end
-
-        def setup
-          LocalVertexNormalizer.normalized_predicate = ->(_group, _tolerance) { false }
+          def valid?; true; end
+          def valid_sketchup_group; group; end
         end
 
         def test_default_policy_delegates_to_existing_atomic_api
@@ -254,42 +196,28 @@ module ULOL
                        model.baseline_call
         end
 
-        def test_continue_policy_uses_single_atomic_operation_when_all_targets_succeed
+        def test_continue_policy_runs_each_target_in_independent_operations
           cells = %w[A C].map { |id| CellSpace.new(id, Group.new(id)) }
           model = IndoorModel.new
-          model.baseline_handler = lambda do |_tolerance, cell_spaces:, **_options|
-            rows = cell_spaces.map do |cell_space|
-              model.send(:normalization_result, cell_space.id).merge(
-                cell_space_id: cell_space.id
-              )
-            end
-            {
-              cell_space_count: rows.length,
-              already_normalized_cell_space_count: 0,
-              topology_metrics: { synchronized: true },
-              cell_spaces: rows
-            }
-          end
 
           report = model.local_vertex_normalize(
             cell_spaces: cells,
             failure_policy: :continue
           )
 
-          assert_equal :single_operation, report[:undo_mode]
-          assert_equal true, report[:atomic_attempted]
-          assert_equal false, report[:atomic_fallback]
+          assert_equal %w[A C], model.normalization_calls
+          assert_equal :per_cell_operations, report[:undo_mode]
           assert_equal 2, report[:cell_space_count]
           assert_equal %i[normalized normalized], report[:cell_spaces].map { |row| row[:status] }
-          assert_empty model.normalization_calls
-          assert_equal 1, model.baseline_call_count
-          assert_equal 0, model.runtime_restore_count
+          assert_equal 0, model.baseline_call_count
+          assert_equal 1, model.topology_sync_count
+          assert_includes model.operation_names, 'IndoorGML LVN A'
+          assert_includes model.operation_names, 'IndoorGML LVN C'
         end
 
-        def test_continue_policy_falls_back_and_preserves_per_cell_failure_isolation
+        def test_per_cell_failure_is_rolled_back_marked_and_does_not_stop_later_targets
           cells = %w[A B C].map { |id| CellSpace.new(id, Group.new(id)) }
           model = IndoorModel.new
-          model.baseline_handler = ->(*_args, **_options) { raise 'forced atomic failure' }
 
           report = model.local_vertex_normalize(
             cell_spaces: cells,
@@ -301,17 +229,15 @@ module ULOL
           assert_equal 1, report[:normalization_failed_cell_space_count]
           assert_equal ['B'], report[:failed_cell_space_ids]
           assert_equal 1, model.topology_sync_count
-          assert_equal :per_cell_fallback, report[:undo_mode]
-          assert_equal true, report[:atomic_attempted]
-          assert_equal true, report[:atomic_fallback]
-          assert_equal 'RuntimeError', report[:atomic_error_class]
-          assert_equal 1, model.runtime_restore_count
+          assert_equal :per_cell_operations, report[:undo_mode]
           assert PrecisionValidation::LvnState.failed?(cells[1].group)
+          assert_includes model.aborted_operations, 'IndoorGML LVN B'
+          assert_includes model.committed_operations, 'Mark CellSpace LVN Failure B'
           refute PrecisionValidation::LvnState.failed?(cells[0].group)
           refute PrecisionValidation::LvnState.failed?(cells[2].group)
         end
 
-        def test_previous_failure_is_skipped_until_geometry_changes
+        def test_previous_failure_is_unconditionally_skipped
           cell = CellSpace.new('B', Group.new('B'))
           PrecisionValidation::LvnState.set_failed(cell.group, true)
           model = IndoorModel.new
@@ -325,7 +251,61 @@ module ULOL
           assert_equal 1, report[:skipped_previous_failure_cell_space_count]
           assert_equal ['B'], report[:failed_cell_space_ids]
           assert_equal :none, report[:undo_mode]
-          assert_equal 0, model.baseline_call_count
+        end
+
+        def test_incomplete_result_fails_postcondition
+          cell = CellSpace.new('A', Group.new('A'))
+          model = IndoorModel.new
+          model.result_overrides['A'] = model.send(:normalization_result, 'A').merge(
+            normalization_complete: false
+          )
+
+          report = model.local_vertex_normalize(
+            cell_spaces: [cell],
+            failure_policy: :continue
+          )
+
+          row = report[:cell_spaces].first
+          assert_equal :failed, row[:status]
+          assert_equal 'ULOL::Indoor3DGmlModeler::IndoorCore::LocalVertexNormalizer::OperationError',
+                       row[:error_class]
+          assert PrecisionValidation::LvnState.failed?(cell.group)
+          assert_includes model.aborted_operations, 'IndoorGML LVN A'
+          assert_equal 0, report[:cell_space_count]
+        end
+
+        def test_false_normalized_predicate_fails_postcondition
+          cell = CellSpace.new('A', Group.new('A'))
+          model = IndoorModel.new
+          model.normalized_effects['A'] = false
+
+          report = model.local_vertex_normalize(
+            cell_spaces: [cell],
+            failure_policy: :continue
+          )
+
+          assert_equal :failed, report[:cell_spaces].first[:status]
+          assert PrecisionValidation::LvnState.failed?(cell.group)
+        end
+
+        def test_existing_cell_space_observer_path_clears_failure_state
+          group = Group.new('changed')
+          PrecisionValidation::LvnState.set_failed(group, true)
+          model = IndoorModel.new
+
+          assert_equal true, model.cell_space_changed(group)
+          refute PrecisionValidation::LvnState.failed?(group)
+        end
+
+        def test_false_state_removes_legacy_signature_attribute
+          group = Group.new('legacy')
+          group.set_attribute('IndoorGml', 'lvn_failed', true)
+          group.set_attribute('IndoorGml', 'lvn_failed_geometry_signature', 'legacy-value')
+
+          PrecisionValidation::LvnState.set_failed(group, false)
+
+          assert_equal false, group.get_attribute('IndoorGml', 'lvn_failed')
+          assert_nil group.get_attribute('IndoorGml', 'lvn_failed_geometry_signature')
         end
 
         def test_new_cell_space_is_initialized_with_false_failure_flag
@@ -333,8 +313,7 @@ module ULOL
           context = CellSpaceLifecycleContext.new
 
           assert_equal :initialized, context.initialize_scene(cell)
-          assert_equal false,
-                       cell.group.get_attribute('IndoorGml', 'lvn_failed')
+          assert_equal false, cell.group.get_attribute('IndoorGml', 'lvn_failed')
         end
 
         def test_unknown_failure_policy_is_rejected
