@@ -15,7 +15,7 @@ module ULOL
 
       EXTENSION = SketchupExtension.new(
         EXTENSION_NAME,
-        File.join(__dir__, 'indoor3d', 'core')
+        File.join(__dir__, 'indoor3d', 'loader')
       )
       EXTENSION.creator = EXTENSION_CREATOR
       EXTENSION.description = EXTENSION_DESCRIPTION
