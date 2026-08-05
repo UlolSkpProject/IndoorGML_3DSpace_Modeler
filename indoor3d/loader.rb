@@ -2,6 +2,7 @@
 
 require_relative 'core'
 require_relative 'application/precision_validation/lvn_integration'
+require_relative 'application/precision_validation/lvn_operation_ownership'
 require_relative 'application/precision_validation/validation_mode_bootstrap'
 require_relative 'application/precision_validation/validation_integration'
 require_relative 'application/precision_validation/report_metadata'
