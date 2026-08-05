@@ -7,7 +7,7 @@ module ULOL
         # view.draw_points에 alpha값이 적용되지 않음
         DUAL_STATE_COLOR = Sketchup::Color.new(35, 120, 255, 0)
         STATE_BASE_POINT_SIZE_PIXELS = 12.0
-        STATE_MIN_POINT_SIZE_PIXELS = 2
+        STATE_MIN_POINT_SIZE_PIXELS = 10
         STATE_MAX_POINT_SIZE_PIXELS = 24
         # SketchUp draw_points style 7 is a filled triangle.
         STATE_POINT_STYLE = 7
