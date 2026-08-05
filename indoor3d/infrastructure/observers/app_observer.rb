@@ -3,34 +3,6 @@
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
-      # A legacy/dev runtime profiler can display this diagnostic directly through
-      # UI.messagebox, bypassing UiFeedback. Suppress only this exact diagnostic
-      # family; all application confirmations and other message boxes remain
-      # untouched.
-      module InitialRuntimeLoadDiagnosticMessageboxGuard
-        MESSAGE_PREFIX = 'IndoorGML initial runtime load'
-
-        def messagebox(message, *arguments)
-          if message.to_s.start_with?(MESSAGE_PREFIX)
-            IndoorCore::Logger.puts(
-              '[IndoorGML] Initial runtime load diagnostic messagebox suppressed'
-            )
-            return defined?(IDOK) ? IDOK : 1
-          end
-
-          super
-        end
-      end
-
-      if defined?(UI) && UI.respond_to?(:messagebox)
-        singleton = UI.singleton_class
-        singleton.prepend(
-          InitialRuntimeLoadDiagnosticMessageboxGuard
-        ) unless singleton.ancestors.include?(
-          InitialRuntimeLoadDiagnosticMessageboxGuard
-        )
-      end
-
       class Indoor3DGmlAppObserver < Sketchup::AppObserver
         INITIAL_REFRESH_DELAY_SECONDS = 0.5
 

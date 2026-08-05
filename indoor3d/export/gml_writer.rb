@@ -3,6 +3,7 @@
 require 'rexml/document'
 require 'rexml/formatters/pretty'
 require_relative '../definition'
+require_relative '../domain/cell_space_type'
 
 module ULOL
   module Indoor3DGmlModeler

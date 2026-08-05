@@ -16,10 +16,11 @@ module ULOL
       class LocalVertexNormalizerMultiSharedEdgesTest < Minitest::Test
         Point = Struct.new(:x, :y, :z)
         Vector = Struct.new(:x, :y, :z)
-        Vertex = Struct.new(:position)
+        Vertex = Struct.new(:position, :edges)
 
         class FakeFace
           attr_reader :persistent_id, :normal, :plane, :vertices
+          attr_accessor :edges
 
           def initialize(persistent_id)
             @persistent_id = persistent_id
@@ -30,6 +31,7 @@ module ULOL
               Vertex.new(Point.new(1.0, 0.0, 0.0)),
               Vertex.new(Point.new(0.0, 1.0, 0.0))
             ]
+            @edges = []
             @valid = true
           end
 
@@ -46,14 +48,19 @@ module ULOL
           attr_reader :persistent_id, :vertices
           attr_accessor :faces
 
-          def initialize(persistent_id, faces)
+          def initialize(persistent_id, faces, vertices = nil)
             @persistent_id = persistent_id
             @faces = faces
-            @vertices = [
-              Vertex.new(Point.new(0.0, 0.0, 0.0)),
-              Vertex.new(Point.new(1.0, 0.0, 0.0))
+            @vertices = vertices || [
+              Vertex.new(Point.new(0.0, 0.0, 0.0), []),
+              Vertex.new(Point.new(1.0, 0.0, 0.0), [])
             ]
             @valid = true
+            @vertices.each do |vertex|
+              vertex.edges ||= []
+              vertex.edges << self
+            end
+            @faces.each { |face| face.edges << self unless face.edges.include?(self) }
           end
 
           def valid?
@@ -74,9 +81,12 @@ module ULOL
 
           def initialize(faces, edges, reduce_faces: true)
             @faces = faces
-            @edges = edges
+            @edges = edges.dup
             @reduce_faces = reduce_faces
             @erase_calls = []
+            faces.each_with_index do |face, index|
+              @edges << FakeEdge.new(10_000 + index, [face])
+            end
           end
 
           def grep(klass)

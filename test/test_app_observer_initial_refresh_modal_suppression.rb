@@ -214,13 +214,15 @@ module ULOL
           assert_equal [true], model.indoor_model.refresh_calls
         end
 
-        def test_initial_runtime_load_diagnostic_messagebox_is_suppressed
-          result = UI.messagebox(
+        def test_messageboxes_are_not_globally_intercepted
+          message =
             "IndoorGML initial runtime load\n\n0.003 s\n\ncells=0\nstates=0\ntransitions=0"
+          result = UI.messagebox(
+            message
           )
 
-          assert_equal 1, result
-          assert_empty UI.messagebox_calls
+          assert_equal :shown, result
+          assert_equal [[message, []]], UI.messagebox_calls
         end
 
         def test_other_messageboxes_are_not_suppressed

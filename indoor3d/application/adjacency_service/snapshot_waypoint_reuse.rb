@@ -258,7 +258,7 @@ module ULOL
         end
 
         module SnapshotWaypointService
-          def synchronize_all(transition_builder: nil, transition_eraser: nil)
+          def synchronize_all(transition_builder: nil, transition_eraser: nil, progress: nil)
             reset_snapshot_waypoint_metrics
             metrics = super
             append_snapshot_waypoint_metrics(metrics)
@@ -266,7 +266,7 @@ module ULOL
             clear_snapshot_waypoint_contexts
           end
 
-          def synchronize_within(cell_spaces, transition_builder: nil, transition_eraser: nil)
+          def synchronize_within(cell_spaces, transition_builder: nil, transition_eraser: nil, progress: nil)
             reset_snapshot_waypoint_metrics
             metrics = super
             append_snapshot_waypoint_metrics(metrics)
@@ -276,13 +276,23 @@ module ULOL
 
           private
 
-          def compute_pair_results(entries, tolerance:)
+          def compute_pair_results(entries, tolerance:, progress: nil)
             prepare_snapshot_waypoint_contexts(entries)
             super
           end
 
-          def compute_pair_chunk(snapshots, pair_indices, tolerance)
-            pair_indices.each_with_object([]) do |(index1, index2), results|
+          def compute_pair_chunk(snapshots, pair_indices, tolerance, progress: nil)
+            total = pair_indices.length
+            emit_stage_start(
+              progress,
+              stage: :detailed_computation,
+              name: 'Adjacency 상세 판정',
+              total: total,
+              message: "Adjacency 상세 판정: 0 / #{total}"
+            )
+
+            results = []
+            pair_indices.each_with_index do |(index1, index2), index|
               started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
               analysis = AdjacencyService::GeometryQuery.analyze_snapshot_pair(
                 snapshots[index1],
@@ -294,20 +304,43 @@ module ULOL
               )
 
               if analysis[:supported]
-                next unless analysis[:adjacent]
-
-                store_snapshot_waypoint_context(index1, index2, analysis)
-                results << [index1, index2, analysis[:axis]] unless analysis[:axis].nil?
-                next
+                if analysis[:adjacent]
+                  store_snapshot_waypoint_context(index1, index2, analysis)
+                  results << [index1, index2, analysis[:axis]] unless analysis[:axis].nil?
+                end
+              else
+                axis = Utils::Geometry.adjacency_axis_from_snapshots(
+                  snapshots[index1],
+                  snapshots[index2],
+                  tolerance: tolerance
+                )
+                results << [index1, index2, axis] unless axis.nil?
               end
 
-              axis = Utils::Geometry.adjacency_axis_from_snapshots(
-                snapshots[index1],
-                snapshots[index2],
-                tolerance: tolerance
-              )
-              results << [index1, index2, axis] unless axis.nil?
+              completed = index + 1
+              emit_stage_progress(
+                progress,
+                stage: :detailed_computation,
+                name: 'Adjacency 상세 판정',
+                total: total,
+                completed: completed,
+                message: "Adjacency 상세 판정: #{completed} / #{total}"
+              ) if progress_checkpoint?(completed, total)
             end
+
+            emit_stage_finish(
+              progress,
+              stage: :detailed_computation,
+              name: 'Adjacency 상세 판정',
+              total: total,
+              completed: total,
+              message: "Adjacency 상세 판정 완료: #{results.length}개 인접",
+              telemetry: {
+                candidate_pair_count: total,
+                adjacent_pair_count: results.length
+              }
+            )
+            results
           end
 
           def apply_pair_results(
@@ -315,7 +348,8 @@ module ULOL
             pair_results,
             transition_builder:,
             transition_eraser:,
-            stale_pair_keys: nil
+            stale_pair_keys: nil,
+            progress: nil
           )
             wrapped_builder = proc do |cell1, cell2|
               context = snapshot_waypoint_context_for(cell1, cell2)
@@ -334,7 +368,8 @@ module ULOL
               pair_results,
               transition_builder: wrapped_builder,
               transition_eraser: transition_eraser,
-              stale_pair_keys: stale_pair_keys
+              stale_pair_keys: stale_pair_keys,
+              progress: progress
             )
           ensure
             clear_snapshot_waypoint_contexts

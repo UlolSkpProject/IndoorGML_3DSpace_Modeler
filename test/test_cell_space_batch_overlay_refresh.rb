@@ -44,10 +44,10 @@ module ULOL
             @fail_display = fail_display
           end
 
-          def apply_display_state
+          def refresh_display_state_after_bulk_conversion
             raise 'forced display failure' if @fail_display
 
-            @events << :apply_display_state
+            @events << :refresh_display_state
           end
 
           def invalidate_overlay_transition_points
@@ -98,7 +98,7 @@ module ULOL
           end
         end
 
-        def test_successful_outermost_batch_registers_then_invalidates_overlay_once
+        def test_successful_outermost_batch_refreshes_then_invalidates_overlay_once
           model = FakeIndoorModel.new
 
           result = model.send(:with_bulk_cell_space_conversion) do
@@ -110,7 +110,7 @@ module ULOL
           assert_equal [
             :conversion,
             :body,
-            :apply_display_state,
+            :refresh_display_state,
             :invalidate_overlay_cache
           ], model.events
           assert_equal 1, model.model.active_view.invalidations
@@ -125,7 +125,7 @@ module ULOL
             end
           end
 
-          assert_equal 1, model.events.count(:apply_display_state)
+          assert_equal 1, model.events.count(:refresh_display_state)
           assert_equal 1, model.events.count(:invalidate_overlay_cache)
           assert_equal 1, model.model.active_view.invalidations
         end
@@ -146,7 +146,7 @@ module ULOL
             model.send(:with_bulk_cell_space_conversion) { raise 'conversion failed' }
           end
 
-          refute_includes model.events, :apply_display_state
+          refute_includes model.events, :refresh_display_state
           refute_includes model.events, :invalidate_overlay_cache
           assert_equal 0, model.model.active_view.invalidations
         end

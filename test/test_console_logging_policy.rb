@@ -30,7 +30,8 @@ class ConsoleLoggingPolicyTest < Minitest::Test
   def test_cell_space_result_message_includes_total_elapsed_time
     commands = File.read(File.join(ROOT, 'indoor3d/ui/commands/cell_space_commands.rb'))
 
-    assert_includes commands, 'result.metrics&.[](:total_duration)'
-    assert_includes commands, "Total elapsed: #{'#{'}format('%.3f', elapsed)} sec"
+    assert_includes commands, 'metrics = result.metrics || {}'
+    assert_includes commands, 'metrics[:total_duration]'
+    assert_includes commands, 'Create CellSpace 시간 요약'
   end
 end

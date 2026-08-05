@@ -2,6 +2,14 @@
 
 require 'minitest/autorun'
 
+module Sketchup
+  class Overlay; end unless const_defined?(:Overlay, false)
+
+  class Color
+    def initialize(*_components); end
+  end unless const_defined?(:Color, false)
+end
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -27,6 +35,9 @@ module ULOL
           nil
         end
       end unless const_defined?(:DualOverlayScaleDialog, false)
+
+      class BulkCellSpaceConversionService
+      end unless const_defined?(:BulkCellSpaceConversionService, false)
     end
   end
 end
@@ -308,7 +319,6 @@ module ULOL
           harness.instance_variable_set(:@validation_focus_recheck_running, true)
 
           refute harness.convert_selected_solid_groups_to_cell_spaces('GeneralSpace|Room')
-          refute harness.set_selected_cell_space_type('GeneralSpace')
           refute harness.set_selected_cell_space_classification('GeneralSpace|Room')
           refute harness.set_selected_cell_space_storey('F01')
           refute harness.request_finish_editing

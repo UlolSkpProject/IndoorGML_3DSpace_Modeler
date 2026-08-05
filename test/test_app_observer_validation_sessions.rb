@@ -48,7 +48,11 @@ module ULOL
         def forget_model(_model); end
       end unless const_defined?(:Indoor3DGmlModelObserver)
 
-      class IndoorModel; end unless const_defined?(:IndoorModel)
+      class IndoorModel
+        ATTRIBUTE_DICTIONARY_NAME = 'IndoorGml' unless const_defined?(:ATTRIBUTE_DICTIONARY_NAME)
+        PRIMAL_GROUP_FEATURE = 'PrimalSpaceFeatures' unless const_defined?(:PRIMAL_GROUP_FEATURE)
+        PRIMAL_GROUP_NAME = 'IndoorGML_PrimalSpaceFeatures' unless const_defined?(:PRIMAL_GROUP_NAME)
+      end unless const_defined?(:IndoorModel)
     end
   end
 end
@@ -229,10 +233,18 @@ module ULOL
         class FakeModel
           attr_reader :runtime
           attr_reader :observers
+          attr_reader :entities
 
           def initialize
             @runtime = FakeRuntime.new
             @observers = []
+            cell_space = FakeEntity.new(feature: 'CellSpace')
+            primal = FakeEntity.new(
+              feature: IndoorModel::PRIMAL_GROUP_FEATURE,
+              name: IndoorModel::PRIMAL_GROUP_NAME,
+              entities: [cell_space]
+            )
+            @entities = [primal]
           end
 
           def add_observer(observer)
@@ -241,6 +253,24 @@ module ULOL
 
           def remove_observer(observer)
             @observers.delete(observer)
+          end
+        end
+
+        class FakeEntity
+          attr_reader :name, :entities
+
+          def initialize(feature:, name: '', entities: nil)
+            @feature = feature
+            @name = name
+            @entities = entities
+          end
+
+          def valid?
+            true
+          end
+
+          def get_attribute(_dictionary, key, default = nil)
+            key == 'feature' ? @feature : default
           end
         end
 

@@ -52,8 +52,8 @@ module ULOL
           assert_includes source, 'stable_samples: HISTORY_STABLE_SAMPLES'
           assert_includes source, 'apply_history_state.confirm_undone!(matches: true)'
           assert_includes source, 'apply_history_state.confirm_redone!(matches: true)'
-          assert_includes source, 'reason: :undo_pending'
-          assert_includes source, 'reason: :redo_pending'
+          assert_includes source, 'history_pending_verification(:undone, :undo_pending)'
+          assert_includes source, 'history_pending_verification(:redone, :redo_pending)'
         end
 
         def test_runner_definition_loads_history_stack_and_is_reload_safe

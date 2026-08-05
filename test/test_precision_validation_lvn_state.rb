@@ -95,33 +95,37 @@ module ULOL
           refute PrecisionValidation::LvnState.failed?(@group)
         end
 
-        def test_failure_records_geometry_signature_and_skips_unchanged_geometry
+        def test_failure_is_recorded_without_geometry_signature
           assert PrecisionValidation::LvnState.set_failed(@group, true)
 
           assert PrecisionValidation::LvnState.failed?(@group)
-          refute_nil PrecisionValidation::LvnState.failure_signature(@group)
+          assert_nil PrecisionValidation::LvnState.failure_signature(@group)
           assert PrecisionValidation::LvnState.failed_and_unchanged?(@group)
         end
 
-        def test_local_geometry_change_reenables_lvn_attempt
+        def test_compatibility_readers_do_not_calculate_geometry_signatures
           PrecisionValidation::LvnState.set_failed(@group, true)
           @v2.position = Point.new(1.001, 0.0, 0.0)
 
-          assert PrecisionValidation::LvnState.geometry_changed_since_failure?(@group)
-          refute PrecisionValidation::LvnState.failed_and_unchanged?(@group)
-        end
-
-        def test_group_translation_or_rotation_does_not_change_signature
-          PrecisionValidation::LvnState.set_failed(@group, true)
-          before = PrecisionValidation::LvnState.geometry_signature(@group)
-          @group.transformation = :translated_and_rotated
-
-          assert_equal before,
-                       PrecisionValidation::LvnState.geometry_signature(@group)
+          assert_nil PrecisionValidation::LvnState.geometry_signature(@group)
+          refute PrecisionValidation::LvnState.geometry_changed_since_failure?(@group)
           assert PrecisionValidation::LvnState.failed_and_unchanged?(@group)
         end
 
-        def test_success_clears_failure_signature
+        def test_group_transform_does_not_change_failure_state
+          PrecisionValidation::LvnState.set_failed(@group, true)
+          @group.transformation = :translated_and_rotated
+
+          assert_nil PrecisionValidation::LvnState.geometry_signature(@group)
+          assert PrecisionValidation::LvnState.failed_and_unchanged?(@group)
+        end
+
+        def test_success_clears_legacy_failure_signature
+          @group.set_attribute(
+            'IndoorGml',
+            'lvn_failed_geometry_signature',
+            'legacy-signature'
+          )
           PrecisionValidation::LvnState.set_failed(@group, true)
           assert PrecisionValidation::LvnState.set_failed(@group, false)
 
