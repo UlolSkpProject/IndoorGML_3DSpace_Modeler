@@ -88,6 +88,12 @@ module ULOL
             nil
           )[:repairable]
 
+          return false unless CoplanarCollinearEdgePolicyV2.fan_transition_vertices(
+            entities,
+            face_class: @face_class,
+            angle_tolerance_deg: STRICT_COPLANAR_ANGLE_TOLERANCE_DEG
+          ).empty?
+
           true
         rescue StandardError
           false

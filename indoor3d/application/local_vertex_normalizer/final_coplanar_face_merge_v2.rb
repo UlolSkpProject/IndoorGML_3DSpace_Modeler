@@ -49,7 +49,12 @@ module ULOL
             merge_report[:applied] = merge_report[:merge_group_count].to_i.positive?
             merge_report[:restored] = false
             merge_report[:fallback_reason] = nil
-            report[:final_coplanar_face_merge] = merge_report if report.is_a?(Hash)
+            if report.is_a?(Hash)
+              report[:final_coplanar_face_merge] = merge_report
+              report[:collinear_vertex_removal_count] =
+                report[:collinear_vertex_removal_count].to_i +
+                merge_report[:collapsed_collinear_vertex_count].to_i
+            end
           rescue StandardError => error
             restored = restore_final_coplanar_baseline!(
               entity,

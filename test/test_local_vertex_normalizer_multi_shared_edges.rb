@@ -173,6 +173,42 @@ module ULOL
           end
         end
 
+        def test_preserves_coplanar_edge_at_straight_fan_transition
+          face_a = FakeFace.new(10)
+          face_b = FakeFace.new(20)
+          outside_a = FakeFace.new(30)
+          outside_b = FakeFace.new(40)
+          outside_a.instance_variable_set(:@normal, Vector.new(0.0, 1.0, 0.0))
+          outside_b.instance_variable_set(:@normal, Vector.new(1.0, 0.0, 0.0))
+          vertex = Vertex.new(Point.new(0.0, 0.0, 0.0), [])
+          point_a = Vertex.new(Point.new(-1.0, 0.0, 0.0), [])
+          point_c = Vertex.new(Point.new(1.0, 0.0, 0.0), [])
+          diagonal_end = Vertex.new(Point.new(0.0, 1.0, 0.0), [])
+          branch_end = Vertex.new(Point.new(0.0, 0.0, 1.0), [])
+          edges = [
+            FakeEdge.new(101, [face_a, face_b], [vertex, diagonal_end]),
+            FakeEdge.new(102, [face_a, outside_a], [vertex, point_a]),
+            FakeEdge.new(103, [face_b, outside_b], [vertex, point_c]),
+            FakeEdge.new(104, [outside_a, outside_b], [vertex, branch_end])
+          ]
+          entities = FakeEntities.new(
+            [face_a, face_b, outside_a, outside_b],
+            edges
+          )
+
+          report = normalizer.send(
+            :remove_coplanar_shared_edges,
+            entities,
+            plane_tolerance_mm: 0.001,
+            angle_tolerance_deg: 0.001
+          )
+
+          assert_empty entities.erase_calls
+          assert_equal 0, report[:removed_edges]
+          assert_equal 1, report[:protected_fan_transition_group_count]
+          assert_equal 1, report[:protected_fan_transition_edge_count]
+        end
+
         private
 
         def normalizer

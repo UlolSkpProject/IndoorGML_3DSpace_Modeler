@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'coplanar_collinear_edge_policy_v2'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -76,12 +78,52 @@ module ULOL
 
           # Snapshot all Face-derived data before mutation. SketchUp can replace
           # several original Faces with a new n-gon as soon as one edge is erased.
-          all_internal_edges = plans.flat_map { |plan| plan[:internal_edges] }
-                                    .uniq
-                                    .select(&:valid?)
+          planned_internal_edges = plans.flat_map { |plan| plan[:internal_edges] }
+                                        .uniq
+                                        .select(&:valid?)
+          protected_lookup = {}
+          plans.each do |plan|
+            protection =
+              CoplanarCollinearEdgePolicyV2.protected_fan_transition_edges(
+                faces: plan[:faces],
+                internal_edges: plan[:internal_edges],
+                removal_edges: planned_internal_edges,
+                angle_tolerance_deg: angle_tolerance_deg
+              )
+            protection[:edges].each do |edge|
+              protected_lookup[stable_entity_id(edge)] = edge
+            end
+            plan[:fan_transition_vertex_ids] =
+              protection[:fan_transition_vertex_ids]
+          end
+
+          plans.each do |plan|
+            plan[:deletable_internal_edges] = plan[:internal_edges].reject do |edge|
+              protected_lookup[stable_entity_id(edge)]
+            end
+            plan[:protected_internal_edge_count] =
+              plan[:internal_edges].length - plan[:deletable_internal_edges].length
+            plan[:expected_face_reduction] = merge_face_reduction_for_edges(
+              plan[:faces],
+              plan[:deletable_internal_edges]
+            )
+          end
+          all_internal_edges = plans.flat_map do |plan|
+            plan[:deletable_internal_edges]
+          end.uniq.select(&:valid?)
+          merge_seed_vertices = all_internal_edges.flat_map do |edge|
+            Array(edge.vertices)
+          end.uniq
           expected_face_reduction = plans.sum { |plan| plan[:expected_face_reduction] }
 
           entities.erase_entities(all_internal_edges) unless all_internal_edges.empty?
+
+          collapse_report =
+            CoplanarCollinearEdgePolicyV2.collapse_degree_two_collinear_vertices!(
+              entities,
+              merge_seed_vertices,
+              angle_tolerance_deg: angle_tolerance_deg
+            )
 
           final_topology = coplanar_merge_face_summary(entities)
           final_manifold = manifold?(solid)
@@ -112,16 +154,32 @@ module ULOL
             normal_component_count: normal_components.length,
             planar_group_count: planar_groups.length,
             singleton_group_count: planar_groups.count { |group| group.length == 1 },
-            merge_group_count: merge_groups.length,
-            merged_input_face_count: plans.sum { |plan| plan[:input_face_count] },
+            merge_group_count: plans.count do |plan|
+              plan[:expected_face_reduction].positive?
+            end,
+            protected_merge_group_count: plans.count do |plan|
+              plan[:protected_internal_edge_count].positive?
+            end,
+            merged_input_face_count: plans.sum do |plan|
+              plan[:expected_face_reduction].positive? ? plan[:input_face_count] : 0
+            end,
             removed_internal_edge_count: all_internal_edges.length,
+            protected_fan_transition_edge_count: protected_lookup.length,
+            collapsed_collinear_vertex_count:
+              collapse_report[:collapsed_vertex_count],
+            collapsed_collinear_vertex_ids:
+              collapse_report[:collapsed_vertex_ids],
             expected_face_reduction: expected_face_reduction,
             actual_face_reduction: actual_face_reduction,
             initial_topology: initial_topology,
             final_topology: final_topology,
             initial_manifold: initial_manifold,
             final_manifold: final_manifold,
-            groups: plans.map { |plan| plan.reject { |key, _value| key == :internal_edges } }
+            groups: plans.map do |plan|
+              plan.reject do |key, _value|
+                %i[faces internal_edges deletable_internal_edges].include?(key)
+              end
+            end
           }
         end
 
@@ -328,6 +386,7 @@ module ULOL
           {
             index: ordinal,
             total: total,
+            faces: current_faces,
             face_ids: descriptor[:face_ids],
             input_face_count: current_faces.length,
             input_vertex_count: descriptor[:vertex_count],
@@ -337,6 +396,50 @@ module ULOL
             max_adjacent_angle_deg: descriptor[:max_adjacent_angle_deg],
             max_vertex_deviation_mm: descriptor[:max_vertex_deviation_mm]
           }
+        end
+
+        def merge_face_reduction_for_edges(faces, edges)
+          valid_faces = Array(faces).select(&:valid?).uniq
+          return 0 if valid_faces.length < 2
+
+          face_lookup = valid_faces.to_h do |face|
+            [stable_entity_id(face), face]
+          end
+          adjacency = Hash.new { |hash, key| hash[key] = [] }
+          Array(edges).each do |edge|
+            next unless edge&.valid?
+
+            owners = Array(edge.faces).select do |face|
+              face_lookup[stable_entity_id(face)]
+            end
+            next unless owners.length == 2
+
+            first = stable_entity_id(owners[0])
+            second = stable_entity_id(owners[1])
+            adjacency[first] << second
+            adjacency[second] << first
+          end
+
+          visited = {}
+          component_count = 0
+          face_lookup.each_key do |seed|
+            next if visited[seed]
+
+            component_count += 1
+            visited[seed] = true
+            queue = [seed]
+            until queue.empty?
+              current = queue.shift
+              adjacency[current].each do |neighbor|
+                next if visited[neighbor]
+
+                visited[neighbor] = true
+                queue << neighbor
+              end
+            end
+          end
+
+          valid_faces.length - component_count
         end
 
         def describe_planar_group(faces)

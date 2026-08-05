@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'coplanar_collinear_edge_policy_v2'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -174,6 +176,9 @@ module ULOL
           max_angle_deg = 0.0
           multi_edge_group_count = 0
           max_shared_edges_per_group = 0
+          protected_fan_transition_group_count = 0
+          protected_fan_transition_edge_count = 0
+          collinear_vertex_removal_count = 0
           groups_done = 0
           last_reference_group = -1
           topology = geometry_counts(entities)
@@ -189,6 +194,7 @@ module ULOL
 
             pass_removed = 0
             pass_removed_groups = 0
+            pass_collapsed_vertices = 0
             groups.each do |group|
               current = refresh_coplanar_shared_edge_group(
                 group,
@@ -199,6 +205,22 @@ module ULOL
 
               edges = current[:edges]
               signature = current[:signature]
+              protection = CoplanarCollinearEdgePolicyV2.protected_fan_transition_edges(
+                faces: current[:faces],
+                internal_edges: edges,
+                angle_tolerance_deg: angle_tolerance_deg
+              )
+              if protection[:edge_count].positive?
+                ignored_group_signatures[signature] = true
+                unchanged += edges.length
+                protected_fan_transition_group_count += 1
+                protected_fan_transition_edge_count += edges.length
+                next
+              end
+
+              merge_seed_vertices = edges.flat_map do |edge|
+                Array(edge.vertices)
+              end.uniq
               topology_before = topology.dup
               affected_before, seed_vertices =
                 coplanar_incremental_affected_before(current)
@@ -271,13 +293,48 @@ module ULOL
                       "remaining=#{edges.count(&:valid?)} total=#{edges.length}"
               end
 
-              topology = topology_after
+              begin
+                collapse =
+                  CoplanarCollinearEdgePolicyV2.collapse_degree_two_collinear_vertices!(
+                    entities,
+                    merge_seed_vertices,
+                    angle_tolerance_deg: angle_tolerance_deg
+                  )
+              rescue CoplanarCollinearEdgePolicyV2::CollapseError => error
+                raise DestructiveCoplanarCleanupError, error.message
+              end
+
+              collapsed_count = collapse[:collapsed_vertex_count].to_i
+              if collapsed_count.positive?
+                collapsed_topology = geometry_counts(entities)
+                if closed_surface?(topology_after) &&
+                   !closed_surface?(collapsed_topology)
+                  raise DestructiveCoplanarCleanupError,
+                        "Collinear vertex collapse opened the shell: " \
+                        "vertices=#{collapse[:collapsed_vertex_ids].inspect} " \
+                        "before=#{topology_after.inspect} " \
+                        "after=#{collapsed_topology.inspect}"
+                end
+                if topology_anomaly_score(collapsed_topology) >
+                   topology_anomaly_score(topology_after)
+                  raise DestructiveCoplanarCleanupError,
+                        "Collinear vertex collapse increased topology anomalies: " \
+                        "vertices=#{collapse[:collapsed_vertex_ids].inspect} " \
+                        "before=#{topology_after.inspect} " \
+                        "after=#{collapsed_topology.inspect}"
+                end
+                topology = collapsed_topology
+              else
+                topology = topology_after
+              end
               edge_count = edges.length
               pass_removed += edge_count
               pass_removed_groups += 1
               removed += edge_count
               removed_groups += 1
               groups_done += 1
+              pass_collapsed_vertices += collapsed_count
+              collinear_vertex_removal_count += collapsed_count
               multi_edge_group_count += 1 if edge_count > 1
               max_shared_edges_per_group = [max_shared_edges_per_group, edge_count].max
               max_deviation_mm = [
@@ -304,7 +361,8 @@ module ULOL
             pass_reports << {
               pass: pass_index + 1,
               removed_edges: pass_removed,
-              removed_groups: pass_removed_groups
+              removed_groups: pass_removed_groups,
+              collapsed_collinear_vertices: pass_collapsed_vertices
             }
           end
 
@@ -345,6 +403,11 @@ module ULOL
             max_angle_deg: max_angle_deg,
             multi_edge_group_count: multi_edge_group_count,
             max_shared_edges_per_group: max_shared_edges_per_group,
+            protected_fan_transition_group_count:
+              protected_fan_transition_group_count,
+            protected_fan_transition_edge_count:
+              protected_fan_transition_edge_count,
+            collinear_vertex_removal_count: collinear_vertex_removal_count,
             fallback_reason: nil
           }
         end

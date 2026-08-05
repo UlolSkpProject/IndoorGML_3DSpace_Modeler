@@ -273,6 +273,10 @@ module ULOL
                 phase: :axis_plane_face_merge,
                 removed_internal_edges: axis_plane_merge[:removed_edges],
                 merged_faces: axis_plane_merge[:merged_faces],
+                protected_fan_transition_edges:
+                  axis_plane_merge[:protected_fan_transition_edge_count].to_i,
+                collapsed_collinear_vertices:
+                  axis_plane_merge[:collinear_vertex_removal_count].to_i,
                 passes: axis_plane_merge[:passes]
               },
               {
@@ -323,7 +327,8 @@ module ULOL
             duplicate_normalized_triangle_samples: duplicate_diagnostics.transform_values do |entry|
               entry[:samples] || []
             end,
-            collinear_vertex_removal_count: 0,
+            collinear_vertex_removal_count:
+              axis_plane_merge[:collinear_vertex_removal_count].to_i,
             short_edge_sliver_threshold_mm: SHORT_EDGE_SLIVER_THRESHOLD_MM,
             short_edge_sliver_detected_face_count:
               short_edge_sliver_repair[:detected_face_count],
@@ -360,6 +365,9 @@ module ULOL
           {
             removed_edges: 0,
             unchanged_edges: 0,
+            protected_fan_transition_group_count: 0,
+            protected_fan_transition_edge_count: 0,
+            collinear_vertex_removal_count: 0,
             passes: [],
             max_plane_deviation_mm: 0.0,
             max_angle_deg: 0.0,
