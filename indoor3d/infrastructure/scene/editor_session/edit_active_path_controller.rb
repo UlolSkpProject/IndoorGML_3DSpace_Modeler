@@ -61,7 +61,12 @@ module ULOL
           end
 
           def cell_space_geometry_editing?(editing:)
-            editing && valid_target_path.length > 1
+            return false unless editing
+
+            primal_group = @indoor_model.primal_group
+            editing_cell_space_path?(valid_target_path, primal_group)
+          rescue StandardError
+            false
           end
 
           def editing_cell_space
@@ -108,7 +113,7 @@ module ULOL
             path = raw_path.select { |entity| entity&.valid? }
             primal_group = @indoor_model.primal_group
             @editing_active_path_target =
-              if raw_path.length == path.length && (editing_cell_space_path?(path, primal_group) || matches_path?(path, [primal_group]))
+              if raw_path.length == path.length && allowed_edit_path?(path, primal_group)
                 @editing_active_path_suspended = false
                 path
               else
@@ -126,7 +131,7 @@ module ULOL
 
             path = Array(model&.active_path).select { |entity| entity&.valid? }
             primal_group = @indoor_model.primal_group
-            if editing_cell_space_path?(path, primal_group) || matches_path?(path, [primal_group])
+            if allowed_edit_path?(path, primal_group)
               @editing_active_path_target = path
             else
               @editing_active_path_target = primal_group&.valid? ? [primal_group] : nil
@@ -182,7 +187,7 @@ module ULOL
             path = raw_path.select { |entity| entity&.valid? }
             primal_group = @indoor_model.primal_group
             return false unless raw_path.length == path.length
-            return false unless editing_cell_space_path?(path, primal_group) || matches_path?(path, [primal_group])
+            return false unless allowed_edit_path?(path, primal_group)
 
             @editing_active_path_target = path
             @editing_active_path_suspended = false
@@ -208,7 +213,7 @@ module ULOL
             end
 
             primal_group = @indoor_model.primal_group
-            if editing_cell_space_path?(current_path, primal_group)
+            if allowed_child_edit_path?(current_path, primal_group)
               @editing_active_path_target = current_path
               notify_lock_selection_and_view(model)
               return
@@ -244,6 +249,15 @@ module ULOL
             active_path.each_with_index.all? { |entity, index| entity == target_path[index] }
           end
 
+          def allowed_edit_path?(path, primal_group)
+            matches_path?(path, [primal_group]) || allowed_child_edit_path?(path, primal_group)
+          end
+
+          def allowed_child_edit_path?(path, primal_group)
+            editing_cell_space_path?(path, primal_group) ||
+              fix_mode_direct_primal_child_path?(path, primal_group)
+          end
+
           def editing_cell_space_path?(path, primal_group)
             return false unless path&.length == 2
             return false unless path.first == primal_group
@@ -252,6 +266,57 @@ module ULOL
             @indoor_model.cell_spaces.any? do |cell_space|
               cell_space&.valid? && cell_space.sketchup_group == cell_group
             end
+          rescue StandardError
+            false
+          end
+
+          def fix_mode_direct_primal_child_path?(path, primal_group)
+            return false unless fix_mode?
+            return false unless path&.length == 2
+            return false unless path.first == primal_group
+
+            child = path.last
+            return false unless editable_container_instance?(child)
+
+            direct_child_of_primal?(child, primal_group)
+          rescue StandardError
+            false
+          end
+
+          def fix_mode?
+            @indoor_model.respond_to?(:validation_focus_active?) &&
+              @indoor_model.validation_focus_active? == true
+          rescue StandardError
+            false
+          end
+
+          def editable_container_instance?(entity)
+            return false unless entity&.valid?
+
+            group = defined?(Sketchup::Group) && entity.is_a?(Sketchup::Group)
+            component = defined?(Sketchup::ComponentInstance) &&
+                        entity.is_a?(Sketchup::ComponentInstance)
+            group || component
+          rescue StandardError
+            false
+          end
+
+          def direct_child_of_primal?(entity, primal_group)
+            return false unless primal_group&.valid?
+            return false unless primal_group.respond_to?(:entities)
+
+            entities = primal_group.entities
+            return false unless entities
+
+            if entity.respond_to?(:parent)
+              parent = entity.parent
+              return true if parent.equal?(entities) || parent == entities
+            end
+
+            return entities.include?(entity) if entities.respond_to?(:include?)
+            return entities.to_a.include?(entity) if entities.respond_to?(:to_a)
+
+            false
           rescue StandardError
             false
           end
