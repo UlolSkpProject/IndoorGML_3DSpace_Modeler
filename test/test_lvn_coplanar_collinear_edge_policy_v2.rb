@@ -3,12 +3,14 @@
 require 'minitest/autorun'
 
 require_relative '../indoor3d/application/local_vertex_normalizer/coplanar_collinear_edge_policy_v2'
+require_relative '../indoor3d/application/local_vertex_normalizer/coplanar_face_component_merge_v2'
 
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class LocalVertexNormalizerCoplanarCollinearEdgePolicyV2Test < Minitest::Test
         Policy = CoplanarCollinearEdgePolicyV2
+        Merger = CoplanarFaceComponentMergeV2
         Point = Struct.new(:x, :y, :z)
         Vector = Struct.new(:x, :y, :z)
 
@@ -211,6 +213,56 @@ module ULOL
 
           assert_empty report[:edges]
           assert_empty report[:fan_transition_vertex_ids]
+        end
+
+        def test_finds_two_edge_triangular_repair_bundle_at_repeated_outer_vertex
+          repeated = Vertex.new(1, Point.new(0.0, 0.0, 0.0))
+          before = Vertex.new(2, Point.new(-1.0, 0.0, 0.0))
+          wedge_a = Vertex.new(3, Point.new(0.0, 1.0, 0.0))
+          wedge_b = Vertex.new(4, Point.new(0.1, 1.0, 0.0))
+          after = Vertex.new(5, Point.new(1.0, 0.0, 0.0))
+          main = Face.new(10, [before, repeated, wedge_a, wedge_b, repeated, after])
+          sliver = Face.new(11, [repeated, wedge_a, wedge_b])
+          first = Edge.new(20, repeated, wedge_a, [main, sliver])
+          second = Edge.new(21, wedge_b, repeated, [main, sliver])
+          main.edges = [first, second]
+          sliver.edges = [first, second]
+
+          bundles = Policy.ring_self_touch_repair_edge_bundles(
+            faces: [main, sliver],
+            internal_edges: [first, second]
+          )
+
+          assert_equal 1, bundles.length
+          assert_equal [first, second], bundles[0][:edges]
+          assert_equal [20, 21], bundles[0][:edge_ids]
+          assert_equal [10, 11], bundles[0][:face_ids]
+          assert_equal repeated.persistent_id, bundles[0][:repeated_vertex_id]
+
+          repair = Merger.prepare_ring_self_touch_repair(
+            [{ faces: [main, sliver], internal_edges: [first, second] }]
+          )
+          assert_equal [first, second], repair[:edges]
+          assert_equal 1, repair[:expected_face_reduction]
+          assert_equal 1, Merger.ring_self_touch_vertex_count([main, sliver])
+        end
+
+        def test_does_not_repair_two_shared_edges_without_repeated_outer_vertex
+          repeated = Vertex.new(1, Point.new(0.0, 0.0, 0.0))
+          before = Vertex.new(2, Point.new(-1.0, 0.0, 0.0))
+          wedge_a = Vertex.new(3, Point.new(0.0, 1.0, 0.0))
+          wedge_b = Vertex.new(4, Point.new(0.1, 1.0, 0.0))
+          main = Face.new(10, [before, repeated, wedge_a, wedge_b])
+          sliver = Face.new(11, [repeated, wedge_a, wedge_b])
+          first = Edge.new(20, repeated, wedge_a, [main, sliver])
+          second = Edge.new(21, wedge_b, repeated, [main, sliver])
+
+          bundles = Policy.ring_self_touch_repair_edge_bundles(
+            faces: [main, sliver],
+            internal_edges: [first, second]
+          )
+
+          assert_empty bundles
         end
 
         def test_finds_existing_straight_fan_transition_for_fast_path_rejection

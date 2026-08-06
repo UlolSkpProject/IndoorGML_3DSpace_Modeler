@@ -22,6 +22,76 @@ module ULOL
 
         module_function
 
+        # A self-touching outer loop can revisit one vertex because a coplanar
+        # triangular wedge is still attached to the same Face through two edges.
+        # Those two edges must be removed as one repair bundle before the general
+        # fan-transition policy evaluates the remaining coplanar edges.
+        def ring_self_touch_repair_edge_bundles(faces:, internal_edges:)
+          valid_faces = Array(faces).select { |face| valid_entity?(face) }.uniq
+          valid_internal_edges = Array(internal_edges).select do |edge|
+            valid_entity?(edge) && Array(edge.faces).length == 2
+          end.uniq
+          face_lookup = valid_faces.each_with_object({}) do |face, result|
+            result[stable_entity_id(face)] = true
+          end
+          bundles = {}
+
+          valid_faces.each do |face|
+            repeated_outer_loop_vertices(face).each do |vertex|
+              neighbors = valid_internal_edges.each_with_object({}) do |edge, result|
+                next unless Array(edge.vertices).include?(vertex)
+
+                owners = Array(edge.faces)
+                next unless owners.include?(face)
+
+                neighbor = owners.find { |candidate| candidate != face }
+                next unless neighbor && face_lookup[stable_entity_id(neighbor)]
+
+                result[stable_entity_id(neighbor)] = neighbor
+              end
+
+              neighbors.each_value do |neighbor|
+                pair_edges = valid_internal_edges.select do |edge|
+                  owners = Array(edge.faces)
+                  owners.include?(face) && owners.include?(neighbor)
+                end
+                next unless pair_edges.length == 2
+                next unless pair_edges.all? do |edge|
+                  Array(edge.vertices).include?(vertex)
+                end
+                next unless triangular_single_loop_face?(neighbor)
+
+                edge_ids = pair_edges.map { |edge| stable_entity_id(edge) }.sort
+                signature = edge_ids.join(':')
+                bundles[signature] ||= {
+                  edges: pair_edges.sort_by { |edge| stable_entity_id(edge) },
+                  edge_ids: edge_ids,
+                  face_ids: [stable_entity_id(face), stable_entity_id(neighbor)].sort,
+                  repeated_vertex_id: stable_entity_id(vertex)
+                }
+              end
+            end
+          end
+
+          bundles.values.sort_by { |bundle| bundle[:edge_ids] }
+        end
+
+        def repeated_outer_loop_vertices(face)
+          return [] unless valid_entity?(face) && face.respond_to?(:outer_loop)
+
+          loop = face.outer_loop
+          return [] unless loop && loop.respond_to?(:vertices)
+
+          vertices = Array(loop.vertices).select { |vertex| valid_entity?(vertex) }
+          counts = Hash.new(0)
+          vertices.each { |vertex| counts[stable_entity_id(vertex)] += 1 }
+          vertices.select do |vertex|
+            counts[stable_entity_id(vertex)] > 1
+          end.uniq
+        rescue StandardError
+          []
+        end
+
         def protected_fan_transition_edges(
           faces:,
           internal_edges:,
@@ -123,6 +193,16 @@ module ULOL
             end
           end
           result.values
+        end
+
+        def triangular_single_loop_face?(face)
+          return false unless valid_entity?(face)
+          return false unless face.respond_to?(:loops) && face.respond_to?(:outer_loop)
+
+          loops = Array(face.loops)
+          loops.length == 1 && Array(face.outer_loop.vertices).length == 3
+        rescue StandardError
+          false
         end
 
         def collapse_degree_two_collinear_vertices!(
