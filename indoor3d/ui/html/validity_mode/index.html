@@ -25,12 +25,21 @@
     }
     h1 { margin: 0; color: #f0eee8; font-size: 22px; line-height: 1.2; }
     .intro { margin: 8px 0 17px; color: #aaa79f; font-size: 12px; line-height: 1.55; }
-    .modes { display: grid; gap: 10px; }
+    .modes {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      align-items: stretch;
+      gap: 12px;
+    }
     .mode {
+      display: flex;
+      flex-direction: column;
       width: 100%;
-      padding: 14px 16px;
+      min-width: 0;
+      min-height: 292px;
+      padding: 16px 18px;
       border: 1px solid #3b3a36;
-      border-radius: 10px;
+      border-radius: 12px;
       background: #252523;
       color: inherit;
       text-align: left;
@@ -49,9 +58,28 @@
     }
     .fast .badge { color: #8ab4f8; background: #17243b; border: 1px solid #315d9b; }
     .precision .badge { color: #f9b84e; background: #3a2a12; border: 1px solid #76541f; }
-    .mode-description { margin-top: 7px; color: #b7b4ac; font-size: 12px; line-height: 1.45; }
-    .mode-detail { margin-top: 7px; color: #85827b; font-size: 11px; line-height: 1.45; }
+    .mode-copy { display: flex; flex: 1; flex-direction: column; }
+    .mode-description {
+      display: block;
+      margin-top: 17px;
+      color: #b7b4ac;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .mode-detail {
+      display: block;
+      margin-top: 14px;
+      color: #85827b;
+      font-size: 11px;
+      line-height: 1.55;
+    }
+    .copy-line {
+      display: block;
+      white-space: nowrap;
+    }
+    .copy-line + .copy-line { margin-top: 3px; }
     .warning { color: #e4aa56; }
+    code { font-family: Consolas, Monaco, monospace; font-size: .95em; }
     footer { display: flex; justify-content: flex-end; margin-top: auto; padding-top: 14px; }
     .cancel {
       min-width: 86px;
@@ -79,8 +107,16 @@
           <span class="mode-title">빠른 검사</span>
           <span class="badge">FAST</span>
         </span>
-        <span class="mode-description">현재 geometry를 변경하지 않고 일반 validity를 확인합니다.</span>
-        <span class="mode-detail">기존 val3dity 검사 + 701/704 extension overlap recheck</span>
+        <span class="mode-copy">
+          <span class="mode-description">
+            <span class="copy-line">현재 geometry를 변경하지 않습니다.</span>
+            <span class="copy-line">일반 validity를 확인합니다.</span>
+          </span>
+          <span class="mode-detail">
+            <span class="copy-line">val3dity 검사를 실행합니다.</span>
+            <span class="copy-line">701/704 extension overlap recheck를 수행합니다.</span>
+          </span>
+        </span>
       </button>
 
       <button class="mode precision" type="button" onclick="sketchup.selectPrecision()">
@@ -88,9 +124,23 @@
           <span class="mode-title">정밀검사 (Beta)</span>
           <span class="badge">PRECISION</span>
         </span>
-        <span class="mode-description">CellSpace Normalize를 시도한 뒤 0.01 mm를 GML 좌표 단위로 변환해 val3dity <code>--overlap_tol</code>에 전달합니다.</span>
-        <span class="mode-detail warning">시험 운영 중인 기능으로 일부 모델에서 오류가 발생할 수 있습니다. 실행 전 모델을 저장해 주세요.</span>
-        <span class="mode-detail">Normalize 성공 CellSpace의 geometry는 미세하게 변경될 수 있으며, extension recheck는 실행하지 않습니다.</span>
+        <span class="mode-copy">
+          <span class="mode-description">
+            <span class="copy-line">CellSpace Normalize를 먼저 수행합니다.</span>
+            <span class="copy-line">0.01 mm를 GML 좌표 단위로 변환해</span>
+            <span class="copy-line">val3dity <code>--overlap_tol</code>에 전달합니다.</span>
+          </span>
+          <span class="mode-detail warning">
+            <span class="copy-line">시험 운영 중인 기능입니다.</span>
+            <span class="copy-line">일부 모델에서 오류가 발생할 수 있습니다.</span>
+            <span class="copy-line">실행 전 모델을 저장해 주세요.</span>
+          </span>
+          <span class="mode-detail">
+            <span class="copy-line">Normalize 성공 CellSpace의 geometry는</span>
+            <span class="copy-line">미세하게 변경될 수 있습니다.</span>
+            <span class="copy-line">Extension recheck는 실행하지 않습니다.</span>
+          </span>
+        </span>
       </button>
     </section>
 

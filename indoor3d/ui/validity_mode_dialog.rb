@@ -4,8 +4,8 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class ValidityModeDialog
-        WIDTH = 520
-        HEIGHT = 430
+        WIDTH = 720
+        HEIGHT = 500
 
         class << self
           def show(&on_select)
