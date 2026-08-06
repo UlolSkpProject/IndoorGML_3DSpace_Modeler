@@ -34,7 +34,9 @@ module ULOL
           end
 
           def apply_values(model, values)
-            options = model&.rendering_options
+            return false unless model&.respond_to?(:rendering_options)
+
+            options = model.rendering_options
             return false unless options
 
             changed = false
@@ -45,8 +47,11 @@ module ULOL
               options[key] = value
               changed = true
             end
-            model&.active_view&.invalidate if changed
+            invalidate_active_view(model) if changed
             changed
+          rescue StandardError => e
+            log_failure('apply', e)
+            false
           end
 
           def rendering_option_key?(options, key)
@@ -65,6 +70,31 @@ module ULOL
             found
           rescue StandardError
             false
+          end
+
+          def invalidate_active_view(model)
+            return false unless model&.respond_to?(:active_view)
+
+            view = model.active_view
+            return false unless view&.respond_to?(:invalidate)
+
+            view.invalidate
+            true
+          rescue StandardError => e
+            log_failure('view invalidate', e)
+            false
+          end
+
+          def log_failure(context, error)
+            return unless defined?(IndoorCore::Logger)
+            return unless IndoorCore::Logger.respond_to?(:puts)
+
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Rendering option #{context} skipped: " \
+              "#{error.class}: #{error.message}"
+            )
+          rescue StandardError
+            nil
           end
         end
 
@@ -120,8 +150,10 @@ module ULOL
             private
 
             def capture_rendering_policy_options(model)
-              options = model&.rendering_options
-              return unless options
+              return false unless model&.respond_to?(:rendering_options)
+
+              options = model.rendering_options
+              return false unless options
 
               @rendering_option_snapshots ||= {}
               RENDERING_POLICY_OPTION_KEYS.each do |key|
@@ -130,6 +162,10 @@ module ULOL
 
                 @rendering_option_snapshots[key] = options[key]
               end
+              true
+            rescue StandardError => e
+              RenderingOptionsPolicy.log_failure('snapshot', e)
+              false
             end
 
             def apply_base_edit_rendering_options(model)
