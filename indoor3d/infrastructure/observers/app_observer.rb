@@ -39,6 +39,7 @@ module ULOL
           @model_observer = Indoor3DGmlModelObserver.new(on_delete_model: method(:release_model))
           @observed_model_ids = {}
           @initial_refresh_states = {}
+          @initial_refresh_generations = {}
         end
 
         def register_model(model)
@@ -56,36 +57,48 @@ module ULOL
         end
 
         def onNewModel(model)
-          cancel_all_validation_sessions
-          register_model(model)
-          schedule_initial_refresh(model)
+          handle_model_lifecycle(model)
         end
 
         def onOpenModel(model)
-          cancel_all_validation_sessions
-          register_model(model)
-          schedule_initial_refresh(model)
+          handle_model_lifecycle(model)
         end
 
         def expectsStartupModelNotifications
           true
         end
 
-        def schedule_initial_refresh(model)
+        def schedule_initial_refresh(model, new_model_lifecycle: false)
           return false unless model
 
           key = model.object_id
-          return false if @initial_refresh_states.key?(key)
+          states = initial_refresh_states
+          generations = initial_refresh_generations
+          state = states[key]
+          status = initial_refresh_status(state)
+          if state
+            return false unless new_model_lifecycle
+            return false if %i[scheduled running].include?(status)
+          end
 
-          # Claim the model before scheduling the timer. Both the extension-load
-          # fallback and AppObserver callbacks can reach this method during the
-          # same startup sequence.
-          @initial_refresh_states[key] = :scheduled
+          prior_lifecycle = !state.nil? || generations[key].to_i.positive?
+          if new_model_lifecycle && prior_lifecycle
+            reset_reused_model_runtime(model)
+          end
+
+          generation = generations[key].to_i + 1
+          generations[key] = generation
+          states[key] = {
+            status: :scheduled,
+            generation: generation
+          }
+
           UI.start_timer(INITIAL_REFRESH_DELAY_SECONDS, false) do
-            next unless @initial_refresh_states[key] == :scheduled
+            current = current_initial_refresh_state(key, generation)
+            next unless current && current[:status] == :scheduled
 
             unless initial_runtime_refresh_applicable?(model)
-              @initial_refresh_states[key] = :skipped
+              current[:status] = :skipped
               IndoorCore::Logger.puts(
                 '[IndoorGML] Initial runtime refresh skipped: ' \
                 'no PrimalSpaceFeatures with persisted CellSpace'
@@ -93,19 +106,21 @@ module ULOL
               next
             end
 
-            @initial_refresh_states[key] = :running
+            current[:status] = :running
             begin
               run_initial_refresh_without_modal_feedback(model)
-              @initial_refresh_states[key] = :complete
+              current = current_initial_refresh_state(key, generation)
+              current[:status] = :complete if current
             rescue StandardError => e
-              # A failed refresh may be explicitly scheduled again.
-              @initial_refresh_states.delete(key)
+              delete_initial_refresh_state(key, generation)
               IndoorCore::Logger.puts "[IndoorGML] Runtime refresh failed: #{e.class}: #{e.message}"
             end
           end
           true
         rescue StandardError => e
-          @initial_refresh_states.delete(key) if defined?(key) && key
+          if defined?(key) && key && defined?(generation)
+            delete_initial_refresh_state(key, generation)
+          end
           IndoorCore::Logger.puts "[IndoorGML] Runtime refresh scheduling failed: #{e.class}: #{e.message}"
           false
         end
@@ -119,6 +134,49 @@ module ULOL
         end
 
         private
+
+        def handle_model_lifecycle(model)
+          cancel_all_validation_sessions
+          register_model(model)
+          schedule_initial_refresh(model, new_model_lifecycle: true)
+        end
+
+        def initial_refresh_states
+          @initial_refresh_states ||= {}
+        end
+
+        def initial_refresh_generations
+          @initial_refresh_generations ||= {}
+        end
+
+        def initial_refresh_status(state)
+          state.is_a?(Hash) ? state[:status] : state
+        end
+
+        def current_initial_refresh_state(key, generation)
+          state = initial_refresh_states[key]
+          return nil unless state
+          return nil unless state[:generation] == generation
+
+          state
+        end
+
+        def delete_initial_refresh_state(key, generation)
+          state = current_initial_refresh_state(key, generation)
+          initial_refresh_states.delete(key) if state
+        end
+
+        def reset_reused_model_runtime(model)
+          @model_observer.forget_model(model) if @model_observer.respond_to?(:forget_model)
+          IndoorModel.release(model)
+          IndoorCore::Logger.puts(
+            '[IndoorGML] Reused SketchUp Model runtime released before refresh'
+          )
+        rescue StandardError => e
+          IndoorCore::Logger.puts(
+            "[IndoorGML] Reused model runtime cleanup failed: #{e.class}: #{e.message}"
+          )
+        end
 
         def initial_runtime_refresh_applicable?(model)
           return false unless model&.respond_to?(:entities)
@@ -228,7 +286,8 @@ module ULOL
         def release_model(model)
           begin
             key = model&.object_id
-            @initial_refresh_states.delete(key) unless key.nil?
+            initial_refresh_states.delete(key) unless key.nil?
+            initial_refresh_generations.delete(key) unless key.nil?
             detach_model_observer(model)
             @model_observer.forget_model(model) if @model_observer.respond_to?(:forget_model)
             @observed_model_ids.delete(key) unless key.nil?
