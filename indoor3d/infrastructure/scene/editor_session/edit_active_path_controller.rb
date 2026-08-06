@@ -274,3 +274,5 @@ module ULOL
     end
   end
 end
+
+require_relative 'rendering_options_policy'
