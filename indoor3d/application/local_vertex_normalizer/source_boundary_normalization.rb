@@ -36,7 +36,6 @@ module ULOL
           plan = @source_boundary_normalization_plan
           return super unless plan
 
-          face_key = stable_entity_id(face)
           begin
             loop_entries = source_boundary_normalized_loop_entries(face, plan)
             changed = loop_entries.any? do |entries|
