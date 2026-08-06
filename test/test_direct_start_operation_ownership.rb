@@ -8,7 +8,7 @@ module ULOL
       class DirectStartOperationOwnershipTest < Minitest::Test
         ALLOWED_DIRECT_OWNERS = %w[
           indoor3d/application/indoor_model/runtime_support.rb
-          indoor3d/application/local_vertex_normalizer/legacy_kernel.rb
+          indoor3d/application/local_vertex_normalizer/geometry_kernel.rb
         ].freeze
 
         def test_only_declared_operation_owners_call_start_operation_directly
@@ -27,7 +27,7 @@ module ULOL
           root = File.expand_path('..', __dir__)
           integration_files = %w[
             indoor3d/application/indoor_model/local_vertex_normalization.rb
-            indoor3d/application/indoor_model/local_grid_coordinate_v2.rb
+            indoor3d/application/indoor_model/local_grid_coordinate.rb
           ]
 
           integration_files.each do |relative_path|

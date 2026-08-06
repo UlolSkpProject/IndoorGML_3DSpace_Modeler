@@ -483,7 +483,7 @@ module ULOL
         end
 
         def call
-          benchmark_started_at = Time.now
+          metrics_started_at = Time.now
           metrics = {}
           errors = []
           preflight_started_at = Time.now
@@ -503,8 +503,8 @@ module ULOL
           metrics.merge!(apply_metrics)
           metrics[:cell_space_state_duration] ||= 0.0
           metrics[:adjacency_transition_duration] ||= 0.0
-          metrics[:total_duration] = Time.now - benchmark_started_at
-          log_benchmark(metrics)
+          metrics[:total_duration] = Time.now - metrics_started_at
+          log_timing_metrics(metrics)
           Result.new(converted_count: converted_count, errors: errors, metrics: metrics)
         end
 
@@ -720,7 +720,7 @@ module ULOL
           Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at
         end
 
-        def log_benchmark(metrics)
+        def log_timing_metrics(metrics)
           puts '----------------------------------------'
           puts 'Create CellSpace 시간 요약'
           puts format('  전체 시간                  : %.3f sec', metrics[:total_duration].to_f)

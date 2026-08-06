@@ -247,7 +247,7 @@ module ULOL
             TOLERANCE_MM,
             cell_spaces: [cell_space],
             activate_edit_context: false,
-            debug: false,
+            diagnostics: false,
             failure_policy: :continue
           )
         end

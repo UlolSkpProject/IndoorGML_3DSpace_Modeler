@@ -20,7 +20,7 @@ module ULOL
   end
 end
 
-require_relative '../indoor3d/application/indoor_model/local_grid_runtime_dispatch_v2'
+require_relative '../indoor3d/application/indoor_model/local_grid_runtime_dispatch'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -216,7 +216,7 @@ module ULOL
             @finishing_editing == true
           end
 
-          def local_grid_coordinate_v2_enabled?
+          def local_grid_coordinate_enabled?
             true
           end
 
@@ -238,7 +238,7 @@ module ULOL
             true
           end
 
-          def soft_refresh_runtime_data_local_grid_v2
+          def soft_refresh_runtime_data_local_grid
             @soft_refresh_calls += 1
             true
           end

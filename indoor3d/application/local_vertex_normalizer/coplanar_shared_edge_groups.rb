@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative 'coplanar_collinear_edge_policy_v2'
+require_relative 'coplanar_collinear_edge_policy'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -205,7 +205,7 @@ module ULOL
 
               edges = current[:edges]
               signature = current[:signature]
-              protection = CoplanarCollinearEdgePolicyV2.protected_fan_transition_edges(
+              protection = CoplanarCollinearEdgePolicy.protected_fan_transition_edges(
                 faces: current[:faces],
                 internal_edges: edges,
                 angle_tolerance_deg: angle_tolerance_deg
@@ -295,12 +295,12 @@ module ULOL
 
               begin
                 collapse =
-                  CoplanarCollinearEdgePolicyV2.collapse_degree_two_collinear_vertices!(
+                  CoplanarCollinearEdgePolicy.collapse_degree_two_collinear_vertices!(
                     entities,
                     merge_seed_vertices,
                     angle_tolerance_deg: angle_tolerance_deg
                   )
-              rescue CoplanarCollinearEdgePolicyV2::CollapseError => error
+              rescue CoplanarCollinearEdgePolicy::CollapseError => error
                 raise DestructiveCoplanarCleanupError, error.message
               end
 

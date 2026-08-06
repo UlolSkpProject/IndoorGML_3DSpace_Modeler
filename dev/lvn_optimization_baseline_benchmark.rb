@@ -175,7 +175,7 @@ module ULOL
           trace_counts = trace ? trace_probe(model, pid, source, source_signature) : {}
           profile_result = profile ? profile_probe(model, pid, source, source_signature) : nil
           timing = summarize_samples(samples, allocations)
-          debug_profile = profile_result.is_a?(Hash) ? profile_result[:debug_profile] : nil
+          diagnostic_profile = profile_result.is_a?(Hash) ? profile_result[:diagnostic_profile] : nil
 
           result = {
             label: entity_label(resolve_entity(model, pid, source) || source),
@@ -185,7 +185,7 @@ module ULOL
             timing: timing,
             strategies: strategies.uniq,
             trace_counts: trace_counts,
-            profile: debug_profile,
+            profile: diagnostic_profile,
             source_restored: true
           }
           print_entity_result(result, trace: trace, profile: profile)
@@ -313,7 +313,7 @@ module ULOL
 
           result[:normalization_strategy] ||
             if result.dig(:normalization_fast_path, :applied)
-              :already_normalized_fast_path_v2
+              :already_normalized_fast_path
             else
               :full_pipeline
             end
@@ -444,15 +444,15 @@ module ULOL
             puts 'trace counts     : skipped'
           end
 
-          debug_profile = result[:profile]
-          if profile && debug_profile
+          diagnostic_profile = result[:profile]
+          if profile && diagnostic_profile
             puts format(
               'profile probe   : total=%9.3f ms status=%s',
-              debug_profile[:total_seconds].to_f * 1000.0,
-              debug_profile[:status]
+              diagnostic_profile[:total_seconds].to_f * 1000.0,
+              diagnostic_profile[:status]
             )
             puts 'top inclusive stages:'
-            top_profile_stages(debug_profile).each do |name, metrics|
+            top_profile_stages(diagnostic_profile).each do |name, metrics|
               puts format(
                 '  %-45s %9.3f ms  calls=%4d  max=%9.3f',
                 name,
@@ -461,7 +461,7 @@ module ULOL
                 metrics[:max_seconds].to_f * 1000.0
               )
             end
-            snapshot_reuse = debug_profile[:snapshot_reuse]
+            snapshot_reuse = diagnostic_profile[:snapshot_reuse]
             puts format('snapshot reuse  : %s', snapshot_reuse.inspect) if snapshot_reuse
           else
             puts 'profile probe   : skipped'

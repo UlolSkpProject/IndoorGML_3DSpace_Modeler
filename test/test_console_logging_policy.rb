@@ -14,7 +14,7 @@ class ConsoleLoggingPolicyTest < Minitest::Test
     refute_includes logger, 'return true if !logging_enabled?'
   end
 
-  def test_cell_space_benchmark_uses_debug_logger
+  def test_cell_space_timing_metrics_use_debug_logger
     policy = File.read(File.join(ROOT, 'indoor3d/application/cell_space_logging_policy.rb'))
     indoor_model = File.read(File.join(ROOT, 'indoor3d/application/indoor_model.rb'))
 

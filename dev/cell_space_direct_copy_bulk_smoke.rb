@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Lightweight one-shot smoke probe for the normal Local Grid V2 bulk Create path.
+# Lightweight one-shot smoke probe for the normal Local Grid bulk Create path.
 # It does not snapshot geometry vertices or time individual CellSpaces.
 #
 # SketchUp Ruby Console:
@@ -13,7 +13,7 @@
 #     'cell_space_direct_copy_bulk_smoke.rb'
 #   )
 #
-# Then run the normal Local Grid V2 Create command/button once.
+# Then run the normal Local Grid Create command/button once.
 
 module ULOL
   module Indoor3DGmlModeler

@@ -24,9 +24,9 @@ module ULOL
         require_relative 'indoor_model/entity_relocation.rb'
         require_relative 'indoor_model/primal_normalization.rb'
         require_relative 'indoor_model/local_vertex_normalization.rb'
-        require_relative 'indoor_model/local_grid_coordinate_v2.rb'
-        require_relative 'indoor_model/local_grid_geometry_close_v2.rb'
-        require_relative 'indoor_model/local_grid_runtime_dispatch_v2.rb'
+        require_relative 'indoor_model/local_grid_coordinate.rb'
+        require_relative 'indoor_model/local_grid_geometry_close.rb'
+        require_relative 'indoor_model/local_grid_runtime_dispatch.rb'
         require_relative 'indoor_model/editor_control.rb'
         require_relative 'indoor_model/cell_space_batch_lifecycle.rb'
         require_relative 'indoor_model/cell_space_batch_execution.rb'
@@ -42,7 +42,7 @@ module ULOL
         include EntityRelocation
         include PrimalNormalization
         include LocalVertexNormalization
-        include LocalGridCoordinateV2
+        include LocalGridCoordinate
         include EditorControl
         include CellSpaceBatchLifecycle
         include CellSpaceBatchExecution

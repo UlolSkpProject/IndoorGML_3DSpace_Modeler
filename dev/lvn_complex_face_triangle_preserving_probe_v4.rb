@@ -23,7 +23,7 @@ module ULOL
                 face,
                 source_face_key
               )
-            plan = @source_boundary_normalization_plan_v2
+            plan = @source_boundary_normalization_plan
             loop_entries = complex_face_loop_entries_v4(face, plan)
             topology_points = loop_entries.flatten.map { |entry| entry[:point] }
             topology_loops = loop_entries.map do |entries|
@@ -51,7 +51,7 @@ module ULOL
                 normalized_records,
                 coordinate_space: :source
               )
-            subdivided_records = subdivide_source_boundary_records_v2(
+            subdivided_records = subdivide_source_boundary_records(
               repaired_records,
               topology_points
             )
@@ -90,10 +90,10 @@ module ULOL
           end
 
           def complex_face_loop_entries_v4(face, plan)
-            return source_boundary_normalized_loop_entries_v2(face, plan) if plan
+            return source_boundary_normalized_loop_entries(face, plan) if plan
 
             face.loops.map do |loop|
-              compact_source_boundary_entries_v2(
+              compact_source_boundary_entries(
                 loop.vertices.map do |vertex|
                   {
                     vertex_id: stable_entity_id(vertex),

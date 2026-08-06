@@ -69,9 +69,9 @@ module ULOL
           end
         end
 
-        # Experimental opt-in command. It intentionally is not connected to the
+        # Optional command. It intentionally is not connected to the
         # existing menu command so the current CellSpace creation path stays intact.
-        def convert_selected_solid_groups_to_cell_spaces_local_grid_v2
+        def convert_selected_solid_groups_to_cell_spaces_local_grid
           return if respond_to?(:validation_operation_running?) && validation_operation_running?
 
           begin
@@ -92,7 +92,7 @@ module ULOL
             targets = conversion_jobs.map { |job| job[:target] }.compact.uniq
             storeys = conversion_jobs.map { |job| job[:storey].to_s }.reject(&:empty?).uniq
             creation_options = prompt_cell_space_creation_options(
-              'Convert Solid Groups to CellSpace Local Grid V2',
+              'Convert Solid Groups to CellSpace Local Grid',
               default_target: targets.length == 1 ? targets.first : nil,
               default_storey: storeys.length == 1 ? storeys.first : CellSpace::DEFAULT_STOREY
             )
@@ -101,11 +101,11 @@ module ULOL
             cell_type, category_code, storey = creation_options
             conversion_jobs = CellSpaceConversionJobBuilder.apply_fallback_storey(conversion_jobs, storey)
 
-            result = indoor_model.convert_cell_space_jobs_bulk_local_grid_v2(
+            result = indoor_model.convert_cell_space_jobs_bulk_local_grid(
               conversion_jobs,
               fallback_target: [cell_type, category_code],
               original_active_path: original_active_path,
-              operation_name: 'Convert Solid Groups to CellSpace Local Grid V2',
+              operation_name: 'Convert Solid Groups to CellSpace Local Grid',
               activate_root_context: true
             )
             publish_cell_space_command_result(result)
@@ -115,7 +115,7 @@ module ULOL
                 restore_active_path(model, original_active_path)
               end
             end
-            UiFeedback.notify("CellSpace Local Grid V2 conversion failed:\n#{e.message}")
+            UiFeedback.notify("CellSpace Local Grid conversion failed:\n#{e.message}")
           end
         end
 

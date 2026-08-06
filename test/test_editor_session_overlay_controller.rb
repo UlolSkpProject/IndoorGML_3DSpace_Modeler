@@ -19,7 +19,7 @@ module ULOL
         def test_ensure_registered_adds_screen_and_space_overlays_and_removes_stale_instances
           stale_screen = fake_overlay(IndoorModeScreenOverlay::OVERLAY_ID)
           stale_space = fake_overlay(DualGraphSpaceOverlay::OVERLAY_ID)
-          stale_legacy = fake_overlay(EditorSession::OverlayController::LEGACY_EDIT_MODE_OVERLAY_ID)
+          stale_legacy = fake_overlay(EditorSession::OverlayController::COMPATIBILITY_EDIT_MODE_OVERLAY_ID)
           unrelated = fake_overlay('other.overlay')
           overlays = fake_overlays([stale_screen, stale_space, stale_legacy, unrelated])
           model = fake_model(overlays: overlays)

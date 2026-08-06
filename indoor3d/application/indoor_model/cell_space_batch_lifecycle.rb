@@ -37,9 +37,9 @@ module ULOL
         end
       end
 
-      # Local Grid V2 keeps its coordinate-preparation policy while following the
+      # Local Grid keeps its coordinate-preparation policy while following the
       # same entity-local lifecycle boundary as the standard context.
-      class CellSpaceBatchLocalGridContextV2 < CellSpaceLifecycleLocalGridContextV2
+      class CellSpaceBatchLocalGridContext < CellSpaceLifecycleLocalGridContext
         def prepare_cell_group(sketchup_group)
           @place_cell_group.call(sketchup_group)
         end
@@ -87,13 +87,13 @@ module ULOL
 
           # Creates one or more CellSpaces. Each request can be either a SketchUp
           # source entity or a hash with :source, :cell_type, :category_code,
-          # :storey and optional :local_grid_v2.
+          # :storey and optional :local_grid.
           def create_cell_spaces(
             requests,
             cell_type: CellSpaceType::GENERAL,
             category_code: nil,
             storey: nil,
-            local_grid_v2: false,
+            local_grid: false,
             operation_name: 'Create CellSpaces'
           )
             plan = Array(requests).map do |request|
@@ -102,7 +102,7 @@ module ULOL
                 cell_type: cell_type,
                 category_code: category_code,
                 storey: storey,
-                local_grid_v2: local_grid_v2
+                local_grid: local_grid
               )
             end
             return [] if plan.empty?
@@ -113,8 +113,8 @@ module ULOL
                 with_indoor_model_operation(operation_name, force: true) do
                   prepare_cell_space_batch_environment
                   plan.each do |request|
-                    service = request[:local_grid_v2] ?
-                      cell_space_lifecycle_service_local_grid_v2 :
+                    service = request[:local_grid] ?
+                      cell_space_lifecycle_service_local_grid :
                       cell_space_lifecycle_service
                     created << service.create_from_group_deferred(
                       request[:source],
@@ -145,16 +145,16 @@ module ULOL
               preserve_source: preserve_source,
               operation_name: operation_name,
               activate_root_context: activate_root_context,
-              local_grid_v2: false
+              local_grid: false
             ).call
           end
 
-          def convert_cell_space_jobs_bulk_local_grid_v2(
+          def convert_cell_space_jobs_bulk_local_grid(
             jobs,
             fallback_target:,
             original_active_path:,
             preserve_source: nil,
-            operation_name: 'Convert Solid Groups to CellSpace Local Grid V2',
+            operation_name: 'Convert Solid Groups to CellSpace Local Grid',
             activate_root_context: true
           )
             build_batch_conversion_service(
@@ -164,7 +164,7 @@ module ULOL
               preserve_source: preserve_source,
               operation_name: operation_name,
               activate_root_context: activate_root_context,
-              local_grid_v2: true
+              local_grid: true
             ).call
           end
 
@@ -262,11 +262,11 @@ module ULOL
             )
           end
 
-          def cell_space_lifecycle_service_local_grid_v2
-            @cell_space_lifecycle_service_local_grid_v2 ||= CellSpaceLifecycleService.new(
+          def cell_space_lifecycle_service_local_grid
+            @cell_space_lifecycle_service_local_grid ||= CellSpaceLifecycleService.new(
               source_preparer: batch_cell_space_source_preparer,
-              context: CellSpaceBatchLocalGridContextV2.new(
-                coordinate_preparer: method(:initialize_cell_space_coordinates_local_grid_v2),
+              context: CellSpaceBatchLocalGridContext.new(
+                coordinate_preparer: method(:initialize_cell_space_coordinates_local_grid),
                 **batch_lifecycle_callbacks
               )
             )
@@ -406,7 +406,7 @@ module ULOL
             super
           end
 
-          def normalize_cell_space_create_request(request, cell_type:, category_code:, storey:, local_grid_v2:)
+          def normalize_cell_space_create_request(request, cell_type:, category_code:, storey:, local_grid:)
             if request.is_a?(Hash)
               source = request[:source]
               return {
@@ -414,7 +414,7 @@ module ULOL
                 cell_type: request.fetch(:cell_type, cell_type),
                 category_code: request.fetch(:category_code, category_code),
                 storey: request.fetch(:storey, storey),
-                local_grid_v2: request.fetch(:local_grid_v2, local_grid_v2)
+                local_grid: request.fetch(:local_grid, local_grid)
               }
             end
 
@@ -423,7 +423,7 @@ module ULOL
               cell_type: cell_type,
               category_code: category_code,
               storey: storey,
-              local_grid_v2: local_grid_v2
+              local_grid: local_grid
             }
           end
         end

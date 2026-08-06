@@ -6,9 +6,9 @@ module ULOL
       class BulkCellSpaceConversionService
         private
 
-        # CellSpace benchmark output is development diagnostics only. Runtime
-        # metrics stay available on Result#metrics for UI/result reporting.
-        def log_benchmark(metrics)
+        # CellSpace timing output is diagnostic only. Runtime metrics stay
+        # available on Result#metrics for UI/result reporting.
+        def log_timing_metrics(metrics)
           @logger.debug do
             [
               '----------------------------------------',

@@ -7,8 +7,8 @@ module Sketchup
   class Face; end unless const_defined?(:Face, false)
 end
 
-require_relative '../indoor3d/application/local_vertex_normalizer/legacy_kernel'
-require_relative '../indoor3d/application/local_vertex_normalizer/coplanar_face_component_merge_v2'
+require_relative '../indoor3d/application/local_vertex_normalizer/geometry_kernel'
+require_relative '../indoor3d/application/local_vertex_normalizer/coplanar_face_component_merge'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -61,9 +61,9 @@ module ULOL
             LocalVertexNormalizer,
             LocalVertexNormalizer.instance_method(:geometry_counts).owner
           )
-          refute_includes LocalVertexNormalizer.ancestors, CoplanarFaceComponentMergeV2
-          refute_respond_to CoplanarFaceComponentMergeV2, :geometry_counts
-          assert_respond_to CoplanarFaceComponentMergeV2, :coplanar_merge_face_summary
+          refute_includes LocalVertexNormalizer.ancestors, CoplanarFaceComponentMerge
+          refute_respond_to CoplanarFaceComponentMerge, :geometry_counts
+          assert_respond_to CoplanarFaceComponentMerge, :coplanar_merge_face_summary
         end
 
         def test_geometry_counts_reports_vertices_wire_edges_and_orientation_conflicts

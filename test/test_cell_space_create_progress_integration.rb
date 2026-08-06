@@ -84,7 +84,7 @@ module ULOL
             preserve_source: preserve_source,
             operation_name: operation_name,
             activate_root_context: activate_root_context,
-            local_grid_v2: false
+            local_grid: false
           ).call
         end
 

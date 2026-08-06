@@ -6,7 +6,7 @@
 # root = File.expand_path('..', File.dirname(core_file))
 # load File.join(root, 'dev', 'cell_space_direct_copy_ab.rb')
 #
-# A: CellSpaceDirectCopyAB.legacy! -> run normal Local Grid V2 Create
+# A: CellSpaceDirectCopyAB.legacy! -> run normal Local Grid Create
 # Reopen the same unconverted SKP without restarting SketchUp.
 # B: CellSpaceDirectCopyAB.direct! -> run the same Create again.
 

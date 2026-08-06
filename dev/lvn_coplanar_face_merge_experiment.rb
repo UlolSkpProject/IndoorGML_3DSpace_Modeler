@@ -10,13 +10,13 @@
 # Selected-Face diagnostic only (no geometry change):
 #   LvnCoplanarFaceMergeExperiment.diagnose_selected_faces
 
-require_relative '../indoor3d/application/local_vertex_normalizer/coplanar_face_component_merge_v2'
+require_relative '../indoor3d/application/local_vertex_normalizer/coplanar_face_component_merge'
 
 Object.send(:remove_const, :LvnCoplanarFaceMergeExperiment) if
   defined?(LvnCoplanarFaceMergeExperiment)
 
 module LvnCoplanarFaceMergeExperiment
-  CORE = ULOL::Indoor3DGmlModeler::IndoorCore::CoplanarFaceComponentMergeV2
+  CORE = ULOL::Indoor3DGmlModeler::IndoorCore::CoplanarFaceComponentMerge
   DEFAULT_ANGLE_TOLERANCE_DEG = CORE::DEFAULT_ANGLE_TOLERANCE_DEG
   DEFAULT_PLANE_TOLERANCE_MM = CORE::DEFAULT_PLANE_TOLERANCE_MM
 

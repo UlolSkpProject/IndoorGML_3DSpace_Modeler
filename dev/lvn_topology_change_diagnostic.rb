@@ -40,7 +40,7 @@ module ULOL
             TOLERANCE_MM,
             cell_spaces: targets,
             activate_edit_context: false,
-            debug: false,
+            diagnostics: false,
             failure_policy: :continue
           )
           elapsed_seconds = monotonic_time - started_at

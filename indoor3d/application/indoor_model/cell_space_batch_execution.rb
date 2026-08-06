@@ -74,13 +74,13 @@ module ULOL
             preserve_source:,
             operation_name:,
             activate_root_context:,
-            local_grid_v2:
+            local_grid:
           )
             model = @model || Sketchup.active_model
             active_path = ActivePathController.new(model, logger: IndoorCore::Logger)
             created = []
-            lifecycle = local_grid_v2 ?
-              cell_space_lifecycle_service_local_grid_v2 :
+            lifecycle = local_grid ?
+              cell_space_lifecycle_service_local_grid :
               cell_space_lifecycle_service
             target_entities = CellSpaceBatchTargetEntities.new(
               primal_group_resolver: proc { @primal_group }

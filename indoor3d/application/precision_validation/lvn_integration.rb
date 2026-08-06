@@ -21,7 +21,7 @@ module ULOL
             tolerance_mm = LocalVertexNormalizer::DEFAULT_TOLERANCE_MM,
             cell_spaces: nil,
             activate_edit_context: false,
-            debug: false,
+            diagnostics: false,
             report: false,
             report_path: nil,
             failure_policy: :rollback_all
@@ -36,7 +36,7 @@ module ULOL
                 tolerance_mm,
                 cell_spaces: cell_spaces,
                 activate_edit_context: activate_edit_context,
-                debug: debug,
+                diagnostics: diagnostics,
                 report: report,
                 report_path: report_path
               )
@@ -46,7 +46,7 @@ module ULOL
               tolerance_mm,
               cell_spaces: cell_spaces,
               activate_edit_context: activate_edit_context,
-              debug: debug,
+              diagnostics: diagnostics,
               report: report,
               report_path: report_path
             )
@@ -79,7 +79,7 @@ module ULOL
             tolerance_mm,
             cell_spaces:,
             activate_edit_context:,
-            debug:,
+            diagnostics:,
             report:,
             report_path:
           )
@@ -110,7 +110,7 @@ module ULOL
               plan[:rows],
               plan[:execution_targets],
               activate_edit_context: activate_edit_context,
-              debug: debug,
+              diagnostics: diagnostics,
               report: report,
               report_path: report_path,
               started_at: started_at
@@ -149,7 +149,7 @@ module ULOL
             initial_rows,
             execution_targets,
             activate_edit_context:,
-            debug:,
+            diagnostics:,
             report:,
             report_path:,
             started_at:
@@ -164,7 +164,7 @@ module ULOL
                 cell_space,
                 tolerance_mm,
                 activate_edit_context: activate_edit_context,
-                debug: debug,
+                diagnostics: diagnostics,
                 report: report
               )
               rows << row
@@ -197,7 +197,7 @@ module ULOL
               atomic_fallback: false
             )
 
-            if debug == true || report == true
+            if diagnostics == true || report == true
               timing_profile = {
                 enabled: true,
                 status: :success,
@@ -207,9 +207,9 @@ module ULOL
                 operation_body_seconds: nil,
                 operation_boundary_overhead_seconds: nil,
                 topology_sync_seconds: topology_sync_seconds,
-                cell_spaces: successful_results.filter_map { |row| row[:debug_profile] }
+                cell_spaces: successful_results.filter_map { |row| row[:diagnostic_profile] }
               }
-              normalization_report[:debug_profile] = timing_profile
+              normalization_report[:diagnostic_profile] = timing_profile
               if report == true
                 written_path = write_local_normalization_timing_report(
                   timing_profile,
@@ -248,7 +248,7 @@ module ULOL
             cell_space,
             tolerance_mm,
             activate_edit_context:,
-            debug:,
+            diagnostics:,
             report:
           )
             group = cell_space.valid_sketchup_group
@@ -267,7 +267,7 @@ module ULOL
                   group,
                   tolerance_mm,
                   activate_edit_context: activate_edit_context,
-                  debug: debug,
+                  diagnostics: diagnostics,
                   report: report
                 )
                 verify_local_normalization_postcondition!(

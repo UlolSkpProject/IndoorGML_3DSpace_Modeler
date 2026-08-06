@@ -100,7 +100,7 @@ module ULOL
           assert report[:skipped]
         end
 
-        def test_group_normalization_forwards_debug_option
+        def test_group_normalization_forwards_diagnostics_option
           group = Object.new
           cell_space = FakeCellSpace.new('cell-1', group)
           calls = []
@@ -118,13 +118,13 @@ module ULOL
               group,
               0.001,
               activate_edit_context: false,
-              debug: true
+              diagnostics: true
             )
           end
 
           assert_equal({ manifold: true }, result)
           assert_equal(
-            [[group, 0.001, { debug: true, manage_operation: false }]],
+            [[group, 0.001, { diagnostics: true, manage_operation: false }]],
             calls
           )
           assert_equal ['Normalize IndoorGML local vertices'], harness.operation_names
@@ -154,7 +154,7 @@ module ULOL
 
           assert_equal(
             [[group, 0.001, {
-              debug: false,
+              diagnostics: false,
               manage_operation: false,
               report: true,
               write_report: false

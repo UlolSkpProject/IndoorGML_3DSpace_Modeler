@@ -8,15 +8,15 @@ require_relative '../indoor3d/application/cell_space_lifecycle_service'
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
-      # The production Local Grid V2 context is loaded by IndoorModel before the
+      # The production Local Grid context is loaded by IndoorModel before the
       # batch module. This lightweight definition keeps this unit test focused on
       # lifecycle responsibility boundaries without loading SketchUp geometry code.
-      class CellSpaceLifecycleLocalGridContextV2 < CellSpaceLifecycleContext
+      class CellSpaceLifecycleLocalGridContext < CellSpaceLifecycleContext
         def initialize(coordinate_preparer:, **callbacks)
           @coordinate_preparer = coordinate_preparer
           super(**callbacks)
         end
-      end unless const_defined?(:CellSpaceLifecycleLocalGridContextV2, false)
+      end unless const_defined?(:CellSpaceLifecycleLocalGridContext, false)
 
       class IndoorModel; end unless const_defined?(:IndoorModel, false)
     end

@@ -288,11 +288,11 @@ module ULOL
             # Recreate services so their callback Method objects reflect the current
             # runtime and then wrap the actual callback objects held by each context.
             model.instance_variable_set(:@cell_space_lifecycle_service, nil)
-            model.instance_variable_set(:@cell_space_lifecycle_service_local_grid_v2, nil)
+            model.instance_variable_set(:@cell_space_lifecycle_service_local_grid, nil)
 
             services = []
             services << safe_call { model.send(:cell_space_lifecycle_service) }
-            services << safe_call { model.send(:cell_space_lifecycle_service_local_grid_v2) }
+            services << safe_call { model.send(:cell_space_lifecycle_service_local_grid) }
             services.compact.uniq.each { |service| instrument_service_callbacks!(service) }
 
             log_line("[CALLBACK PROBES] services=#{services.compact.uniq.length}")

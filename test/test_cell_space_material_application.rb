@@ -18,7 +18,7 @@ module ULOL
 
     module IndoorCore
       class CellSpaceLifecycleContext; end
-      class CellSpaceLifecycleLocalGridContextV2 < CellSpaceLifecycleContext; end
+      class CellSpaceLifecycleLocalGridContext < CellSpaceLifecycleContext; end
 
       class IndoorModel
       end

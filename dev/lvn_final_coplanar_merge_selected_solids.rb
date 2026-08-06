@@ -4,7 +4,7 @@
 # selected manifold solid. The preceding LocalVertexNormalizer stages are not run.
 #
 # This runner intentionally reuses the production final merge implementation in
-# final_coplanar_face_merge_v2.rb instead of keeping a second copy of the geometry
+# final_coplanar_face_merge.rb instead of keeping a second copy of the geometry
 # algorithm in dev/.
 #
 # Each selected solid is handled in its own SketchUp operation. Any failure aborts

@@ -6,7 +6,7 @@
 # root = File.expand_path('..', File.dirname(core_file))
 # load File.join(root, 'dev', 'transition_builder_deep_profile.rb')
 #
-# Then run the normal Local Grid V2 CellSpace Create once.
+# Then run the normal Local Grid CellSpace Create once.
 
 module ULOL
   module Indoor3DGmlModeler

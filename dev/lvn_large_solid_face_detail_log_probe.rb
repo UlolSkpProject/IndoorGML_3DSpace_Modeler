@@ -129,15 +129,15 @@ module ULOL
 
         def cache_before(instance, outer, holes, drop_axis)
           cache = instance.instance_variable_get(
-            :@local_vertex_normalizer_exact_polygon_cache_v2
+            :@local_vertex_normalizer_exact_polygon_cache
           )
           stats = instance.instance_variable_get(
-            :@local_vertex_normalizer_exact_polygon_cache_stats_v2
+            :@local_vertex_normalizer_exact_polygon_cache_stats
           )
           return { cache_enabled: false, cache_hit: false } unless cache && stats
 
           key = instance.send(
-            :exact_polygon_ordered_cache_key_v2,
+            :exact_polygon_ordered_cache_key,
             outer,
             holes,
             drop_axis
@@ -159,10 +159,10 @@ module ULOL
 
         def cache_after(instance)
           cache = instance.instance_variable_get(
-            :@local_vertex_normalizer_exact_polygon_cache_v2
+            :@local_vertex_normalizer_exact_polygon_cache
           )
           stats = instance.instance_variable_get(
-            :@local_vertex_normalizer_exact_polygon_cache_stats_v2
+            :@local_vertex_normalizer_exact_polygon_cache_stats
           )
           {
             cache_entries_after: cache&.length,

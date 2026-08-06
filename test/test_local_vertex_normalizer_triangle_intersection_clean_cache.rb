@@ -28,13 +28,13 @@ module ULOL
   end
 end
 
-require_relative '../indoor3d/application/local_vertex_normalizer/triangle_intersection_clean_cache_v2'
+require_relative '../indoor3d/application/local_vertex_normalizer/triangle_intersection_clean_cache'
 
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class LocalVertexNormalizerTriangleIntersectionCleanCacheTest < Minitest::Test
-        CachePolicy = LocalVertexNormalizerTriangleIntersectionCleanCacheV2
+        CachePolicy = LocalVertexNormalizerTriangleIntersectionCleanCache
 
         def test_minimum_triangle_threshold_is_eight
           assert_equal 8, CachePolicy::TRIANGLE_INTERSECTION_CLEAN_CACHE_MIN_TRIANGLES
@@ -99,15 +99,15 @@ module ULOL
         def build_normalizer(&result_factory)
           normalizer = LocalVertexNormalizer.new(result_factory)
           normalizer.instance_variable_set(
-            :@local_vertex_normalizer_triangle_intersection_clean_cache_v2,
+            :@local_vertex_normalizer_triangle_intersection_clean_cache,
             {}
           )
           normalizer.instance_variable_set(
-            :@local_vertex_normalizer_triangle_intersection_clean_cache_order_v2,
+            :@local_vertex_normalizer_triangle_intersection_clean_cache_order,
             []
           )
           normalizer.instance_variable_set(
-            :@local_vertex_normalizer_triangle_intersection_clean_cache_stats_v2,
+            :@local_vertex_normalizer_triangle_intersection_clean_cache_stats,
             {
               hits: 0,
               misses: 0,
@@ -123,7 +123,7 @@ module ULOL
 
         def cache_stats(normalizer)
           normalizer.instance_variable_get(
-            :@local_vertex_normalizer_triangle_intersection_clean_cache_stats_v2
+            :@local_vertex_normalizer_triangle_intersection_clean_cache_stats
           )
         end
 

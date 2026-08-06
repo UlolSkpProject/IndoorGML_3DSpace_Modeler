@@ -55,7 +55,7 @@ module ULOL
             tolerance_mm = LocalVertexNormalizer::DEFAULT_TOLERANCE_MM,
             cell_spaces: nil,
             activate_edit_context: false,
-            debug: false,
+            diagnostics: false,
             report: false,
             report_path: nil
           )
@@ -89,7 +89,7 @@ module ULOL
                   targets: targets,
                   report_path: report_path
                 )
-                empty_report[:debug_profile] = timing_profile
+                empty_report[:diagnostic_profile] = timing_profile
                 empty_report[:timing_report_path] = written_path
                 puts "[LVN REPORT] SUCCESS total=0.000000s path=#{written_path}"
               end
@@ -100,7 +100,7 @@ module ULOL
             # not accept activate_edit_context when the default mode is used.
             normalization_options = { cell_spaces: unnormalized }
             normalization_options[:activate_edit_context] = true if activate_edit_context
-            normalization_options[:debug] = true if debug == true
+            normalization_options[:diagnostics] = true if diagnostics == true
             normalization_options[:report] = true if report == true
             normalization_options[:report_path] = report_path if report_path
             normalization_report = local_vertex_normalize(
@@ -126,12 +126,12 @@ module ULOL
             tolerance_mm = LocalVertexNormalizer::DEFAULT_TOLERANCE_MM,
             cell_spaces: nil,
             activate_edit_context: false,
-            debug: false,
+            diagnostics: false,
             report: false,
             report_path: nil
           )
             report_requested = report == true
-            verbose_debug = debug == true && !report_requested
+            verbose_diagnostics = diagnostics == true && !report_requested
             results = []
             topology_metrics = nil
             topology_sync_seconds = 0.0
@@ -141,13 +141,13 @@ module ULOL
             topology_started_at = nil
             operation_started_at = nil
             operation_total_seconds = 0.0
-            LocalVertexNormalizer.last_debug_profile = nil if report_requested
+            LocalVertexNormalizer.last_diagnostic_profile = nil if report_requested
             targets = normalization_targets(cell_spaces)
             if targets.empty?
               raise 'No valid CellSpace found for local vertex normalization'
             end
 
-            puts "[LVN DEBUG] BATCH START cells=#{targets.length}" if verbose_debug
+            puts "[LVN DIAGNOSTIC] BATCH START cells=#{targets.length}" if verbose_diagnostics
 
             operation_started_at = local_normalization_monotonic_time
             with_indoor_model_operation('IndoorGML Local Vertex Normalize') do
@@ -164,7 +164,7 @@ module ULOL
                     group,
                     tolerance_mm,
                     activate_edit_context: activate_edit_context,
-                    debug: debug,
+                    diagnostics: diagnostics,
                     report: report_requested
                   )
 
@@ -174,13 +174,13 @@ module ULOL
                 end
 
                 topology_started_at = local_normalization_monotonic_time
-                puts '[LVN DEBUG] BATCH START topology_synchronize_all' if verbose_debug
+                puts '[LVN DIAGNOSTIC] BATCH START topology_synchronize_all' if verbose_diagnostics
                 topology_metrics = topology_coordinator.synchronize_all
                 topology_sync_seconds =
                   local_normalization_monotonic_time - topology_started_at
-                if verbose_debug
+                if verbose_diagnostics
                   puts format(
-                    '[LVN DEBUG] BATCH END   topology_synchronize_all duration=%.6fs',
+                    '[LVN DIAGNOSTIC] BATCH END   topology_synchronize_all duration=%.6fs',
                     topology_sync_seconds
                   )
                 end
@@ -201,7 +201,7 @@ module ULOL
               topology_metrics,
               activate_edit_context: activate_edit_context
             )
-            if debug == true || report_requested
+            if diagnostics == true || report_requested
               total_seconds = local_normalization_monotonic_time - batch_started_at
               timing_profile = {
                 enabled: true,
@@ -212,9 +212,9 @@ module ULOL
                 operation_boundary_overhead_seconds:
                   operation_total_seconds - operation_body_seconds,
                 topology_sync_seconds: topology_sync_seconds,
-                cell_spaces: results.filter_map { |result| result[:debug_profile] }
+                cell_spaces: results.filter_map { |result| result[:diagnostic_profile] }
               }
-              normalization_report[:debug_profile] = timing_profile
+              normalization_report[:diagnostic_profile] = timing_profile
               if report_requested
                 written_path = write_local_normalization_timing_report(
                   timing_profile,
@@ -230,7 +230,7 @@ module ULOL
                 )
               else
                 puts format(
-                  '[LVN DEBUG] BATCH END total=%.6fs operation=%.6fs ' \
+                  '[LVN DIAGNOSTIC] BATCH END total=%.6fs operation=%.6fs ' \
                   'operation_boundary=%.6fs topology_sync=%.6fs',
                   total_seconds,
                   operation_total_seconds,
@@ -252,8 +252,8 @@ module ULOL
                 if topology_started_at && topology_sync_seconds.zero?
                   topology_sync_seconds = now - topology_started_at
                 end
-                profiles = Array(results).filter_map { |result| result[:debug_profile] }
-                failed_profile = LocalVertexNormalizer.last_debug_profile
+                profiles = Array(results).filter_map { |result| result[:diagnostic_profile] }
+                failed_profile = LocalVertexNormalizer.last_diagnostic_profile
                 profiles << failed_profile if failed_profile && !profiles.include?(failed_profile)
                 timing_profile = {
                   enabled: true,
@@ -311,7 +311,7 @@ module ULOL
             group,
             tolerance_mm,
             activate_edit_context:,
-            debug: false,
+            diagnostics: false,
             report: false
           )
             with_unlocked(group) do
@@ -320,7 +320,7 @@ module ULOL
                 # Opening another operation for every Solid can leave dialog and
                 # observer state unresponsive after the batch commit.
                 normalization_options = {
-                  debug: debug
+                  diagnostics: diagnostics
                 }
                 if report == true
                   normalization_options[:report] = true
@@ -358,7 +358,7 @@ module ULOL
             end
           end
 
-          # Legacy opt-in path activation. Default normalization never calls this.
+          # Compatibility opt-in path activation. Default normalization never calls this.
           def with_local_normalization_active_path(group)
             model = @model || Sketchup.active_model
             return yield unless model&.respond_to?(:active_path=)
@@ -604,7 +604,7 @@ module ULOL
             return nil unless report
 
             report.reject do |key, _value|
-              [:cell_spaces, :debug_profile].include?(key)
+              [:cell_spaces, :diagnostic_profile].include?(key)
             end
           end
 

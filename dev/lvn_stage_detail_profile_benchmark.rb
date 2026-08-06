@@ -32,24 +32,24 @@ module LvnStageDetailProfileBenchmark
   module StageProfilerExtensions
     private
 
-    def normalize_entity_before_final_coplanar_face_merge_v2(entity)
-      measure_debug_stage(:core_before_final_coplanar_merge) { super }
+    def normalize_entity_before_final_coplanar_face_merge(entity)
+      measure_diagnostic_stage(:core_before_final_coplanar_merge) { super }
     end
 
-    def normalize_entity_before_normalized_input_fast_path_v2(entity)
-      measure_debug_stage(:full_rebuild_pipeline) { super }
+    def normalize_entity_before_normalized_input_fast_path(entity)
+      measure_diagnostic_stage(:full_rebuild_pipeline) { super }
     end
 
-    def normalized_input_fast_path_candidate_v2?(entity)
-      measure_debug_stage(:fast_path_candidate_probe) { super }
+    def normalized_input_fast_path_candidate?(entity)
+      measure_diagnostic_stage(:fast_path_candidate_probe) { super }
     end
 
-    def try_normalized_input_fast_path_v2(entity)
-      measure_debug_stage(:fast_path_exact_validation) { super }
+    def try_normalized_input_fast_path(entity)
+      measure_diagnostic_stage(:fast_path_exact_validation) { super }
     end
 
     def snapshot_final_coplanar_baseline(entities)
-      measure_debug_stage(:final_coplanar_baseline_snapshot_total) { super }
+      measure_diagnostic_stage(:final_coplanar_baseline_snapshot_total) { super }
     end
 
     def normalize_entity(entity)
@@ -57,7 +57,7 @@ module LvnStageDetailProfileBenchmark
       @lvn_stage_detail_profile_v1 = new_lvn_stage_detail_profile_v1
       super
     ensure
-      profile = @local_vertex_normalizer_debug_profile
+      profile = @local_vertex_normalizer_diagnostic_profile
       if profile && @lvn_stage_detail_profile_v1
         profile[:hotspot_detail] = deep_dup_lvn_stage_detail_profile_v1(
           @lvn_stage_detail_profile_v1
@@ -68,7 +68,7 @@ module LvnStageDetailProfileBenchmark
 
     def source_boundary_triangle_records(face, source_face_key)
       detail_add_v1(:snapshot, :source_boundary_face_calls)
-      result = measure_debug_stage(
+      result = measure_diagnostic_stage(
         :detail_source_boundary_face_total,
         emit: false,
         record_event: false
@@ -85,7 +85,7 @@ module LvnStageDetailProfileBenchmark
         :input_boundary_vertex_count,
         loops.sum { |loop| Array(loop).length }
       )
-      result = measure_debug_stage(
+      result = measure_diagnostic_stage(
         :detail_loop_classification,
         emit: false,
         record_event: false
@@ -103,9 +103,9 @@ module LvnStageDetailProfileBenchmark
         :hole_vertex_count,
         holes.sum { |hole| Array(hole).length }
       )
-      cache_stats = @local_vertex_normalizer_exact_polygon_cache_stats_v2
+      cache_stats = @local_vertex_normalizer_exact_polygon_cache_stats
       before = cache_stats && cache_stats.dup
-      result = measure_debug_stage(
+      result = measure_diagnostic_stage(
         :detail_exact_polygon_total,
         emit: false,
         record_event: false
@@ -125,27 +125,27 @@ module LvnStageDetailProfileBenchmark
       )
     end
 
-    def exact_polygon_ordered_cache_key_v2(outer, holes, drop_axis)
+    def exact_polygon_ordered_cache_key(outer, holes, drop_axis)
       detail_add_v1(:snapshot, :exact_polygon_cache_key_calls)
-      measure_debug_stage(
+      measure_diagnostic_stage(
         :detail_exact_polygon_cache_key,
         emit: false,
         record_event: false
       ) { super }
     end
 
-    def exact_polygon_cached_triangles_copy_v2(triangles)
+    def exact_polygon_cached_triangles_copy(triangles)
       detail_add_v1(:snapshot, :exact_polygon_cache_store_copy_calls)
-      measure_debug_stage(
+      measure_diagnostic_stage(
         :detail_exact_polygon_cache_store_copy,
         emit: false,
         record_event: false
       ) { super }
     end
 
-    def exact_polygon_cached_triangles_dup_v2(cached)
+    def exact_polygon_cached_triangles_dup(cached)
       detail_add_v1(:snapshot, :exact_polygon_cache_hit_copy_calls)
-      measure_debug_stage(
+      measure_diagnostic_stage(
         :detail_exact_polygon_cache_hit_copy,
         emit: false,
         record_event: false
@@ -154,7 +154,7 @@ module LvnStageDetailProfileBenchmark
 
     def bridge_exact_hole(polygon, hole, outer_2d, holes_2d, drop_axis)
       detail_add_v1(:snapshot, :hole_bridge_calls)
-      measure_debug_stage(
+      measure_diagnostic_stage(
         :detail_hole_bridge,
         emit: false,
         record_event: false
@@ -164,7 +164,7 @@ module LvnStageDetailProfileBenchmark
     def triangulate_exact_weak_polygon(points, drop_axis)
       detail_add_v1(:snapshot, :ear_clipping_calls)
       detail_add_v1(:snapshot, :ear_clipping_input_vertices, points.length)
-      result = measure_debug_stage(
+      result = measure_diagnostic_stage(
         :detail_ear_clipping,
         emit: false,
         record_event: false
@@ -176,7 +176,7 @@ module LvnStageDetailProfileBenchmark
     def optimize_exact_patch_triangulation(triangles, constraints, drop_axis)
       detail_add_v1(:snapshot, :lawson_flip_calls)
       detail_add_v1(:snapshot, :lawson_flip_input_triangles, triangles.length)
-      result = measure_debug_stage(
+      result = measure_diagnostic_stage(
         :detail_lawson_flip,
         emit: false,
         record_event: false
@@ -192,7 +192,7 @@ module LvnStageDetailProfileBenchmark
     )
       detail_add_v1(:snapshot, :source_boundary_validation_calls)
       detail_add_v1(:snapshot, :source_boundary_validation_triangles, records.length)
-      measure_debug_stage(
+      measure_diagnostic_stage(
         :detail_source_boundary_validation_total,
         emit: false,
         record_event: false
@@ -209,7 +209,7 @@ module LvnStageDetailProfileBenchmark
         :possible_pair_count,
         (triangles.length * (triangles.length - 1)) / 2
       )
-      measure_debug_stage(
+      measure_diagnostic_stage(
         :detail_intersection_validation_total,
         emit: false,
         record_event: false
@@ -219,9 +219,9 @@ module LvnStageDetailProfileBenchmark
     def collect_triangle_intersection_failures(triangles, partition_ids: nil)
       detail_add_v1(:intersection, :collect_calls)
       detail_add_v1(:intersection, :collect_triangle_count, triangles.length)
-      clean_stats = @local_vertex_normalizer_triangle_intersection_clean_cache_stats_v2
+      clean_stats = @local_vertex_normalizer_triangle_intersection_clean_cache_stats
       before = clean_stats && clean_stats.dup
-      result = measure_debug_stage(
+      result = measure_diagnostic_stage(
         :detail_intersection_collect_total,
         emit: false,
         record_event: false
@@ -256,9 +256,9 @@ module LvnStageDetailProfileBenchmark
       )
     end
 
-    def triangle_intersection_clean_cache_key_v2(triangles)
+    def triangle_intersection_clean_cache_key(triangles)
       detail_add_v1(:intersection, :clean_cache_key_calls)
-      measure_debug_stage(
+      measure_diagnostic_stage(
         :detail_intersection_clean_cache_key,
         emit: false,
         record_event: false
@@ -274,7 +274,7 @@ module LvnStageDetailProfileBenchmark
                     block.call(*arguments)
                   end
                 end
-      measure_debug_stage(
+      measure_diagnostic_stage(
         :detail_intersection_broad_phase_total,
         emit: false,
         record_event: false
@@ -287,7 +287,7 @@ module LvnStageDetailProfileBenchmark
 
     def exact_triangle_intersection_allowed?(triangle_a, triangle_b)
       detail_add_v1(:intersection, :exact_predicate_calls)
-      measure_debug_stage(
+      measure_diagnostic_stage(
         :detail_intersection_exact_predicate_total,
         emit: false,
         record_event: false
@@ -296,20 +296,20 @@ module LvnStageDetailProfileBenchmark
 
     def coplanar_triangle_intersection_allowed?(triangle_a, triangle_b, shared)
       detail_add_v1(:intersection, :coplanar_predicate_calls)
-      measure_debug_stage(
+      measure_diagnostic_stage(
         :detail_intersection_coplanar_total,
         emit: false,
         record_event: false
       ) { super }
     end
 
-    def coplanar_shared_edge_intersection_decision_v2(
+    def coplanar_shared_edge_intersection_decision(
       triangle_a,
       triangle_b,
       shared
     )
       detail_add_v1(:intersection, :shared_edge_fast_path_calls)
-      result = measure_debug_stage(
+      result = measure_diagnostic_stage(
         :detail_intersection_shared_edge_fast_path,
         emit: false,
         record_event: false
@@ -327,7 +327,7 @@ module LvnStageDetailProfileBenchmark
 
     def convex_polygon_intersection(subject, clip)
       detail_add_v1(:intersection, :rational_clipping_calls)
-      measure_debug_stage(
+      measure_diagnostic_stage(
         :detail_intersection_rational_clipping,
         emit: false,
         record_event: false
@@ -343,7 +343,7 @@ module LvnStageDetailProfileBenchmark
       line_direction
     )
       detail_add_v1(:intersection, :noncoplanar_predicate_calls)
-      measure_debug_stage(
+      measure_diagnostic_stage(
         :detail_intersection_noncoplanar_total,
         emit: false,
         record_event: false
@@ -357,7 +357,7 @@ module LvnStageDetailProfileBenchmark
       direction
     )
       detail_add_v1(:intersection, :plane_interval_calls)
-      measure_debug_stage(
+      measure_diagnostic_stage(
         :detail_intersection_plane_interval,
         emit: false,
         record_event: false
@@ -524,7 +524,7 @@ module LvnStageDetailProfileBenchmark
       timing_semantics: {
         built_in_profile: 'inclusive nested stage timing',
         reported_stage_percentages: 'exclusive timing reconstructed from event intervals',
-        percentage_denominator: 'sum of debug_profile total_seconds for all targets',
+        percentage_denominator: 'sum of diagnostic_profile total_seconds for all targets',
         profiler_changes_geometry_decisions: false,
         profiling_overhead_included: true,
         operation_abort_in_profile_total: false,
@@ -568,11 +568,11 @@ module LvnStageDetailProfileBenchmark
         report: true,
         write_report: false
       )
-      profile = result[:debug_profile] if result.is_a?(Hash)
+      profile = result[:diagnostic_profile] if result.is_a?(Hash)
     rescue StandardError => caught
       error = caught
-      profile = lvn_class.last_debug_profile if
-        lvn_class.respond_to?(:last_debug_profile)
+      profile = lvn_class.last_diagnostic_profile if
+        lvn_class.respond_to?(:last_diagnostic_profile)
     ensure
       outer_finished = Process.clock_gettime(CLOCK)
       allocation_after = GC.stat(:total_allocated_objects)

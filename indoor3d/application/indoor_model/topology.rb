@@ -454,7 +454,7 @@ module ULOL
           def topology_coordinator
             @topology_coordinator ||= TopologyCoordinator.new(
               adjacency_service: @adjacency_service,
-              dirty_queue: legacy_dirty_topology_queue
+              dirty_queue: compatibility_dirty_topology_queue
             )
           end
 
@@ -462,7 +462,7 @@ module ULOL
             topology_coordinator.dirty_queue
           end
 
-          def legacy_dirty_topology_queue
+          def compatibility_dirty_topology_queue
             queue = DirtyTopologyQueue.new
             return queue unless instance_variable_defined?(:@dirty_cell_space_pids) ||
                                 instance_variable_defined?(:@cell_space_sync_scheduled) ||

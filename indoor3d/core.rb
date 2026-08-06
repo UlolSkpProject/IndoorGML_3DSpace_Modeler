@@ -39,7 +39,7 @@ module ULOL
     require_relative 'application/storey_filter'
     require_relative 'application/local_vertex_normalizer'
     require_relative 'application/local_vertex_normalizer/coplanar_shared_edge_groups'
-    require_relative 'application/local_vertex_normalizer/pipeline_v2'
+    require_relative 'application/local_vertex_normalizer/pipeline'
 
     require_relative 'infrastructure/scene/scene_group_guard'
     require_relative 'infrastructure/scene/entity_copy_helper'

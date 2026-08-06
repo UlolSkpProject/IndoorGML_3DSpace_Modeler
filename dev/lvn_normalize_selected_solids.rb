@@ -67,7 +67,7 @@ module LvnNormalizeSelectedSolids
           ),
           grid_altitude_sliver_retriangulation: compact_report(
             report_value(report, :grid_altitude_sliver_retriangulation) ||
-              normalizer.instance_variable_get(:@grid_altitude_sliver_retriangulation_stats_v2)
+              normalizer.instance_variable_get(:@grid_altitude_sliver_retriangulation_stats)
           ),
           final_coplanar_face_merge: final_coplanar
         )

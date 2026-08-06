@@ -76,7 +76,7 @@ module ULOL
           post_cleanup_snapshot_reuse_decision
           verify_normalized_surface_equivalence!
           build_normalization_report
-          augment_v2_normalization_report!
+          augment_normalization_report!
         ].freeze
 
         class DiagnosticLog

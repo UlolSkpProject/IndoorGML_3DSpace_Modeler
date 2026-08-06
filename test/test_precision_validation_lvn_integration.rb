@@ -192,7 +192,7 @@ module ULOL
 
           assert_equal :baseline, result
           assert_equal [[0.002], { cell_spaces: [:cell], activate_edit_context: false,
-                                  debug: false, report: false, report_path: nil }],
+                                  diagnostics: false, report: false, report_path: nil }],
                        model.baseline_call
         end
 
@@ -297,7 +297,7 @@ module ULOL
           refute PrecisionValidation::LvnState.failed?(group)
         end
 
-        def test_false_state_removes_legacy_signature_attribute
+        def test_false_state_removes_compatibility_signature_attribute
           group = Group.new('legacy')
           group.set_attribute('IndoorGml', 'lvn_failed', true)
           group.set_attribute('IndoorGml', 'lvn_failed_geometry_signature', 'legacy-value')

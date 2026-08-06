@@ -16,7 +16,7 @@ module ULOL
           raise 'Select a solid first' unless entity
 
           bench = LvnOptimizationBaselineBenchmark
-          cache = LocalVertexNormalizerTriangleIntersectionCleanCacheV2
+          cache = LocalVertexNormalizerTriangleIntersectionCleanCache
           original = cache.const_get(CONST_NAME, false)
           pid = bench.persistent_id(entity)
           source_signature = bench.brep_signature(entity)

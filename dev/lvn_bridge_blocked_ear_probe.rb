@@ -371,11 +371,11 @@ module ULOL
             drop_axis
           )
             broad_phase_module =
-              LocalVertexNormalizerExactPolygonEarBroadPhaseV2
+              LocalVertexNormalizerExactPolygonEarBroadPhase
             threshold = broad_phase_module::
               EXACT_POLYGON_EAR_BROAD_PHASE_THRESHOLD
-            stats = @local_vertex_normalizer_exact_ear_broad_phase_stats_v2
-            context = @local_vertex_normalizer_exact_ear_broad_phase_context_v2
+            stats = @local_vertex_normalizer_exact_ear_broad_phase_stats
+            context = @local_vertex_normalizer_exact_ear_broad_phase_context
             unless stats && context && projected && polygon.length >= threshold
               return [
                 exact_polygon_ear?(
@@ -390,7 +390,7 @@ module ULOL
             end
 
             stats[:ear_calls] += 1
-            broad_phase = exact_polygon_ear_broad_phase_index_v2(
+            broad_phase = exact_polygon_ear_broad_phase_index(
               projected,
               context,
               stats
@@ -419,10 +419,10 @@ module ULOL
               point_c
             ).positive?
 
-            triangle_bounds = exact_polygon_ear_bounds_2d_v2(
+            triangle_bounds = exact_polygon_ear_bounds_2d(
               [point_a, point_b, point_c]
             )
-            point_indices = exact_polygon_ear_point_candidates_v2(
+            point_indices = exact_polygon_ear_point_candidates(
               broad_phase,
               triangle_bounds,
               stats
@@ -448,10 +448,10 @@ module ULOL
               end
             end
 
-            diagonal_bounds = exact_polygon_ear_bounds_2d_v2(
+            diagonal_bounds = exact_polygon_ear_bounds_2d(
               [point_a, point_c]
             )
-            edge_indices = exact_polygon_ear_edge_candidates_v2(
+            edge_indices = exact_polygon_ear_edge_candidates(
               broad_phase,
               diagonal_bounds,
               stats
@@ -484,7 +484,7 @@ module ULOL
 
             [true, nil, nil]
           rescue StandardError => error
-            exact_polygon_ear_broad_phase_fallback_v2(stats, error) if stats
+            exact_polygon_ear_broad_phase_fallback(stats, error) if stats
             [
               exact_polygon_ear?(
                 polygon,
@@ -699,7 +699,7 @@ new_install = <<-'RUBY'
               ).owner.to_s,
             exact_broad_phase_owner:
               LocalVertexNormalizer.instance_method(
-                :exact_polygon_ear_broad_phase_index_v2
+                :exact_polygon_ear_broad_phase_index
               ).owner.to_s
           }
         )

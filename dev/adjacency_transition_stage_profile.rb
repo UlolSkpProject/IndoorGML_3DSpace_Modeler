@@ -6,7 +6,7 @@
 # root = File.expand_path('..', File.dirname(core_file))
 # load File.join(root, 'dev', 'adjacency_transition_stage_profile.rb')
 #
-# Then run the normal Local Grid V2 CellSpace Create once.
+# Then run the normal Local Grid CellSpace Create once.
 
 module ULOL
   module Indoor3DGmlModeler

@@ -5,7 +5,7 @@ module ULOL
     module IndoorCore
       class EditorSession
         class OverlayController
-          LEGACY_EDIT_MODE_OVERLAY_ID = 'ulol.indoor3dgml_modeler.edit_mode_overlay'
+          COMPATIBILITY_EDIT_MODE_OVERLAY_ID = 'ulol.indoor3dgml_modeler.edit_mode_overlay'
 
           def initialize(
             indoor_model:,
@@ -155,7 +155,7 @@ module ULOL
             stale_ids = [
               IndoorModeScreenOverlay::OVERLAY_ID,
               DualGraphSpaceOverlay::OVERLAY_ID,
-              LEGACY_EDIT_MODE_OVERLAY_ID
+              COMPATIBILITY_EDIT_MODE_OVERLAY_ID
             ]
             if defined?(ValidationErrorGeometryOverlay::OVERLAY_ID)
               stale_ids << ValidationErrorGeometryOverlay::OVERLAY_ID

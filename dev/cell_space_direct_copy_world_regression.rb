@@ -68,7 +68,7 @@ module ULOL
             active_path = ActivePathController.new(model, logger: IndoorCore::Logger).snapshot
             jobs = CellSpaceConversionJobBuilder.apply_fallback_storey(@jobs, STOREY)
             started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-            @result = indoor_model.convert_cell_space_jobs_bulk_local_grid_v2(
+            @result = indoor_model.convert_cell_space_jobs_bulk_local_grid(
               jobs,
               fallback_target: [CellSpaceType::GENERAL, CATEGORY],
               original_active_path: active_path,
@@ -362,8 +362,8 @@ module ULOL
           def ensure_ready!
             raise 'This script must run inside SketchUp' unless defined?(Sketchup) && Sketchup.respond_to?(:active_model)
             raise 'IndoorGML extension is not fully loaded' unless defined?(IndoorModel) && IndoorModel.respond_to?(:current)
-            unless IndoorModel.current.respond_to?(:convert_cell_space_jobs_bulk_local_grid_v2)
-              raise 'Local Grid V2 bulk conversion entrypoint is unavailable'
+            unless IndoorModel.current.respond_to?(:convert_cell_space_jobs_bulk_local_grid)
+              raise 'Local Grid bulk conversion entrypoint is unavailable'
             end
             true
           end

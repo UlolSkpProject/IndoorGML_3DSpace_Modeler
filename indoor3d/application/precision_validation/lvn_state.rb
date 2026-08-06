@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'digest'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -7,7 +9,7 @@ module ULOL
         module LvnState
           DICTIONARY_NAME = 'IndoorGml'
           FAILED_KEY = 'lvn_failed'
-          LEGACY_FAILED_SIGNATURE_KEY = 'lvn_failed_geometry_signature'
+          COMPATIBILITY_FAILED_SIGNATURE_KEY = 'lvn_failed_geometry_signature'
           SIGNATURE_VERSION = 'lvn-geometry-v1'
 
           module_function
@@ -64,22 +66,19 @@ module ULOL
             target = failed == true
             raw_value = group.get_attribute(DICTIONARY_NAME, FAILED_KEY)
             current = raw_value == true || raw_value.to_s.casecmp('true').zero?
-            legacy_signature = group.get_attribute(
+            compatibility_signature = group.get_attribute(
               DICTIONARY_NAME,
-              LEGACY_FAILED_SIGNATURE_KEY
+              COMPATIBILITY_FAILED_SIGNATURE_KEY
             )
 
-            changed = raw_value.nil? || current != target || !legacy_signature.nil?
+            changed = raw_value.nil? || current != target || !compatibility_signature.nil?
             return false unless changed
 
-            # `signature` remains accepted only for call-site compatibility. It is
-            # deliberately not persisted.
-            signature
             group.set_attribute(DICTIONARY_NAME, FAILED_KEY, target)
             if group.respond_to?(:delete_attribute)
               group.delete_attribute(
                 DICTIONARY_NAME,
-                LEGACY_FAILED_SIGNATURE_KEY
+                COMPATIBILITY_FAILED_SIGNATURE_KEY
               )
             end
             true

@@ -11,7 +11,7 @@ module ULOL
           # Full-Solid Boolean engine. The clipped-mesh pipeline remains the
           # default for pairs above the measured complexity threshold.
           module AdaptiveRouting
-            # The real-model A/B benchmark observed the performance crossover
+            # Real-model performance measurements observed the crossover
             # between 75 and 76 maximum input faces. Keep the direct Full-Solid
             # route on the faster side of that measured boundary.
             SIMPLE_SOLID_FACE_THRESHOLD = 75

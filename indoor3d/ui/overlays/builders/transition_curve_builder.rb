@@ -26,7 +26,7 @@ module ULOL
           @render_transition_line_points_dirty = true
         end
 
-        # Explicit hard reset for lifecycle/reload/debug cases that need all
+        # Explicit hard reset for lifecycle/reload/diagnostic cases that need all
         # per-transition render geometry released immediately.
         def clear_cache
           @transition_render_segment_cache&.clear

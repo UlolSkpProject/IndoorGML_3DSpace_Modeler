@@ -273,7 +273,7 @@ module ULOL
           assert_equal [[:commit_operation]], model.calls.drop(1)
         end
 
-        def test_debug_normalization_records_stage_timings
+        def test_diagnostics_normalization_records_stage_timings
           model = FakeModel.new
           instance = normalizer(model: model)
           instance.define_singleton_method(:validate_entity!) { |_entity| true }
@@ -289,28 +289,28 @@ module ULOL
           end
 
           output, = capture_io do
-            @debug_result = instance.normalize(Object.new, debug: true)
+            @diagnostics_result = instance.normalize(Object.new, diagnostics: true)
           end
-          profile = @debug_result[:debug_profile]
+          profile = @diagnostics_result[:diagnostic_profile]
 
           assert_equal :success, profile[:status]
           assert_operator profile[:total_seconds], :>=, 0.0
           assert_equal 1, profile.dig(:stages, :operation_start, :calls)
           assert_equal 1, profile.dig(:stages, :operation_commit, :calls)
           assert_equal 1, profile.dig(:stages, :operation_total, :calls)
-          assert_match(/\[LVN DEBUG\] PROFILE START/, output)
-          assert_match(/\[LVN DEBUG\] PROFILE SUCCESS/, output)
-          assert_same profile, LocalVertexNormalizer.last_debug_profile
+          assert_match(/\[LVN DIAGNOSTIC\] PROFILE START/, output)
+          assert_match(/\[LVN DIAGNOSTIC\] PROFILE SUCCESS/, output)
+          assert_same profile, LocalVertexNormalizer.last_diagnostic_profile
         ensure
-          @debug_result = nil
+          @diagnostics_result = nil
         end
 
-        def test_aggregate_only_debug_stage_does_not_append_an_event
+        def test_aggregate_only_diagnostics_stage_does_not_append_an_event
           model = FakeModel.new
           instance = normalizer(model: model)
           instance.define_singleton_method(:validate_entity!) { |_entity| true }
           instance.define_singleton_method(:normalize_entity) do |_entity|
-            measure_debug_stage(
+            measure_diagnostic_stage(
               :aggregate_only_stage,
               emit: false,
               record_event: false
@@ -319,7 +319,7 @@ module ULOL
           end
 
           result = instance.normalize(Object.new, report: true, write_report: false)
-          profile = result[:debug_profile]
+          profile = result[:diagnostic_profile]
 
           assert_equal 1, profile.dig(:stages, :aggregate_only_stage, :calls)
           refute(
@@ -341,7 +341,7 @@ module ULOL
           assert_empty model.calls
         end
 
-        def test_debug_normalization_keeps_failed_profile_after_rollback
+        def test_diagnostics_normalization_keeps_failed_profile_after_rollback
           model = FakeModel.new
           instance = normalizer(model: model)
           instance.define_singleton_method(:validate_entity!) { |_entity| true }
@@ -351,18 +351,18 @@ module ULOL
 
           capture_io do
             error = assert_raises(RuntimeError) do
-              instance.normalize(Object.new, debug: true)
+              instance.normalize(Object.new, diagnostics: true)
             end
             assert_equal 'timed failure', error.message
           end
-          profile = LocalVertexNormalizer.last_debug_profile
+          profile = LocalVertexNormalizer.last_diagnostic_profile
 
           assert_equal :failed, profile[:status]
           assert_match(/timed failure/, profile[:error])
           assert_equal 1, profile.dig(:stages, :operation_rollback, :calls)
         end
 
-        def test_report_writes_json_and_suppresses_verbose_debug_output
+        def test_report_writes_json_and_suppresses_verbose_diagnostics_output
           model = FakeModel.new
           instance = normalizer(model: model)
           instance.define_singleton_method(:validate_entity!) { |_entity| true }
@@ -383,7 +383,7 @@ module ULOL
             output, = capture_io do
               @report_result = instance.normalize(
                 entity,
-                debug: true,
+                diagnostics: true,
                 report: true,
                 report_path: path
               )
@@ -405,7 +405,7 @@ module ULOL
                            'final_repair_attempted'
                          )
             assert_match(/\[LVN REPORT\] SUCCESS/, output)
-            refute_match(/\[LVN DEBUG\].*START/, output)
+            refute_match(/\[LVN DIAGNOSTIC\].*START/, output)
           end
         ensure
           @report_result = nil
@@ -1321,7 +1321,7 @@ module ULOL
           assert records.all? { |record| record[:source_boundary_normalized] }
           assert_operator source_triangle_minimum_altitude_mm(records), :>, 0.001
           stats = instance.instance_variable_get(
-            :@source_boundary_normalization_stats_v2
+            :@source_boundary_normalization_stats
           )
           assert_equal 1, stats[:normalized_vertex_count]
           assert_equal records.length, stats[:source_triangle_count]
@@ -1484,7 +1484,7 @@ module ULOL
           unsafe = { vertices.first.object_id => mm_point(5, 5, 0) }
 
           accepted = instance.send(
-            :reject_unsafe_source_boundary_targets_v2,
+            :reject_unsafe_source_boundary_targets,
             [face],
             unsafe
           )
@@ -1506,7 +1506,7 @@ module ULOL
           )
           instance = normalizer(face_class: MultiLoopBoundarySnapshotFace)
           instance.instance_variable_set(
-            :@source_boundary_normalization_plan_v2,
+            :@source_boundary_normalization_plan,
             nil
           )
 
@@ -1515,7 +1515,7 @@ module ULOL
           end
 
           refute_instance_of(
-            LocalVertexNormalizerSourceBoundaryNormalizationV2::
+            LocalVertexNormalizerSourceBoundaryNormalization::
               BoundaryNormalizationFallback,
             error
           )
@@ -1539,15 +1539,15 @@ module ULOL
           source_key = instance.send(:source_point_key, points[1])
           axis_plan = { constraints: { source_key => { 1 => 23 } } }
           instance.instance_variable_set(
-            :@source_boundary_axis_plane_plan_v2,
+            :@source_boundary_axis_plane_plan,
             axis_plan
           )
 
           plan = instance.send(
-            :source_boundary_normalization_plan_v2,
+            :source_boundary_normalization_plan,
             [face]
           )
-          instance.send(:apply_source_boundary_constraint_aliases_v2!, plan)
+          instance.send(:apply_source_boundary_constraint_aliases!, plan)
           target = plan[:targets].fetch(vertices[1].object_id)
           target_key = instance.send(:source_point_key, target)
 
@@ -1572,7 +1572,7 @@ module ULOL
           source_key = instance.send(:source_point_key, points[1])
           target_key = instance.send(:source_point_key, mm_point(5, 0, 0))
           instance.instance_variable_set(
-            :@source_boundary_axis_plane_plan_v2,
+            :@source_boundary_axis_plane_plan,
             {
               constraints: {
                 source_key => { 1 => 23 },
@@ -1582,7 +1582,7 @@ module ULOL
           )
 
           plan = instance.send(
-            :source_boundary_normalization_plan_v2,
+            :source_boundary_normalization_plan,
             [face]
           )
 
@@ -1592,18 +1592,18 @@ module ULOL
 
         def test_grid_invalid_repair_preserves_source_fallback_and_defers_near_edge
           source_fallback =
-            :retriangulate_grid_invalid_source_faces_before_near_edge_split_v2
+            :retriangulate_grid_invalid_source_faces_before_near_edge_split
           current = LocalVertexNormalizer.instance_method(
             :retriangulate_grid_invalid_source_faces
           )
           preserved = LocalVertexNormalizer.instance_method(source_fallback)
 
           assert_match(
-            /grid_post_conforming_invalid_repair_v2\.rb\z/,
+            /grid_post_conforming_invalid_repair\.rb\z/,
             current.source_location.first
           )
           assert_match(
-            /grid_altitude_sliver_retriangulation_v2\.rb\z/,
+            /grid_altitude_sliver_retriangulation\.rb\z/,
             preserved.source_location.first
           )
 
@@ -2149,7 +2149,7 @@ module ULOL
           )
         end
 
-        def test_snapshot_roles_are_aggregated_in_debug_profile
+        def test_snapshot_roles_are_aggregated_in_diagnostic_profile
           model = FakeModel.new
           instance = normalizer(model: model)
           entities = EmptyReportEntities.new
@@ -2168,8 +2168,8 @@ module ULOL
           end
 
           capture_io do
-            result = instance.normalize(Object.new, debug: true)
-            @snapshot_role_profile = result[:debug_profile]
+            result = instance.normalize(Object.new, diagnostics: true)
+            @snapshot_role_profile = result[:diagnostic_profile]
           end
           roles = @snapshot_role_profile[:snapshot_roles]
 
@@ -2649,7 +2649,7 @@ module ULOL
             point(0, 0, 1)
           )
           instance = normalizer(face_class: MultiLoopBoundarySnapshotFace)
-          instance.send(:source_boundary_normalization_plan_v2, [face])
+          instance.send(:source_boundary_normalization_plan, [face])
         end
 
         def assert_source_boundary_vertex_present(instance, records, expected)

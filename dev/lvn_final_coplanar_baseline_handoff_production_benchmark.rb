@@ -4,14 +4,14 @@ require_relative 'lvn_stage_detail_profile_benchmark_guarded'
 
 # Records production handoff use per target without changing geometry decisions.
 module LvnFinalCoplanarBaselineHandoffProductionBenchmarkIntegration
-  PROFILE_KEY = :final_coplanar_baseline_handoff_v2
+  PROFILE_KEY = :final_coplanar_baseline_handoff
 
   def profile_target(entity, target)
     sample = super
     return sample unless sample[:profile_available]
 
-    profile = lvn_class.last_debug_profile if
-      lvn_class.respond_to?(:last_debug_profile)
+    profile = lvn_class.last_diagnostic_profile if
+      lvn_class.respond_to?(:last_diagnostic_profile)
     handoff = profile && profile[PROFILE_KEY]
     sample[PROFILE_KEY] = handoff.dup if handoff.is_a?(Hash)
     sample

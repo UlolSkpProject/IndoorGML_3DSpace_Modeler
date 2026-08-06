@@ -22,7 +22,7 @@ module ULOL
           raise 'Select one or more solids first' if selected.empty?
 
           corpus = representative_corpus(selected, sample_count)
-          cache = LocalVertexNormalizerTriangleIntersectionCleanCacheV2
+          cache = LocalVertexNormalizerTriangleIntersectionCleanCache
           original = cache.const_get(CONST_NAME, false)
           totals = THRESHOLDS.to_h do |threshold|
             [threshold, { milliseconds: 0.0, allocations: 0, wins: 0 }]

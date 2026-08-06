@@ -128,7 +128,7 @@ module ULOL
                        PrecisionValidation::LvnState.geometry_signature(@group)
         end
 
-        def test_setting_failure_removes_legacy_signature
+        def test_setting_failure_removes_compatibility_signature
           @group.set_attribute(
             'IndoorGml',
             'lvn_failed_geometry_signature',
@@ -143,7 +143,7 @@ module ULOL
           )
         end
 
-        def test_success_clears_flag_and_legacy_signature
+        def test_success_clears_flag_and_compatibility_signature
           PrecisionValidation::LvnState.set_failed(@group, true)
           @group.set_attribute(
             'IndoorGml',
