@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'cell_space_type_change_optimization'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
