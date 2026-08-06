@@ -34,19 +34,37 @@ class ValidityModeBetaNoticeTest < Minitest::Test
     assert_includes @html, 'white-space: nowrap;'
 
     [
-      '현재 geometry를 변경하지 않습니다.',
-      '일반 validity를 확인합니다.',
-      'CellSpace Normalize를 먼저 수행합니다.',
-      '0.01 mm를 GML 좌표 단위로 변환해',
+      '현재 Geometry를 변경하지 않습니다.',
+      'val3dity.exe 기본 검사를 수행합니다.',
+      '기본 검사 완료 후 빠른 재검사를 수행합니다.',
+      'CellSpace의 정점을 정규화합니다.',
+      '이 과정에서 Geometry가 변경될 수 있습니다.',
+      'val3dity.exe 검사를 수행합니다.',
       '시험 운영 중인 기능입니다.',
       '일부 모델에서 오류가 발생할 수 있습니다.',
-      '실행 전 모델을 저장해 주세요.',
-      'Normalize 성공 CellSpace의 geometry는',
-      '미세하게 변경될 수 있습니다.',
-      'Extension recheck는 실행하지 않습니다.'
+      '실행 전 모델을 저장해 주세요.'
     ].each do |line|
       assert_includes @html, %(<span class="copy-line">#{line}</span>)
     end
+
+    assert_includes(
+      @html,
+      '<span class="copy-line"><code>--overlap_tol</code> 옵션을 적용하여</span>'
+    )
+  end
+
+  def test_precision_mode_shows_small_duration_notice_below_overlap_option
+    option_index = @html.index('<code>--overlap_tol</code> 옵션을 적용하여')
+    notice_index = @html.index('모델 규모에 따라 수십 분이 소요될 수 있습니다.')
+    warning_index = @html.index('시험 운영 중인 기능입니다.')
+
+    assert option_index
+    assert notice_index
+    assert warning_index
+    assert_operator option_index, :<, notice_index
+    assert_operator notice_index, :<, warning_index
+    assert_includes @html, '<span class="mode-note">모델 규모에 따라 수십 분이 소요될 수 있습니다.</span>'
+    assert_match(/\.mode-note \{.*?font-size: 10px;/m, @html)
   end
 
   def test_precision_mode_warns_about_instability_and_saving

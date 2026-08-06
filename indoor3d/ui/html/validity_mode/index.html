@@ -73,6 +73,14 @@
       font-size: 11px;
       line-height: 1.55;
     }
+    .mode-note {
+      display: block;
+      margin-top: 6px;
+      color: #77746d;
+      font-size: 10px;
+      line-height: 1.4;
+      white-space: nowrap;
+    }
     .copy-line {
       display: block;
       white-space: nowrap;
@@ -109,12 +117,11 @@
         </span>
         <span class="mode-copy">
           <span class="mode-description">
-            <span class="copy-line">현재 geometry를 변경하지 않습니다.</span>
-            <span class="copy-line">일반 validity를 확인합니다.</span>
+            <span class="copy-line">현재 Geometry를 변경하지 않습니다.</span>
+            <span class="copy-line">val3dity.exe 기본 검사를 수행합니다.</span>
           </span>
           <span class="mode-detail">
-            <span class="copy-line">val3dity 검사를 실행합니다.</span>
-            <span class="copy-line">701/704 extension overlap recheck를 수행합니다.</span>
+            <span class="copy-line">기본 검사 완료 후 빠른 재검사를 수행합니다.</span>
           </span>
         </span>
       </button>
@@ -126,19 +133,18 @@
         </span>
         <span class="mode-copy">
           <span class="mode-description">
-            <span class="copy-line">CellSpace Normalize를 먼저 수행합니다.</span>
-            <span class="copy-line">0.01 mm를 GML 좌표 단위로 변환해</span>
-            <span class="copy-line">val3dity <code>--overlap_tol</code>에 전달합니다.</span>
+            <span class="copy-line">CellSpace의 정점을 정규화합니다.</span>
+            <span class="copy-line">이 과정에서 Geometry가 변경될 수 있습니다.</span>
           </span>
+          <span class="mode-detail">
+            <span class="copy-line"><code>--overlap_tol</code> 옵션을 적용하여</span>
+            <span class="copy-line">val3dity.exe 검사를 수행합니다.</span>
+          </span>
+          <span class="mode-note">모델 규모에 따라 수십 분이 소요될 수 있습니다.</span>
           <span class="mode-detail warning">
             <span class="copy-line">시험 운영 중인 기능입니다.</span>
             <span class="copy-line">일부 모델에서 오류가 발생할 수 있습니다.</span>
             <span class="copy-line">실행 전 모델을 저장해 주세요.</span>
-          </span>
-          <span class="mode-detail">
-            <span class="copy-line">Normalize 성공 CellSpace의 geometry는</span>
-            <span class="copy-line">미세하게 변경될 수 있습니다.</span>
-            <span class="copy-line">Extension recheck는 실행하지 않습니다.</span>
           </span>
         </span>
       </button>
