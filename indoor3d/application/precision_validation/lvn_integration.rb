@@ -56,14 +56,6 @@ module ULOL
             LvnState.failed?(cell_space)
           end
 
-          def cell_space_lvn_geometry_signature(_cell_space)
-            nil
-          end
-
-          def cell_space_lvn_failure_signature(_cell_space)
-            nil
-          end
-
           # Reuses the existing CellSpace InstanceObserver. No additional observer
           # is attached for LVN state management.
           def cell_space_changed(entity)
