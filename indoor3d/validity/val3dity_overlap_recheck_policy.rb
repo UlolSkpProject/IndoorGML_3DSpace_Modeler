@@ -12,7 +12,6 @@ module ULOL
         class Val3dityOverlapRecheckPolicy
           REPORT_KEY = Val3dityReportSchema::OVERLAP_RECHECK_REPORT_KEY
           STRICT_VALIDITY_KEY = Val3dityReportSchema::STRICT_VALIDITY_KEY
-          EXTENSION_VALIDITY_KEY = Val3dityReportSchema::EXTENSION_VALIDITY_KEY
           VALIDATION_STATUS_KEY = Val3dityReportSchema::VALIDATION_STATUS_KEY
           STRICT_ERRORS_REPORT_KEY = Val3dityReportSchema::STRICT_ERRORS_REPORT_KEY
           RECHECKABLE_CODES = [701, 704].freeze
@@ -139,14 +138,7 @@ module ULOL
             end
 
             raw_report['validity'] = error_item_rows(raw_report).empty?
-            raw_report[EXTENSION_VALIDITY_KEY] = raw_report['validity'] == true
-            raw_report[VALIDATION_STATUS_KEY] = if raw_report[STRICT_VALIDITY_KEY] == true
-                                                  'exact_valid'
-                                                elsif raw_report[EXTENSION_VALIDITY_KEY] == true
-                                                  'extension_policy_valid'
-                                                else
-                                                  'invalid'
-                                                end
+            raw_report[VALIDATION_STATUS_KEY] = raw_report['validity'] == true ? 'valid' : 'invalid'
             refresh_overview_counts!(raw_report, 'features_overview', Array(raw_report['features']))
             refresh_overview_counts!(
               raw_report,

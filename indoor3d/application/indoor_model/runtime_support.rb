@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../topology_coordinator'
+require_relative '../../ui/ui_feedback'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -161,12 +162,14 @@ module ULOL
             :unknown
           end
 
-          def with_indoor_model_operation(name, transparent: false)
+          def with_indoor_model_operation(name, transparent: false, rollback: false, rollback_if: nil, force: false)
             # 이미 with_indoor_model_operation에서 operation을 시작했다면 다음 동작으로 새 operation을 만들지 않도록 한다.
             # 중첩 호출된 동작을 하나의 operation으로 묶기 위함이다.
+            # `force` may claim ownership while observer routing is suppressed,
+            # but it must never bypass a genuinely caller-owned operation.
             return yield if @indoor_operation_depth.to_i.positive?
             # 동작 처리 중 observer가 들어오는 경우 불필요한 operation을 중첩하여 생성하지 않도록 하기 위함이다.
-            return yield if indoor_operation_suppressed?
+            return yield if !force && indoor_operation_suppressed?
 
             model = @model || Sketchup.active_model
             return yield unless model
@@ -175,20 +178,34 @@ module ULOL
             @indoor_operation_depth = @indoor_operation_depth.to_i + 1
             begin
               operation_started = model.start_operation(name, true, false, transparent)
+              raise "Failed to start SketchUp operation: #{name}" unless operation_started
+
               result = yield
-              model.commit_operation if operation_started
+              if operation_started
+                should_rollback = rollback || (rollback_if && rollback_if.call)
+                # Do not retry abort_operation if SketchUp raises while aborting;
+                # a second abort against an uncertain native operation state is unsafe.
+                operation_started = false if should_rollback
+                completed = should_rollback ? model.abort_operation : model.commit_operation
+                action = should_rollback ? 'abort' : 'commit'
+                raise "Failed to #{action} SketchUp operation: #{name}" if completed == false
+              end
               operation_started = false
               result
             rescue StandardError
               # FIXME : 이 rescue에 도달했다면 현재 helper가 실제 operation을 시작한 owner다.
               # transparent operation은 abort할 경우 연결된 사용자 operation까지
               # 취소될 수 있으므로, 예외 발생 전까지의 변경을 commit하고 닫는다.
-              transparent ? model.commit_operation : model.abort_operation
+              if operation_started
+                operation_started = false
+                transparent && !rollback ? model.commit_operation : model.abort_operation
+              end
               raise
             ensure
               @indoor_operation_depth = [@indoor_operation_depth.to_i - 1, 0].max
             end
           end
+          public :with_indoor_model_operation
 
           def indoor_operation_suppressed?
             respond_to?(:observer_routing_suppressed?) && observer_routing_suppressed?
@@ -323,31 +340,6 @@ module ULOL
             end
           end
 
-          def topology_coordinator
-            @topology_coordinator ||= TopologyCoordinator.new(
-              adjacency_service: @adjacency_service,
-              dirty_queue: legacy_dirty_topology_queue
-            )
-          end
-
-          def dirty_topology_queue
-            topology_coordinator.dirty_queue
-          end
-
-          def legacy_dirty_topology_queue
-            queue = DirtyTopologyQueue.new
-            return queue unless instance_variable_defined?(:@dirty_cell_space_pids) ||
-                                instance_variable_defined?(:@cell_space_sync_scheduled) ||
-                                instance_variable_defined?(:@dirty_cell_space_sync_generation)
-
-            queue.restore!(
-              persistent_ids: Hash(@dirty_cell_space_pids),
-              scheduled: @cell_space_sync_scheduled == true,
-              generation: @dirty_cell_space_sync_generation.to_i
-            )
-            queue
-          end
-
           def restore_topology_snapshot(snapshot)
             if snapshot[:topology]
               topology_coordinator.restore!(snapshot[:topology])
@@ -413,9 +405,7 @@ module ULOL
           end
 
           def defer_ui_message(message)
-            UI.start_timer(0, false) do
-              UI.messagebox(message)
-            end
+            UiFeedback.defer_modal(message)
           end
 
           def write_space_features_attributes(group, feature)

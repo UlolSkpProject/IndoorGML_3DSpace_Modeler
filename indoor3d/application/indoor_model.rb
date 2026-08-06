@@ -13,15 +13,26 @@ module ULOL
 
         require_relative 'cell_space_lifecycle_service'
         require_relative 'cell_space_conversion'
+        require_relative 'cell_space_logging_policy'
         require_relative 'topology_coordinator'
         require_relative 'indoor_model/runtime_support.rb'
         require_relative 'indoor_model/scene_groups.rb'
         require_relative 'indoor_model/feature_lifecycle.rb'
         require_relative 'indoor_model/topology.rb'
+        require_relative 'indoor_model/waypoint_snapshot_context.rb'
         require_relative 'indoor_model/observer_routing.rb'
         require_relative 'indoor_model/entity_relocation.rb'
         require_relative 'indoor_model/primal_normalization.rb'
+        require_relative 'indoor_model/local_vertex_normalization.rb'
+        require_relative 'indoor_model/local_grid_coordinate.rb'
+        require_relative 'indoor_model/local_grid_geometry_close.rb'
+        require_relative 'indoor_model/local_grid_runtime_dispatch.rb'
         require_relative 'indoor_model/editor_control.rb'
+        require_relative 'indoor_model/cell_space_batch_lifecycle.rb'
+        require_relative 'indoor_model/cell_space_batch_execution.rb'
+        require_relative 'indoor_model/cell_space_batch_compatibility.rb'
+        require_relative 'indoor_model/cell_space_demotion_batch.rb'
+        require_relative 'indoor_model/cell_space_batch_overlay_refresh.rb'
 
         include RuntimeSupport
         include SceneGroups
@@ -30,7 +41,13 @@ module ULOL
         include ObserverRouting
         include EntityRelocation
         include PrimalNormalization
+        include LocalVertexNormalization
+        include LocalGridCoordinate
         include EditorControl
+        include CellSpaceBatchLifecycle
+        include CellSpaceBatchExecution
+        include CellSpaceBatchCompatibility
+        include CellSpaceDemotionBatch
 
         attr_reader :cell_spaces
         attr_reader :states
@@ -59,6 +76,10 @@ module ULOL
 
         def self.each_instance
           @instances&.each_value || []
+        end
+
+        def find_cell_space_by_normalized_id(value)
+          @feature_registry.find_cell_space_by_normalized_id(value)
         end
 
         def cleanup_for_model_close

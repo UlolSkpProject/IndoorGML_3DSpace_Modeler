@@ -10,6 +10,7 @@ require_relative 'val3dity_report_renderer'
 require_relative 'val3dity_overlap_recheck_policy'
 require_relative 'val3dity_overlap_geometry_rechecker'
 require_relative 'val3dity_run_orchestration'
+require_relative 'xml_input_validator'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -20,8 +21,8 @@ module ULOL
           VENDOR_ROOT = File.expand_path('../assets/vendor/val3dity-windows-x64-v2.2.0', __dir__)
           WINDOWS_ONLY_MESSAGE = 'Val3dity validity check is currently supported only on Windows because the bundled runtime is val3dity-windows-x64-v2.2.0.'
           TERMINATE_WAIT_MS      = 200
-          DEFAULT_OVERLAP_TOL    = 0.5
           STRICT_OVERLAP_TOL     = -1
+          DEFAULT_OVERLAP_TOL    = STRICT_OVERLAP_TOL
           OVERLAP_RECHECK_TOLERANCE = Utils::Geometry::VALIDATION_TOLERANCE
           OVERLAP_RECHECK_TOLERANCE_MM = OVERLAP_RECHECK_TOLERANCE * 25.4
 
@@ -109,22 +110,49 @@ module ULOL
             def error?
               !@error.nil?
             end
+
+            def outcome
+              return :failed if error?
+
+              status = @report&.[](Val3dityReportSchema::VALIDATION_STATUS_KEY).to_s
+              return :valid if status == 'valid'
+              return :valid if status.empty? && valid?
+
+              :invalid
+            end
+
+            def failed?
+              outcome == :failed
+            end
+
+            def invalid?
+              outcome == :invalid
+            end
           end
 
-          def initialize(gml_path, overlap_tol: DEFAULT_OVERLAP_TOL, report_name: 'report', work_dir: nil, indoor_model: nil, owner_key: nil)
+          def initialize(gml_path, overlap_tol: DEFAULT_OVERLAP_TOL, overlap_tol_mm: nil,
+                         report_name: 'report', work_dir: nil, indoor_model: nil, owner_key: nil)
             @gml_path = File.expand_path(gml_path)
             @work_dir = File.expand_path(work_dir || GmlExporter.output_root)
             @report_name = sanitize_report_name(report_name)
             @report_json_path = File.join(@work_dir, "#{@report_name}.json")
             @report_dir = File.join(@work_dir, @report_name)
             @report_html_path = File.join(@report_dir, 'report.html')
-            @overlap_tol = normalize_overlap_tol(overlap_tol)
             @indoor_model = indoor_model
             @model = indoor_model&.model
+            @overlap_tol_mm = normalize_overlap_tol_mm(overlap_tol_mm)
+            @overlap_tol = if @overlap_tol_mm.nil?
+                             normalize_overlap_tol(overlap_tol)
+                           else
+                             raise ArgumentError, 'overlap_tol_mm requires an indoor_model with a model.' unless @model
+
+                             GmlExporter.millimeters_to_coordinate_units(@overlap_tol_mm, model: @model)
+                           end
             @owner_key = owner_key || self.class.owner_key_for_model(indoor_model&.model) || self.class.default_owner_key
           end
 
-          def start(progress: nil, progress_step: :val3dity, recheck_step: :extension_recheck, report_step: :report, active: nil, &callback)
+          def start(progress: nil, progress_step: :val3dity, recheck_step: :extension_recheck,
+                    report_step: :report, active: nil, &callback)
             raise ArgumentError, 'callback is required' unless callback
 
             ensure_supported_platform!
@@ -135,8 +163,26 @@ module ULOL
             progress&.detail(
               progress_step,
               percent: 0,
-              phase: '1. XSD Validation',
-              message: 'Starting val3dity schema validation',
+              phase: '1. Input Parsing',
+              message: 'Checking XML well-formedness (XSD validation is not performed)',
+              current: File.basename(@gml_path)
+            )
+            input_result = XmlInputValidator.new.validate(@gml_path)
+            unless input_result.valid?
+              progress&.fail(progress_step)
+              result = build_preflight_invalid_result(
+                input_result.errors,
+                progress: progress,
+                report_step: report_step
+              )
+              callback.call(result)
+              return nil
+            end
+            progress&.detail(
+              progress_step,
+              percent: 2,
+              phase: '1. Input Parsing',
+              message: 'XML input parsed successfully; starting val3dity',
               current: File.basename(@gml_path)
             )
 
@@ -198,6 +244,17 @@ module ULOL
             tolerance
           rescue ArgumentError, TypeError
             raise ArgumentError, "Invalid overlap_tol: #{value.inspect}"
+          end
+
+          def normalize_overlap_tol_mm(value)
+            return nil if value.nil?
+
+            tolerance = Float(value)
+            raise ArgumentError if tolerance.negative?
+
+            tolerance
+          rescue ArgumentError, TypeError
+            raise ArgumentError, "Invalid overlap_tol_mm: #{value.inspect}"
           end
 
           def format_tolerance(value)
@@ -270,7 +327,8 @@ module ULOL
             )
           end
 
-          def build_result_after_process(exit_code, progress = nil, recheck_step: :extension_recheck, report_step: :report)
+          def build_result_after_process(exit_code, progress = nil, recheck_step: :extension_recheck,
+                                         report_step: :report)
             raise "val3dity failed: exit code #{exit_code}" unless exit_code == 0
             raise 'val3dity failed to create report.json.' unless File.exist?(@report_json_path)
 
@@ -298,12 +356,14 @@ module ULOL
               progress&.detail(
                 recheck_step,
                 percent: 100,
-                phase: 'Apply extension policy',
-                message: 'Extension overlap recheck finished',
+                phase: 'Apply recheck policy',
+                message: 'Overlap recheck finished',
                 current: File.basename(@gml_path)
               )
               progress&.complete(recheck_step)
             end
+
+            attach_overlap_tolerance_metadata!(raw_report)
 
             if report_step
               progress&.running(report_step)
@@ -358,6 +418,65 @@ module ULOL
             File.write(@report_html_path, Val3dityReportRenderer.new.render(raw_report), encoding: 'UTF-8')
           end
 
+          def build_preflight_invalid_result(errors, progress:, report_step:)
+            raw_report = {
+              'input_file' => File.basename(@gml_path),
+              'validity' => false,
+              'val3dity_version' => 'not run',
+              'parameters' => {},
+              'dataset_errors' => Array(errors),
+              'features' => [],
+              'features_overview' => [],
+              'primitives_overview' => [],
+              Val3dityReportSchema::STRICT_VALIDITY_KEY => false,
+              Val3dityReportSchema::VALIDATION_STATUS_KEY => 'invalid'
+            }
+            attach_overlap_tolerance_metadata!(raw_report)
+            write_report(raw_report, progress: progress, report_step: report_step)
+            Val3dityResult.new(
+              valid: false,
+              report: raw_report,
+              report_json_path: @report_json_path,
+              report_html_path: @report_html_path,
+              error: nil
+            )
+          end
+
+          def attach_overlap_tolerance_metadata!(raw_report)
+            unit = GmlExporter.coordinate_unit_for_model(@model)
+            raw_report[Val3dityReportSchema::OVERLAP_TOLERANCE_KEY] = {
+              'mode' => @overlap_tol_mm.nil? ? (@overlap_tol == STRICT_OVERLAP_TOL ? 'strict' : 'coordinate') : 'physical',
+              'requested_mm' => @overlap_tol_mm,
+              'cli_value' => @overlap_tol,
+              'coordinate_unit' => unit[:unit]
+            }
+          end
+
+          def write_report(raw_report, progress:, report_step:)
+            if report_step
+              progress&.running(report_step)
+              progress&.detail(
+                report_step,
+                percent: 0,
+                phase: 'Report generation',
+                message: 'Writing final report JSON',
+                current: File.basename(@report_json_path)
+              )
+            end
+            File.write(@report_json_path, JSON.pretty_generate(raw_report), encoding: 'UTF-8')
+            prepare_html_report(raw_report)
+            if report_step
+              progress&.detail(
+                report_step,
+                percent: 100,
+                phase: 'Report generation',
+                message: 'Report generated',
+                current: File.basename(@report_html_path)
+              )
+              progress&.complete(report_step)
+            end
+          end
+
           def recheck_overlap_errors!(raw_report, progress: nil, progress_step: nil)
             @overlap_recheck_pair_analysis = {}
             @overlap_recheck_701_decisions = {}
@@ -382,8 +501,8 @@ module ULOL
               before_refresh: lambda { |_results|
                 emit_overlap_recheck_progress(
                   tracker,
-                  message: 'Applying extension validation policy',
-                  phase: 'Apply extension policy'
+                  message: 'Applying overlap recheck policy',
+                  phase: 'Apply recheck policy'
                 )
               }
             ) { |code, cell_id1, cell_id2| recheck_cell_pair(code, cell_id1, cell_id2) }

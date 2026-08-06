@@ -15,6 +15,7 @@ module ULOL
         def initialize(indoor_model)
           @indoor_model = indoor_model
           @geometry = empty_geometry
+          rebuild_geometry_cache
           super(
             OVERLAY_ID,
             OVERLAY_NAME,
@@ -24,20 +25,22 @@ module ULOL
 
         def set_geometry(geometry)
           @geometry = normalized_geometry(geometry)
+          rebuild_geometry_cache
           true
         end
 
         def clear
           @geometry = empty_geometry
+          rebuild_geometry_cache
           true
         end
 
         def draw(view)
           return unless draw_validation_geometry?
 
-          draw_triangles(view, @geometry[:face_triangles], FACE_FILL_COLOR)
+          draw_triangles(view, @face_triangle_points, FACE_FILL_COLOR)
           draw_lines(view, @geometry[:face_edges], FACE_EDGE_COLOR, 4)
-          draw_triangles(view, @geometry[:overlap_triangles], OVERLAP_FILL_COLOR)
+          draw_triangles(view, @overlap_triangle_points, OVERLAP_FILL_COLOR)
           draw_lines(view, @geometry[:overlap_edges], OVERLAP_EDGE_COLOR, 3)
         rescue StandardError => e
           IndoorCore::Logger.puts(
@@ -53,7 +56,7 @@ module ULOL
           bounds = Geom::BoundingBox.new
           return bounds unless draw_validation_geometry?
 
-          geometry_points.each { |point| bounds.add(point) }
+          @geometry_extent_points.each { |point| bounds.add(point) }
           bounds
         rescue StandardError => e
           IndoorCore::Logger.puts(
@@ -70,15 +73,15 @@ module ULOL
           return false unless @indoor_model.respond_to?(:validation_focus_active?)
           return false unless @indoor_model.validation_focus_active?
 
-          !geometry_points.empty?
+          !@geometry_points.empty?
         end
 
-        def draw_triangles(view, triangles, color)
-          points = Array(triangles).flatten(1)
-          return if points.empty?
+        def draw_triangles(view, points, color)
+          render_points = Array(points)
+          return if render_points.empty?
 
           view.drawing_color = color
-          view.draw(GL_TRIANGLES, points)
+          view.draw(GL_TRIANGLES, render_points)
         end
 
         def draw_lines(view, points, color, width)
@@ -92,10 +95,30 @@ module ULOL
         end
 
         def geometry_points
-          @geometry[:face_triangles].flatten(1) +
+          @geometry_points
+        end
+
+        def rebuild_geometry_cache
+          @face_triangle_points = @geometry[:face_triangles].flatten(1)
+          @overlap_triangle_points = @geometry[:overlap_triangles].flatten(1)
+          @geometry_points =
+            @face_triangle_points +
             @geometry[:face_edges] +
-            @geometry[:overlap_triangles].flatten(1) +
+            @overlap_triangle_points +
             @geometry[:overlap_edges]
+          @geometry_extent_points = geometry_extent_points(@geometry_points)
+        end
+
+        def geometry_extent_points(points)
+          return [] if points.empty?
+
+          bounds = Geom::BoundingBox.new
+          points.each { |point| bounds.add(point) }
+          return [] if bounds.respond_to?(:empty?) && bounds.empty?
+
+          [bounds.min, bounds.max]
+        rescue StandardError
+          []
         end
 
         def normalized_geometry(geometry)

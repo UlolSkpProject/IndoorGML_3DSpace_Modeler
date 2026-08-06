@@ -13,7 +13,7 @@ var defaultSteps = [
 ];
 
 var validationSubsteps = [
-  { key: 'xsd', label: 'XSD Validation' },
+  { key: 'input_parsing', label: 'Input Parsing' },
   { key: 'geometry', label: 'Geometry Primal Cells' },
   { key: 'xlinks', label: 'XLinks Errors' },
   { key: 'overlap', label: 'Overlap Primal Cells' },
@@ -24,7 +24,7 @@ var validationSubsteps = [
 var extensionRecheckSubsteps = [
   { key: 'collect', label: 'Collect 701/704 errors' },
   { key: 'pairs', label: 'Recheck reported cell pairs' },
-  { key: 'policy', label: 'Apply extension policy' }
+  { key: 'policy', label: 'Apply recheck policy' }
 ];
 
 var substepGroups = {
@@ -275,6 +275,13 @@ function updateCancelVisibility() {
 window.addEventListener('load', function () {
   sketchup.domReady();
   fitDialogToContent();
+  window.requestAnimationFrame(function () {
+    window.requestAnimationFrame(function () {
+      if (typeof sketchup !== 'undefined' && sketchup.visualReady) {
+        sketchup.visualReady();
+      }
+    });
+  });
 });
 document.addEventListener('dragstart', function (event) {
   if (!event.target.closest('.result-title, .result-message')) {

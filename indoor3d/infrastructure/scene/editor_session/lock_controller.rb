@@ -57,7 +57,10 @@ module ULOL
           def set_entity_locked(entity, locked)
             return false unless lockable_entity?(entity)
 
-            entity.locked = locked == true
+            desired = locked == true
+            return true if entity.locked? == desired
+
+            entity.locked = desired
             true
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Entity lock update failed: #{e.class}: #{e.message}"

@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IndoorGML Validity Check</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Arial, "Malgun Gothic", sans-serif;
+      color: #dedcd6;
+      background: #1c1c1b;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { background: #1c1c1b; user-select: none; -webkit-user-select: none; }
+    button { font: inherit; }
+    main { display: flex; flex-direction: column; height: 100%; padding: 22px; }
+    .eyebrow {
+      margin-bottom: 7px;
+      color: #85827b;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    h1 { margin: 0; color: #f0eee8; font-size: 22px; line-height: 1.2; }
+    .intro { margin: 8px 0 17px; color: #aaa79f; font-size: 12px; line-height: 1.55; }
+    .modes {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      align-items: stretch;
+      gap: 12px;
+    }
+    .mode {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      min-width: 0;
+      height: 100%;
+      padding: 17px 18px 18px;
+      border: 1px solid #3b3a36;
+      border-radius: 12px;
+      background: #252523;
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .mode:hover { background: #2d2d2a; border-color: #5a5953; }
+    .mode:focus-visible,
+    .footer-link:focus-visible,
+    .cancel:focus-visible { outline: 2px solid #8ab4f8; outline-offset: 2px; }
+    .mode-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .mode-title { color: #eceae4; font-size: 15px; font-weight: 700; }
+    .badge {
+      flex: 0 0 auto;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .fast .badge { color: #8ab4f8; background: #17243b; border: 1px solid #315d9b; }
+    .precision .badge { color: #f9b84e; background: #3a2a12; border: 1px solid #76541f; }
+    .mode-copy { display: flex; flex: 1; flex-direction: column; }
+    .mode-description {
+      display: block;
+      margin-top: 17px;
+      color: #b7b4ac;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .mode-detail {
+      display: block;
+      margin-top: 14px;
+      color: #85827b;
+      font-size: 11px;
+      line-height: 1.55;
+    }
+    .mode-note {
+      display: block;
+      margin-top: 6px;
+      color: #d3a15c;
+      font-size: 10px;
+      font-weight: 600;
+      line-height: 1.4;
+      white-space: nowrap;
+    }
+    .copy-line {
+      display: block;
+      white-space: nowrap;
+    }
+    .copy-line + .copy-line { margin-top: 3px; }
+    .inline-code {
+      display: inline-block;
+      padding: 1px 5px;
+      border: 1px solid #4b4a45;
+      border-radius: 4px;
+      background: #1b1b1a;
+      color: #d8d5cd;
+      font-family: Consolas, Monaco, monospace;
+      font-size: 10px;
+      line-height: 1.35;
+      vertical-align: 1px;
+    }
+    footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: auto;
+      padding-top: 14px;
+    }
+    .footer-link {
+      padding: 5px 0;
+      border: 0;
+      background: transparent;
+      color: #8f969f;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .footer-link:hover { color: #b7c4d5; text-decoration: underline; }
+    .cancel {
+      min-width: 86px;
+      padding: 8px 14px;
+      border: 1px solid #55534e;
+      border-radius: 7px;
+      background: #343432;
+      color: #e4e2dc;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .cancel:hover { background: #3d3d3a; border-color: #6b6962; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="eyebrow">IndoorGML · Validity</div>
+    <h1>검사 방식을 선택하세요</h1>
+    <p class="intro">두 검사 모두 동일한 val3dity 진행률, 종료 코드 판정, Report Dialog와 Fix Mode를 사용합니다.</p>
+
+    <section class="modes">
+      <button class="mode fast" type="button" onclick="sketchup.selectFast()">
+        <span class="mode-head">
+          <span class="mode-title">빠른 검사</span>
+          <span class="badge">FAST</span>
+        </span>
+        <span class="mode-copy">
+          <span class="mode-description">
+            <span class="copy-line">현재 Geometry를 변경하지 않습니다.</span>
+            <span class="copy-line">val3dity.exe 기본 검사를 수행합니다.</span>
+          </span>
+          <span class="mode-detail">
+            <span class="copy-line">기본 검사 완료 후 빠른 재검사를 수행합니다.</span>
+          </span>
+        </span>
+      </button>
+
+      <button class="mode precision" type="button" onclick="sketchup.selectPrecision()">
+        <span class="mode-head">
+          <span class="mode-title">정밀검사</span>
+          <span class="badge">PRECISION</span>
+        </span>
+        <span class="mode-copy">
+          <span class="mode-description">
+            <span class="copy-line">CellSpace의 정점을 정규화합니다.</span>
+            <span class="copy-line">이 과정에서 Geometry가 변경될 수 있습니다.</span>
+          </span>
+          <span class="mode-detail">
+            <span class="copy-line"><code class="inline-code">--overlap_tol</code> 옵션을 적용하여 val3dity.exe 검사를 수행합니다.</span>
+          </span>
+          <span class="mode-note">모델 규모에 따라 수십 분~수시간이 걸릴 수 있습니다.</span>
+        </span>
+      </button>
+    </section>
+
+    <footer>
+      <button class="footer-link" type="button" onclick="sketchup.openVal3dityRelease()">
+        val3dity 2.2.0 릴리스 ↗
+      </button>
+      <button class="cancel" type="button" onclick="sketchup.cancel()">취소</button>
+    </footer>
+  </main>
+  <script src="../shared/external_file_drop_guard.js"></script>
+  <script>initExternalFileDropGuard();</script>
+</body>
+</html>

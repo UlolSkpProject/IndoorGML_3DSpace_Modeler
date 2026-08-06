@@ -16,7 +16,6 @@ module ULOL
         def initialize(indoor_model)
           @indoor_model = indoor_model
           @dialog = nil
-          @dialog_height = INITIAL_DIALOG_HEIGHT
           @suppress_close_callback = false
           @visibility_filter_request_id = 0
         end
@@ -182,7 +181,6 @@ module ULOL
 
         def set_dialog_height(height)
           @dialog.set_size(DIALOG_WIDTH, height)
-          @dialog_height = height
         end
 
         def init_script

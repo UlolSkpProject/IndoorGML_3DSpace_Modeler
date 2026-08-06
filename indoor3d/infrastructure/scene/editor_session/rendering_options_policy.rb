@@ -1,0 +1,263 @@
+# frozen_string_literal: true
+
+module ULOL
+  module Indoor3DGmlModeler
+    module IndoorCore
+      class EditorSession
+        module RenderingOptionsPolicy
+          INACTIVE_HIDDEN_KEY = 'InactiveHidden'
+          MODEL_TRANSPARENCY_KEY = 'ModelTransparency'
+          RENDER_MODE_KEY = 'RenderMode'
+          TEXTURE_KEY = 'Texture'
+          SHADED_RENDER_MODE = 2
+          MONOCHROME_RENDER_MODE = 5
+
+          module_function
+
+          def apply_shaded(model)
+            apply_values(
+              model,
+              RENDER_MODE_KEY => SHADED_RENDER_MODE,
+              TEXTURE_KEY => false
+            )
+          end
+
+          def apply_monochrome(model)
+            apply_values(
+              model,
+              RENDER_MODE_KEY => MONOCHROME_RENDER_MODE,
+              TEXTURE_KEY => false
+            )
+          end
+
+          def apply_inactive_hidden(model, hidden)
+            apply_values(model, INACTIVE_HIDDEN_KEY => hidden == true)
+          end
+
+          def apply_fix_mode_context(model, group_editing:, row_selected:)
+            apply_values(
+              model,
+              INACTIVE_HIDDEN_KEY => row_selected == true && group_editing != true,
+              MODEL_TRANSPARENCY_KEY => group_editing == true
+            )
+          end
+
+          def apply_values(model, values)
+            return false unless model&.respond_to?(:rendering_options)
+
+            options = model.rendering_options
+            return false unless options
+
+            changed = false
+            values.each do |key, value|
+              next unless rendering_option_key?(options, key)
+              next if options[key] == value
+
+              options[key] = value
+              changed = true
+            end
+            invalidate_active_view(model) if changed
+            changed
+          rescue StandardError => e
+            log_failure('apply', e)
+            false
+          end
+
+          def rendering_option_key?(options, key)
+            return options.key?(key) if options.respond_to?(:key?)
+            return options.keys.include?(key) if options.respond_to?(:keys)
+
+            found = false
+            if options.respond_to?(:each_key)
+              options.each_key do |candidate|
+                if candidate == key
+                  found = true
+                  break
+                end
+              end
+            end
+            found
+          rescue StandardError
+            false
+          end
+
+          def invalidate_active_view(model)
+            return false unless model&.respond_to?(:active_view)
+
+            view = model.active_view
+            return false unless view&.respond_to?(:invalidate)
+
+            view.invalidate
+            true
+          rescue StandardError => e
+            log_failure('view invalidate', e)
+            false
+          end
+
+          def log_failure(context, error)
+            return unless defined?(IndoorCore::Logger)
+            return unless IndoorCore::Logger.respond_to?(:puts)
+
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Rendering option #{context} skipped: " \
+              "#{error.class}: #{error.message}"
+            )
+          rescue StandardError
+            nil
+          end
+        end
+
+        if const_defined?(:ValidationFocusController, false)
+          class ValidationFocusController
+            remove_const(:MULTI_FOCUS_RENDERING_OPTION_KEYS) if
+              const_defined?(:MULTI_FOCUS_RENDERING_OPTION_KEYS, false)
+            MULTI_FOCUS_RENDERING_OPTION_KEYS = [
+              RenderingOptionsPolicy::INACTIVE_HIDDEN_KEY
+            ].freeze
+
+            RENDERING_POLICY_OPTION_KEYS = (
+              HIDDEN_RENDERING_OPTION_KEYS +
+              MULTI_FOCUS_RENDERING_OPTION_KEYS +
+              [
+                RenderingOptionsPolicy::MODEL_TRANSPARENCY_KEY,
+                RenderingOptionsPolicy::RENDER_MODE_KEY,
+                RenderingOptionsPolicy::TEXTURE_KEY
+              ]
+            ).freeze unless const_defined?(:RENDERING_POLICY_OPTION_KEYS, false)
+
+            unless method_defined?(:set_highlight_before_rendering_options_policy)
+              alias_method :set_highlight_before_rendering_options_policy, :set_highlight
+            end
+
+            def set_highlight(cell_gml_ids, code = nil, row_id: nil, row_cells: nil,
+                              states: nil, transitions: nil, geometry_refs: nil)
+              result = set_highlight_before_rendering_options_policy(
+                cell_gml_ids,
+                code,
+                row_id: row_id,
+                row_cells: row_cells,
+                states: states,
+                transitions: transitions,
+                geometry_refs: geometry_refs
+              )
+              model = Sketchup.active_model
+              RenderingOptionsPolicy.apply_fix_mode_context(
+                model,
+                group_editing: model&.respond_to?(:active_path) && Array(model.active_path).length > 1,
+                row_selected: !@highlight_row_id.nil?
+              )
+              result
+            end
+
+            def capture_and_apply_rendering_options(model, _focus_cell_count)
+              capture_rendering_policy_options(model)
+              apply_base_edit_rendering_options(model)
+              RenderingOptionsPolicy.apply_values(
+                model,
+                RenderingOptionsPolicy::MODEL_TRANSPARENCY_KEY => false
+              )
+            end
+
+            def capture_and_apply_hidden_rendering_options(model)
+              capture_rendering_policy_options(model)
+              apply_base_edit_rendering_options(model)
+            end
+
+            private
+
+            def capture_rendering_policy_options(model)
+              return false unless model&.respond_to?(:rendering_options)
+
+              options = model.rendering_options
+              return false unless options
+
+              @rendering_option_snapshots ||= {}
+              RENDERING_POLICY_OPTION_KEYS.each do |key|
+                next unless rendering_option_key?(options, key)
+                next if @rendering_option_snapshots.key?(key)
+
+                @rendering_option_snapshots[key] = options[key]
+              end
+              true
+            rescue StandardError => e
+              RenderingOptionsPolicy.log_failure('snapshot', e)
+              false
+            end
+
+            def apply_base_edit_rendering_options(model)
+              hidden_values = HIDDEN_RENDERING_OPTION_KEYS.each_with_object({}) do |key, values|
+                values[key] = false
+              end
+              RenderingOptionsPolicy.apply_values(model, hidden_values)
+              RenderingOptionsPolicy.apply_inactive_hidden(model, false)
+              RenderingOptionsPolicy.apply_shaded(model)
+            end
+          end
+        end
+
+        class EditActivePathController
+          unless method_defined?(:set_before_rendering_options_policy)
+            alias_method :set_before_rendering_options_policy, :set
+          end
+          unless method_defined?(:active_path_changed_before_rendering_options_policy)
+            alias_method :active_path_changed_before_rendering_options_policy,
+                         :active_path_changed
+          end
+
+          def set(model, target_path)
+            result = set_before_rendering_options_policy(model, target_path)
+            apply_rendering_style_for_path(model, target_path)
+            result
+          end
+
+          def active_path_changed(model, editing:, reenter:)
+            result = active_path_changed_before_rendering_options_policy(
+              model,
+              editing: editing,
+              reenter: reenter
+            )
+            apply_rendering_style_for_path(model, model&.active_path) if editing
+            result
+          end
+
+          private
+
+          def apply_rendering_style_for_path(model, path)
+            fix_mode = fix_mode?
+            primal_group = @indoor_model.primal_group
+            active_path = Array(path)
+            cell_space_editing = editing_cell_space_path?(active_path, primal_group)
+
+            if fix_mode
+              RenderingOptionsPolicy.apply_fix_mode_context(
+                model,
+                group_editing: fix_mode_group_editing_path?(active_path, primal_group),
+                row_selected: fix_mode_row_selected?
+              )
+            end
+
+            if fix_mode && cell_space_editing
+              RenderingOptionsPolicy.apply_monochrome(model)
+            else
+              RenderingOptionsPolicy.apply_shaded(model)
+            end
+          rescue StandardError => e
+            log("Rendering option update failed: #{e.class}: #{e.message}")
+          end
+
+          def fix_mode_group_editing_path?(path, primal_group)
+            path.length > 1 && path.first == primal_group
+          end
+
+          def fix_mode_row_selected?
+            return false unless @indoor_model.respond_to?(:validation_focus_highlight_row_id)
+
+            !@indoor_model.validation_focus_highlight_row_id.to_s.empty?
+          rescue StandardError
+            false
+          end
+        end
+      end
+    end
+  end
+end

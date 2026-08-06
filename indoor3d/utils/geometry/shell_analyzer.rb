@@ -73,6 +73,7 @@ module ULOL
           return [] unless entity&.valid?
           return [] unless entity.respond_to?(:definition) && entity.definition&.valid?
 
+          ray_directions = shell_ray_directions
           entity.definition.entities.grep(Sketchup::Face).map do |face|
             next unless face&.valid?
 
@@ -82,23 +83,47 @@ module ULOL
             normal = face.normal
             normal.normalize!
             loops = face.loops.map { |loop| loop.vertices.map(&:position) }
+            inners = loops.reject { |loop| loop == outer || loop.length < 3 }
+            axis = dominant_axis(normal)
             {
               outer: outer,
-              inners: loops.reject { |loop| loop == outer || loop.length < 3 },
+              inners: inners,
               loops: loops.select { |loop| loop.length >= 2 },
+              outer_2d: outer.map { |vertex| project_point_for_axis(vertex, axis) },
+              inners_2d: inners.map do |loop|
+                loop.map { |vertex| project_point_for_axis(vertex, axis) }
+              end,
+              loop_edges: loops.select { |loop| loop.length >= 2 }
+                               .flat_map { |loop| loop_edges(loop) },
+              ray_denominators: ray_directions.map { |direction| dot_product(normal, direction) },
               normal: normal,
               plane_point: outer.first,
-              axis: dominant_axis(normal)
+              axis: axis
             }
           end.compact
         end
         private_class_method :local_shell_faces
 
         def self.shell_contains_point?(faces, point, tolerance)
-          votes = shell_ray_directions.count do |direction|
-            ray_intersection_count(faces, point, direction, tolerance).odd?
+          directions = shell_ray_directions
+          required_votes = (directions.length / 2) + 1
+          inside_votes = 0
+
+          directions.each_with_index do |direction, index|
+            inside_votes += 1 if ray_intersection_count(
+              faces,
+              point,
+              direction,
+              tolerance,
+              ray_index: index
+            ).odd?
+            return true if inside_votes >= required_votes
+
+            remaining = directions.length - index - 1
+            return false if inside_votes + remaining < required_votes
           end
-          votes > (shell_ray_directions.length / 2)
+
+          false
         end
         private_class_method :shell_contains_point?
 
@@ -111,16 +136,26 @@ module ULOL
         end
         private_class_method :shell_ray_directions
 
-        def self.ray_intersection_count(faces, point, direction, tolerance)
+        def self.ray_intersection_count(faces, point, direction, tolerance, ray_index: nil)
           distances = faces.filter_map do |face|
-            ray_face_intersection_distance(face, point, direction, tolerance)
+            ray_face_intersection_distance(
+              face,
+              point,
+              direction,
+              tolerance,
+              ray_index: ray_index
+            )
           end
           unique_sorted_distances(distances, tolerance).length
         end
         private_class_method :ray_intersection_count
 
-        def self.ray_face_intersection_distance(face, point, direction, tolerance)
-          denominator = dot_product(face[:normal], direction)
+        def self.ray_face_intersection_distance(face, point, direction, tolerance, ray_index: nil)
+          denominator = if ray_index && face[:ray_denominators]
+                          face[:ray_denominators][ray_index]
+                        else
+                          dot_product(face[:normal], direction)
+                        end
           return nil if denominator.abs <= tolerance
 
           distance = dot_product(point.vector_to(face[:plane_point]), face[:normal]) / denominator
@@ -132,9 +167,21 @@ module ULOL
         private_class_method :ray_face_intersection_distance
 
         def self.unique_sorted_distances(distances, tolerance)
-          distances.sort.each_with_object([]) do |distance, unique|
-            unique << distance if unique.empty? || (distance - unique.last).abs > tolerance
+          return distances if distances.length < 2
+
+          distances.sort!
+          write_index = 1
+          last_distance = distances.first
+          (1...distances.length).each do |read_index|
+            distance = distances[read_index]
+            next if (distance - last_distance).abs <= tolerance
+
+            distances[write_index] = distance
+            write_index += 1
+            last_distance = distance
           end
+          distances.slice!(write_index, distances.length - write_index) if write_index < distances.length
+          distances
         end
         private_class_method :unique_sorted_distances
 
@@ -247,7 +294,12 @@ module ULOL
         private_class_method :clamp_point_to_bounds
 
         def self.shell_distance(faces, point)
-          faces.map { |face| point_to_face_distance(point, face) }.min || 0.0
+          minimum = nil
+          faces.each do |face|
+            distance = point_to_face_distance(point, face)
+            minimum = distance if minimum.nil? || distance < minimum
+          end
+          minimum || 0.0
         end
         private_class_method :shell_distance
 
@@ -256,19 +308,21 @@ module ULOL
           projected = offset_point(point, face[:normal], -signed_distance)
           return signed_distance.abs if point_in_face_region?(projected, face, SHELL_CENTER_TOLERANCE)
 
-          face[:loops].flat_map { |loop| loop_edges(loop) }
-                      .map { |edge_start, edge_end| point_to_segment_distance(point, edge_start, edge_end) }
-                      .min || signed_distance.abs
+          minimum = nil
+          face[:loop_edges].each do |edge_start, edge_end|
+            distance = point_to_segment_distance(point, edge_start, edge_end)
+            minimum = distance if minimum.nil? || distance < minimum
+          end
+          minimum || signed_distance.abs
         end
         private_class_method :point_to_face_distance
 
         def self.point_in_face_region?(point, face, tolerance)
           point_2d = project_point_for_axis(point, face[:axis])
-          outer = face[:outer].map { |vertex| project_point_for_axis(vertex, face[:axis]) }
-          return false unless point_in_polygon?(point_2d, outer, tolerance)
+          return false unless point_in_polygon?(point_2d, face[:outer_2d], tolerance)
 
-          face[:inners].none? do |inner|
-            point_in_polygon?(point_2d, inner.map { |vertex| project_point_for_axis(vertex, face[:axis]) }, tolerance)
+          face[:inners_2d].none? do |inner|
+            point_in_polygon?(point_2d, inner, tolerance)
           end
         end
         private_class_method :point_in_face_region?

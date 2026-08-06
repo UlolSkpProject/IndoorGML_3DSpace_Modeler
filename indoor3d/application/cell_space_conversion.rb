@@ -461,7 +461,7 @@ module ULOL
       class BulkCellSpaceConversionService
         Result = Struct.new(:converted_count, :errors, :metrics, keyword_init: true)
 
-        def initialize(model:, jobs:, fallback_target:, target_entities:, converter:, synchronize_all:, apply_lock_policy:, runtime_snapshot:, runtime_restore:, apply_guards:, restore_active_path:, activate_root_context:, clear_dirty_topology:, logger: Logger, labeler: nil, preserve_source: nil, operation_name: 'Convert Solid Groups to CellSpace')
+        def initialize(model:, jobs:, fallback_target:, target_entities:, converter:, synchronize_all:, apply_lock_policy:, runtime_snapshot:, runtime_restore:, apply_guards:, operation_runner:, restore_active_path:, activate_root_context:, clear_dirty_topology:, logger: Logger, labeler: nil, preserve_source: nil, operation_name: 'Convert Solid Groups to CellSpace')
           @model = model
           @jobs = Array(jobs)
           @fallback_target = fallback_target
@@ -472,6 +472,7 @@ module ULOL
           @runtime_snapshot = runtime_snapshot
           @runtime_restore = runtime_restore
           @apply_guards = apply_guards
+          @operation_runner = operation_runner
           @restore_active_path = restore_active_path
           @activate_root_context = activate_root_context
           @clear_dirty_topology = clear_dirty_topology
@@ -482,7 +483,7 @@ module ULOL
         end
 
         def call
-          benchmark_started_at = Time.now
+          metrics_started_at = Time.now
           metrics = {}
           errors = []
           preflight_started_at = Time.now
@@ -502,8 +503,8 @@ module ULOL
           metrics.merge!(apply_metrics)
           metrics[:cell_space_state_duration] ||= 0.0
           metrics[:adjacency_transition_duration] ||= 0.0
-          metrics[:total_duration] = Time.now - benchmark_started_at
-          log_benchmark(metrics)
+          metrics[:total_duration] = Time.now - metrics_started_at
+          log_timing_metrics(metrics)
           Result.new(converted_count: converted_count, errors: errors, metrics: metrics)
         end
 
@@ -561,15 +562,17 @@ module ULOL
 
         def apply_plan(plan)
           snapshot = @runtime_snapshot.call
-          operation_started = false
           converted_count = 0
           errors = []
+          rollback_requested = false
 
-          @apply_guards.call do
-            begin
-              activate_root_context!
-              operation_started = @model.start_operation(@operation_name, true)
-              raise 'Failed to start CellSpace conversion operation' unless operation_started
+          result = @apply_guards.call do
+            activate_root_context!
+            @operation_runner.call(
+              @operation_name,
+              force: true,
+              rollback_if: proc { rollback_requested }
+            ) do
 
               executor = CellSpaceConversionExecutor.new(
                 target_entities: @target_entities,
@@ -595,10 +598,7 @@ module ULOL
               cell_space_state_duration = Time.now - creation_started_at
 
               if converted_count.zero?
-                safely_abort_operation if operation_started
-                operation_started = false
-                safely_restore_runtime(snapshot)
-                safely_restore_active_path(success: false)
+                rollback_requested = true
                 next [
                   converted_count,
                   errors,
@@ -617,11 +617,7 @@ module ULOL
               adjacency_transition_duration = Time.now - adjacency_started_at
               @apply_lock_policy.call
               @clear_dirty_topology.call
-              committed = @model.commit_operation
-              raise 'Failed to commit CellSpace conversion operation' if committed == false
 
-              operation_started = false
-              safely_restore_active_path(success: true)
               [
                 converted_count,
                 errors,
@@ -633,13 +629,20 @@ module ULOL
                   adjacency_transition_duration: adjacency_transition_duration
                 }
               ]
-            rescue StandardError
-              safely_abort_operation if operation_started
-              safely_restore_runtime(snapshot)
-              safely_restore_active_path(success: false)
-              raise
             end
           end
+
+          if rollback_requested
+            safely_restore_runtime(snapshot)
+            safely_restore_active_path(success: false)
+          else
+            safely_restore_active_path(success: true)
+          end
+          result
+        rescue StandardError
+          safely_restore_runtime(snapshot)
+          safely_restore_active_path(success: false)
+          raise
         end
 
         def conversion_error(source, reason)
@@ -689,12 +692,6 @@ module ULOL
           raise 'Failed to activate root context for CellSpace conversion' unless activated == true
         end
 
-        def safely_abort_operation
-          @model.abort_operation
-        rescue StandardError => e
-          @logger.puts "[IndoorGML] CellSpace conversion abort failed: #{e.class}: #{e.message}"
-        end
-
         def safely_restore_runtime(snapshot)
           @runtime_restore.call(snapshot)
         rescue StandardError => e
@@ -723,13 +720,13 @@ module ULOL
           Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at
         end
 
-        def log_benchmark(metrics)
+        def log_timing_metrics(metrics)
           puts '----------------------------------------'
           puts 'Create CellSpace 시간 요약'
+          puts format('  전체 시간                  : %.3f sec', metrics[:total_duration].to_f)
           puts format('  시작 전 검사               : %.3f sec', metrics[:preflight_duration].to_f)
           puts format('  CellSpace/State 생성       : %.3f sec', metrics[:cell_space_state_duration].to_f)
           puts format('  Adjacency/Transition 생성  : %.3f sec', metrics[:adjacency_transition_duration].to_f)
-          puts format('  전체 시간                  : %.3f sec', metrics[:total_duration].to_f)
           puts '----------------------------------------'
         end
       end

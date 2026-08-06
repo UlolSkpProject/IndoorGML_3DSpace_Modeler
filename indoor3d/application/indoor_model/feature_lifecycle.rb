@@ -5,71 +5,6 @@ module ULOL
     module IndoorCore
       class IndoorModel
         module FeatureLifecycle
-          def convert_single_group_to_cell_space(sketchup_group, cell_type = CellSpaceType::GENERAL, category_code = nil)
-            with_validation_focus_mutation_batch do
-              with_indoor_model_operation('IndoorGML Convert Group to CellSpace') do
-                cell_space = cell_space_lifecycle_service.create_from_group(
-                  sketchup_group,
-                  cell_type: cell_type,
-                  category_code: category_code
-                )
-                flush_validation_focus_row_topology_sync
-                cell_space
-              end
-            end
-          end
-
-          def convert_cell_space_jobs_bulk(jobs, fallback_target:, original_active_path:, preserve_source: nil, operation_name: 'Convert Solid Groups to CellSpace', activate_root_context: true)
-            model = @model || Sketchup.active_model
-            active_path = ActivePathController.new(model, logger: IndoorCore::Logger)
-            service = BulkCellSpaceConversionService.new(
-              model: model,
-              jobs: jobs,
-              fallback_target: fallback_target,
-              target_entities: model.entities,
-              converter: proc do |source, cell_type, category_code, storey|
-                cell_space_lifecycle_service.create_from_group_deferred(
-                  source,
-                  cell_type: cell_type,
-                  category_code: category_code,
-                  storey: storey
-                )
-              end,
-              synchronize_all: proc { synchronize_topology_after_bulk_conversion },
-              apply_lock_policy: proc { apply_indoor_lock_policy },
-              runtime_snapshot: proc { bulk_conversion_runtime_snapshot },
-              runtime_restore: proc { |snapshot| restore_bulk_conversion_runtime(snapshot) },
-              apply_guards: proc { |&block| with_bulk_cell_space_conversion(&block) },
-              restore_active_path: proc { active_path.restore(original_active_path, close_when_nil: true) },
-              activate_root_context: activate_root_context ? proc { active_path.close_to_root } : nil,
-              clear_dirty_topology: proc { clear_bulk_dirty_topology },
-              logger: IndoorCore::Logger,
-              labeler: ConversionMessageFormatter.method(:group_label),
-              preserve_source: preserve_source,
-              operation_name: operation_name
-            )
-            with_validation_focus_mutation_batch { service.call }
-          end
-
-          def change_cell_space_type(sketchup_group, cell_type, category_code = nil)
-            with_indoor_model_operation('IndoorGML Change CellSpace Type') do
-              cell_space = find_cell_space_for_entity(sketchup_group)
-              raise ArgumentError, 'Selected entity is not a registered CellSpace' if cell_space.nil?
-              raise ArgumentError, 'CellSpace is no longer valid' unless cell_space.valid?
-              cell_type, category_code = tag_cell_space_type_change_target(cell_space, cell_type, category_code)
-
-              sync do
-                cell_space_lifecycle_service.change_type(
-                  cell_space,
-                  cell_type: cell_type,
-                  category_code: category_code
-                )
-              end
-
-              cell_space
-            end
-          end
-
           def cell_space_changed(entity)
             begin
               return false if observer_routing_suppressed? || guard_active?(:@syncing) || guard_active?(:@erasing)
@@ -145,48 +80,11 @@ module ULOL
 
           private
 
-          def cell_space_lifecycle_service
-            @cell_space_lifecycle_service ||= CellSpaceLifecycleService.new(
-              source_preparer: CellSpaceLifecycleSourcePreparer.new(
-                converted_group: method(:converted_group?),
-                type_resolver: IndoorCore.method(:resolve_cell_space_type_and_category),
-                geometry_preparer: Utils::Geometry.method(:prepare_cell_space_source_group!),
-                tag_storey_resolver: IndoorCore.method(:tag_cell_space_storey),
-                storey_resolver: IndoorCore.method(:resolve_cell_space_storey),
-                storey_value_resolver: IndoorCore.method(:resolve_cell_space_storey_value)
-              ),
-              context: CellSpaceLifecycleContext.new(
-                ensure_space_features_groups: method(:ensure_space_features_groups),
-                place_cell_group: method(:place_cell_group),
-                default_storey_name: method(:default_storey_name),
-                fixed_state_height_offset: method(:fixed_state_height_offset),
-                recenter_cell_space_geometry: method(:recenter_cell_space_geometry),
-                name_cell_space_entity: method(:name_cell_space_entity),
-                apply_cell_space_material: method(:apply_cell_space_material),
-                track_cell_space_entity: method(:track_cell_space_entity),
-                apply_indoor_lock_policy: method(:apply_indoor_lock_policy),
-                register_cell_space: method(:register_cell_space),
-                register_state: method(:register_state),
-                unregister_cell_space: method(:unregister_cell_space),
-                unregister_state: method(:unregister_state),
-                write_attributes: method(:write_attributes),
-                write_cell_space_attributes: method(:write_cell_space_attributes),
-                synchronize_adjacency_and_transitions_for_cell_space: method(:synchronize_adjacency_and_transitions_for_cell_space),
-                erase_transitions_for_state: method(:erase_transitions_for_state),
-                erase_adjacency_for_cell_space: method(:erase_adjacency_for_cell_space)
-              )
-            )
-          end
-
           def with_bulk_cell_space_conversion
             with_active_path_enforcement_suspended do
               with_runtime_observer_suppression do
                 with_guard_flag(:@bulk_cell_space_conversion) do
-                  previous_depth = @indoor_operation_depth.to_i
-                  @indoor_operation_depth = previous_depth + 1
                   yield
-                ensure
-                  @indoor_operation_depth = previous_depth
                 end
               end
             end
@@ -217,105 +115,6 @@ module ULOL
             end
 
             target
-          end
-
-          def auto_convert_tagged_primal_entity(entity)
-            return false unless convertible_cell_space_container?(entity)
-            return false if converted_group?(entity)
-
-            target = IndoorCore.tag_cell_space_type_and_category(entity)
-            return false unless target
-            return false unless solid_container?(entity)
-
-            convert_single_group_to_cell_space(entity, target[0], target[1])
-            true
-          rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] Tagged CellSpace auto conversion failed: #{e.class}: #{e.message}"
-            false
-          end
-
-          def auto_convert_direct_tagged_children(container)
-            return false unless convertible_cell_space_container?(container)
-            return false unless container.respond_to?(:definition) && container.definition&.valid?
-
-            auto_convert_tagged_descendants(container, container.transformation)
-          end
-
-          def auto_convert_tagged_descendants(container, accumulated_transformation)
-            parent_target = IndoorCore.tag_cell_space_type_and_category(container)
-            converted_any = false
-            container.definition.entities.to_a.each do |child|
-              next unless child&.valid?
-              next unless convertible_cell_space_container?(child)
-              next if converted_group?(child)
-
-              if solid_container?(child)
-                child_target = target_for_tagged_child(child, parent_target)
-                converted_any = convert_primal_child_to_cell_space(child, child_target, accumulated_transformation) || converted_any if child_target
-              else
-                child_transformation = accumulated_transformation * child.transformation
-                child_converted = auto_convert_tagged_descendants(child, child_transformation)
-                cleanup_empty_tag_source_container(child) if child_converted
-                converted_any = child_converted || converted_any
-              end
-            end
-            converted_any
-          end
-
-          def target_for_tagged_child(child, parent_target)
-            child_target = IndoorCore.tag_cell_space_type_and_category(child)
-            return child_target if child_target
-            return parent_target unless IndoorCore.tag_assigned?(child)
-
-            nil
-          end
-
-          def convert_primal_child_to_cell_space(child, target, parent_transformation)
-            copy = EntityCopyHelper.copy_instance(
-              source: child,
-              target_entities: @primal_group.entities,
-              transformation: parent_transformation * child.transformation,
-              convert_to_group: :source_group,
-              make_unique: :source_group,
-              copy_attributes: [:name, :material, :layer, :visible]
-            )
-            convert_single_group_to_cell_space(copy, target[0], target[1])
-            child.erase! if child.valid?
-            true
-          rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] Tagged child CellSpace auto conversion failed: #{e.class}: #{e.message}"
-            copy.erase! if copy&.valid? && indoor_feature(copy) != 'CellSpace'
-            false
-          end
-
-          def cleanup_empty_tag_source_container(entity)
-            return false unless cleanup_candidate_source_container?(entity)
-            return false unless entity.respond_to?(:definition) && entity.definition&.valid?
-            return false unless entity.definition.entities.to_a.empty?
-
-            entity.erase!
-            true
-          rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] Empty tagged source group cleanup failed: #{e.class}: #{e.message}"
-            false
-          end
-
-          def cleanup_candidate_source_container?(entity)
-            entity&.valid? &&
-              convertible_cell_space_container?(entity) &&
-              indoor_feature(entity).to_s.empty?
-          rescue StandardError
-            false
-          end
-
-          def convertible_cell_space_container?(entity)
-            entity.is_a?(Sketchup::Group) || entity.is_a?(Sketchup::ComponentInstance)
-          end
-
-          def solid_container?(entity)
-            entity.respond_to?(:manifold?) && entity.manifold?
-          rescue StandardError
-            false
           end
 
           def register_cell_space(cell_space)
@@ -466,14 +265,6 @@ module ULOL
             feature
           end
 
-          def feature_id_in_use?(id, excluding: nil)
-            return false if id.to_s.empty?
-
-            (@cell_spaces + @states + @transitions).any? do |feature|
-              feature && feature != excluding && feature.id == id
-            end
-          end
-
           def random_feature_id
             rand(36**8).to_s(36)
           end
@@ -546,13 +337,6 @@ module ULOL
             remember_cell_space_change_snapshot(cell_space.sketchup_group)
             @editor_session.refresh_visibility_filter if editing?
             true
-          end
-
-          def handle_cell_space_etc_changed(cell_space)
-            IndoorCore::Logger.puts "[IndoorGML] CellSpace change ignored as etc: entity_id=#{cell_space.sketchup_group.entityID} name=#{cell_space.sketchup_group.name}"
-            with_transparent_cell_space_operation('IndoorGML CellSpace Etc Change') {}
-            remember_cell_space_change_snapshot(cell_space.sketchup_group)
-            false
           end
 
           def ensure_cell_space_transform_scale_identity(cell_space)
@@ -699,38 +483,6 @@ module ULOL
 
             cell_space.sketchup_group.name = expected_name
             @scene_group_guard.track(cell_space.sketchup_group, expected_name)
-          end
-
-          def apply_cell_space_material(cell_space)
-            group = cell_space.sketchup_group
-            material = Utils::Materials.cell_space(cell_space.cell_type, cell_space.category_code)
-
-            group.material = material if group.respond_to?(:material=)
-            group.entities.grep(Sketchup::Face) do |face|
-              clear_cell_space_face_material(face)
-            end
-          end
-
-          def clear_cell_space_materials(group)
-            return false unless group&.valid?
-
-            group.material = nil if group.respond_to?(:material=)
-            entities = if group.respond_to?(:definition) && group.definition&.valid?
-                         group.definition.entities
-                       elsif group.respond_to?(:entities)
-                         group.entities
-                       end
-            Array(entities&.grep(Sketchup::Face)).each do |face|
-              clear_cell_space_face_material(face)
-            end
-            true
-          end
-
-          def clear_cell_space_face_material(face)
-            face.material = nil if face.respond_to?(:material=)
-            face.back_material = nil if face.respond_to?(:back_material=)
-          rescue StandardError => e
-            IndoorCore::Logger.puts "[IndoorGML] CellSpace face material cleanup failed: #{e.class}: #{e.message}"
           end
 
           def register_state(state)

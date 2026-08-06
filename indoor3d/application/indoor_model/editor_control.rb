@@ -3,6 +3,7 @@
 require 'fileutils'
 require 'json'
 require_relative '../../validity/validation_focus_report_mapper'
+require_relative '../../ui/ui_feedback'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -38,7 +39,7 @@ module ULOL
 
           def recheck_validation_focus_errors
             if validation_focus_recheck_running?
-              UI.messagebox('오류 요소 재검사가 이미 실행 중입니다.')
+              UiFeedback.defer_modal('오류 요소 재검사가 이미 실행 중입니다.')
               return nil
             end
 
@@ -54,7 +55,7 @@ module ULOL
                !synchronize_validation_focus_topology_if_dirty
               state[:completed] = true
               finish_validation_focus_recheck(state)
-              UI.messagebox('전체 topology 동기화에 실패하여 오류 요소 재검사를 시작할 수 없습니다.')
+              UiFeedback.defer_modal('전체 topology 동기화에 실패하여 오류 요소 재검사를 시작할 수 없습니다.')
               return nil
             end
 
@@ -66,7 +67,7 @@ module ULOL
             if focus[:cell_spaces].empty?
               state[:completed] = true
               finish_validation_focus_recheck(state)
-              UI.messagebox('재검사할 오류 CellSpace가 없습니다.')
+              UiFeedback.defer_modal('재검사할 오류 CellSpace가 없습니다.')
               return nil
             end
 
@@ -111,7 +112,7 @@ module ULOL
               finish_validation_focus_recheck(nil)
             end
             IndoorCore::Logger.puts "[IndoorGML] Validation focus recheck failed: #{e.class}: #{e.message}"
-            UI.messagebox("오류 요소 재검사 실패:\n#{e.message}")
+            UiFeedback.defer_modal("오류 요소 재검사 실패:\n#{e.message}")
             nil
           end
 
@@ -132,12 +133,12 @@ module ULOL
             return false if validation_focus_recheck_running?
 
             IndoorCore::Logger.puts '[IndoorGML] EditModeDialog#RequestfinishEditing'
-            result = UI.messagebox("CellSpace 편집을 종료하시겠습니까?", MB_YESNO)
-            return false unless result == IDYES
+            UiFeedback.confirm('CellSpace 편집을 종료하시겠습니까?', MB_YESNO) do |result|
+              next unless result == IDYES
 
-            finished = finish_editing
-            UI.messagebox('전체 topology 동기화에 실패하여 편집 모드를 종료하지 못했습니다.') unless finished
-            finished
+              finished = finish_editing
+              UiFeedback.defer_modal('전체 topology 동기화에 실패하여 편집 모드를 종료하지 못했습니다.') unless finished
+            end
           end
 
           def editing?
@@ -300,25 +301,22 @@ module ULOL
           end
 
           def clear_all_indoor_gml_elements
-            model = Sketchup.active_model()
-            confirmed = UI.messagebox(
-              'Clear all IndoorGML elements?',
-              MB_YESNO
-            )
-            return false unless confirmed == IDYES
+            model = Sketchup.active_model
+            UiFeedback.confirm('Clear all IndoorGML elements?', MB_YESNO) do |result|
+              next unless result == IDYES
+              next unless Sketchup.active_model.equal?(model)
 
-            model.start_operation('Clear All IndoorGML Elements', true)
-            begin
-              @editor_session.finish() if editing?
-              clear_indoor_gml_groups()
-              reset_runtime_collections()
-              model.active_view.invalidate if model&.active_view
-              model.commit_operation
-              true
-            rescue StandardError => e
-              model.abort_operation
-              IndoorCore::Logger.puts "[IndoorGML] Clear all failed: #{e.class}: #{e.message}"
-              false
+              begin
+                with_indoor_model_operation('Clear All IndoorGML Elements') do
+                  @editor_session.finish() if editing?
+                  clear_indoor_gml_groups()
+                  reset_runtime_collections()
+                  model.active_view.invalidate if model&.active_view
+                end
+              rescue StandardError => e
+                IndoorCore::Logger.puts "[IndoorGML] Clear all failed: #{e.class}: #{e.message}"
+                UiFeedback.defer_modal("Clear all IndoorGML elements failed:\n#{e.message}")
+              end
             end
           end
 
@@ -412,41 +410,14 @@ module ULOL
               )
               @editor_session.selection_changed()
               Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
-              UI.messagebox(ConversionMessageFormatter.result_message(result.converted_count, result.errors))
+              UiFeedback.publish_result(
+                ConversionMessageFormatter.result_message(result.converted_count, result.errors),
+                errors: result.errors
+              )
               true
             rescue StandardError => e
               IndoorCore::Logger.puts "[IndoorGML] Selected solid group conversion failed: #{e.class}: #{e.message}"
-              UI.messagebox("CellSpace conversion failed:\n#{e.message}")
-              false
-            end
-          end
-
-          def set_selected_cell_space_type(cell_type_label, category_code = nil)
-            return false if validation_focus_recheck_running?
-
-            begin
-              cell_spaces = selected_cell_spaces
-              cell_spaces = [@editor_session.editing_cell_space].compact if cell_spaces.empty?
-              cell_spaces = cell_spaces.select { |cell_space| cell_space&.valid? }
-              return false if cell_spaces.empty?
-
-              model = Sketchup.active_model()
-              operation_started = false
-              model.start_operation('Change CellSpace Type and Category', true)
-              operation_started = true
-              cell_type = CellSpaceType.from_label(cell_type_label)
-              category_code = nil unless CellSpaceCategory.valid_for_type?(cell_type, category_code)
-              cell_spaces.each do |cell_space|
-                change_cell_space_type(cell_space.sketchup_group, cell_type, category_code)
-              end
-              model.commit_operation()
-              @editor_session.refresh_visibility_filter
-              @editor_session.selection_changed()
-              model.active_view().invalidate() if model&.active_view
-              true
-            rescue StandardError => e
-              model.abort_operation() if operation_started
-              IndoorCore::Logger.puts "[IndoorGML] Selected CellSpace type update failed: #{e.class}: #{e.message}"
+              UiFeedback.defer_modal("CellSpace conversion failed:\n#{e.message}")
               false
             end
           end
@@ -464,32 +435,12 @@ module ULOL
 
             cell_spaces = selected_cell_spaces.select { |cell_space| cell_space&.valid? }
             return false if cell_spaces.empty?
-            return false unless confirm_selected_cell_space_demotion(cell_spaces.length)
 
-            runtime_snapshot = bulk_conversion_runtime_snapshot
-            groups = cell_spaces.map(&:sketchup_group)
-            begin
-              with_validation_focus_mutation_batch do
-                with_indoor_model_operation('Remove Selected CellSpace IndoorGML Attributes') do
-                  sync do
-                    cell_spaces.each do |cell_space|
-                      demote_cell_space_to_solid_group(cell_space)
-                    end
-                  end
-                end
-              end
-            rescue StandardError => e
-              restore_bulk_conversion_runtime(runtime_snapshot) if runtime_snapshot
-              IndoorCore::Logger.puts(
-                "[IndoorGML] Selected CellSpace demotion failed: #{e.class}: #{e.message}"
-              )
-              UI.messagebox("IndoorGML 속성 제거 실패:\n#{e.message}")
-              return false
+            confirm_selected_cell_space_demotion(cell_spaces.length) do |confirmed|
+              next unless confirmed
+
+              perform_selected_cell_space_demotion(cell_spaces)
             end
-
-            untrack_demoted_primal_entities(groups)
-            refresh_after_selected_cell_space_demotion
-            true
           end
 
           def set_selected_cell_space_storey(storey)
@@ -504,22 +455,19 @@ module ULOL
               normalized_storey = storey_range_allowed_for_cell_spaces(cell_spaces) ? storey : first_storey_value(storey)
 
               model = Sketchup.active_model()
-              operation_started = false
-              model.start_operation('Change CellSpace Storey', true)
-              operation_started = true
-              sync do
-                cell_spaces.each do |cell_space|
-                  cell_space.set_storey(normalized_storey)
-                  write_cell_space_attributes(cell_space)
+              with_indoor_model_operation('Change CellSpace Storey') do
+                sync do
+                  cell_spaces.each do |cell_space|
+                    cell_space.set_storey(normalized_storey)
+                    write_cell_space_attributes(cell_space)
+                  end
                 end
               end
-              model.commit_operation()
               cell_spaces.each { |cell_space| remember_cell_space_change_snapshot(cell_space.sketchup_group) }
               @editor_session.refresh_visibility_filter
               @editor_session.selection_changed()
               true
             rescue StandardError => e
-              model.abort_operation() if operation_started
               IndoorCore::Logger.puts "[IndoorGML] Selected CellSpace storey update failed: #{e.class}: #{e.message}"
               false
             end
@@ -555,31 +503,16 @@ module ULOL
 
           private
 
-          def confirm_selected_cell_space_demotion(count)
+          def confirm_selected_cell_space_demotion(count, &callback)
             message = if count == 1
                         '선택한 CellSpace의 IndoorGML 속성을 제거하시겠습니까?'
                       else
                         "선택한 CellSpace #{count}개의 IndoorGML 속성을 제거하시겠습니까?"
                       end
             message += "\n\n연결된 State와 Transition도 제거되며 형상은 Solid Group으로 유지됩니다."
-            UI.messagebox(message, MB_YESNO) == IDYES
-          end
-
-          def demote_cell_space_to_solid_group(cell_space)
-            group = cell_space&.sketchup_group
-            raise ArgumentError, 'CellSpace group is no longer valid' unless group&.valid?
-
-            erase_cell_space(cell_space, erase_sketchup_group: false)
-            @attribute_serializer.clear_indoor_gml_attributes(group)
-            unless indoor_gml_attribute_dictionary_empty?(group)
-              raise 'IndoorGML AttributeDictionary cleanup was incomplete'
+            UiFeedback.confirm(message, MB_YESNO) do |result|
+              callback&.call(result == IDYES)
             end
-            raise 'CellSpace material cleanup failed' unless clear_cell_space_materials(group)
-
-            @scene_group_guard.untrack(group) if @scene_group_guard
-            @cell_space_change_snapshots.delete(entity_observer_key(group)) if @cell_space_change_snapshots
-            unlock_indoor_entity(group)
-            group
           end
 
           def indoor_gml_attribute_dictionary_empty?(entity)

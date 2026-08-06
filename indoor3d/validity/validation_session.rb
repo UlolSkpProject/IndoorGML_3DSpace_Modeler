@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../ui/ui_feedback'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -285,9 +287,7 @@ module ULOL
           end
 
           def notify_expired
-            return unless defined?(UI) && UI.respond_to?(:messagebox)
-
-            UI.messagebox(EXPIRED_MESSAGE)
+            UiFeedback.defer_modal(EXPIRED_MESSAGE)
           rescue StandardError => e
             log("Validation expiration notice failed: #{e.class}: #{e.message}")
           end

@@ -181,19 +181,10 @@ module ULOL
             model = Sketchup.active_model
             return with_visibility_observer_suppression { yield } unless model
 
-            operation_started = false
-            begin
-              result = nil
+            @indoor_model.with_indoor_model_operation('IndoorGML Edit Visibility') do
               with_visibility_observer_suppression do
-                operation_started = model.start_operation('IndoorGML Edit Visibility', true)
-                result = yield
-                model.commit_operation if operation_started
-                operation_started = false
+                yield
               end
-              result
-            rescue StandardError
-              model.abort_operation if operation_started
-              raise
             end
           end
 

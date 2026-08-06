@@ -21,10 +21,12 @@ module ULOL
           @cell_spaces_by_entity_object = {}
           @cell_spaces_by_persistent_id = {}
           @cell_spaces_by_entity_id_for_removed_callback = {}
+          @cell_spaces_by_normalized_id = {}
           @adjacent_cell_space_pairs = {}
           @transitions_by_cell_pair = {}
           @adjacent_pair_keys_by_cell_id = {}
           @transition_pair_keys_by_cell_id = {}
+          @features_by_id = {}
         end
 
         def snapshot
@@ -49,24 +51,37 @@ module ULOL
           @cell_spaces_by_entity_id_for_removed_callback = Hash(snapshot[:cell_spaces_by_entity_id_for_removed_callback]).dup
           @adjacent_cell_space_pairs = Hash(snapshot[:adjacent_cell_space_pairs]).dup
           @transitions_by_cell_pair = Hash(snapshot[:transitions_by_cell_pair]).dup
+          rebuild_cell_space_normalized_id_index
           rebuild_pair_key_indexes
+          rebuild_feature_id_index
         end
 
         def add_cell_space(cell_space)
           ensure_unique_feature_id!(cell_space)
-          @cell_spaces << cell_space unless @cell_spaces.include?(cell_space)
+          unless @cell_spaces.include?(cell_space)
+            @cell_spaces << cell_space
+            index_cell_space_normalized_id(cell_space)
+          end
           @cell_spaces_by_entity_object[cell_space.sketchup_group] = cell_space
           @cell_spaces_by_persistent_id[cell_space.sketchup_group.persistent_id] = cell_space
           @cell_spaces_by_entity_id_for_removed_callback[cell_space.sketchup_group.entityID] = cell_space
+          index_feature_id(cell_space)
         end
 
         def remove_cell_space(cell_space)
           return if cell_space.nil?
 
+          indexed_keys = @cell_spaces_by_normalized_id.each_with_object([]) do |(key, mapped), keys|
+            keys << key if mapped.equal?(cell_space)
+          end
+
           @cell_spaces.delete(cell_space)
           @cell_spaces_by_entity_object.delete(cell_space.sketchup_group)
           @cell_spaces_by_persistent_id.delete(cell_space.sketchup_group_id)
           @cell_spaces_by_entity_id_for_removed_callback.delete_if { |_entity_id, mapped_cell_space| mapped_cell_space == cell_space }
+
+          indexed_keys.each { |key| restore_first_normalized_id_match(key) }
+          unindex_feature_id(cell_space)
         end
 
         def find_cell_space_for_entity(entity)
@@ -85,15 +100,25 @@ module ULOL
           @cell_spaces_by_entity_id_for_removed_callback[entity_id]
         end
 
+        # Validation reports may reference the same CellSpace as `id`, `cell_id`,
+        # or `solid_id`, and non-ID-safe characters are normalized to `_`.
+        # Keep the first registered match so lookup semantics stay identical to
+        # the former Array#find path even when normalized IDs collide.
+        def find_cell_space_by_normalized_id(value)
+          @cell_spaces_by_normalized_id[normalize_cell_space_lookup_id(value)]
+        end
+
         def add_state(state)
           ensure_unique_feature_id!(state)
           @states << state unless @states.include?(state)
+          index_feature_id(state)
         end
 
         def remove_state(state)
           return if state.nil?
 
           @states.delete(state)
+          unindex_feature_id(state)
         end
 
         def add_transition(transition, pair_key: nil)
@@ -103,6 +128,7 @@ module ULOL
             @transitions_by_cell_pair[pair_key] = transition
             index_pair_key(@transition_pair_keys_by_cell_id, pair_key)
           end
+          index_feature_id(transition)
         end
 
         def remove_transition(transition)
@@ -115,6 +141,7 @@ module ULOL
             unindex_pair_key(@transition_pair_keys_by_cell_id, pair_key)
             true
           end
+          unindex_feature_id(transition)
         end
 
         def transition_for_pair(pair_key)
@@ -158,7 +185,47 @@ module ULOL
           Hash(@adjacent_pair_keys_by_cell_id[cell_id.to_s]).keys
         end
 
+        def feature_id_in_use?(id, excluding: nil)
+          id = id.to_s
+          return false if id.empty?
+
+          registered = Hash(@features_by_id)[id]
+          registered && !registered.equal?(excluding)
+        end
+
+        def feature_by_id(id)
+          Hash(@features_by_id)[id.to_s]
+        end
+
         private
+
+        def rebuild_cell_space_normalized_id_index
+          @cell_spaces_by_normalized_id = {}
+          @cell_spaces.each { |cell_space| index_cell_space_normalized_id(cell_space) }
+        end
+
+        def index_cell_space_normalized_id(cell_space)
+          key = normalize_cell_space_lookup_id(cell_space&.id)
+          @cell_spaces_by_normalized_id[key] ||= cell_space
+        end
+
+        def restore_first_normalized_id_match(key)
+          replacement = @cell_spaces.find do |cell_space|
+            normalize_cell_space_lookup_id(cell_space&.id) == key
+          end
+
+          if replacement
+            @cell_spaces_by_normalized_id[key] = replacement
+          else
+            @cell_spaces_by_normalized_id.delete(key)
+          end
+        end
+
+        def normalize_cell_space_lookup_id(value)
+          value.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')
+               .sub(/\Asolid_/, '')
+               .sub(/\Acell_/, '')
+        end
 
         def rebuild_pair_key_indexes
           @adjacent_pair_keys_by_cell_id = {}
@@ -169,6 +236,35 @@ module ULOL
           @transitions_by_cell_pair.each_key do |pair_key|
             index_pair_key(@transition_pair_keys_by_cell_id, pair_key)
           end
+        end
+
+        def rebuild_feature_id_index
+          @features_by_id = {}
+          (@cell_spaces + @states + @transitions).each { |feature| index_feature_id(feature) }
+        end
+
+        def index_feature_id(feature)
+          return unless feature
+
+          id = feature.id.to_s
+          return if id.empty?
+
+          registered = Hash(@features_by_id)[id]
+          if registered && !registered.equal?(feature)
+            raise ArgumentError, "Duplicate IndoorGML feature id: #{feature.id}"
+          end
+
+          @features_by_id[id] = feature
+        end
+
+        def unindex_feature_id(feature)
+          return unless feature
+
+          id = feature.id.to_s
+          return if id.empty?
+          return unless Hash(@features_by_id)[id].equal?(feature)
+
+          @features_by_id.delete(id)
         end
 
         def index_pair_key(index, pair_key)
@@ -193,9 +289,12 @@ module ULOL
 
         def ensure_unique_feature_id!(feature)
           return if feature.nil?
-          return unless (@cell_spaces + @states + @transitions).any? do |registered|
-            !registered.equal?(feature) && registered.id.to_s == feature.id.to_s
-          end
+
+          id = feature.id.to_s
+          return if id.empty?
+
+          registered = Hash(@features_by_id)[id]
+          return if registered.nil? || registered.equal?(feature)
 
           raise ArgumentError, "Duplicate IndoorGML feature id: #{feature.id}"
         end

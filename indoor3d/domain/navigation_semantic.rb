@@ -59,21 +59,21 @@ module ULOL
           NAVIGATION_SEMANTICS[[cell_type, category_code.to_s]]
         end
 
-        def self.legacy_default_semantic?(cell_type, category_code, semantic)
+        def self.compatibility_default_semantic?(cell_type, category_code, semantic)
           return false unless semantic
 
-          legacy_default_values?(cell_type, category_code, semantic) &&
-            legacy_code_space?(semantic.class_code_space) &&
-            legacy_code_space?(semantic.function_code_space) &&
-            legacy_code_space?(semantic.usage_code_space)
+          compatibility_default_values?(cell_type, category_code, semantic) &&
+            compatibility_code_space?(semantic.class_code_space) &&
+            compatibility_code_space?(semantic.function_code_space) &&
+            compatibility_code_space?(semantic.usage_code_space)
         end
 
-        def self.legacy_code_space?(value)
+        def self.compatibility_code_space?(value)
           normalized = value.to_s.strip
           normalized.empty? || normalized == 'urn:ogc:def:nil:OGC::IndoorGML:AnnexD'
         end
 
-        def self.legacy_default_values?(cell_type, category_code, semantic)
+        def self.compatibility_default_values?(cell_type, category_code, semantic)
           values = [
             semantic.class_value.to_s,
             semantic.function_value.to_s,
@@ -94,7 +94,7 @@ module ULOL
             false
           end
         end
-        private_class_method :legacy_default_values?
+        private_class_method :compatibility_default_values?
 
         def self.override_from_cell_space(cell_space, default_semantic)
           NavigationSemantic.new(

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../ui_feedback'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -11,10 +13,10 @@ module ULOL
             message: 'Refreshing...',
             batch_size: 1,
             complete: proc do
-              UI.messagebox('IndoorGML runtime data refreshed.')
+              UiFeedback.defer_modal('IndoorGML runtime data refreshed.')
             end,
             failure: proc do |error|
-              UI.messagebox("Runtime refresh failed:\n#{error.message}")
+              UiFeedback.defer_modal("Runtime refresh failed:\n#{error.message}")
             end
           ) do
             indoor_model.refresh_runtime_data
@@ -22,7 +24,7 @@ module ULOL
 
           indoor_model.refresh_runtime_data unless scheduled
         rescue StandardError => e
-          UI.messagebox("Runtime refresh failed:\n#{e.message}")
+          UiFeedback.defer_modal("Runtime refresh failed:\n#{e.message}")
         end
 
         def selected_indoor_gml_entities

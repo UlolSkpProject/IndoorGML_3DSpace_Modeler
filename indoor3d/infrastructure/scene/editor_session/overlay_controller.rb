@@ -5,7 +5,7 @@ module ULOL
     module IndoorCore
       class EditorSession
         class OverlayController
-          LEGACY_EDIT_MODE_OVERLAY_ID = 'ulol.indoor3dgml_modeler.edit_mode_overlay'
+          COMPATIBILITY_EDIT_MODE_OVERLAY_ID = 'ulol.indoor3dgml_modeler.edit_mode_overlay'
 
           def initialize(
             indoor_model:,
@@ -70,7 +70,7 @@ module ULOL
             IndoorCore::Logger.puts "[IndoorGML] Edit mode overlay enable failed: #{e.class}: #{e.message}"
           end
 
-          def update_enabled(editing:, dual_overlay_visible:, progress_active:)
+          def update_enabled(editing:, dual_overlay_visible:)
             set_overlay_enabled(@screen_overlay, editing == true)
             set_overlay_enabled(@space_overlay, dual_overlay_visible == true)
             set_overlay_enabled(
@@ -140,8 +140,7 @@ module ULOL
           def update_enabled_from_model
             update_enabled(
               editing: @indoor_model.respond_to?(:editing?) && @indoor_model.editing?,
-              dual_overlay_visible: @indoor_model.respond_to?(:dual_overlay_visible?) && @indoor_model.dual_overlay_visible?,
-              progress_active: false
+              dual_overlay_visible: @indoor_model.respond_to?(:dual_overlay_visible?) && @indoor_model.dual_overlay_visible?
             )
           end
 
@@ -156,7 +155,7 @@ module ULOL
             stale_ids = [
               IndoorModeScreenOverlay::OVERLAY_ID,
               DualGraphSpaceOverlay::OVERLAY_ID,
-              LEGACY_EDIT_MODE_OVERLAY_ID
+              COMPATIBILITY_EDIT_MODE_OVERLAY_ID
             ]
             if defined?(ValidationErrorGeometryOverlay::OVERLAY_ID)
               stale_ids << ValidationErrorGeometryOverlay::OVERLAY_ID

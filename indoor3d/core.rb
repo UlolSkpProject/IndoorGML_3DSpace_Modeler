@@ -37,6 +37,9 @@ module ULOL
     require_relative 'infrastructure/preferences/dual_overlay_preferences'
 
     require_relative 'application/storey_filter'
+    require_relative 'application/local_vertex_normalizer'
+    require_relative 'application/local_vertex_normalizer/coplanar_shared_edge_groups'
+    require_relative 'application/local_vertex_normalizer/pipeline'
 
     require_relative 'infrastructure/scene/scene_group_guard'
     require_relative 'infrastructure/scene/entity_copy_helper'
@@ -54,6 +57,7 @@ module ULOL
     require_relative 'application/indoor_model/observer_routing'
     require_relative 'application/indoor_model/entity_relocation'
     require_relative 'application/indoor_model/primal_normalization'
+    require_relative 'application/indoor_model/local_vertex_normalization'
     require_relative 'application/indoor_model/edit_mode_selection_projection'
     require_relative 'application/indoor_model/editor_control'
     require_relative 'application/indoor_model'
@@ -75,6 +79,8 @@ module ULOL
     require_relative 'ui/overlays/dual_graph_space_overlay'
     require_relative 'ui/html_dialog_metrics'
     require_relative 'ui/dual_overlay_scale_dialog'
+    require_relative 'ui/dual_overlay_scale_dialog_drop_guard'
+    require_relative 'validity/val3dity_report_drop_guard'
     require_relative 'ui/edit_mode_dialog'
     require_relative 'ui/export_progress_dialog'
     require_relative 'ui/command_dispatcher'
@@ -109,18 +115,9 @@ module ULOL
       begin
         @app_observer ||= IndoorCore::Indoor3DGmlAppObserver.new
         Sketchup.add_observer(@app_observer)
-        @app_observer.register_model(Sketchup.active_model())
-
-        # Deferred runtime refresh to avoid SketchUp crash on model load.
-        UI.start_timer(0.5, false) do
-          begin
-            IndoorCore::IndoorModel.current.refresh_runtime_data(initial_model_load: true)
-          rescue StandardError => e
-            IndoorCore::Logger.error(
-              "[IndoorGML] Deferred runtime refresh failed: #{e.class}: #{e.message}\n#{e.backtrace&.join("\n")}"
-            )
-          end
-        end
+        model = Sketchup.active_model()
+        @app_observer.register_model(model)
+        @app_observer.schedule_initial_refresh(model)
 
       rescue StandardError => e
         IndoorCore::Logger.puts "[IndoorGML] Model observer setup failed: #{e.class}: #{e.message}"
@@ -187,7 +184,7 @@ module ULOL
         selected_cell_spaces = dispatcher.selected_indoor_gml_entities.select do |entity|
           dispatcher.indoor_feature(entity) == 'CellSpace'
         end
-      
+
         indoor_model.editing? && dispatcher.cell_space_type_change_available?(selected_cell_spaces) ? MF_ENABLED : MF_GRAYED
       end
       @edit_property_command = create_command(

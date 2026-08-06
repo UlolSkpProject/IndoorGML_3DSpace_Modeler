@@ -184,7 +184,7 @@ module ULOL
             usage_value: restored_usage,
             usage_code_space: blank_to_nil(usage_code_space)
           )
-          if NavigationSemanticResolver.legacy_default_semantic?(@cell_type, @category_code, restored_semantic)
+          if NavigationSemanticResolver.compatibility_default_semantic?(@cell_type, @category_code, restored_semantic)
             apply_default_navigation_semantics
             return
           end

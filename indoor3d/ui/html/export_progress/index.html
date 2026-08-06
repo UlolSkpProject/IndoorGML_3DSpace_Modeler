@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="step_summary.css">
 </head>
 <body>
   <div class="title">IndoorGML Validity Check</div>
@@ -20,7 +21,7 @@
     <div id="detail-message" class="detail-message"></div>
     <div id="detail-current" class="detail-current"></div>
     <div class="detail-actions">
-      <button id="cancel-validation" type="button">Cancel</button>
+      <button id="cancel-validation" type="button" hidden>Cancel</button>
     </div>
   </div>
   <div id="result" class="result hidden">
@@ -28,6 +29,11 @@
     <div id="result-message" class="result-message"></div>
     <div id="result-actions" class="result-actions"></div>
   </div>
+  <script src="../shared/external_file_drop_guard.js"></script>
+  <script>initExternalFileDropGuard();</script>
   <script src="app.js"></script>
+  <script src="step_summary.js"></script>
+  <script src="cancel_visibility.js"></script>
+  <script src="public_result_labels.js"></script>
 </body>
 </html>
