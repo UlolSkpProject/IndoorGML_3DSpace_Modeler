@@ -167,15 +167,22 @@ module ULOL
         end
 
         def reset_reused_model_runtime(model)
+          key = model.object_id
+          detach_model_observer(model)
+          @observed_model_ids.delete(key)
           @model_observer.forget_model(model) if @model_observer.respond_to?(:forget_model)
           IndoorModel.release(model)
+          register_model(model)
           IndoorCore::Logger.puts(
             '[IndoorGML] Reused SketchUp Model runtime released before refresh'
           )
+          true
         rescue StandardError => e
+          register_model(model) if model
           IndoorCore::Logger.puts(
             "[IndoorGML] Reused model runtime cleanup failed: #{e.class}: #{e.message}"
           )
+          raise
         end
 
         def initial_runtime_refresh_applicable?(model)
