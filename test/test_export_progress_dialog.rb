@@ -89,6 +89,40 @@ module ULOL
             assert_empty dialog.instance_variable_get(:@pending_scripts)
           end
 
+          def test_ready_callback_waits_until_dialog_has_rendered
+            calls = 0
+            fake_dialog = Struct.new(:scripts) do
+              def execute_script(script)
+                scripts << script
+              end
+            end.new([])
+            dialog = ExportProgressDialog.new
+            dialog.instance_variable_set(:@dialog, fake_dialog)
+            dialog.on_ready { calls += 1 }
+
+            dialog.send(:handle_progress_dom_ready, fake_dialog)
+
+            assert_equal true, dialog.instance_variable_get(:@dom_ready)
+            assert_equal false, dialog.instance_variable_get(:@visual_ready)
+            assert_equal 0, calls
+
+            dialog.send(:handle_visual_ready)
+            dialog.send(:handle_visual_ready)
+
+            assert_equal true, dialog.instance_variable_get(:@visual_ready)
+            assert_equal 1, calls
+          end
+
+          def test_html_signals_visual_ready_after_two_animation_frames
+            script = File.read(
+              File.expand_path('../indoor3d/ui/html/export_progress/app.js', __dir__),
+              encoding: 'UTF-8'
+            )
+
+            assert_operator script.scan('window.requestAnimationFrame').length, :>=, 2
+            assert_includes script, 'sketchup.visualReady();'
+          end
+
           def test_clear_validation_focus_selection_executes_report_function
             executed_scripts = []
             fake_dialog = Struct.new(:executed_scripts) do
