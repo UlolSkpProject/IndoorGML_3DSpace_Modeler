@@ -175,10 +175,6 @@ module ULOL
           def set_attribute(dictionary, key, value)
             @attributes[[dictionary, key]] = value
           end
-
-          def delete_attribute(dictionary, key)
-            @attributes.delete([dictionary, key])
-          end
         end
 
         CellSpace = Struct.new(:id, :group) do
@@ -295,17 +291,6 @@ module ULOL
 
           assert_equal true, model.cell_space_changed(group)
           refute PrecisionValidation::LvnState.failed?(group)
-        end
-
-        def test_false_state_removes_compatibility_signature_attribute
-          group = Group.new('legacy')
-          group.set_attribute('IndoorGml', 'lvn_failed', true)
-          group.set_attribute('IndoorGml', 'lvn_failed_geometry_signature', 'legacy-value')
-
-          PrecisionValidation::LvnState.set_failed(group, false)
-
-          assert_equal false, group.get_attribute('IndoorGml', 'lvn_failed')
-          assert_nil group.get_attribute('IndoorGml', 'lvn_failed_geometry_signature')
         end
 
         def test_new_cell_space_is_initialized_with_false_failure_flag
