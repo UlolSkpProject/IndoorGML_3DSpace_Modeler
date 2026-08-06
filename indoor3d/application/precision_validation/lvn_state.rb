@@ -9,9 +9,8 @@ module ULOL
         module LvnState
           DICTIONARY_NAME = 'IndoorGml'
           FAILED_KEY = 'lvn_failed'
-          FAILED_SIGNATURE_KEY = 'lvn_failed_geometry_signature'
+          LEGACY_FAILED_SIGNATURE_KEY = 'lvn_failed_geometry_signature'
           SIGNATURE_VERSION = 'lvn-geometry-v1'
-          UNAVAILABLE_SIGNATURE = "#{SIGNATURE_VERSION}:unavailable"
 
           module_function
 
@@ -43,32 +42,21 @@ module ULOL
             false
           end
 
-          def failure_signature(candidate)
-            group = group_for(candidate)
-            return nil unless valid_group?(group)
-
-            value = group.get_attribute(DICTIONARY_NAME, FAILED_SIGNATURE_KEY)
-            value.to_s.empty? ? nil : value.to_s
-          rescue StandardError
+          # Compatibility accessor retained for existing callers. Failure state is
+          # intentionally persisted only through lvn_failed.
+          def failure_signature(_candidate)
             nil
           end
 
-          def geometry_changed_since_failure?(candidate)
-            group = group_for(candidate)
-            return false unless valid_group?(group)
-            return false unless failed?(group)
-
-            stored = failure_signature(group)
-            return true if stored.nil?
-
-            current = geometry_signature(group)
-            return false if current.nil?
-
-            stored != current
+          # Geometry-change retry is handled by the existing mutation lifecycle,
+          # which clears lvn_failed when a CellSpace geometry operation succeeds.
+          # No persisted geometry signature participates in failure-state checks.
+          def geometry_changed_since_failure?(_candidate)
+            false
           end
 
           def failed_and_unchanged?(candidate)
-            failed?(candidate) && !geometry_changed_since_failure?(candidate)
+            failed?(candidate)
           end
 
           def set_failed(candidate, failed, signature: nil)
@@ -78,25 +66,23 @@ module ULOL
             target = failed == true
             raw_value = group.get_attribute(DICTIONARY_NAME, FAILED_KEY)
             current = raw_value == true || raw_value.to_s.casecmp('true').zero?
-            stored_signature = failure_signature(group)
-            target_signature = if target
-                                 signature || geometry_signature(group) || UNAVAILABLE_SIGNATURE
-                               end
+            legacy_signature = group.get_attribute(
+              DICTIONARY_NAME,
+              LEGACY_FAILED_SIGNATURE_KEY
+            )
 
-            changed = raw_value.nil? || current != target
-            changed ||= target && stored_signature != target_signature
-            changed ||= !target && !stored_signature.nil?
+            changed = raw_value.nil? || current != target || !legacy_signature.nil?
             return false unless changed
 
+            # `signature` remains accepted only for call-site compatibility. It is
+            # deliberately not persisted.
+            signature
             group.set_attribute(DICTIONARY_NAME, FAILED_KEY, target)
-            if target
-              group.set_attribute(
+            if group.respond_to?(:delete_attribute)
+              group.delete_attribute(
                 DICTIONARY_NAME,
-                FAILED_SIGNATURE_KEY,
-                target_signature
+                LEGACY_FAILED_SIGNATURE_KEY
               )
-            elsif group.respond_to?(:delete_attribute)
-              group.delete_attribute(DICTIONARY_NAME, FAILED_SIGNATURE_KEY)
             end
             true
           rescue StandardError => e
@@ -104,6 +90,9 @@ module ULOL
             false
           end
 
+          # Transient geometry signature used only to compare geometry before and
+          # after a mutation within the current Ruby process. It is never written
+          # to the SketchUp model.
           def geometry_signature(candidate)
             group = group_for(candidate)
             return nil unless valid_group?(group)
