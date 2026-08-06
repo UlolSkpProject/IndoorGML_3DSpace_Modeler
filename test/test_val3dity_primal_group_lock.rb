@@ -86,7 +86,21 @@ FakeVal3dityIndoorModel = Struct.new(:primal_group)
 
 class Val3dityPrimalGroupLockTest < Minitest::Test
   Runner = ULOL::Indoor3DGmlModeler::IndoorCore::IndoorGmlConverter::Val3dityRunner
+  Lock = ULOL::Indoor3DGmlModeler::IndoorCore::IndoorGmlConverter::Val3dityPrimalGroupLock
   Guard = ULOL::Indoor3DGmlModeler::IndoorCore::IndoorGmlConverter::Val3dityPrimalGroupLock::Guard
+
+  def test_active_for_tracks_the_acquired_group_only
+    group = FakeVal3dityPrimalGroup.new
+    other = FakeVal3dityPrimalGroup.new
+    guard = Guard.new(group)
+
+    refute Lock.active_for?(group)
+    assert guard.acquire
+    assert Lock.active_for?(group)
+    refute Lock.active_for?(other)
+    assert guard.release
+    refute Lock.active_for?(group)
+  end
 
   def test_locks_only_during_process_and_restores_unlocked_state_on_finish
     group = FakeVal3dityPrimalGroup.new(locked: false)

@@ -30,6 +30,7 @@ module ULOL
 end
 
 require_relative '../indoor3d/application/indoor_model/scene_groups'
+require_relative '../indoor3d/validity/val3dity_primal_group_lock'
 require_relative '../indoor3d/application/indoor_model/observer_routing'
 require_relative '../indoor3d/application/indoor_model/runtime_support'
 require_relative '../indoor3d/application/indoor_model/feature_lifecycle'
@@ -85,6 +86,38 @@ module ULOL
           model.primal_entity_removed(123)
 
           assert_empty model.calls
+        end
+
+        def test_active_validation_guard_immediately_restores_primal_lock
+          entity = FakeEntity.new(locked: false)
+          guard = IndoorGmlConverter::Val3dityPrimalGroupLock::Guard.new(entity)
+          model = FakeValidationRelockModel.new
+
+          assert guard.acquire
+          entity.locked = false
+          assert_equal true, model.space_features_changed(entity)
+
+          assert entity.locked?
+          assert_equal [
+            [
+              :operation,
+              'IndoorGML Restore Validation Primal Lock',
+              true
+            ],
+            [:guard, :@constraining_space_features]
+          ], model.calls
+        ensure
+          guard&.release
+        end
+
+        def test_inactive_validation_guard_does_not_restore_primal_lock
+          entity = FakeEntity.new(locked: false)
+          model = FakeValidationRelockModel.new
+
+          assert_equal false, model.space_features_changed(entity)
+
+          refute entity.locked?
+          assert_equal [:classify], model.calls
         end
 
         def test_suppressed_observer_context_does_not_start_nested_operation
@@ -455,6 +488,48 @@ module ULOL
 
           def observer_routing_suppressed?
             @syncing == true
+          end
+        end
+
+        class FakeValidationRelockModel
+          include IndoorModel::ObserverRouting
+
+          attr_reader :calls
+
+          def initialize
+            @calls = []
+            @erasing = false
+            @constraining_space_features = false
+            @finishing_editing = false
+          end
+
+          private
+
+          def observer_routing_suppressed?
+            false
+          end
+
+          def guard_active?(flag)
+            instance_variable_get(flag)
+          end
+
+          def with_indoor_model_operation(name, transparent: false)
+            @calls << [:operation, name, transparent]
+            yield
+          end
+
+          def with_guard_flag(flag)
+            @calls << [:guard, flag]
+            previous = instance_variable_get(flag)
+            instance_variable_set(flag, true)
+            yield
+          ensure
+            instance_variable_set(flag, previous)
+          end
+
+          def classify_space_features_change(_entity)
+            @calls << :classify
+            nil
           end
         end
 
@@ -934,12 +1009,21 @@ module ULOL
         class FakeEntity
           attr_reader :entityID
 
-          def initialize(entity_id = nil)
+          def initialize(entity_id = nil, locked: false)
             @entityID = entity_id || object_id
+            @locked = locked == true
           end
 
           def valid?
             true
+          end
+
+          def locked?
+            @locked == true
+          end
+
+          def locked=(value)
+            @locked = value == true
           end
         end
       end

@@ -8,6 +8,7 @@ module ULOL
           def space_features_changed(entity)
             return false if observer_routing_suppressed? || guard_active?(:@constraining_space_features) || guard_active?(:@erasing) || @finishing_editing
             return false unless entity&.valid?
+            return true if restore_validation_primal_group_lock(entity)
 
             change_kind = classify_space_features_change(entity)
             return false if change_kind.nil?
@@ -21,6 +22,37 @@ module ULOL
               handle_space_features_etc_changed(entity)
             end
           end
+
+          def restore_validation_primal_group_lock(entity)
+            return false unless defined?(
+              IndoorGmlConverter::Val3dityPrimalGroupLock
+            )
+
+            lock = IndoorGmlConverter::Val3dityPrimalGroupLock
+            return false unless lock.active_for?(entity)
+            return false if entity.locked? == true
+
+            with_transparent_space_features_operation(
+              'IndoorGML Restore Validation Primal Lock'
+            ) do
+              with_guard_flag(:@constraining_space_features) do
+                entity.locked = true
+              end
+            end
+            restored = entity.locked? == true
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Validation primal_group lock restored: " \
+              "entity_id=#{entity.entityID}"
+            ) if restored
+            restored
+          rescue StandardError => e
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Validation primal_group relock failed: " \
+              "#{e.class}: #{e.message}"
+            )
+            false
+          end
+          private :restore_validation_primal_group_lock
 
           def observer_routing_suppressed?
             guard_active?(:@syncing) ||

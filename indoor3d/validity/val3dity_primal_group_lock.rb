@@ -27,6 +27,15 @@ module ULOL
             @registry ||= {}
           end
 
+          def active_for?(group)
+            return false unless lockable_group?(group)
+
+            entry = registry[group.object_id]
+            entry && entry[:group].equal?(group) && entry[:count].to_i.positive?
+          rescue StandardError
+            false
+          end
+
           def acquire(group, logger: IndoorCore::Logger)
             return nil unless lockable_group?(group)
 
