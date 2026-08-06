@@ -19,11 +19,27 @@ IndoorGML 3D Modeler는 SketchUp 모델 안의 manifold solid group을 IndoorGML
 - CellSpace 타입, 카테고리, 층 정보를 Edit Mode에서 편집
 - State/Transition을 SketchUp geometry가 아닌 Overlay로 표시
 - `.skp` 저장 후 다시 열어도 CellSpace runtime을 attribute에서 복원
-- val3dity v2.2.0으로 임시 GML을 검증하고 HTML report 제공
+- val3dity v2.2.0과 Extension 재검사 정책으로 Geometry/Topology 오류 확인
+- 빠른 검사와 Local Vertex Normalization 기반 정밀검사 제공
+
+## v1.0.5 Highlights
+
+v1.0.5는 검사 자체뿐 아니라 오류를 찾고, 안전하게 보정하고, 다시 확인하는 전체 Validation 워크플로를 확장합니다.
+
+- `Check Validity` 실행 시 **빠른 검사**와 **정밀검사** 중 선택
+- 정밀검사 전 CellSpace별 **Local Vertex Normalization(LVN)** 수행
+- LVN 실패 시 해당 CellSpace만 원복하고 이미 성공한 CellSpace 결과는 유지
+- 이미 정규화된 CellSpace와 이전 실패 CellSpace를 구분하여 불필요한 반복 처리 방지
+- Validation report의 오류 geometry를 viewport Overlay로 표시하고 오류 범위에 focus
+- 빠른 검사의 701/704 재검사를 현재 SketchUp 원본 CellSpace geometry 기준으로 수행
+- 선택한 CellSpace의 IndoorGML 의미만 제거하여 일반 Solid Group으로 복원
+- Validation 진행률, LVN 통계, 재실행 session 정리, Fix Mode와 runtime 복원 안정성 개선
+
+정밀검사는 geometry를 실제로 변경할 수 있는 Beta 기능입니다. CellSpace별 독립 작업과 rollback을 사용하므로 하나의 특수 형상에서 실패하더라도 다른 성공 결과를 함께 폐기하지 않습니다.
 
 ## Project Scope
 
-이 프로젝트는 연구보고서와 legacy extension이 목표로 했던 전체 기능을 모두 복원하지 않습니다. 대신 실제 작업 경로인 **CellSpace -> State -> Transition -> Validation -> Export** 흐름에 집중합니다.
+이 프로젝트는 연구보고서와 legacy extension이 목표로 했던 전체 기능을 모두 복원하지 않습니다. 대신 실제 작업 경로인 **CellSpace → State → Transition → Validation → Export** 흐름에 집중합니다.
 
 ### 지원
 
@@ -34,6 +50,9 @@ IndoorGML 3D Modeler는 SketchUp 모델 안의 manifold solid group을 IndoorGML
 - 인접 CellSpace 간 Transition 자동 생성
 - `.skp` 저장 후 재오픈 시 IndoorGML 정보 복원
 - Edit Mode, visibility filter, geometry toggle, State/Transition Overlay
+- 선택 CellSpace의 IndoorGML 속성 제거 및 일반 Solid Group 복원
+- 빠른 검사와 LVN 기반 정밀검사
+- Validation report, 오류 geometry Overlay, focus, Fix Mode
 - val3dity 기반 Validation과 GML Export
 
 ### 미지원
@@ -49,7 +68,7 @@ IndoorGML 3D Modeler는 SketchUp 모델 안의 manifold solid group을 IndoorGML
 
 ## Version Policy
 
-코드에서는 확장/저장 포맷 버전과 OGC schema 버전을 분리합니다.
+코드에서는 확장 패키지, 저장 포맷, OGC XML schema 버전을 분리합니다.
 
 | 항목 | 값 | 정의 |
 | --- | --- | --- |
@@ -58,19 +77,34 @@ IndoorGML 3D Modeler는 SketchUp 모델 안의 manifold solid group을 IndoorGML
 | IndoorGML XML schema version | `1.0` | `Definition::INDOOR_GML_SCHEMA_VERSION` |
 | Validator runtime | `val3dity-windows-x64-v2.2.0` | `Val3dityRunner::VENDOR_ROOT` |
 
-`schemas.opengis.net/indoorgml/1.0.3/*.xsd`는 존재하지 않으므로 Export XML의 namespace와 `xsi:schemaLocation`은 공식 IndoorGML 1.0 schema 경로를 사용합니다. 반면 SketchUp attribute에 기록되는 extension/storage version은 `1.0.3`입니다.
+`schemas.opengis.net/indoorgml/1.0.3/*.xsd`는 존재하지 않으므로 Export XML의 namespace와 `xsi:schemaLocation`은 공식 IndoorGML 1.0 schema 경로를 사용합니다. SketchUp attribute에 기록되는 extension/storage version은 `1.0.3`입니다.
 
 ## Validation Contract
 
-Validation performs XML well-formedness parsing, val3dity strict checks, and the 701/704 overlap recheck policy. It does **not** perform XSD validation. Final results are reported consistently as `Valid`, `Invalid`, or `Failed`.
+Validation은 XML well-formedness 확인과 val3dity 2.2.0 검사를 수행합니다. XSD validation은 수행하지 않습니다. 모든 val3dity 실행에는 GML 좌표 단위 기준 `--planarity_d2p_tol 0.025`가 적용됩니다.
 
-Solid cavities and disconnected shells are rejected before export because the exporter writes one exterior shell and no `gml:Solid/gml:interior`. Transition export remains endpoint-only by default; API callers can opt into `transition_geometry_mode: :shared_face_waypoint` to compare a three-point `State1 → shared-face waypoint → State2` LineString with downstream tools before changing the default.
+검사 profile에 따라 pipeline이 달라집니다.
+
+| Profile | Geometry 변경 | val3dity overlap 설정 | Extension 701/704 재검사 |
+| --- | --- | --- | --- |
+| 빠른 검사 | 없음 | `--overlap_tol -1` | 수행 |
+| 정밀검사 | LVN으로 변경 가능 | 0.01 mm를 GML 좌표 단위로 변환 | 수행하지 않음 |
+
+최종 결과는 일관되게 다음 세 상태로 보고합니다.
+
+- `Valid`: 검사 기준에서 오류가 발견되지 않음
+- `Invalid`: 수정이 필요한 Validation 오류가 있음
+- `Failed`: 검사 실행 또는 후처리 자체가 완료되지 못함
+
+Exporter는 하나의 exterior shell을 가진 `gml:Solid`를 생성합니다. 따라서 cavity가 포함된 solid와 서로 분리된 shell은 export 전에 거부됩니다.
+
+Transition geometry는 두 State endpoint를 연결하는 방식이 기본값입니다. API 호출에서는 비교·실험 목적으로 `transition_geometry_mode: :shared_face_waypoint`를 지정하여 `State1 → shared-face waypoint → State2`의 3점 LineString을 사용할 수 있지만 기본 Export 동작은 변경되지 않습니다.
 
 ## Installation
 
 ### RBZ 설치
 
-1. Releases에서 `IndoorGML_3D_Modeler-x.x.x.rbz`를 내려받습니다.
+1. [Releases](https://github.com/UlolSkpProject/IndoorGML_3DSpace_Modeler/releases)에서 `IndoorGML_3D_Modeler-x.x.x.rbz`를 내려받습니다.
 2. SketchUp 2026에서 `Extension Manager`를 엽니다.
 3. `Install Extension`으로 `.rbz`를 선택합니다.
 4. SketchUp을 재시작합니다.
@@ -91,7 +125,7 @@ Plugins/
 
 ### 1. Solid Group 준비
 
-SketchUp에서 CellSpace로 변환할 공간을 solid group 또는 component instance로 모델링합니다. 변환 대상은 manifold solid여야 합니다.
+SketchUp에서 CellSpace로 변환할 공간을 solid group 또는 component instance로 모델링합니다. 변환 대상은 manifold solid여야 하며, 하나의 CellSpace는 하나의 연결된 exterior shell이어야 합니다.
 
 ![Solid Group 준비](docs/images/step1_solid_group.png)
 
@@ -102,26 +136,35 @@ SketchUp에서 CellSpace로 변환할 공간을 solid group 또는 component ins
 ![Create CellSpace 결과](docs/images/step2_create_cellspace.png)
 
 변환된 객체는 `IndoorGML_PrimalSpaceFeatures` group 아래로 이동되며, 대응되는 `State`가 1:1로 생성됩니다. 선택 객체가 이미 CellSpace이면 재변환하지 않습니다.
-여러 group을 한 번에 선택한 경우 변환 가능한 항목만 CellSpace로 생성하고, 조건을 만족하지 못한 항목은 결과 메시지의 `Failed` 목록에 group 이름 또는 entity id와 함께 표시합니다.
+
+여러 group을 한 번에 선택하면 변환 가능한 항목은 계속 처리하고, 조건을 만족하지 못한 항목은 결과의 `Failed` 목록에 group 이름 또는 entity id와 함께 표시합니다.
 
 ### 3. Edit Mode 진입
 
-`Edit CellSpace Property`를 실행하면 Edit Mode가 켜지고, CellSpace 편집 dialog와 viewport overlay가 활성화됩니다.
+`Edit CellSpace Property`를 실행하면 Edit Mode가 켜지고, CellSpace 편집 dialog와 viewport Overlay가 활성화됩니다.
 
 ![EditMode 진입](docs/images/step3_edit_mode.png)
 
-Edit Mode에서는 CellSpace 이동, 타입 변경, 층 변경, visibility filter, geometry 표시 토글, State/Transition overlay 확인을 수행합니다.
+Edit Mode에서는 CellSpace 이동, 타입 변경, 층 변경, visibility filter, geometry 표시 토글, State/Transition Overlay 확인을 수행합니다.
 
 ### 4. CellSpace 편집
 
-CellSpace를 이동하거나 타입/층 정보를 변경하면 runtime attribute와 topology가 갱신됩니다. 인접 관계가 생기거나 사라지면 Transition도 자동 생성·삭제됩니다.
+CellSpace를 이동하거나 타입·층 정보를 변경하면 runtime attribute와 topology가 갱신됩니다. 인접 관계가 생기거나 사라지면 Transition도 자동 생성·삭제됩니다.
 
 ![CellSpace 편집](docs/images/step4_edit_cellspace.png)
 
-### 5. Export 또는 Validity Check
+### 5. Validity Check
 
-- `Export GML`: 현재 모델을 바로 `.gml`로 저장합니다.
-- `Check Validity`: 임시 GML을 만들고 val3dity로 검증한 뒤 report를 표시합니다. 검증 결과를 확인한 뒤 별도 저장이 필요하면 `Export GML`을 실행합니다.
+`Check Validity`를 실행하고 검사 profile을 선택합니다.
+
+- **빠른 검사**: 현재 geometry를 바꾸지 않고 val3dity와 Extension 701/704 재검사를 수행
+- **정밀검사**: CellSpace별 LVN 후 물리 허용오차 0.01 mm를 적용해 val3dity 검사
+
+오류가 있으면 report에서 대상 CellSpace와 오류 geometry를 확인하고 Fix Mode로 수정합니다. 부분 재검사를 통과했더라도 최종 납품 전에는 전체 검사를 다시 실행해야 합니다.
+
+### 6. Export
+
+`Export GML`은 현재 모델을 `.gml`로 저장합니다. Export 자체가 Validation을 자동 수행하지 않으므로 권장 순서는 **전체 Validity Check → 오류 수정 → 전체 재검사 → Export GML**입니다.
 
 ## Toolbar Commands
 
@@ -131,12 +174,12 @@ CellSpace를 이동하거나 타입/층 정보를 변경하면 runtime attribute
 | Edit CellSpace Property | ![](indoor3d/assets/icons/edit_cellspace_property.svg) | Edit Mode 시작/종료 |
 | Change CellSpace Type | ![](indoor3d/assets/icons/change_cellspace_type.svg) | 선택한 CellSpace 타입/카테고리 변경 |
 | Show/Hide Geometry | ![](indoor3d/assets/icons/toggle_geometry.svg) | CellSpace geometry 표시 토글 |
-| Show/Hide State/Link Overlay | ![](indoor3d/assets/icons/toggle_dual_overlay.svg) | State/Transition overlay 표시 토글 |
-| Dual Overlay Scale | ![](indoor3d/assets/icons/dual_overlay_scale.svg) | State 크기 조절 |
+| Show/Hide State/Link Overlay | ![](indoor3d/assets/icons/toggle_dual_overlay.svg) | State/Transition Overlay 표시 토글 |
+| Dual Overlay Scale | ![](indoor3d/assets/icons/dual_overlay_scale.svg) | State 표시 크기 조절 |
 | Export GML | ![](indoor3d/assets/icons/export_gml.svg) | IndoorGML 1.0 GML 파일 저장 |
-| Check Validity | ![](indoor3d/assets/icons/check_validity.svg) | 임시 GML 생성, val3dity 실행, report 생성 |
+| Check Validity | ![](indoor3d/assets/icons/check_validity.svg) | 검사 profile 선택 후 Validation 실행 |
 
-Context menu는 상황에 따라 `Edit IndoorGML`, `Change CellSpace Type` 항목을 추가합니다.
+Context menu는 상황에 따라 `Edit IndoorGML`, `Change CellSpace Type` 등 IndoorGML 편집 항목을 추가합니다.
 
 ## CellSpace Types
 
@@ -149,9 +192,9 @@ Context menu는 상황에 따라 `Edit IndoorGML`, `Change CellSpace Type` 항�
 | `TransitionSpace` | `Elevator` | `navi:TransitionSpace` |
 | `ConnectionSpace` | `Door` | `navi:ConnectionSpace` |
 | `AnchorSpace` | `ExteriorDoor` | `navi:AnchorSpace` |
-| `CellSpace` | `Window` | `Core:CellSpace` |
+| `CellSpace` | `Window` | `core:CellSpace` |
 
-Navigation semantic code는 [indoor3d/domain/navigation_semantic.rb](indoor3d/domain/navigation_semantic.rb)에 정의되어 있으며, 기본값은 IndoorGML Annex D code space를 사용합니다. CellSpace attribute에 navigation semantic override 값이 있으면 export 시 override가 우선합니다.
+Navigation semantic code는 [indoor3d/domain/navigation_semantic.rb](indoor3d/domain/navigation_semantic.rb)에 정의되어 있으며, 기본값은 IndoorGML Annex D code space를 사용합니다. CellSpace attribute에 navigation semantic override 값이 있으면 Export 시 override가 우선합니다.
 
 ## Tag-Based Classification
 
@@ -166,7 +209,13 @@ Navigation semantic code는 [indoor3d/domain/navigation_semantic.rb](indoor3d/do
 | `RM_DR` | `ConnectionSpace / Door` |
 | `RM_WD` | `CellSpace / Window` |
 
-Tag 이름 앞부분은 `F01F02_` 또는 `B01F01_` 같은 층 패턴이어야 합니다. 예를 들어 `F01F02_MV_RM_02`는 `TransitionSpace / Stair`로 해석됩니다. Tag로 타입이 결정된 선택 항목은 Edit Mode dialog에서 classification이 잠길 수 있습니다. CellSpace 생성 시 유효한 직접 TAG와 상위 컨테이너에서 전파된 TAG의 층 정보는 dialog에서 선택한 층보다 항상 우선합니다.
+Tag 이름 앞부분은 `F01F02_` 또는 `B01F01_` 같은 층 패턴이어야 합니다. 예를 들어 `F01F02_MV_RM_02`는 `TransitionSpace / Stair`로 해석됩니다. Tag로 타입이 결정된 선택 항목은 Edit Mode dialog에서 classification이 잠길 수 있습니다.
+
+CellSpace 생성 시 층 정보 우선순위는 다음과 같습니다.
+
+**직접 지정된 TAG → 상위 컨테이너에서 전달된 TAG → dialog에서 선택한 층 → 기본층**
+
+유효한 직접 TAG나 상위 container TAG의 층 정보는 dialog 선택값보다 우선합니다.
 
 ## Storey
 
@@ -197,11 +246,25 @@ Edit Mode는 SketchUp scene 상태를 보호하면서 IndoorGML 편집을 수행
 - CellSpace type/category/storey 변경
 - Solid group 선택 시 dialog에서 CellSpace 변환
 - Storey/Type visibility filter 적용
-- State/Transition overlay invalidation
+- State/Transition Overlay invalidation
+- 선택 CellSpace의 IndoorGML 속성 제거
 - 모든 IndoorGML 요소 삭제
-- validation report에서 오류 CellSpace focus 및 오류 요소 재검사
+- Validation report에서 오류 CellSpace와 오류 geometry focus
+- 오류 요소 재검사와 Fix Mode 진입
 
-Edit Mode dialog의 `편집 완료`는 Edit Mode를 종료하고, 필요한 경우 PrimalGroup child 정규화를 수행합니다.
+Edit Mode dialog의 `편집 완료`는 Edit Mode를 종료하고, 필요한 runtime·topology·Overlay 상태를 정리합니다.
+
+### 선택 CellSpace를 일반 Solid Group으로 복원
+
+선택한 CellSpace에서 IndoorGML 의미를 제거하면 다음 항목이 정리됩니다.
+
+- CellSpace runtime 등록과 IndoorGML attribute dictionary
+- 연결된 State와 Transition
+- adjacency 정보
+- CellSpace material
+- observer 및 runtime tracking 정보
+
+원래 SketchUp group geometry와 group에 지정된 TAG는 유지됩니다. 여러 CellSpace는 하나의 batch로 처리하며, 처리 중 오류가 발생하면 runtime snapshot을 원복합니다.
 
 ## Topology and Transition Policy
 
@@ -216,7 +279,7 @@ CellSpace 인접 관계는 `AdjacencyService`가 동기화합니다.
 
 즉, 현재 정책은 `transition_allowed_for_axis?(adjacency_axis)`가 `nil`이 아닌 축을 받으면 Transition을 생성하는 구조입니다. 이 정책은 [docs/architecture_decisions.md](docs/architecture_decisions.md)에 명시되어 있습니다.
 
-Window의 경우 NavigableSpace가 아닌 CellSpace로, State는 생성되지만 Transition은 생기지 않습니다.
+Window는 NavigableSpace가 아닌 CellSpace로, State는 생성되지만 Transition은 생기지 않습니다.
 
 성능 관련 구현:
 
@@ -224,7 +287,8 @@ Window의 경우 NavigableSpace가 아닌 CellSpace로, State는 생성되지만
 - dirty queue와 `UI.start_timer`를 사용한 지연 topology sync
 - bounding box 후보 필터
 - face-level adjacency 검사
-- 전체 동기화 시 20,000 pair 이상이면 worker thread 병렬 처리
+- batch lifecycle에서 전체 sync와 부분 refresh 분리
+- 전체 동기화 시 큰 pair set의 worker thread 처리
 
 ## Persistence
 
@@ -241,8 +305,11 @@ IndoorGML runtime 데이터는 SketchUp attribute dictionary `IndoorGml`에 저�
 - `storey`
 - `duality_state_id`
 - navigation semantic override fields
+- LVN 완료 또는 이전 실패 상태
 
 파일을 다시 열면 `RuntimeRestorer`가 PrimalGroup 아래의 CellSpace attribute를 읽어 `CellSpace`와 `State`를 복원합니다. Transition은 저장된 선형 geometry가 아니라 CellSpace adjacency를 다시 계산해 runtime에서 재구성합니다.
+
+재사용된 SketchUp model 객체가 다시 활성화되는 경우에도 runtime과 ModelObserver lifecycle을 다시 결합하고, 이전 Validation session과 timer가 새 모델에 영향을 주지 않도록 정리합니다.
 
 ## Export
 
@@ -262,7 +329,7 @@ Export 구조:
 GML 좌표:
 
 - SketchUp 내부 좌표는 inch입니다.
-- export 시 모델의 `UnitsOptions/LengthUnit`에 따라 `in`, `ft`, `mm`, `cm`, `m` 중 하나로 변환합니다.
+- Export 시 모델의 `UnitsOptions/LengthUnit`에 따라 `in`, `ft`, `mm`, `cm`, `m` 중 하나로 변환합니다.
 - `gml:Point`, `gml:LineString`, `gml:Solid`, `gml:Polygon`에는 `srsName`, `srsDimension`, `axisLabels`, `uomLabels`를 기록합니다.
 
 지원하지 않는 IndoorGML 요소:
@@ -274,34 +341,98 @@ GML 좌표:
 | `NavigableBoundary` | 미출력 |
 | `InterLayerConnection` | 미출력 |
 | `Route`, `RouteNode`, `RouteSegment` | 미지원 |
-| POI | application-specific 후보, 현재 export 제외 |
-| legacy AnchorNode | application-specific 후보, 현재 export 제외 |
+| POI | application-specific 후보, 현재 Export 제외 |
+| legacy AnchorNode | application-specific 후보, 현재 Export 제외 |
 
 ## Validity Check
 
-`Check Validity`는 다음 순서로 동작합니다.
+`Check Validity`를 실행하면 빠른 검사와 정밀검사 선택 dialog가 표시됩니다. 두 profile은 동일한 진행 dialog, 종료 코드 판정, report, 오류 focus, Fix Mode를 사용하지만 geometry 처리와 overlap 판정 경로가 다릅니다.
 
-1. 현재 Edit Mode가 켜져 있으면 종료합니다.
-2. `tmp/indoorgml/validation-runs/run-*` 아래 isolated workspace를 만듭니다.
-3. 임시 `input.gml`을 생성합니다.
-4. bundled `val3dity.exe`를 실행합니다.
-5. stdout progress를 dialog에 표시합니다.
-6. val3dity report JSON을 UTF-8로 정규화합니다.
-7. 701/704 overlap error의 CellSpace ID를 현재 모델의 원본 entity와 연결하여 SketchUp geometry 기준으로 재검사합니다. 면 분석은 원본 entity를 사용하고 Boolean 교차검사는 원본을 보호하기 위해 독립 복제본에서 수행합니다.
-8. 최종 JSON과 HTML report를 생성합니다.
+### 빠른 검사
 
-검증 report에서 가능한 작업:
+현재 CellSpace geometry를 변경하지 않는 기본 검사입니다.
 
-- report 열기
-- 검증 실패 CellSpace focus
-- 오류 요소 Edit Mode 진입
-- focus된 오류 요소만 재검사
+1. Edit Mode와 이전 완료 Validation session 정리
+2. isolated validation workspace와 임시 `input.gml` 생성
+3. val3dity 2.2.0 실행
+   - `--overlap_tol -1`
+   - `--planarity_d2p_tol 0.025`
+4. report의 701/704 오류 대상 ID를 현재 SketchUp CellSpace와 연결
+5. 현재 모델의 원본 face/boundary를 분석하고 필요한 Boolean만 독립 복제본에서 수행
+6. 최종 JSON과 HTML report 생성
 
-주의: bundled val3dity runtime은 Windows x64용입니다. 현재 validation은 Windows에서만 지원됩니다.
+빠른 재검사는 비솔리드 교차 결과, edge-only 접촉, 허용오차 경계의 접촉을 구분하며 파괴적인 Boolean 실패가 원본 CellSpace를 변경하지 않도록 합니다.
+
+### 정밀검사
+
+val3dity 실행 전에 CellSpace geometry를 정규화하는 Beta 검사입니다.
+
+1. 각 CellSpace를 definition-local 좌표계에서 Local Vertex Normalize
+2. 성공한 CellSpace geometry 유지
+3. 실패한 CellSpace만 원복하고 `lvn_failed` 상태 기록
+4. 임시 GML 생성
+5. val3dity 2.2.0 실행
+   - 물리 허용오차 0.01 mm를 현재 GML 좌표 단위로 변환하여 `--overlap_tol`에 전달
+   - `--planarity_d2p_tol 0.025`
+6. 최종 JSON과 HTML report 생성
+
+정밀검사에서는 Extension의 별도 701/704 재검사를 수행하지 않습니다.
+
+### Local Vertex Normalization
+
+LVN은 기존 정점을 단순 이동하는 대신 solid shell을 다시 구성하여 정점 병합 과정에서 GML ring이나 triangle topology가 손상되는 문제를 줄입니다.
+
+주요 처리:
+
+- 기본 0.001 mm 단위 정점 정규화
+- coplanar face와 shared edge 정리
+- 공선 정점과 축소된 sliver triangle 복구
+- 수평면과 공유 Edge 높이 정렬
+- triangle intersection과 patch 재구성
+- 정규화 후 manifold solid와 topology 재검증
+
+CellSpace별 독립 작업 원칙:
+
+- 하나의 CellSpace 실패는 해당 CellSpace에만 rollback
+- 다른 CellSpace의 성공 결과는 유지
+- 이미 정규화된 CellSpace는 반복 처리 생략
+- 이전 실패 CellSpace는 geometry가 변경되기 전까지 재시도 생략
+- geometry 수정 시 실패 상태를 해제하여 재시도 가능
+- 성공한 CellSpace가 있을 때만 필요한 topology 동기화 수행
+
+완료 화면은 `성공`, `기존 완료`, `실패`, `이전 실패 생략`을 구분하여 표시합니다.
+
+### Report, 오류 Overlay와 Fix Mode
+
+Validation report에서 오류 행을 선택하면 관련 CellSpace와 오류 geometry를 viewport에서 함께 확인할 수 있습니다.
+
+- report ID와 현재 runtime CellSpace 매핑
+- 오류 geometry Overlay 표시
+- horizontal OBB 기반 focus 범위 계산
+- visibility 반영 후 upright isometric camera와 zoom extents 적용
+- report와 Fix Mode 사이의 선택·focus 상태 유지
+- PrimalSpaceFeatures 직접 자식 group 편집 지원
+- 오류 요소만 다시 검사하는 부분 재검사 지원
+
+부분 재검사 통과는 전체 모델의 최종 유효성을 의미하지 않습니다. 수정 완료 후 전체 `Check Validity`를 다시 실행해야 합니다.
+
+### Validation 실행 중 동작
+
+Validation 실행 중에도 다음 표시 기능을 사용할 수 있습니다.
+
+- CellSpace geometry 표시/숨김
+- State/Transition Overlay 표시/숨김
+- State/Link Overlay Scale 변경
+
+val3dity process가 실행되는 동안 `IndoorGML_PrimalSpaceFeatures`는 잠가 geometry가 동시에 변경되지 않도록 합니다. 취소 버튼은 실제 process를 중단할 수 있는 구간에서만 활성화됩니다.
+
+완료 dialog나 report가 열린 상태에서 검사를 다시 실행하면 이전 session을 먼저 정리한 뒤 새 검사를 시작합니다.
+
+> bundled val3dity runtime은 Windows x64용입니다. 현재 자동 Validity Check는 Windows에서만 지원됩니다.
 
 ## Legacy and Stabilization Notes
 
-현재 프로젝트는 legacy `une-young/indoorgml-modeler`의 모든 UI 기능을 복구한 것이 아니라, 저장·복원, topology, export, validation을 실제 사용 가능한 흐름으로 재작성한 버전입니다.
+현재 프로젝트는 legacy `une-young/indoorgml-modeler`의 모든 UI 기능을 복구한 것이 아니라, 저장·복원, topology, Export, Validation을 실제 사용 가능한 흐름으로 재작성한 버전입니다.
 
 | 영역 | Legacy 또는 이전 구현의 문제 | 현재 처리 |
 | --- | --- | --- |
@@ -309,19 +440,23 @@ GML 좌표:
 | State 중복 | 같은 entity 재변환 시 State 중복 가능 | 이미 변환된 CellSpace 검사 |
 | Node/Link 표시 | 보조선·geometry 기반 표시로 모델 오염 가능 | 3D Overlay로 분리 표시 |
 | Transition 중복 | 같은 CellSpace pair에 중복 Transition 가능 | pair key 기준 단일 Transition 관리 |
-| Duality/Connects | 끊어진 참조가 export에 남을 수 있음 | Export snapshot에서 유효 관계만 작성 |
+| Duality/Connects | 끊어진 참조가 Export에 남을 수 있음 | Export snapshot에서 유효 관계만 작성 |
 | GML 생성 | 외부 converter 내부 구조 확인 어려움 | Ruby exporter로 Core/Navigation subset 직접 생성 |
-| Validation | report만으로 오류 위치 추적이 어려움 | report ID를 CellSpace/State/Transition focus로 연결 |
+| Validation | report만으로 오류 위치 추적이 어려움 | report ID와 오류 geometry를 viewport focus로 연결 |
+| Geometry 보정 | 한 형상 실패가 전체 보정 결과를 무효화할 수 있음 | CellSpace별 LVN operation과 개별 rollback |
+| 701/704 재검사 | export GML 재구성 geometry와 현재 모델 불일치 가능 | 현재 SketchUp 원본 geometry 분석, Boolean만 clone 사용 |
 
 최근 안정화 작업:
 
-- Bulk 변환을 하나의 동기 transaction으로 처리하되, 개별 항목 실패는 전체 rollback이 아니라 실패 목록으로 보고
+- Bulk 변환에서 개별 항목 실패를 전체 rollback 대신 실패 목록으로 보고
 - Undo/Redo 이후 runtime reconciliation 수행
 - Validation 실행별 isolated workspace 사용
 - val3dity process 종료를 stdout EOF가 아닌 process handle/exit code로 판정
-- 모델 New/Open/Close 시 stale validation callback 정리
+- 모델 New/Open/Close 시 stale Validation callback 정리
 - Windows process handle 상속을 stdout/stderr pipe로 제한
-- Validation report에서 오류 CellSpace focus와 오류 요소 재검사 제공
+- Validation 재실행 전 이전 dialog/report/session 정리
+- CellSpace 생성·타입 변경·속성 제거 후 topology와 Overlay refresh 범위 최적화
+- LVN 실패 CellSpace만 원복하고 성공 CellSpace 결과 유지
 
 ## Architecture
 
@@ -330,16 +465,18 @@ indoor3d/
 ├── definition.rb                  # version constants
 ├── core.rb                        # extension runtime loader
 ├── domain/                        # CellSpace, State, Transition, semantics
-├── application/                   # IndoorModel and application services
+├── application/
 │   ├── adjacency_service/         # adjacency sync and geometry query
-│   └── indoor_model/              # IndoorModel mixins
+│   ├── indoor_model/              # IndoorModel mixins and lifecycle
+│   ├── local_vertex_normalizer/   # CellSpace-local geometry normalization
+│   └── precision_validation/      # Fast/Precision validation integration
 ├── infrastructure/
 │   ├── observers/                 # SketchUp observer adapters
 │   ├── persistence/               # AttributeSerializer, RuntimeRestorer
 │   └── scene/                     # active path, locks, editor session
 ├── export/                        # snapshot, exporter, XML writer
 ├── validity/                      # val3dity runner, report, recheck policy
-├── ui/                            # commands, dialogs, overlay
+├── ui/                            # commands, dialogs, Overlay
 └── utils/                         # geometry, transform, materials
 ```
 
@@ -350,11 +487,12 @@ indoor3d/
 | `RuntimeSupport` | runtime collection, registry binding, attribute helper |
 | `SceneGroups` | PrimalGroup 생성/보호, 좌표 변환, scene 배치 |
 | `FeatureLifecycle` | CellSpace 생성/변경/삭제 lifecycle |
+| `CellSpaceDemotionBatch` | 선택 CellSpace의 IndoorGML 의미 제거와 rollback |
 | `Topology` | adjacency와 Transition runtime sync |
 | `ObserverRouting` | SketchUp observer event 라우팅 |
 | `EntityRelocation` | entity 복제/이동과 transform 보존 |
 | `PrimalNormalization` | PrimalGroup child 정규화 |
-| `EditorControl` | Edit Mode dialog action과 validation focus 제어 |
+| `EditorControl` | Edit Mode action과 Validation focus 제어 |
 
 ## Development
 
@@ -364,11 +502,7 @@ indoor3d/
 ruby -Itest test\run_all.rb
 ```
 
-현재 테스트는 SketchUp API를 직접 실행하지 않는 부분을 중심으로 구성되어 있습니다. 최근 기준 전체 테스트는 다음 규모입니다.
-
-```text
-195 runs, 1199 assertions
-```
+테스트는 SketchUp API를 직접 실행하지 않는 domain, geometry, serialization, validation policy와 integration contract를 중심으로 구성되어 있습니다. 기능 변경 후에는 전체 테스트와 관련 smoke/recheck를 함께 실행합니다.
 
 ### Useful Checks
 
@@ -376,23 +510,26 @@ ruby -Itest test\run_all.rb
 # Ruby syntax check
 Get-ChildItem -Recurse -Filter *.rb indoor3d,test | ForEach-Object { ruby -c $_.FullName }
 
-# 미사용 인자 후보 확인은 Prism 기반 정적 스캔으로 보조 확인
+# 전체 테스트
 ruby -Itest test\run_all.rb
 ```
 
 ## Known Limitations
 
 - Validation은 bundled Windows x64 val3dity runtime에 의존합니다.
+- 정밀검사는 Beta 기능이며 geometry를 변경할 수 있고 모델 규모에 따라 수십 분에서 수시간이 걸릴 수 있습니다.
+- 정밀검사에서 이전 실패로 표시된 CellSpace는 geometry가 수정되기 전까지 LVN 재시도를 생략합니다.
 - Export는 IndoorGML 1.0 Core/Navigation의 단일 SpaceLayer 모델만 생성합니다.
 - Transition 생성 정책은 현재 CellSpace 타입과 수직/수평 방향을 구분하지 않습니다.
 - State/Transition을 사용자가 직접 생성·연결·해제하는 topology editor는 없습니다.
-- Undo/Redo는 runtime reconciliation이 있지만 SketchUp `active_path`, observer callback, transparent operation이 얽히는 경우가 있어 대형 모델에서는 재동기화 비용이 발생할 수 있습니다.
-- Edit Mode 밖에서 `IndoorGML_PrimalSpaceFeatures`나 CellSpace group을 직접 이동·삭제하면 runtime과 저장 attribute가 일시적으로 어긋날 수 있습니다. 가능한 한 Edit Mode와 제공 명령을 통해 수정하세요.
+- Undo/Redo는 runtime reconciliation이 있지만 SketchUp `active_path`, observer callback, transparent operation이 얽히는 경우 대형 모델에서 재동기화 비용이 발생할 수 있습니다.
+- Edit Mode 밖에서 `IndoorGML_PrimalSpaceFeatures`나 CellSpace group을 직접 이동·삭제하면 runtime과 저장 attribute가 일시적으로 어긋날 수 있습니다. 가능한 한 Edit Mode와 제공 명령으로 수정하세요.
 
 ## References
 
-- IndoorGML: https://www.ogc.org/standards/indoorgml
-- IndoorGML schemas: http://schemas.opengis.net/indoorgml/1.0/
-- val3dity: https://github.com/tudelft3d/val3dity
-- Legacy reference: https://github.com/une-young/indoorgml-modeler
-- Project notes: https://u-lo-l.notion.site/IndoorGML-3DSpace-Modeler-395be883973b805dba28c890c9c7e225
+- [v1.0.5 Release Notes](https://github.com/UlolSkpProject/IndoorGML_3DSpace_Modeler/releases/tag/v1.0.5)
+- [IndoorGML](https://www.ogc.org/standards/indoorgml)
+- [IndoorGML 1.0 schemas](http://schemas.opengis.net/indoorgml/1.0/)
+- [val3dity](https://github.com/tudelft3d/val3dity)
+- [Legacy reference](https://github.com/une-young/indoorgml-modeler)
+- [Project notes](https://u-lo-l.notion.site/IndoorGML-3DSpace-Modeler-395be883973b805dba28c890c9c7e225)
