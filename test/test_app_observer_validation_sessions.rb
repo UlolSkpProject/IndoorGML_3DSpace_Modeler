@@ -161,6 +161,7 @@ module ULOL
           observer.onOpenModel(model)
 
           assert_equal [model], @released_models
+          assert_equal 1, model.observers.length
           assert_equal 1, UI.scheduled_timers.length
           state = observer.instance_variable_get(:@initial_refresh_states)[model.object_id]
           assert_equal :scheduled, state[:status]
@@ -187,6 +188,7 @@ module ULOL
           observer.onOpenModel(model)
 
           assert_equal [model], @released_models
+          assert_equal 1, model.observers.length
           assert_equal 1, UI.scheduled_timers.length
           state = observer.instance_variable_get(:@initial_refresh_states)[model.object_id]
           assert_equal :scheduled, state[:status]
