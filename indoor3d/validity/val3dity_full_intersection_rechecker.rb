@@ -366,7 +366,7 @@ module ULOL
               nonmanifold_edge_count: nonmanifold_edge_count,
               lower_dimensional: lower_dimensional,
               face_points: intersection_face_points(result, faces),
-              contact_samples: intersection_contact_samples(result, faces)
+              contact_samples: intersection_contact_samples(result, faces, edges)
             }
           end
 
@@ -460,7 +460,13 @@ module ULOL
             return false if intersection[:lower_dimensional] == true
 
             intersection[:boundary_edge_count].to_i.positive? ||
-              intersection[:nonmanifold_edge_count].to_i.positive?
+              intersection[:nonmanifold_edge_count].to_i.positive? ||
+              edge_only_intersection?(intersection)
+          end
+
+          def edge_only_intersection?(intersection)
+            intersection[:face_count].to_i.zero? &&
+              intersection[:edge_count].to_i.positive?
           end
 
           def finite_contact_slab(candidate, index)
@@ -545,9 +551,9 @@ module ULOL
             []
           end
 
-          def intersection_contact_samples(result, faces)
+          def intersection_contact_samples(result, faces, edges)
             transform = result.transformation
-            samples = faces.flat_map do |face|
+            face_samples = faces.flat_map do |face|
               mesh = face.mesh(0)
               mesh.polygons.flat_map do |polygon|
                 points = polygon.map do |index|
@@ -571,6 +577,20 @@ module ULOL
                 points + midpoints + [centroid]
               end
             end
+            edge_samples = edges.flat_map do |edge|
+              points = edge.vertices.map do |vertex|
+                vertex.position.transform(transform)
+              end
+              next [] unless points.length == 2
+
+              midpoint = Geom::Point3d.new(
+                (points[0].x + points[1].x) * 0.5,
+                (points[0].y + points[1].y) * 0.5,
+                (points[0].z + points[1].z) * 0.5
+              )
+              points + [midpoint]
+            end
+            samples = face_samples + edge_samples
             samples.uniq { |point| [point.x.to_f, point.y.to_f, point.z.to_f] }
           rescue StandardError
             intersection_face_points(result, faces)

@@ -283,6 +283,37 @@ module ULOL
             assert_equal 'BOOLEAN_INTERSECTION_INCONCLUSIVE', result[:reason]
           end
 
+          def test_edge_only_non_solid_result_in_finite_contact_slab_is_tolerated
+            rechecker = Val3dityOverlapGeometryRechecker.new(
+              indoor_model: FakeIndoorModel.new([], nil),
+              tolerance: 0.001
+            )
+            intersection = {
+              status: :non_solid,
+              lower_dimensional: false,
+              face_count: 0,
+              edge_count: 1,
+              contact_samples: [
+                FakePoint.new(0.0, 0.5, 0.0005),
+                FakePoint.new(1.0, 0.5, 0.0005),
+                FakePoint.new(0.5, 0.5, 0.0005)
+              ],
+              volume: 0.0005,
+              boundary_edge_count: 0,
+              nonmanifold_edge_count: 0
+            }
+
+            result = rechecker.send(
+              :resolve_non_solid_intersection,
+              intersection,
+              [finite_slab_candidate(0.0, 1.0)]
+            )
+
+            assert_equal :not_reproduced, result[:status]
+            assert_equal 'NON_SOLID_INTERSECTION_WITHIN_OVERLAP_TOLERANCE',
+                         result[:reason]
+          end
+
           private
 
           def finite_slab_candidate(min_x, max_x)
