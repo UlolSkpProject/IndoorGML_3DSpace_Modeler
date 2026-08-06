@@ -68,76 +68,78 @@ module ULOL
           end
         end
 
-        class ValidationFocusController
-          remove_const(:MULTI_FOCUS_RENDERING_OPTION_KEYS) if
-            const_defined?(:MULTI_FOCUS_RENDERING_OPTION_KEYS, false)
-          MULTI_FOCUS_RENDERING_OPTION_KEYS = [
-            RenderingOptionsPolicy::INACTIVE_HIDDEN_KEY
-          ].freeze
+        if const_defined?(:ValidationFocusController, false)
+          class ValidationFocusController
+            remove_const(:MULTI_FOCUS_RENDERING_OPTION_KEYS) if
+              const_defined?(:MULTI_FOCUS_RENDERING_OPTION_KEYS, false)
+            MULTI_FOCUS_RENDERING_OPTION_KEYS = [
+              RenderingOptionsPolicy::INACTIVE_HIDDEN_KEY
+            ].freeze
 
-          RENDERING_POLICY_OPTION_KEYS = (
-            HIDDEN_RENDERING_OPTION_KEYS +
-            MULTI_FOCUS_RENDERING_OPTION_KEYS +
-            [
-              RenderingOptionsPolicy::RENDER_MODE_KEY,
-              RenderingOptionsPolicy::TEXTURE_KEY
-            ]
-          ).freeze unless const_defined?(:RENDERING_POLICY_OPTION_KEYS, false)
+            RENDERING_POLICY_OPTION_KEYS = (
+              HIDDEN_RENDERING_OPTION_KEYS +
+              MULTI_FOCUS_RENDERING_OPTION_KEYS +
+              [
+                RenderingOptionsPolicy::RENDER_MODE_KEY,
+                RenderingOptionsPolicy::TEXTURE_KEY
+              ]
+            ).freeze unless const_defined?(:RENDERING_POLICY_OPTION_KEYS, false)
 
-          unless method_defined?(:set_highlight_before_rendering_options_policy)
-            alias_method :set_highlight_before_rendering_options_policy, :set_highlight
-          end
-
-          def set_highlight(cell_gml_ids, code = nil, row_id: nil, row_cells: nil,
-                            states: nil, transitions: nil, geometry_refs: nil)
-            result = set_highlight_before_rendering_options_policy(
-              cell_gml_ids,
-              code,
-              row_id: row_id,
-              row_cells: row_cells,
-              states: states,
-              transitions: transitions,
-              geometry_refs: geometry_refs
-            )
-            RenderingOptionsPolicy.apply_inactive_hidden(
-              Sketchup.active_model,
-              !@highlight_row_id.nil?
-            )
-            result
-          end
-
-          def capture_and_apply_rendering_options(model, _focus_cell_count)
-            capture_rendering_policy_options(model)
-            apply_base_edit_rendering_options(model)
-          end
-
-          def capture_and_apply_hidden_rendering_options(model)
-            capture_rendering_policy_options(model)
-            apply_base_edit_rendering_options(model)
-          end
-
-          private
-
-          def capture_rendering_policy_options(model)
-            options = model&.rendering_options
-            return unless options
-
-            @rendering_option_snapshots ||= {}
-            RENDERING_POLICY_OPTION_KEYS.each do |key|
-              next unless rendering_option_key?(options, key)
-              next if @rendering_option_snapshots.key?(key)
-
-              @rendering_option_snapshots[key] = options[key]
+            unless method_defined?(:set_highlight_before_rendering_options_policy)
+              alias_method :set_highlight_before_rendering_options_policy, :set_highlight
             end
-          end
 
-          def apply_base_edit_rendering_options(model)
-            hidden_values = HIDDEN_RENDERING_OPTION_KEYS.each_with_object({}) do |key, values|
-              values[key] = false
+            def set_highlight(cell_gml_ids, code = nil, row_id: nil, row_cells: nil,
+                              states: nil, transitions: nil, geometry_refs: nil)
+              result = set_highlight_before_rendering_options_policy(
+                cell_gml_ids,
+                code,
+                row_id: row_id,
+                row_cells: row_cells,
+                states: states,
+                transitions: transitions,
+                geometry_refs: geometry_refs
+              )
+              RenderingOptionsPolicy.apply_inactive_hidden(
+                Sketchup.active_model,
+                !@highlight_row_id.nil?
+              )
+              result
             end
-            RenderingOptionsPolicy.apply_values(model, hidden_values)
-            RenderingOptionsPolicy.apply_inactive_hidden(model, false)
-            RenderingOptionsPolicy.apply_shaded(model)
+
+            def capture_and_apply_rendering_options(model, _focus_cell_count)
+              capture_rendering_policy_options(model)
+              apply_base_edit_rendering_options(model)
+            end
+
+            def capture_and_apply_hidden_rendering_options(model)
+              capture_rendering_policy_options(model)
+              apply_base_edit_rendering_options(model)
+            end
+
+            private
+
+            def capture_rendering_policy_options(model)
+              options = model&.rendering_options
+              return unless options
+
+              @rendering_option_snapshots ||= {}
+              RENDERING_POLICY_OPTION_KEYS.each do |key|
+                next unless rendering_option_key?(options, key)
+                next if @rendering_option_snapshots.key?(key)
+
+                @rendering_option_snapshots[key] = options[key]
+              end
+            end
+
+            def apply_base_edit_rendering_options(model)
+              hidden_values = HIDDEN_RENDERING_OPTION_KEYS.each_with_object({}) do |key, values|
+                values[key] = false
+              end
+              RenderingOptionsPolicy.apply_values(model, hidden_values)
+              RenderingOptionsPolicy.apply_inactive_hidden(model, false)
+              RenderingOptionsPolicy.apply_shaded(model)
+            end
           end
         end
 
@@ -171,7 +173,8 @@ module ULOL
           def apply_rendering_style_for_path(model, path)
             fix_mode = @indoor_model.respond_to?(:validation_focus_active?) &&
                        @indoor_model.validation_focus_active?
-            cell_space_editing = Array(path).length > 1
+            primal_group = @indoor_model.primal_group
+            cell_space_editing = editing_cell_space_path?(Array(path), primal_group)
 
             if fix_mode && cell_space_editing
               RenderingOptionsPolicy.apply_monochrome(model)
