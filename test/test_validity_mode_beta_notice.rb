@@ -39,7 +39,7 @@ class ValidityModeDialogContentTest < Minitest::Test
       '기본 검사 완료 후 빠른 재검사를 수행합니다.',
       'CellSpace의 정점을 정규화합니다.',
       '이 과정에서 Geometry가 변경될 수 있습니다.',
-      '모델 규모에 따라 수십 분이 소요될 수 있습니다.'
+      '모델 규모에 따라 수십 분~수시간이 걸릴 수 있습니다.'
     ].each do |line|
       assert_includes @html, line
     end
@@ -50,6 +50,14 @@ class ValidityModeDialogContentTest < Minitest::Test
 
     assert_includes @html, expected
     assert_match(/\.inline-code \{.*?background: #1b1b1a;.*?font-family: Consolas/m, @html)
+  end
+
+  def test_duration_notice_uses_distinct_orange_color
+    assert_includes(
+      @html,
+      '<span class="mode-note">모델 규모에 따라 수십 분~수시간이 걸릴 수 있습니다.</span>'
+    )
+    assert_match(/\.mode-note \{.*?color: #d3a15c;.*?font-weight: 600;/m, @html)
   end
 
   def test_yellow_beta_warning_copy_is_removed
