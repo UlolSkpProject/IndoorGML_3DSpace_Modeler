@@ -275,6 +275,13 @@ function updateCancelVisibility() {
 window.addEventListener('load', function () {
   sketchup.domReady();
   fitDialogToContent();
+  window.requestAnimationFrame(function () {
+    window.requestAnimationFrame(function () {
+      if (typeof sketchup !== 'undefined' && sketchup.visualReady) {
+        sketchup.visualReady();
+      }
+    });
+  });
 });
 document.addEventListener('dragstart', function (event) {
   if (!event.target.closest('.result-title, .result-message')) {

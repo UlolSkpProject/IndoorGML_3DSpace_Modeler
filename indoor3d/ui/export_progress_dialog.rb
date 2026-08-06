@@ -37,6 +37,7 @@ module ULOL
             @detail_payload = nil
             @result_payload = nil
             @dom_ready = false
+            @visual_ready = false
             @pending_scripts = []
             @create_gml_callback = nil
             @open_report_callback = nil
@@ -58,6 +59,7 @@ module ULOL
 
           def show_report(path)
             @dom_ready = false
+            @visual_ready = false
             self.class.instance_variable_set(:@active_dialog, self)
             dialog.set_file(File.expand_path(path))
             dialog.show
@@ -193,7 +195,7 @@ module ULOL
 
           def on_ready(&block)
             @ready_callback = block
-            block.call if @dom_ready && block
+            block.call if @visual_ready && block
           end
 
           def request_close
@@ -208,6 +210,7 @@ module ULOL
             self.class.instance_variable_set(:@active_dialog, nil) if self.class.instance_variable_get(:@active_dialog).equal?(self)
             @dialog = nil
             @dom_ready = false
+            @visual_ready = false
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Export progress close failed: #{e.class}: #{e.message}"
           end
@@ -224,6 +227,7 @@ module ULOL
             @detail_payload = nil
             @result_payload = nil
             @dom_ready = false
+            @visual_ready = false
             @pending_scripts = []
           end
 
@@ -238,11 +242,10 @@ module ULOL
               style: UI::HtmlDialog::STYLE_DIALOG
             )
             dialog.add_action_callback('domReady') do |_context|
-              @dom_ready = true
-              dialog.execute_script(init_script)
-              replay_state
-              @pending_scripts.clear
-              @ready_callback&.call
+              handle_progress_dom_ready(dialog)
+            end
+            dialog.add_action_callback('visualReady') do |_context|
+              handle_visual_ready
             end
             dialog.add_action_callback('reportDomReady') do |_context|
               handle_report_dom_ready
@@ -308,12 +311,14 @@ module ULOL
               @suppress_close_callback = false
               @dialog = nil
               @dom_ready = false
+              @visual_ready = false
               return
             end
 
             if @request_close_callback&.call == :keep_open
               @dialog = nil
               @dom_ready = false
+              @visual_ready = false
               UI.start_timer(0, false) do
                 show
               end
@@ -321,11 +326,27 @@ module ULOL
               self.class.instance_variable_set(:@active_dialog, nil) if self.class.instance_variable_get(:@active_dialog).equal?(self)
               @dialog = nil
               @dom_ready = false
+              @visual_ready = false
             end
           rescue StandardError => e
             @dialog = nil
             @dom_ready = false
+            @visual_ready = false
             IndoorCore::Logger.puts "[IndoorGML] Export progress close request failed: #{e.class}: #{e.message}"
+          end
+
+          def handle_progress_dom_ready(dialog)
+            @dom_ready = true
+            dialog.execute_script(init_script)
+            replay_state
+            @pending_scripts.clear
+          end
+
+          def handle_visual_ready
+            return if @visual_ready
+
+            @visual_ready = true
+            @ready_callback&.call
           end
 
           def fit_content_height(content_height)
