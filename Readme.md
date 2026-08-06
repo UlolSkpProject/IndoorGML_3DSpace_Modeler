@@ -72,7 +72,7 @@ IndoorGML 3D Modeler는 SketchUp 모델 안의 manifold solid group을 IndoorGML
 
 ## Validation Contract
 
-Validation performs XML well-formedness parsing, val3dity strict checks, and the extension 701/704 policy. It does **not** perform XSD validation. Final results are reported consistently as `Exact Valid`, `Extension Policy Valid`, or `Invalid`.
+Validation performs XML well-formedness parsing, val3dity strict checks, and the 701/704 overlap recheck policy. It does **not** perform XSD validation. Final results are reported consistently as `Valid`, `Invalid`, or `Failed`.
 
 Solid cavities and disconnected shells are rejected before export because the exporter writes one exterior shell and no `gml:Solid/gml:interior`. Transition export remains endpoint-only by default; API callers can opt into `transition_geometry_mode: :shared_face_waypoint` to compare a three-point `State1 → shared-face waypoint → State2` LineString with downstream tools before changing the default.
 

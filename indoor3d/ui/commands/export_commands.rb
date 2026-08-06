@@ -371,8 +371,8 @@ module ULOL
             session.cleanup_workspace
             progress&.fail(:val3dity)
             progress&.result(
-              status: :error,
-              title: 'IndoorGML validity check failed',
+              status: :failed,
+              title: 'Failed',
               message: result.error.message,
               actions: [:close]
             )
@@ -380,18 +380,11 @@ module ULOL
           end
 
           case result.outcome
-          when :exact_valid
+          when :valid
             progress&.result(
               status: :success,
-              title: 'Exact Valid',
-              message: 'Strict val3dity checks passed.',
-              actions: [:openReport, :close]
-            )
-          when :extension_policy_valid
-            progress&.result(
-              status: :extension,
-              title: 'Extension Policy Valid',
-              message: 'Strict val3dity reported 701/704 issues that the extension policy accepted.',
+              title: 'Valid',
+              message: 'Validation completed with no remaining errors.',
               actions: [:openReport, :close]
             )
           else

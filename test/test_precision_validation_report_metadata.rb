@@ -9,7 +9,6 @@ module ULOL
         module Val3dityReportSchema
           OVERLAP_RECHECK_REPORT_KEY = 'indoorgml_modeler_overlap_recheck'
           STRICT_VALIDITY_KEY = 'strict_val3dity_validity'
-          EXTENSION_VALIDITY_KEY = 'extension_policy_validity'
           VALIDATION_STATUS_KEY = 'indoorgml_modeler_validation_status'
           STRICT_ERRORS_REPORT_KEY = 'indoorgml_modeler_strict_errors'
         end
@@ -72,20 +71,18 @@ module ULOL
           runner.send(:preserve_strict_validation!, report)
 
           assert_equal true, report['strict_val3dity_validity']
-          assert_equal true, report['extension_policy_validity']
-          assert_equal 'exact_valid', report['indoorgml_modeler_validation_status']
+          assert_equal 'valid', report['indoorgml_modeler_validation_status']
           refute report.key?('indoorgml_modeler_overlap_recheck')
           refute report.key?('base_called')
         end
 
-        def test_precision_invalid_report_remains_invalid_without_extension_policy_rewrite
+        def test_precision_invalid_report_remains_invalid_without_recheck_rewrite
           runner = IndoorGmlConverter::Val3dityRunner.new(:precision)
           report = { 'validity' => false }
 
           runner.send(:preserve_strict_validation!, report)
 
           assert_equal false, report['strict_val3dity_validity']
-          assert_equal false, report['extension_policy_validity']
           assert_equal 'invalid', report['indoorgml_modeler_validation_status']
         end
 

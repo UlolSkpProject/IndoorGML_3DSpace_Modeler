@@ -75,24 +75,25 @@ module ULOL
               'features_overview' => [],
               'primitives_overview' => [],
               'parameters' => {},
-              'indoorgml_modeler_validation_status' => 'exact_valid'
+              'indoorgml_modeler_validation_status' => 'valid'
             )
 
             refute_includes html, 'sketchup.fixValidationErrors'
-            assert_includes html, 'EXACT VALID'
+            assert_includes html, '>VALID<'
           end
 
-          def test_render_distinguishes_extension_policy_valid
+          def test_render_failed_report_without_fix_action
             html = Val3dityReportRenderer.new.render(
-              'validity' => true,
+              'validity' => false,
               'features_overview' => [],
               'primitives_overview' => [],
               'parameters' => {},
-              'indoorgml_modeler_validation_status' => 'extension_policy_valid'
+              'indoorgml_modeler_validation_status' => 'failed'
             )
 
-            assert_includes html, 'EXTENSION POLICY VALID'
-            assert_includes html, 'result-badge extension'
+            assert_includes html, '>FAILED<'
+            assert_includes html, 'result-badge failed'
+            refute_includes html, 'sketchup.fixValidationErrors'
           end
 
           def test_render_maps_primitive_solid_cell_id_without_parent_feature

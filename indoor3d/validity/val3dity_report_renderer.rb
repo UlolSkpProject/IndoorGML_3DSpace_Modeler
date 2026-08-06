@@ -10,7 +10,6 @@ module ULOL
         class Val3dityReportRenderer
           OVERLAP_RECHECK_REPORT_KEY = Val3dityReportSchema::OVERLAP_RECHECK_REPORT_KEY
           STRICT_VALIDITY_KEY = Val3dityReportSchema::STRICT_VALIDITY_KEY
-          EXTENSION_VALIDITY_KEY = Val3dityReportSchema::EXTENSION_VALIDITY_KEY
           VALIDATION_STATUS_KEY = Val3dityReportSchema::VALIDATION_STATUS_KEY
           OVERLAP_TOLERANCE_KEY = Val3dityReportSchema::OVERLAP_TOLERANCE_KEY
 
@@ -48,8 +47,7 @@ module ULOL
                   .result-message { margin: 8px 0 0; color: #b9b6ae; font-size: 12px; line-height: 1.5; }
                   .result-badge { display: inline-flex; align-items: center; padding: 5px 13px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
                   .result-badge.valid { color: #3ebc71; background: #12261a; border: 1px solid #327a4f; }
-                  .result-badge.extension { color: #f9b84e; background: #30240f; border: 1px solid #9b762d; }
-                  .result-badge.invalid { color: #f97066; background: #351918; border: 1px solid #7a2e2a; }
+                  .result-badge.invalid, .result-badge.failed { color: #f97066; background: #351918; border: 1px solid #7a2e2a; }
                   .fix-action { display: inline-flex; align-items: center; padding: 5px 13px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; color: #8ab4f8; background: #17243b; border: 1px solid #315d9b; cursor: pointer; }
                   .fix-action:hover { background: #1d2d4a; border-color: #4278c7; }
                   .result-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
@@ -142,22 +140,21 @@ module ULOL
           def report_result_hero_section(raw_report)
             final_errors = final_error_count(raw_report)
             status = validation_status(raw_report, final_errors)
-            validity = status != 'invalid'
             suppressed = overlap_recheck_suppressed_count(raw_report)
             kept = overlap_recheck_kept_count(raw_report)
             inconclusive = overlap_recheck_inconclusive_count(raw_report)
             primitive_value = "#{valid_count(raw_report['primitives_overview'])} / #{total_count(raw_report['primitives_overview'])}"
             badge_class = case status
-                          when 'exact_valid' then 'result-badge valid'
-                          when 'extension_policy_valid' then 'result-badge extension'
+                          when 'valid' then 'result-badge valid'
+                          when 'failed' then 'result-badge failed'
                           else 'result-badge invalid'
                           end
             badge_label = case status
-                          when 'exact_valid' then 'EXACT VALID'
-                          when 'extension_policy_valid' then 'EXTENSION POLICY VALID'
+                          when 'valid' then 'VALID'
+                          when 'failed' then 'FAILED'
                           else 'INVALID'
                           end
-            fix_button = validity ? '' : '<button class="fix-action" type="button" onclick="if (window.sketchup && sketchup.fixValidationErrors) { sketchup.fixValidationErrors(); }">FIX</button>'
+            fix_button = status == 'invalid' ? '<button class="fix-action" type="button" onclick="if (window.sketchup && sketchup.fixValidationErrors) { sketchup.fixValidationErrors(); }">FIX</button>' : ''
             message = result_hero_message(raw_report, final_errors, suppressed, kept, inconclusive)
             <<~HTML
               <section class="hero">
@@ -200,7 +197,7 @@ module ULOL
             <<~HTML
               <div class="top-meta">
                 <div>#{html_escape(report_checked_at(raw_report['time']))}</div>
-                <div>strict: #{html_escape(raw_report[STRICT_VALIDITY_KEY] == true ? 'valid' : 'invalid')} · extension policy: #{html_escape(raw_report[EXTENSION_VALIDITY_KEY] == true ? 'valid' : 'invalid')} · features #{valid_count(raw_report['features_overview'])}/#{total_count(raw_report['features_overview'])}</div>
+                <div>strict val3dity: #{html_escape(raw_report[STRICT_VALIDITY_KEY] == true ? 'valid' : 'invalid')} · final: #{html_escape(raw_report['validity'] == true ? 'valid' : 'invalid')} · features #{valid_count(raw_report['features_overview'])}/#{total_count(raw_report['features_overview'])}</div>
               </div>
             HTML
           end
@@ -270,9 +267,12 @@ module ULOL
 
           def result_hero_message(raw_report, final_errors, suppressed, kept, inconclusive)
             total_rechecks = suppressed + kept + inconclusive
-            return 'strict val3dity 오류가 없습니다.' if raw_report[VALIDATION_STATUS_KEY] == 'exact_valid'
-            if %w[extension_policy_valid tolerance_valid].include?(raw_report[VALIDATION_STATUS_KEY])
-              return "strict val3dity 오류는 있었지만 최종 오류가 없습니다. Overlap 재검사 후보 #{suppressed}건이 extension policy로 억제되었습니다."
+            status = validation_status(raw_report, final_errors)
+            return '최종 판정에 도달하기 전에 validation이 실패했습니다.' if status == 'failed'
+            if status == 'valid'
+              return 'strict val3dity 오류가 없습니다.' if raw_report[STRICT_VALIDITY_KEY] == true
+
+              return "strict val3dity 오류는 있었지만 최종 오류가 없습니다. Overlap 재검사 후보 #{suppressed}건이 억제되었습니다."
             end
             return "실제 수정이 필요한 오류가 #{final_errors}건 남아 있습니다." if total_rechecks.zero?
 
@@ -281,9 +281,9 @@ module ULOL
 
           def validation_status(raw_report, final_errors)
             status = raw_report[VALIDATION_STATUS_KEY].to_s
-            return status if %w[exact_valid extension_policy_valid invalid].include?(status)
+            return status if %w[valid invalid failed].include?(status)
 
-            final_errors.zero? ? 'exact_valid' : 'invalid'
+            final_errors.zero? ? 'valid' : 'invalid'
           end
 
           def final_error_count(raw_report)

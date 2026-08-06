@@ -24,7 +24,7 @@ var validationSubsteps = [
 var extensionRecheckSubsteps = [
   { key: 'collect', label: 'Collect 701/704 errors' },
   { key: 'pairs', label: 'Recheck reported cell pairs' },
-  { key: 'policy', label: 'Apply extension policy' }
+  { key: 'policy', label: 'Apply recheck policy' }
 ];
 
 var substepGroups = {

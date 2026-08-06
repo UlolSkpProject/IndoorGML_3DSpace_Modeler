@@ -172,10 +172,6 @@ ul {
   border-color: #327a4f;
 }
 
-.result.extension {
-  border-color: #9b762d;
-}
-
 .result.failed,
 .result.error {
   border-color: #7a2e2a;
@@ -193,10 +189,6 @@ ul {
 
 .result.success .result-title {
   color: #3ebc71;
-}
-
-.result.extension .result-title {
-  color: #f9b84e;
 }
 
 .result.failed .result-title,

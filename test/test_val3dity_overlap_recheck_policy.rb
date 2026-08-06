@@ -55,7 +55,7 @@ module ULOL
             assert_equal 0, report['primitives_overview'].first['valid']
           end
 
-          def test_apply_marks_extension_policy_valid_when_only_tolerated_errors_remain
+          def test_apply_marks_valid_when_only_tolerated_errors_remain
             report = sample_report
             report['features'].first['errors'] = [
               { 'code' => 701, 'description' => 'overlap cell_A cell_B' }
@@ -70,8 +70,7 @@ module ULOL
 
             assert_empty report['features'].first['errors']
             assert_equal true, report['validity']
-            assert_equal true, report[Val3dityOverlapRecheckPolicy::EXTENSION_VALIDITY_KEY]
-            assert_equal 'extension_policy_valid', report[Val3dityOverlapRecheckPolicy::VALIDATION_STATUS_KEY]
+            assert_equal 'valid', report[Val3dityOverlapRecheckPolicy::VALIDATION_STATUS_KEY]
           end
 
           def test_missing_cell_pair_is_recorded_and_kept

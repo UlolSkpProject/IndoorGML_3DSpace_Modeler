@@ -15,9 +15,8 @@ module ULOL
             overlap_recheck_policy.preserve_strict_validation!(raw_report)
             schema = IndoorGmlConverter::Val3dityReportSchema
             raw_valid = raw_report['validity'] == true
-            raw_report[schema::EXTENSION_VALIDITY_KEY] = raw_valid
             raw_report[schema::VALIDATION_STATUS_KEY] =
-              raw_valid ? 'exact_valid' : 'invalid'
+              raw_valid ? 'valid' : 'invalid'
             raw_report.delete(schema::OVERLAP_RECHECK_REPORT_KEY)
             raw_report
           end

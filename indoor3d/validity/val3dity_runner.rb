@@ -112,22 +112,17 @@ module ULOL
             end
 
             def outcome
-              return :error if error?
+              return :failed if error?
 
               status = @report&.[](Val3dityReportSchema::VALIDATION_STATUS_KEY).to_s
-              return :exact_valid if status == 'exact_valid'
-              return :extension_policy_valid if status == 'extension_policy_valid'
-              return :exact_valid if status.empty? && valid?
+              return :valid if status == 'valid'
+              return :valid if status.empty? && valid?
 
               :invalid
             end
 
-            def exact_valid?
-              outcome == :exact_valid
-            end
-
-            def extension_policy_valid?
-              outcome == :extension_policy_valid
+            def failed?
+              outcome == :failed
             end
 
             def invalid?
@@ -361,8 +356,8 @@ module ULOL
               progress&.detail(
                 recheck_step,
                 percent: 100,
-                phase: 'Apply extension policy',
-                message: 'Extension overlap recheck finished',
+                phase: 'Apply recheck policy',
+                message: 'Overlap recheck finished',
                 current: File.basename(@gml_path)
               )
               progress&.complete(recheck_step)
@@ -434,7 +429,6 @@ module ULOL
               'features_overview' => [],
               'primitives_overview' => [],
               Val3dityReportSchema::STRICT_VALIDITY_KEY => false,
-              Val3dityReportSchema::EXTENSION_VALIDITY_KEY => false,
               Val3dityReportSchema::VALIDATION_STATUS_KEY => 'invalid'
             }
             attach_overlap_tolerance_metadata!(raw_report)
@@ -507,8 +501,8 @@ module ULOL
               before_refresh: lambda { |_results|
                 emit_overlap_recheck_progress(
                   tracker,
-                  message: 'Applying extension validation policy',
-                  phase: 'Apply extension policy'
+                  message: 'Applying overlap recheck policy',
+                  phase: 'Apply recheck policy'
                 )
               }
             ) { |code, cell_id1, cell_id2| recheck_cell_pair(code, cell_id1, cell_id2) }

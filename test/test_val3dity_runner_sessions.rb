@@ -100,13 +100,13 @@ module ULOL
             result_class = Val3dityRunner::Val3dityResult
             paths = { report_json_path: nil, report_html_path: nil, error: nil }
 
-            exact = result_class.new(valid: true, report: { 'indoorgml_modeler_validation_status' => 'exact_valid' }, **paths)
-            extension = result_class.new(valid: true, report: { 'indoorgml_modeler_validation_status' => 'extension_policy_valid' }, **paths)
+            valid = result_class.new(valid: true, report: { 'indoorgml_modeler_validation_status' => 'valid' }, **paths)
             invalid = result_class.new(valid: false, report: { 'indoorgml_modeler_validation_status' => 'invalid' }, **paths)
+            failed = result_class.new(valid: false, report: nil, **paths.merge(error: RuntimeError.new('boom')))
 
-            assert_equal :exact_valid, exact.outcome
-            assert_equal :extension_policy_valid, extension.outcome
+            assert_equal :valid, valid.outcome
             assert_equal :invalid, invalid.outcome
+            assert_equal :failed, failed.outcome
           end
 
           def test_701_boundary_contact_reason_is_preserved_when_suppressed
