@@ -6,6 +6,7 @@ module ULOL
       class EditorSession
         module RenderingOptionsPolicy
           INACTIVE_HIDDEN_KEY = 'InactiveHidden'
+          MODEL_TRANSPARENCY_KEY = 'ModelTransparency'
           RENDER_MODE_KEY = 'RenderMode'
           TEXTURE_KEY = 'Texture'
           SHADED_RENDER_MODE = 2
@@ -31,6 +32,14 @@ module ULOL
 
           def apply_inactive_hidden(model, hidden)
             apply_values(model, INACTIVE_HIDDEN_KEY => hidden == true)
+          end
+
+          def apply_fix_mode_context(model, group_editing:, row_selected:)
+            apply_values(
+              model,
+              INACTIVE_HIDDEN_KEY => row_selected == true && group_editing != true,
+              MODEL_TRANSPARENCY_KEY => group_editing == true
+            )
           end
 
           def apply_values(model, values)
@@ -110,6 +119,7 @@ module ULOL
               HIDDEN_RENDERING_OPTION_KEYS +
               MULTI_FOCUS_RENDERING_OPTION_KEYS +
               [
+                RenderingOptionsPolicy::MODEL_TRANSPARENCY_KEY,
                 RenderingOptionsPolicy::RENDER_MODE_KEY,
                 RenderingOptionsPolicy::TEXTURE_KEY
               ]
@@ -130,9 +140,11 @@ module ULOL
                 transitions: transitions,
                 geometry_refs: geometry_refs
               )
-              RenderingOptionsPolicy.apply_inactive_hidden(
-                Sketchup.active_model,
-                !@highlight_row_id.nil?
+              model = Sketchup.active_model
+              RenderingOptionsPolicy.apply_fix_mode_context(
+                model,
+                group_editing: model&.respond_to?(:active_path) && Array(model.active_path).length > 1,
+                row_selected: !@highlight_row_id.nil?
               )
               result
             end
@@ -140,6 +152,10 @@ module ULOL
             def capture_and_apply_rendering_options(model, _focus_cell_count)
               capture_rendering_policy_options(model)
               apply_base_edit_rendering_options(model)
+              RenderingOptionsPolicy.apply_values(
+                model,
+                RenderingOptionsPolicy::MODEL_TRANSPARENCY_KEY => false
+              )
             end
 
             def capture_and_apply_hidden_rendering_options(model)
@@ -207,10 +223,18 @@ module ULOL
           private
 
           def apply_rendering_style_for_path(model, path)
-            fix_mode = @indoor_model.respond_to?(:validation_focus_active?) &&
-                       @indoor_model.validation_focus_active?
+            fix_mode = fix_mode?
             primal_group = @indoor_model.primal_group
-            cell_space_editing = editing_cell_space_path?(Array(path), primal_group)
+            active_path = Array(path)
+            cell_space_editing = editing_cell_space_path?(active_path, primal_group)
+
+            if fix_mode
+              RenderingOptionsPolicy.apply_fix_mode_context(
+                model,
+                group_editing: fix_mode_group_editing_path?(active_path, primal_group),
+                row_selected: fix_mode_row_selected?
+              )
+            end
 
             if fix_mode && cell_space_editing
               RenderingOptionsPolicy.apply_monochrome(model)
@@ -219,6 +243,18 @@ module ULOL
             end
           rescue StandardError => e
             log("Rendering option update failed: #{e.class}: #{e.message}")
+          end
+
+          def fix_mode_group_editing_path?(path, primal_group)
+            path.length > 1 && path.first == primal_group
+          end
+
+          def fix_mode_row_selected?
+            return false unless @indoor_model.respond_to?(:validation_focus_highlight_row_id)
+
+            !@indoor_model.validation_focus_highlight_row_id.to_s.empty?
+          rescue StandardError
+            false
           end
         end
       end

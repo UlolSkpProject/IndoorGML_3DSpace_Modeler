@@ -29,6 +29,8 @@ module ULOL
           assert_equal [primal, child], model.active_path
           assert_equal 0, model.active_path_write_count
           refute controller.cell_space_geometry_editing?(editing: true)
+          assert_equal false, model.rendering_options['InactiveHidden']
+          assert_equal true, model.rendering_options['ModelTransparency']
           assert_equal 2, model.rendering_options['RenderMode']
           assert_equal false, model.rendering_options['Texture']
         end
@@ -47,6 +49,8 @@ module ULOL
 
           assert_equal [primal, child], controller.target_path
           assert_equal 0, model.active_path_write_count
+          assert_equal false, model.rendering_options['InactiveHidden']
+          assert_equal true, model.rendering_options['ModelTransparency']
         end
 
         def test_edit_mode_rejects_non_cell_primal_child
@@ -119,8 +123,26 @@ module ULOL
           assert_equal [primal, cell_group], controller.target_path
           assert controller.cell_space_geometry_editing?(editing: true)
           assert_equal cell_space, controller.editing_cell_space
+          assert_equal false, model.rendering_options['InactiveHidden']
+          assert_equal true, model.rendering_options['ModelTransparency']
           assert_equal 5, model.rendering_options['RenderMode']
           assert_equal false, model.rendering_options['Texture']
+        end
+
+        def test_fix_mode_primal_path_hides_rest_for_selected_row_without_xray
+          primal = FakeGroup.new
+          indoor_model = FakeIndoorModel.new(primal, [], validation_focus_active: true)
+          controller = build_controller(indoor_model)
+          model = FakeModel.new([primal])
+          model.rendering_options['InactiveHidden'] = false
+          model.rendering_options['ModelTransparency'] = true
+
+          controller.set_target_path([primal])
+          controller.active_path_changed(model, editing: true, reenter: -> {})
+
+          assert_equal true, model.rendering_options['InactiveHidden']
+          assert_equal false, model.rendering_options['ModelTransparency']
+          assert_equal 2, model.rendering_options['RenderMode']
         end
 
         def test_fix_mode_transaction_replay_adopts_direct_primal_group_without_write
@@ -216,14 +238,19 @@ module ULOL
         class FakeIndoorModel
           attr_reader :primal_group, :cell_spaces
 
-          def initialize(primal_group, cell_spaces, validation_focus_active:)
+          def initialize(primal_group, cell_spaces, validation_focus_active:, highlight_row_id: nil)
             @primal_group = primal_group
             @cell_spaces = cell_spaces
             @validation_focus_active = validation_focus_active
+            @highlight_row_id = highlight_row_id || (validation_focus_active ? 'row-1' : nil)
           end
 
           def validation_focus_active?
             @validation_focus_active == true
+          end
+
+          def validation_focus_highlight_row_id
+            @highlight_row_id
           end
         end
 
@@ -238,7 +265,8 @@ module ULOL
             @active_path = active_path
             @active_path_write_count = 0
             @rendering_options = {
-              'InactiveHidden' => false,
+              'InactiveHidden' => true,
+              'ModelTransparency' => false,
               'RenderMode' => 2,
               'Texture' => false
             }
