@@ -48,7 +48,11 @@ module ULOL
         def forget_model(_model); end
       end unless const_defined?(:Indoor3DGmlModelObserver)
 
-      class IndoorModel; end unless const_defined?(:IndoorModel)
+      class IndoorModel
+        PRIMAL_GROUP_NAME = 'IndoorGML_PrimalSpaceFeatures' unless const_defined?(:PRIMAL_GROUP_NAME)
+        PRIMAL_GROUP_FEATURE = 'primalspace' unless const_defined?(:PRIMAL_GROUP_FEATURE)
+        ATTRIBUTE_DICTIONARY_NAME = 'IndoorGml' unless const_defined?(:ATTRIBUTE_DICTIONARY_NAME)
+      end unless const_defined?(:IndoorModel)
     end
   end
 end
@@ -132,14 +136,66 @@ module ULOL
           observer.onOpenModel(model)
 
           assert_equal 1, UI.scheduled_timers.length
-          assert_equal :scheduled, observer.instance_variable_get(:@initial_refresh_states)[model.object_id]
+          state = observer.instance_variable_get(:@initial_refresh_states)[model.object_id]
+          assert_equal :scheduled, state[:status]
 
           UI.run_scheduled_timers
 
           assert_equal 1, model.runtime.refreshes
-          assert_equal :complete, observer.instance_variable_get(:@initial_refresh_states)[model.object_id]
+          state = observer.instance_variable_get(:@initial_refresh_states)[model.object_id]
+          assert_equal :complete, state[:status]
           refute observer.schedule_initial_refresh(model)
           assert_empty UI.scheduled_timers
+        end
+
+        def test_reused_model_object_open_releases_stale_runtime_and_refreshes_again
+          model = FakeModel.new
+          observer = Indoor3DGmlAppObserver.new
+
+          observer.onOpenModel(model)
+          UI.run_scheduled_timers
+
+          assert_equal 1, model.runtime.refreshes
+          assert_empty @released_models
+
+          observer.onOpenModel(model)
+
+          assert_equal [model], @released_models
+          assert_equal 1, UI.scheduled_timers.length
+          state = observer.instance_variable_get(:@initial_refresh_states)[model.object_id]
+          assert_equal :scheduled, state[:status]
+          assert_equal 2, state[:generation]
+
+          UI.run_scheduled_timers
+
+          assert_equal 2, model.runtime.refreshes
+          assert_equal [true, true], model.runtime.initial_model_load_flags
+          state = observer.instance_variable_get(:@initial_refresh_states)[model.object_id]
+          assert_equal :complete, state[:status]
+        end
+
+        def test_legacy_symbol_refresh_state_is_migrated_on_reopen
+          model = FakeModel.new
+          observer = Indoor3DGmlAppObserver.new
+          observer.register_model(model)
+          observer.instance_variable_set(
+            :@initial_refresh_states,
+            { model.object_id => :complete }
+          )
+          observer.instance_variable_set(:@initial_refresh_generations, nil)
+
+          observer.onOpenModel(model)
+
+          assert_equal [model], @released_models
+          assert_equal 1, UI.scheduled_timers.length
+          state = observer.instance_variable_get(:@initial_refresh_states)[model.object_id]
+          assert_equal :scheduled, state[:status]
+          assert_equal 1, state[:generation]
+
+          UI.run_scheduled_timers
+
+          assert_equal 1, model.runtime.refreshes
+          assert_equal :complete, state[:status]
         end
 
         def test_failed_initial_refresh_can_be_scheduled_again
@@ -155,7 +211,8 @@ module ULOL
           UI.run_scheduled_timers
 
           assert_equal 1, model.runtime.refreshes
-          assert_equal :complete, observer.instance_variable_get(:@initial_refresh_states)[model.object_id]
+          state = observer.instance_variable_get(:@initial_refresh_states)[model.object_id]
+          assert_equal :complete, state[:status]
         end
 
         def test_releasing_model_cancels_pending_initial_refresh
@@ -169,6 +226,7 @@ module ULOL
 
           assert_equal 0, model.runtime.refreshes
           refute observer.instance_variable_get(:@initial_refresh_states).key?(model.object_id)
+          refute observer.instance_variable_get(:@initial_refresh_generations).key?(model.object_id)
         end
 
         def test_extension_load_delegates_to_the_same_initial_refresh_scheduler
@@ -229,10 +287,12 @@ module ULOL
         class FakeModel
           attr_reader :runtime
           attr_reader :observers
+          attr_reader :entities
 
           def initialize
             @runtime = FakeRuntime.new
             @observers = []
+            @entities = FakeEntities.new([FakePrimalGroup.new])
           end
 
           def add_observer(observer)
@@ -241,6 +301,50 @@ module ULOL
 
           def remove_observer(observer)
             @observers.delete(observer)
+          end
+        end
+
+        class FakeEntities
+          def initialize(items)
+            @items = items
+          end
+
+          def to_a
+            @items.dup
+          end
+        end
+
+        class FakePrimalGroup
+          attr_reader :name
+          attr_reader :entities
+
+          def initialize
+            @name = IndoorModel::PRIMAL_GROUP_NAME
+            @entities = FakeEntities.new([FakeCellSpaceGroup.new])
+          end
+
+          def valid?
+            true
+          end
+
+          def get_attribute(dictionary, key)
+            return IndoorModel::PRIMAL_GROUP_FEATURE if
+              dictionary == IndoorModel::ATTRIBUTE_DICTIONARY_NAME && key == 'feature'
+
+            nil
+          end
+        end
+
+        class FakeCellSpaceGroup
+          def valid?
+            true
+          end
+
+          def get_attribute(dictionary, key)
+            return 'CellSpace' if
+              dictionary == IndoorModel::ATTRIBUTE_DICTIONARY_NAME && key == 'feature'
+
+            nil
           end
         end
 
