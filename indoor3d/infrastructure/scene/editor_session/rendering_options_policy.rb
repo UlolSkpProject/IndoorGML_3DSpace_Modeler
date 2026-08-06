@@ -69,10 +69,16 @@ module ULOL
         end
 
         class ValidationFocusController
+          remove_const(:MULTI_FOCUS_RENDERING_OPTION_KEYS) if
+            const_defined?(:MULTI_FOCUS_RENDERING_OPTION_KEYS, false)
+          MULTI_FOCUS_RENDERING_OPTION_KEYS = [
+            RenderingOptionsPolicy::INACTIVE_HIDDEN_KEY
+          ].freeze
+
           RENDERING_POLICY_OPTION_KEYS = (
             HIDDEN_RENDERING_OPTION_KEYS +
+            MULTI_FOCUS_RENDERING_OPTION_KEYS +
             [
-              RenderingOptionsPolicy::INACTIVE_HIDDEN_KEY,
               RenderingOptionsPolicy::RENDER_MODE_KEY,
               RenderingOptionsPolicy::TEXTURE_KEY
             ]
