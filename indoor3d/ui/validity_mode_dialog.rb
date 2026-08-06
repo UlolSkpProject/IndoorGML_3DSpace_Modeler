@@ -4,8 +4,9 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class ValidityModeDialog
-        WIDTH = 720
-        HEIGHT = 500
+        WIDTH = 760
+        HEIGHT = 420
+        VAL3DITY_RELEASE_URL = 'https://github.com/tudelft3d/val3dity/releases#release-2.2.0'
 
         class << self
           def show(&on_select)
@@ -99,6 +100,9 @@ module ULOL
           html_dialog.add_action_callback('selectPrecision') do |_context|
             commit_selection(:precision)
           end
+          html_dialog.add_action_callback('openVal3dityRelease') do |_context|
+            open_external_url(VAL3DITY_RELEASE_URL)
+          end
           html_dialog.add_action_callback('cancel') do |_context|
             close
           end
@@ -109,6 +113,16 @@ module ULOL
             @on_select = nil
           end if html_dialog.respond_to?(:set_on_closed)
           html_dialog
+        end
+
+        def open_external_url(url)
+          UI.openURL(url)
+          true
+        rescue StandardError => e
+          IndoorCore::Logger.puts(
+            "[IndoorGML] External URL open failed: #{e.class}: #{e.message}"
+          )
+          false
         end
 
         def commit_selection(profile)

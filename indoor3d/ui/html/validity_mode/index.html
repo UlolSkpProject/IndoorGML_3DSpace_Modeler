@@ -14,6 +14,7 @@
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
     body { background: #1c1c1b; user-select: none; -webkit-user-select: none; }
+    button { font: inherit; }
     main { display: flex; flex-direction: column; height: 100%; padding: 22px; }
     .eyebrow {
       margin-bottom: 7px;
@@ -36,8 +37,8 @@
       flex-direction: column;
       width: 100%;
       min-width: 0;
-      min-height: 292px;
-      padding: 16px 18px;
+      height: 100%;
+      padding: 17px 18px 18px;
       border: 1px solid #3b3a36;
       border-radius: 12px;
       background: #252523;
@@ -46,7 +47,9 @@
       cursor: pointer;
     }
     .mode:hover { background: #2d2d2a; border-color: #5a5953; }
-    .mode:focus-visible { outline: 2px solid #8ab4f8; outline-offset: 2px; }
+    .mode:focus-visible,
+    .footer-link:focus-visible,
+    .cancel:focus-visible { outline: 2px solid #8ab4f8; outline-offset: 2px; }
     .mode-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .mode-title { color: #eceae4; font-size: 15px; font-weight: 700; }
     .badge {
@@ -86,9 +89,34 @@
       white-space: nowrap;
     }
     .copy-line + .copy-line { margin-top: 3px; }
-    .warning { color: #e4aa56; }
-    code { font-family: Consolas, Monaco, monospace; font-size: .95em; }
-    footer { display: flex; justify-content: flex-end; margin-top: auto; padding-top: 14px; }
+    .inline-code {
+      display: inline-block;
+      padding: 1px 5px;
+      border: 1px solid #4b4a45;
+      border-radius: 4px;
+      background: #1b1b1a;
+      color: #d8d5cd;
+      font-family: Consolas, Monaco, monospace;
+      font-size: 10px;
+      line-height: 1.35;
+      vertical-align: 1px;
+    }
+    footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: auto;
+      padding-top: 14px;
+    }
+    .footer-link {
+      padding: 5px 0;
+      border: 0;
+      background: transparent;
+      color: #8f969f;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .footer-link:hover { color: #b7c4d5; text-decoration: underline; }
     .cancel {
       min-width: 86px;
       padding: 8px 14px;
@@ -137,20 +165,17 @@
             <span class="copy-line">이 과정에서 Geometry가 변경될 수 있습니다.</span>
           </span>
           <span class="mode-detail">
-            <span class="copy-line"><code>--overlap_tol</code> 옵션을 적용하여</span>
-            <span class="copy-line">val3dity.exe 검사를 수행합니다.</span>
+            <span class="copy-line"><code class="inline-code">--overlap_tol</code> 옵션을 적용하여 val3dity.exe 검사를 수행합니다.</span>
           </span>
           <span class="mode-note">모델 규모에 따라 수십 분이 소요될 수 있습니다.</span>
-          <span class="mode-detail warning">
-            <span class="copy-line">시험 운영 중인 기능입니다.</span>
-            <span class="copy-line">일부 모델에서 오류가 발생할 수 있습니다.</span>
-            <span class="copy-line">실행 전 모델을 저장해 주세요.</span>
-          </span>
         </span>
       </button>
     </section>
 
     <footer>
+      <button class="footer-link" type="button" onclick="sketchup.openVal3dityRelease()">
+        val3dity 2.2.0 릴리스 ↗
+      </button>
       <button class="cancel" type="button" onclick="sketchup.cancel()">취소</button>
     </footer>
   </main>
