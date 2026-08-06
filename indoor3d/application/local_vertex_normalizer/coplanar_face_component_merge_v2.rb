@@ -32,49 +32,66 @@ module ULOL
           raise ArgumentError, 'plane_tolerance_mm must be >= 0' if plane_tolerance_mm.negative?
 
           entities = solid.definition.entities
-          all_faces = entities.grep(Sketchup::Face).select(&:valid?)
-          source_face_count = all_faces.length
-
-          face_by_id = all_faces.to_h { |face| [stable_entity_id(face), face] }
-          unvisited = face_by_id.keys.to_h { |face_id| [face_id, true] }
-          normal_components = []
-
-          until unvisited.empty?
-            seed_id = unvisited.keys.first
-            seed = face_by_id[seed_id]
-            unless seed&.valid?
-              unvisited.delete(seed_id)
-              next
-            end
-
-            component = collect_normal_component(
-              seed,
-              allowed_ids: unvisited,
-              angle_tolerance_deg: angle_tolerance_deg
-            )
-            component.each { |face| unvisited.delete(stable_entity_id(face)) }
-            normal_components << component unless component.empty?
-          end
-
-          planar_groups = normal_components.flat_map do |component|
-            refine_component_by_best_fit(
-              component,
-              angle_tolerance_deg: angle_tolerance_deg,
-              plane_tolerance_mm: plane_tolerance_mm
-            )
-          end
-
-          merge_groups = planar_groups
-                         .select { |group| group.length > 1 }
-                         .sort_by do |group|
-                           [-group.length, group.map { |face| stable_entity_id(face) }.min]
-                         end
-
           initial_topology = coplanar_merge_face_summary(entities)
           initial_manifold = manifold?(solid)
-          plans = merge_groups.map.with_index do |group, index|
-            prepare_merge_plan(group, ordinal: index + 1, total: merge_groups.length)
+          source_face_count = initial_topology[:faces]
+          initial_state = build_merge_plan_state(
+            entities,
+            angle_tolerance_deg: angle_tolerance_deg,
+            plane_tolerance_mm: plane_tolerance_mm
+          )
+          ring_repair = prepare_ring_self_touch_repair(initial_state[:plans])
+          initial_ring_self_touch_vertex_count =
+            ring_self_touch_vertex_count(initial_state[:all_faces])
+          ring_repair[:ring_self_touch_vertex_count_after] =
+            initial_ring_self_touch_vertex_count
+
+          unless ring_repair[:edges].empty?
+            entities.erase_entities(ring_repair[:edges])
+            repaired_topology = coplanar_merge_face_summary(entities)
+            repaired_manifold = manifold?(solid)
+            repair_face_reduction =
+              initial_topology[:faces] - repaired_topology[:faces]
+            if repair_face_reduction != ring_repair[:expected_face_reduction]
+              raise MergeError,
+                    "Ring self-touch repair merged faces by #{repair_face_reduction}; " \
+                    "expected #{ring_repair[:expected_face_reduction]}"
+            end
+            if initial_topology[:closed] && !repaired_topology[:closed]
+              raise MergeError, 'Ring self-touch repair opened a previously closed shell'
+            end
+            if repaired_topology[:overused_edges] > initial_topology[:overused_edges]
+              raise MergeError, 'Ring self-touch repair increased overused-edge count'
+            end
+            if repaired_topology[:boundary_edges] > initial_topology[:boundary_edges]
+              raise MergeError, 'Ring self-touch repair increased boundary-edge count'
+            end
+            if initial_manifold && !repaired_manifold
+              raise MergeError,
+                    'Ring self-touch repair changed a manifold solid into non-manifold geometry'
+            end
+
+            repaired_faces = entities.grep(Sketchup::Face).select(&:valid?)
+            repaired_ring_count = ring_self_touch_vertex_count(repaired_faces)
+            if repaired_ring_count >= initial_ring_self_touch_vertex_count
+              raise MergeError,
+                    'Ring self-touch repair did not reduce repeated outer-loop vertices'
+            end
+            ring_repair[:actual_face_reduction] = repair_face_reduction
+            ring_repair[:ring_self_touch_vertex_count_after] = repaired_ring_count
           end
+
+          # Erasing a shared edge can replace either incident SketchUp Face.
+          # Rebuild every component, planar group, and merge plan from entities;
+          # no pre-repair Face/Edge reference is safe to reuse here.
+          state = build_merge_plan_state(
+            entities,
+            angle_tolerance_deg: angle_tolerance_deg,
+            plane_tolerance_mm: plane_tolerance_mm
+          )
+          normal_components = state[:normal_components]
+          planar_groups = state[:planar_groups]
+          plans = state[:plans]
 
           # Snapshot all Face-derived data before mutation. SketchUp can replace
           # several original Faces with a new n-gon as soon as one edge is erased.
@@ -114,7 +131,9 @@ module ULOL
           merge_seed_vertices = all_internal_edges.flat_map do |edge|
             Array(edge.vertices)
           end.uniq
-          expected_face_reduction = plans.sum { |plan| plan[:expected_face_reduction] }
+          expected_face_reduction =
+            ring_repair[:expected_face_reduction] +
+            plans.sum { |plan| plan[:expected_face_reduction] }
 
           entities.erase_entities(all_internal_edges) unless all_internal_edges.empty?
 
@@ -154,16 +173,30 @@ module ULOL
             normal_component_count: normal_components.length,
             planar_group_count: planar_groups.length,
             singleton_group_count: planar_groups.count { |group| group.length == 1 },
-            merge_group_count: plans.count do |plan|
-              plan[:expected_face_reduction].positive?
-            end,
+            merge_group_count:
+              ring_repair[:bundles].length +
+              plans.count { |plan| plan[:expected_face_reduction].positive? },
             protected_merge_group_count: plans.count do |plan|
               plan[:protected_internal_edge_count].positive?
             end,
             merged_input_face_count: plans.sum do |plan|
               plan[:expected_face_reduction].positive? ? plan[:input_face_count] : 0
             end,
-            removed_internal_edge_count: all_internal_edges.length,
+            removed_internal_edge_count:
+              ring_repair[:edges].length + all_internal_edges.length,
+            ring_self_touch_repair_bundle_count: ring_repair[:bundles].length,
+            ring_self_touch_repair_edge_count: ring_repair[:edges].length,
+            ring_self_touch_repair_expected_face_reduction:
+              ring_repair[:expected_face_reduction],
+            ring_self_touch_repair_actual_face_reduction:
+              ring_repair[:actual_face_reduction],
+            ring_self_touch_vertex_count_before:
+              initial_ring_self_touch_vertex_count,
+            ring_self_touch_vertex_count_after:
+              ring_repair[:ring_self_touch_vertex_count_after],
+            ring_self_touch_repairs: ring_repair[:bundles].map do |bundle|
+              bundle.reject { |key, _value| key == :edges }
+            end,
             protected_fan_transition_edge_count: protected_lookup.length,
             collapsed_collinear_vertex_count:
               collapse_report[:collapsed_vertex_count],
@@ -181,6 +214,90 @@ module ULOL
               end
             end
           }
+        end
+
+        def build_merge_plan_state(entities, angle_tolerance_deg:, plane_tolerance_mm:)
+          all_faces = entities.grep(Sketchup::Face).select(&:valid?)
+          face_by_id = all_faces.to_h { |face| [stable_entity_id(face), face] }
+          unvisited = face_by_id.keys.to_h { |face_id| [face_id, true] }
+          normal_components = []
+
+          until unvisited.empty?
+            seed_id = unvisited.keys.first
+            seed = face_by_id[seed_id]
+            unless seed&.valid?
+              unvisited.delete(seed_id)
+              next
+            end
+
+            component = collect_normal_component(
+              seed,
+              allowed_ids: unvisited,
+              angle_tolerance_deg: angle_tolerance_deg
+            )
+            component.each { |face| unvisited.delete(stable_entity_id(face)) }
+            normal_components << component unless component.empty?
+          end
+
+          planar_groups = normal_components.flat_map do |component|
+            refine_component_by_best_fit(
+              component,
+              angle_tolerance_deg: angle_tolerance_deg,
+              plane_tolerance_mm: plane_tolerance_mm
+            )
+          end
+          merge_groups = planar_groups
+                         .select { |group| group.length > 1 }
+                         .sort_by do |group|
+                           [-group.length, group.map { |face| stable_entity_id(face) }.min]
+                         end
+          plans = merge_groups.map.with_index do |group, index|
+            prepare_merge_plan(group, ordinal: index + 1, total: merge_groups.length)
+          end
+
+          {
+            all_faces: all_faces,
+            normal_components: normal_components,
+            planar_groups: planar_groups,
+            plans: plans
+          }
+        end
+
+        def prepare_ring_self_touch_repair(plans)
+          bundles = Array(plans).flat_map do |plan|
+            CoplanarCollinearEdgePolicyV2.ring_self_touch_repair_edge_bundles(
+              faces: plan[:faces],
+              internal_edges: plan[:internal_edges]
+            )
+          end
+          bundles = bundles.each_with_object({}) do |bundle, result|
+            result[bundle[:edge_ids]] ||= bundle
+          end.values
+          edges = bundles.flat_map { |bundle| bundle[:edges] }.uniq.select(&:valid?)
+          expected_face_reduction = Array(plans).sum do |plan|
+            plan_edges = edges.select do |edge|
+              Array(edge.faces).all? do |face|
+                plan[:faces].include?(face)
+              end
+            end
+            merge_face_reduction_for_edges(plan[:faces], plan_edges)
+          end
+
+          {
+            bundles: bundles,
+            edges: edges,
+            expected_face_reduction: expected_face_reduction,
+            actual_face_reduction: 0,
+            ring_self_touch_vertex_count_after: nil
+          }
+        end
+
+        def ring_self_touch_vertex_count(faces)
+          Array(faces).sum do |face|
+            CoplanarCollinearEdgePolicyV2
+              .repeated_outer_loop_vertices(face)
+              .length
+          end
         end
 
         # Implicit BFS. SketchUp Face/Edge incidence is the graph.
