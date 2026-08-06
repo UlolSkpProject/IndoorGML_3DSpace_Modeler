@@ -200,6 +200,108 @@ module ULOL
             assert_equal 'BOOLEAN_INTERSECTION_INCONCLUSIVE', result[:reason]
           end
 
+          def test_non_solid_result_across_finite_contact_slabs_is_tolerated
+            rechecker = Val3dityOverlapGeometryRechecker.new(
+              indoor_model: FakeIndoorModel.new([], nil),
+              tolerance: 0.001
+            )
+            intersection = {
+              status: :non_solid,
+              lower_dimensional: false,
+              contact_samples: [
+                FakePoint.new(0.5, 0.5, 0.0005),
+                FakePoint.new(2.5, 0.5, 0.0005)
+              ],
+              volume: 0.001,
+              boundary_edge_count: 3,
+              nonmanifold_edge_count: 1
+            }
+            candidates = [
+              finite_slab_candidate(0.0, 1.0),
+              finite_slab_candidate(2.0, 3.0)
+            ]
+
+            result = rechecker.send(
+              :resolve_non_solid_intersection, intersection, candidates
+            )
+
+            assert_equal :not_reproduced, result[:status]
+            assert_equal 'NON_SOLID_INTERSECTION_WITHIN_OVERLAP_TOLERANCE',
+                         result[:reason]
+            assert_equal 0.0, result[:volume]
+            assert_equal 0.001, result[:raw_non_solid_volume]
+            assert_equal 'finite_contact_slab_union',
+                         result.dig(:overlap_tolerance_gate, :mode)
+            assert_equal 2, result.dig(:overlap_tolerance_gate, :candidate_count)
+          end
+
+          def test_non_solid_result_outside_finite_overlap_polygon_is_inconclusive
+            rechecker = Val3dityOverlapGeometryRechecker.new(
+              indoor_model: FakeIndoorModel.new([], nil),
+              tolerance: 0.001
+            )
+            intersection = {
+              status: :non_solid,
+              lower_dimensional: false,
+              contact_samples: [FakePoint.new(10.0, 10.0, 0.0005)],
+              volume: 0.0001,
+              boundary_edge_count: 1,
+              nonmanifold_edge_count: 0
+            }
+
+            result = rechecker.send(
+              :resolve_non_solid_intersection,
+              intersection,
+              [finite_slab_candidate(0.0, 1.0)]
+            )
+
+            assert_equal :inconclusive, result[:status]
+            assert_equal 'BOOLEAN_INTERSECTION_INCONCLUSIVE', result[:reason]
+          end
+
+          def test_non_solid_result_over_contact_volume_limit_is_inconclusive
+            rechecker = Val3dityOverlapGeometryRechecker.new(
+              indoor_model: FakeIndoorModel.new([], nil),
+              tolerance: 0.001
+            )
+            intersection = {
+              status: :non_solid,
+              lower_dimensional: false,
+              contact_samples: [FakePoint.new(0.5, 0.5, 0.0005)],
+              volume: 0.01,
+              boundary_edge_count: 1,
+              nonmanifold_edge_count: 0
+            }
+
+            result = rechecker.send(
+              :resolve_non_solid_intersection,
+              intersection,
+              [finite_slab_candidate(0.0, 1.0)]
+            )
+
+            assert_equal :inconclusive, result[:status]
+            assert_equal 'BOOLEAN_INTERSECTION_INCONCLUSIVE', result[:reason]
+          end
+
+          private
+
+          def finite_slab_candidate(min_x, max_x)
+            {
+              normal: FakePoint.new(0.0, 0.0, 1.0),
+              plane1: 0.0,
+              plane2: 0.001,
+              penetration_depth: 0.001,
+              overlap_area: max_x - min_x,
+              axis: :z,
+              overlap_polygons: [
+                [
+                  [min_x, 0.0], [max_x, 0.0],
+                  [max_x, 1.0], [min_x, 1.0]
+                ]
+              ]
+            }
+          end
+
           FakeCellSpace = Struct.new(:id, :sketchup_group)
           FakeIndoorModel = Struct.new(:cell_spaces, :model) do
             def with_indoor_model_operation(name, rollback: false)

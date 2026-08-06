@@ -365,7 +365,8 @@ module ULOL
               boundary_edge_count: boundary_edge_count,
               nonmanifold_edge_count: nonmanifold_edge_count,
               lower_dimensional: lower_dimensional,
-              face_points: intersection_face_points(result, faces)
+              face_points: intersection_face_points(result, faces),
+              contact_samples: intersection_contact_samples(result, faces)
             }
           end
 
@@ -378,6 +379,19 @@ module ULOL
                 status: :not_reproduced,
                 reason: 'BOUNDARY_CONTACT_ONLY',
                 volume: 0.0
+              )
+            end
+
+            tolerance_match = non_solid_overlap_tolerance_match(
+              intersection, candidates
+            )
+            if tolerance_match
+              return intersection.merge(
+                status: :not_reproduced,
+                reason: 'NON_SOLID_INTERSECTION_WITHIN_OVERLAP_TOLERANCE',
+                volume: 0.0,
+                raw_non_solid_volume: intersection[:volume],
+                overlap_tolerance_gate: tolerance_match
               )
             end
 
@@ -403,6 +417,112 @@ module ULOL
             end
           end
 
+          def non_solid_overlap_tolerance_match(intersection, candidates)
+            return nil unless non_solid_tolerance_fallback_applicable?(intersection)
+
+            # Reuse the already filtered shared-face candidates. A non-solid
+            # Boolean result is tolerated only when its sampled surface stays
+            # inside the finite projected contact regions, not merely near the
+            # candidates' infinite planes.
+            slabs = Array(candidates).filter_map.with_index do |candidate, index|
+              finite_contact_slab(candidate, index)
+            end
+            return nil if slabs.empty?
+
+            samples = Array(intersection[:contact_samples])
+            samples = Array(intersection[:face_points]) if samples.empty?
+            return nil if samples.empty?
+            return nil unless samples.all? do |point|
+              slabs.any? { |slab| point_in_finite_contact_slab?(point, slab) }
+            end
+
+            area = slabs.sum { |slab| slab.fetch(:overlap_area) }
+            volume_limit = area * @tolerance.to_f.abs
+            raw_volume = intersection[:volume]
+            maximum_volume = volume_limit + overlap_tolerance_volume_epsilon
+            return nil if raw_volume && raw_volume.to_f > maximum_volume
+
+            {
+              applied: true,
+              mode: 'finite_contact_slab_union',
+              tolerance_in: @tolerance.to_f,
+              tolerance_mm: @tolerance.to_f * 25.4,
+              candidate_count: slabs.length,
+              sample_count: samples.length,
+              overlap_area_in2: area,
+              volume_limit_in3: volume_limit,
+              raw_non_solid_volume_in3: raw_volume
+            }
+          end
+
+          def non_solid_tolerance_fallback_applicable?(intersection)
+            return false unless intersection[:status] == :non_solid
+            return false if intersection[:lower_dimensional] == true
+
+            intersection[:boundary_edge_count].to_i.positive? ||
+              intersection[:nonmanifold_edge_count].to_i.positive?
+          end
+
+          def finite_contact_slab(candidate, index)
+            normal = candidate[:normal]
+            plane1 = candidate[:plane1]
+            plane2 = candidate[:plane2]
+            polygons = Array(candidate[:overlap_polygons]).select do |polygon|
+              Array(polygon).length >= 3
+            end
+            return nil unless normal && !plane1.nil? && !plane2.nil?
+            return nil if polygons.empty?
+            return nil if candidate[:penetration_depth].to_f >
+                          @tolerance.to_f.abs + overlap_tolerance_numeric_epsilon
+
+            nx = normal.x.to_f
+            ny = normal.y.to_f
+            nz = normal.z.to_f
+            magnitude = Math.sqrt((nx * nx) + (ny * ny) + (nz * nz))
+            return nil if magnitude <= 1.0e-30
+
+            slab_min, slab_max = [
+              plane1.to_f / magnitude,
+              plane2.to_f / magnitude
+            ].minmax
+            {
+              candidate_index: index,
+              unit_normal: [nx / magnitude, ny / magnitude, nz / magnitude],
+              slab_min: slab_min,
+              slab_max: slab_max,
+              axis: candidate[:axis] || Utils::Geometry.dominant_axis(normal),
+              polygons: polygons,
+              overlap_area: candidate[:overlap_area].to_f
+            }
+          rescue StandardError
+            nil
+          end
+
+          def point_in_finite_contact_slab?(point, slab)
+            normal = slab.fetch(:unit_normal)
+            projection = normal[0] * point.x.to_f +
+                         normal[1] * point.y.to_f +
+                         normal[2] * point.z.to_f
+            epsilon = overlap_tolerance_numeric_epsilon
+            return false if projection < slab.fetch(:slab_min) - epsilon
+            return false if projection > slab.fetch(:slab_max) + epsilon
+
+            point_2d = Utils::Geometry.project_points_for_axis(
+              [point], slab.fetch(:axis)
+            ).first
+            slab.fetch(:polygons).any? do |polygon|
+              Utils::Geometry.point_in_polygon_2d?(
+                point_2d, polygon, @tolerance.to_f.abs
+              )
+            end
+          rescue StandardError
+            false
+          end
+
+          def overlap_tolerance_volume_epsilon
+            [@tolerance.to_f.abs**3, 1.0e-12].max
+          end
+
           def point_plane_distance(point, normal, plane_constant)
             return Float::INFINITY unless point && normal && !plane_constant.nil?
 
@@ -423,6 +543,37 @@ module ULOL
             end.uniq { |point| [point.x.to_f, point.y.to_f, point.z.to_f] }
           rescue StandardError
             []
+          end
+
+          def intersection_contact_samples(result, faces)
+            transform = result.transformation
+            samples = faces.flat_map do |face|
+              mesh = face.mesh(0)
+              mesh.polygons.flat_map do |polygon|
+                points = polygon.map do |index|
+                  mesh.point_at(index.abs).transform(transform)
+                end
+                next [] if points.empty?
+
+                centroid = Geom::Point3d.new(
+                  points.sum(&:x) / points.length.to_f,
+                  points.sum(&:y) / points.length.to_f,
+                  points.sum(&:z) / points.length.to_f
+                )
+                midpoints = points.each_index.map do |index|
+                  following = points[(index + 1) % points.length]
+                  Geom::Point3d.new(
+                    (points[index].x + following.x) * 0.5,
+                    (points[index].y + following.y) * 0.5,
+                    (points[index].z + following.z) * 0.5
+                  )
+                end
+                points + midpoints + [centroid]
+              end
+            end
+            samples.uniq { |point| [point.x.to_f, point.y.to_f, point.z.to_f] }
+          rescue StandardError
+            intersection_face_points(result, faces)
           end
 
           def cache_intersection_overlay_geometry(result, cell_ids, volume)
