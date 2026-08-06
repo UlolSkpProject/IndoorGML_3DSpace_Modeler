@@ -159,10 +159,6 @@ module ULOL
             )
           end
 
-          def nice_progress_update_step(raw_step)
-            AdaptiveProgressCheckpoint.nice_step(raw_step)
-          end
-
           def hidden_overlay_stage?(stage)
             HIDDEN_OVERLAY_STAGES.include?(stage&.to_sym)
           end
