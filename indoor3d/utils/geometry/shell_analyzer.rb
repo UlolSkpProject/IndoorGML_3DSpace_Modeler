@@ -73,8 +73,20 @@ module ULOL
           return [] unless entity&.valid?
           return [] unless entity.respond_to?(:definition) && entity.definition&.valid?
 
+          shell_face_records(entity.definition.entities.grep(Sketchup::Face))
+        end
+        private_class_method :local_shell_faces
+
+        def self.shell_contains_point_in_faces?(faces, point, tolerance = SHELL_CENTER_TOLERANCE)
+          records = shell_face_records(faces)
+          return false if records.empty?
+
+          shell_contains_point?(records, point, tolerance)
+        end
+
+        def self.shell_face_records(faces)
           ray_directions = shell_ray_directions
-          entity.definition.entities.grep(Sketchup::Face).map do |face|
+          Array(faces).map do |face|
             next unless face&.valid?
 
             outer = face.outer_loop.vertices.map(&:position)
@@ -102,7 +114,7 @@ module ULOL
             }
           end.compact
         end
-        private_class_method :local_shell_faces
+        private_class_method :shell_face_records
 
         def self.shell_contains_point?(faces, point, tolerance)
           directions = shell_ray_directions
