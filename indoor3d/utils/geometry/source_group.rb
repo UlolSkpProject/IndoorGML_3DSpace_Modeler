@@ -9,10 +9,11 @@ module ULOL
           return { valid: false, reason: 'No faces found', component_count: 0, reversed_face_count: 0 } if faces.empty?
 
           components = face_components(faces)
-          if components.length != 1
+          classification = classify_shell_components(components)
+          unless classification[:valid]
             return {
               valid: false,
-              reason: "Disconnected solid shells detected (#{components.length} components)",
+              reason: classification[:reason],
               component_count: components.length,
               reversed_face_count: 0
             }
@@ -21,7 +22,9 @@ module ULOL
           {
             valid: true,
             reason: nil,
-            component_count: 1,
+            component_count: components.length,
+            exterior_faces: classification[:exterior_faces],
+            interior_face_components: classification[:interior_face_components],
             reversed_face_count: 0
           }
         end
@@ -30,9 +33,70 @@ module ULOL
           result = validate_cell_space_source_group(group)
           return result unless result[:valid]
 
-          result[:reversed_face_count] = orient_single_shell_faces!(group_faces(group))
+          reversed_count = orient_shell_faces!(result[:exterior_faces], positive_volume: true)
+          Array(result[:interior_face_components]).each do |faces|
+            reversed_count += orient_shell_faces!(faces, positive_volume: false)
+          end
+          result[:reversed_face_count] = reversed_count
           result
         end
+
+        def self.classify_shell_components(components)
+          components = Array(components).reject(&:empty?)
+          return { valid: false, reason: 'No closed shell components found' } if components.empty?
+          return {
+            valid: true,
+            exterior_faces: components.first,
+            interior_face_components: []
+          } if components.length == 1
+
+          unless respond_to?(:shell_contains_point_in_faces?)
+            return {
+              valid: false,
+              reason: "Disconnected solid shells detected (#{components.length} components)"
+            }
+          end
+
+          nesting_depths = components.map.with_index do |component, index|
+            point = component_representative_point(component)
+            return { valid: false, reason: 'Unable to classify solid shell containment' } unless point
+
+            components.each_with_index.count do |candidate, candidate_index|
+              candidate_index != index && shell_contains_point_in_faces?(candidate, point)
+            end
+          end
+          exterior_indices = nesting_depths.each_index.select { |index| nesting_depths[index].zero? }
+          interior_indices = nesting_depths.each_index.select { |index| nesting_depths[index] == 1 }
+          valid = exterior_indices.length == 1 &&
+                  interior_indices.length == components.length - 1 &&
+                  interior_indices.all? do |index|
+                    shell_contains_point_in_faces?(
+                      components[exterior_indices.first],
+                      component_representative_point(components[index])
+                    )
+                  end
+          unless valid
+            return {
+              valid: false,
+              reason: "Disconnected or nested solid shells detected (#{components.length} components)"
+            }
+          end
+
+          {
+            valid: true,
+            exterior_faces: components[exterior_indices.first],
+            interior_face_components: interior_indices.map { |index| components[index] }
+          }
+        end
+        private_class_method :classify_shell_components
+
+        def self.component_representative_point(faces)
+          face = Array(faces).find { |candidate| candidate&.valid? }
+          face&.outer_loop&.vertices&.first&.position
+        rescue StandardError
+          nil
+        end
+        private_class_method :component_representative_point
         def self.group_faces(group)
           return [] unless group&.valid?
           return [] unless group.respond_to?(:definition) && group.definition&.valid?
@@ -74,12 +138,13 @@ module ULOL
         end
         private_class_method :adjacent_faces
 
-        def self.orient_single_shell_faces!(faces)
+        def self.orient_shell_faces!(faces, positive_volume:)
           desired_signs = propagated_face_orientation_signs(faces)
           return 0 if desired_signs.empty?
 
           signed_volume = shell_signed_volume(faces, desired_signs)
-          if signed_volume.negative?
+          should_reverse = positive_volume ? signed_volume.negative? : signed_volume.positive?
+          if should_reverse
             desired_signs.transform_values! { |sign| -sign }
           end
 
@@ -92,7 +157,7 @@ module ULOL
           end
           reversed_count
         end
-        private_class_method :orient_single_shell_faces!
+        private_class_method :orient_shell_faces!
 
         def self.propagated_face_orientation_signs(faces)
           face_set = faces.each_with_object({}) { |face, memo| memo[face] = true }

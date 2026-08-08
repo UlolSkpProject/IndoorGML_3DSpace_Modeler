@@ -67,6 +67,34 @@ module ULOL
             assert_includes xml, '0.025399999999999999 0.050799999999999998 0.07619999999999999'
           end
 
+          def test_writer_exports_cavity_as_solid_interior_shell
+            state = fake_state('S cavity')
+            exterior_surface = fake_surface
+            interior_surface = ExportSnapshot::SurfaceSnapshot.new(
+              id_hint: 7,
+              exterior: [
+                fake_point(0.25, 0.25, 0.25),
+                fake_point(0.25, 0.75, 0.25),
+                fake_point(0.75, 0.25, 0.25),
+                fake_point(0.25, 0.25, 0.25)
+              ],
+              interiors: []
+            )
+            cell = fake_cell_space('Cavity', CellSpaceType::GENERAL, nil, state, surfaces: [exterior_surface])
+            cell.interior_shells = [[interior_surface]]
+            state.duality_cell = cell
+            snapshot = ExportSnapshot.new(cell_spaces: [cell], transitions: [])
+
+            doc = REXML::Document.new(GmlWriter.new(
+              snapshot: snapshot,
+              coordinate_unit: { unit: 'in', factor: 1.0, srs_name: 'urn:test:in' }
+            ).to_xml)
+
+            assert_xpath(doc, '//gml:Solid/gml:exterior/gml:Shell[@gml:id="shell_cell_Cavity"]')
+            assert_xpath(doc, '//gml:Solid/gml:interior/gml:Shell[@gml:id="shell_cell_Cavity_interior_1"]')
+            assert_xpath(doc, '//gml:interior/gml:Shell/gml:surfaceMember/gml:Polygon[@gml:id="polygon_7_cell_Cavity"]')
+          end
+
           def test_writer_builds_navigable_codes_and_transition_links
             state1 = fake_state('S1', transition_ids: ['T 1'])
             state2 = fake_state('S2', transition_ids: ['T 1'])

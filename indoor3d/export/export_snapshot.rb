@@ -23,6 +23,7 @@ module ULOL
             :storey,
             :duality_state,
             :surfaces,
+            :interior_shells,
             :category_code,
             :navigation_class,
             :navigation_class_code_space,
@@ -116,12 +117,15 @@ module ULOL
             def build_cell_space_snapshot(cell_space)
               state = cell_space.duality_state
               group = cell_space.valid_sketchup_group
-              validate_supported_cell_geometry!(cell_space, group)
+              geometry = validate_supported_cell_geometry!(cell_space, group)
               cell_snapshot = CellSpaceSnapshot.new(
                 id: cell_space.id,
                 cell_type: cell_space.cell_type,
                 storey: cell_space.storey,
-                surfaces: build_surfaces(group),
+                surfaces: build_surfaces(group, geometry[:exterior_faces]),
+                interior_shells: Array(geometry[:interior_face_components]).map do |faces|
+                  build_surfaces(group, faces)
+                end,
                 category_code: value_for(cell_space, :category_code),
                 navigation_class: value_for(cell_space, :navigation_class),
                 navigation_class_code_space: value_for(cell_space, :navigation_class_code_space),
@@ -181,16 +185,13 @@ module ULOL
             end
 
             def validate_supported_cell_geometry!(cell_space, group)
-              return unless group&.respond_to?(:definition) && defined?(Sketchup::Face)
-              return unless defined?(Utils::Geometry) && Utils::Geometry.respond_to?(:validate_cell_space_source_group)
+              return {} unless group&.respond_to?(:definition) && defined?(Sketchup::Face)
+              return {} unless defined?(Utils::Geometry) && Utils::Geometry.respond_to?(:validate_cell_space_source_group)
 
               result = Utils::Geometry.validate_cell_space_source_group(group)
-              return if result[:valid]
+              return result if result[:valid]
 
               reason = result[:reason] || 'unsupported CellSpace solid geometry'
-              if result[:component_count].to_i > 1
-                reason = "cavities and disconnected solid shells are unsupported (#{reason})"
-              end
               raise UnsupportedCellSpaceGeometryError,
                     "CellSpace #{cell_space.id} cannot be exported: #{reason}."
             end
@@ -199,16 +200,19 @@ module ULOL
               object.respond_to?(name) ? object.public_send(name) : nil
             end
 
-            def build_surfaces(group)
+            def build_surfaces(group, faces = nil)
               return [] unless group&.respond_to?(:definition) && defined?(Sketchup::Face)
 
               transform = cell_space_world_transformation(group)
-              group.definition.entities.grep(Sketchup::Face).map.with_index do |face, index|
+              all_faces = group.definition.entities.grep(Sketchup::Face)
+              source_faces = faces || all_faces
+              face_indices = all_faces.each_with_index.to_h
+              Array(source_faces).map.with_index do |face, index|
                 normal = transformed_face_normal(face, transform)
                 SurfaceSnapshot.new(
                   exterior: oriented_ring_points(face.outer_loop, transform, normal, true),
                   interiors: interior_rings(face, transform, normal),
-                  id_hint: index
+                  id_hint: face_indices.fetch(face, index)
                 )
               end
             end

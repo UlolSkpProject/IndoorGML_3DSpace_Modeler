@@ -62,6 +62,7 @@ module ULOL
 
         def self.reason_label(reason)
           return 'SolidGroup내 분리된 형상' if reason.to_s.include?('Disconnected solid shells detected')
+          return 'SolidGroup내 분리되거나 중첩된 형상' if reason.to_s.include?('Disconnected or nested solid shells detected')
 
           reason.to_s.empty? ? '알 수 없는 실패 원인' : reason.to_s
         end

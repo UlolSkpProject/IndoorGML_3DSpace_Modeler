@@ -780,6 +780,13 @@ module ULOL
           assert_equal 'deleted group (entity 314)', ConversionMessageFormatter.group_label(group)
         end
 
+        def test_conversion_message_formatter_labels_unsupported_nested_shells
+          assert_equal(
+            'SolidGroup내 분리되거나 중첩된 형상',
+            ConversionMessageFormatter.reason_label('Disconnected or nested solid shells detected (3 components)')
+          )
+        end
+
         private
 
         def job_for(source, target: nil, storey: nil, ancestors: [], source_label: nil, source_path_indices: [], source_signature: nil, requires_instance_isolation: false)

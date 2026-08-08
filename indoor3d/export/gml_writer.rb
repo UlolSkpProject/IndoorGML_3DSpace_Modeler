@@ -110,7 +110,13 @@ module ULOL
             exterior = solid.add_element('gml:exterior')
             shell = exterior.add_element('gml:Shell')
             shell.add_attribute('gml:id', "shell_#{cell_id}")
-            append_cell_surfaces(shell, cell_space, cell_id)
+            append_cell_surfaces(shell, cell_space.surfaces, cell_id)
+            Array(cell_space.respond_to?(:interior_shells) ? cell_space.interior_shells : nil).each_with_index do |surfaces, index|
+              interior = solid.add_element('gml:interior')
+              interior_shell = interior.add_element('gml:Shell')
+              interior_shell.add_attribute('gml:id', "shell_#{cell_id}_interior_#{index + 1}")
+              append_cell_surfaces(interior_shell, surfaces, cell_id)
+            end
             duality = cell.add_element('core:duality')
             duality.add_attribute('xlink:href', internal_href(state_gml_id(cell_space.duality_state)))
             append_navigable_space_codes(cell, cell_space) if tag.start_with?('navi:')
@@ -164,8 +170,8 @@ module ULOL
             end
           end
 
-          def append_cell_surfaces(shell, cell_space, cell_id)
-            Array(cell_space.surfaces).each_with_index do |surface, index|
+          def append_cell_surfaces(shell, surfaces, cell_id)
+            Array(surfaces).each_with_index do |surface, index|
               surface_member = shell.add_element('gml:surfaceMember')
               polygon = surface_member.add_element('gml:Polygon')
               polygon.add_attribute('gml:id', "polygon_#{surface.id_hint || index}_#{cell_id}")

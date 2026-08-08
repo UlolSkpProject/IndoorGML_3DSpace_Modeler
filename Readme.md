@@ -96,7 +96,7 @@ Validation은 XML well-formedness 확인과 val3dity 2.2.0 검사를 수행합�
 - `Invalid`: 수정이 필요한 Validation 오류가 있음
 - `Failed`: 검사 실행 또는 후처리 자체가 완료되지 못함
 
-Exporter는 하나의 exterior shell을 가진 `gml:Solid`를 생성합니다. 따라서 cavity가 포함된 solid와 서로 분리된 shell은 export 전에 거부됩니다.
+Exporter는 하나의 exterior shell과 0개 이상의 `gml:interior` shell을 가진 `gml:Solid`를 생성합니다. 따라서 외부 shell 안에 완전히 포함된 cavity는 export할 수 있습니다. 서로 분리된 복수 exterior solid와 cavity 내부에 다시 solid가 중첩된 형상은 단일 CellSpace로 export하기 전에 거부됩니다.
 
 Transition geometry는 두 State endpoint를 연결하는 방식이 기본값입니다. API 호출에서는 비교·실험 목적으로 `transition_geometry_mode: :shared_face_waypoint`를 지정하여 `State1 → shared-face waypoint → State2`의 3점 LineString을 사용할 수 있지만 기본 Export 동작은 변경되지 않습니다.
 
