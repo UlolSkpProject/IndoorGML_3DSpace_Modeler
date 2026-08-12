@@ -27,14 +27,33 @@ module ULOL
           assert_equal [[8, 10.0], [12, 10.0]], attempted_divisions
         end
 
-        def test_inner_centroid_does_not_fall_back_to_unverified_bounds_center
+          def test_inner_centroid_does_not_fall_back_to_unverified_bounds_center
           center = Object.new
           entity = FakeEntity.new(FakeDefinition.new(FakeBounds.new(center)))
 
           with_stubbed_singleton_method(Geometry, :local_shell_faces, proc { |_entity| [:face] }) do
             with_stubbed_singleton_method(Geometry, :shell_contains_point?, proc { |_faces, _point, _tolerance| false }) do
               with_stubbed_singleton_method(Geometry, :adaptive_inner_sample, proc { |_faces, _bounds, _tolerance, fixed_z: nil| [nil, nil, nil] }) do
-                assert_raises(ArgumentError) { Geometry.find_shell_inner_centroid(entity) }
+                with_stubbed_singleton_method(Geometry, :face_inset_inner_sample, proc { |_faces, _bounds, _tolerance, fixed_z: nil| [nil, nil] }) do
+                  assert_raises(ArgumentError) { Geometry.find_shell_inner_centroid(entity) }
+                end
+              end
+            end
+          end
+
+          def test_inner_centroid_uses_verified_face_inset_when_axis_grid_misses
+            center = Object.new
+            bounds = FakeBounds.new(center)
+            entity = FakeEntity.new(FakeDefinition.new(bounds))
+            inset_point = Object.new
+
+            with_stubbed_singleton_method(Geometry, :local_shell_faces, proc { |_entity| [:face] }) do
+              with_stubbed_singleton_method(Geometry, :shell_contains_point?, proc { |_faces, point, _tolerance| point == inset_point }) do
+                with_stubbed_singleton_method(Geometry, :adaptive_inner_sample, proc { |_faces, _bounds, _tolerance, fixed_z: nil| [nil, nil, nil] }) do
+                  with_stubbed_singleton_method(Geometry, :face_inset_inner_sample, proc { |_faces, _bounds, _tolerance, fixed_z: nil| [inset_point, 0.5] }) do
+                    assert_same inset_point, Geometry.find_shell_inner_centroid(entity)
+                  end
+                end
               end
             end
           end
