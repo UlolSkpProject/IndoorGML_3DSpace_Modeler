@@ -272,16 +272,18 @@ module ULOL
           state = session.state
           progress.on_cancel do
             if state[:val_running] && !state[:completed]
+              cancelled_step = state[:crash_scan_running] ? :crash_scan : :val3dity
               state[:cancelled] = true
               state[:val_running] = false
+              state[:crash_scan_running] = false if cancelled_step == :crash_scan
               state[:completed] = true
               @validation_operation_running = false
               session.cancel(reason: :user_cancelled, close_dialog: false, terminate_process: true)
-              progress&.fail(:val3dity)
+              progress&.fail(cancelled_step)
               progress&.result(
                 status: :error,
-                title: 'IndoorGML validation canceled',
-                message: 'Validation was canceled.',
+                title: cancelled_step == :crash_scan ? 'IndoorGML crash scan canceled' : 'IndoorGML validation canceled',
+                message: cancelled_step == :crash_scan ? 'All running val3dity probes were canceled.' : 'Validation was canceled.',
                 actions: [:close]
               )
             elsif state[:temp_file_running]

@@ -205,6 +205,27 @@ module ULOL
             refute_includes GmlWriter::CELL_SPACE_TAGS.keys, CellSpaceType::GEOMETRY_ONLY
           end
 
+          def test_writer_can_export_primal_geometry_without_duality_or_graph
+            state = fake_state('Geometry State')
+            cell = fake_cell_space('Geometry Cell', CellSpaceType::GENERAL, 'F01', state, surfaces: [fake_surface])
+            state.duality_cell = cell
+            snapshot = ExportSnapshot.new(cell_spaces: [cell], transitions: [])
+
+            xml = GmlWriter.new(
+              snapshot: snapshot,
+              coordinate_unit: { unit: 'in', factor: 1.0, srs_name: 'urn:test:in' },
+              include_dual_graph: false
+            ).to_xml
+            doc = REXML::Document.new(xml)
+
+            assert_xpath(doc, '//core:cellSpaceMember')
+            assert_xpath(doc, '//gml:Solid')
+            refute_xpath(doc, '//core:duality')
+            refute_xpath(doc, '//core:multiLayeredGraph')
+            refute_xpath(doc, '//core:State')
+            refute_xpath(doc, '//core:Transition')
+          end
+
           def test_writer_allocates_unique_xml_ids_for_duplicate_missing_and_safe_id_collisions
             states = [fake_state('same'), fake_state('same'), fake_state(nil)]
             cells = [

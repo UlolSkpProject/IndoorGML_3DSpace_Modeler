@@ -20,14 +20,14 @@ IndoorGML 3D Modeler는 SketchUp 모델 안의 manifold solid group을 IndoorGML
 - State/Transition을 SketchUp geometry가 아닌 Overlay로 표시
 - `.skp` 저장 후 다시 열어도 CellSpace runtime을 attribute에서 복원
 - val3dity v2.2.0과 Extension 재검사 정책으로 Geometry/Topology 오류 확인
-- 빠른 검사와 Local Vertex Normalization 기반 정밀검사 제공
+- 빠른 검사와 crash CellSpace 선택형 Local Vertex Normalization 기반 정밀검사 제공
 
 ## v1.0.5 Highlights
 
 v1.0.5는 검사 자체뿐 아니라 오류를 찾고, 안전하게 보정하고, 다시 확인하는 전체 Validation 워크플로를 확장합니다.
 
 - `Check Validity` 실행 시 **빠른 검사**와 **정밀검사** 중 선택
-- 정밀검사 전 CellSpace별 **Local Vertex Normalization(LVN)** 수행
+- 정밀검사에서 유형별 geometry-only crash 탐색 후 원인 CellSpace에만 **Local Vertex Normalization(LVN)** 수행
 - LVN 실패 시 해당 CellSpace만 원복하고 이미 성공한 CellSpace 결과는 유지
 - 이미 정규화된 CellSpace와 이전 실패 CellSpace를 구분하여 불필요한 반복 처리 방지
 - Validation report의 오류 geometry를 viewport Overlay로 표시하고 오류 범위에 focus
@@ -88,7 +88,7 @@ Validation은 XML well-formedness 확인과 val3dity 2.2.0 검사를 수행합�
 | Profile | Geometry 변경 | val3dity overlap 설정 | Extension 701/704 재검사 |
 | --- | --- | --- | --- |
 | 빠른 검사 | 없음 | `--overlap_tol -1` | 수행 |
-| 정밀검사 | LVN으로 변경 가능 | 0.01 mm를 GML 좌표 단위로 변환 | 수행하지 않음 |
+| 정밀검사 | crash 대상만 LVN으로 변경 가능 | 0.01 mm를 GML 좌표 단위로 변환 | 수행하지 않음 |
 
 최종 결과는 일관되게 다음 세 상태로 보고합니다.
 
@@ -365,16 +365,27 @@ GML 좌표:
 
 ### 정밀검사
 
-val3dity 실행 전에 CellSpace geometry를 정규화하는 Beta 검사입니다.
+Dual graph를 제외한 geometry-only 입력으로 val3dity crash 대상을 먼저 격리하고, 해당 CellSpace만 정규화하는 Beta 검사입니다.
 
-1. 각 CellSpace를 definition-local 좌표계에서 Local Vertex Normalize
-2. 성공한 CellSpace geometry 유지
-3. 실패한 CellSpace만 원복하고 `lvn_failed` 상태 기록
-4. 임시 GML 생성
-5. val3dity 2.2.0 실행
+1. CellSpace를 `Room 전체`, `Stair 전반 50%`, `Stair 후반 50%`, `Door / Elevator / Window / Anchor`의 4개 초기 묶음으로 분류
+2. 각 묶음의 Dual graph를 제외한 geometry-only GML 생성
+3. 최대 4개의 val3dity 프로세스를 병렬 실행하고, crash 묶음을 재귀적으로 4분할
+4. crash CellSpace 목록을 표시하고 사용자가 **다음**을 누를 때까지 대기
+5. 식별된 crash CellSpace만 definition-local 좌표계에서 Local Vertex Normalize
+6. LVN 실패 CellSpace만 원복하고 `lvn_failed` 상태 기록
+7. LVN 결과를 표시하고 사용자가 **다음**을 누르면 전체 모델 임시 GML 생성
+8. val3dity 2.2.0 실행
    - 물리 허용오차 0.01 mm를 현재 GML 좌표 단위로 변환하여 `--overlap_tol`에 전달
    - `--planarity_d2p_tol 0.025`
-6. 최종 JSON과 HTML report 생성
+9. 최종 JSON과 HTML report 생성
+
+하나의 CellSpace가 원인이라면 단일 항목까지 격리합니다. 여러 CellSpace 조합에서만 crash가 재현되고 개별 4분할에서는 재현되지 않으면 해당 부모 묶음을 보수적으로 LVN 대상으로 처리합니다.
+
+진행 dialog는 초기 묶음별 crash 상태, 생성·완료된 분할 job 수, 실행·대기 수, 최대 분할 depth, AABB에 도달한 job의 누적 CellSpace 수와 격리된 CellSpace 수를 실시간으로 표시합니다. Crash 탐색 중 취소하면 현재 실행 중인 모든 val3dity probe process를 함께 종료합니다.
+
+각 crash probe는 val3dity 출력에서 `Constructing AABB tree`를 확인하면 Nef 생성 단계를 통과한 것으로 판정합니다. 해당 process를 즉시 종료하고 정상 job으로 기록하여 AABB tree 및 CellSpace intersection 계산은 생략합니다. AABB 진입 전에 비정상 종료된 job만 crash로 판정하여 4분할합니다.
+
+Crash 검사가 끝난 CellSpace는 `IndoorGml` attribute dictionary의 `precision_crash_checked`, `precision_crash_detected` 값으로 결과를 보존합니다. Geometry가 변경되지 않은 CellSpace는 다음 정밀검사에서 probe를 생략하며, 이전 crash CellSpace는 저장된 결과를 LVN 대상으로 재사용합니다. CellSpace 변경이 관찰되면 두 값은 제거되어 다음 검사 대상에 다시 포함됩니다.
 
 정밀검사에서는 Extension의 별도 701/704 재검사를 수행하지 않습니다.
 

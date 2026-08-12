@@ -37,8 +37,8 @@ class ValidityModeDialogContentTest < Minitest::Test
       '현재 Geometry를 변경하지 않습니다.',
       'val3dity.exe 기본 검사를 수행합니다.',
       '기본 검사 완료 후 빠른 재검사를 수행합니다.',
-      'CellSpace의 정점을 정규화합니다.',
-      '이 과정에서 Geometry가 변경될 수 있습니다.',
+      '4개 유형 묶음의 Geometry-only 검사로 crash 대상을 찾습니다.',
+      'Crash 목록과 LVN 결과를 확인하고 다음 단계로 진행합니다.',
       '모델 규모에 따라 수십 분~수시간이 걸릴 수 있습니다.'
     ].each do |line|
       assert_includes @html, line
@@ -46,7 +46,7 @@ class ValidityModeDialogContentTest < Minitest::Test
   end
 
   def test_overlap_option_is_inline_code_in_one_non_wrapping_line
-    expected = '<span class="copy-line"><code class="inline-code">--overlap_tol</code> 옵션을 적용하여 val3dity.exe 검사를 수행합니다.</span>'
+    expected = '<span class="copy-line">Crash CellSpace만 정규화한 뒤 <code class="inline-code">--overlap_tol</code> 검사를 수행합니다.</span>'
 
     assert_includes @html, expected
     assert_match(/\.inline-code \{.*?background: #1b1b1a;.*?font-family: Consolas/m, @html)

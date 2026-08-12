@@ -66,6 +66,10 @@ module ULOL
           true
         end
 
+        def cell_space_closed(_entity)
+          true
+        end
+
         private
 
         def normalization_targets(cell_spaces)
@@ -294,12 +298,50 @@ module ULOL
           refute PrecisionValidation::LvnState.failed?(group)
         end
 
+        def test_generic_change_event_preserves_cached_crash_state_until_geometry_close
+          group = Group.new('changed')
+          PrecisionValidation::CrashState.set(group, crashed: true)
+          model = IndoorModel.new
+
+          assert_equal true, model.cell_space_changed(group)
+          assert PrecisionValidation::CrashState.checked?(group)
+          assert PrecisionValidation::CrashState.crashed?(group)
+        end
+
+        def test_geometry_edit_close_clears_cached_crash_state
+          group = Group.new('changed-geometry')
+          PrecisionValidation::CrashState.set(group, crashed: false)
+          model = IndoorModel.new
+
+          assert_equal true, model.cell_space_closed(group)
+          refute PrecisionValidation::CrashState.checked?(group)
+          assert_equal 'unknown', PrecisionValidation::CrashState.status(group)
+        end
+
+        def test_crash_check_results_mark_passed_and_crashed_cells
+          passed = CellSpace.new('A', Group.new('A'))
+          crashed = CellSpace.new('B', Group.new('B'))
+          model = IndoorModel.new
+
+          assert_equal 2, model.mark_precision_crash_check_results(
+            checked_cell_spaces: [passed, crashed],
+            crash_cell_spaces: [crashed]
+          )
+
+          assert PrecisionValidation::CrashState.checked?(passed)
+          refute PrecisionValidation::CrashState.crashed?(passed)
+          assert PrecisionValidation::CrashState.checked?(crashed)
+          assert PrecisionValidation::CrashState.crashed?(crashed)
+          assert_includes model.operation_names, 'Mark IndoorGML Precision Crash Check'
+        end
+
         def test_new_cell_space_is_initialized_with_false_failure_flag
           cell = CellSpace.new('new', Group.new('new'))
           context = CellSpaceLifecycleContext.new
 
           assert_equal :initialized, context.initialize_scene(cell)
           assert_equal false, cell.group.get_attribute('IndoorGml', 'lvn_failed')
+          assert_equal 'unknown', cell.group.get_attribute('IndoorGml', 'precision_crash_status')
         end
 
         def test_unknown_failure_policy_is_rejected

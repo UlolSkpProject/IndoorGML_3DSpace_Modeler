@@ -123,6 +123,28 @@ module ULOL
             assert_includes script, 'sketchup.visualReady();'
           end
 
+          def test_html_supports_next_action_and_clearing_intermediate_result
+            script = File.read(
+              File.expand_path('../indoor3d/ui/html/export_progress/app.js', __dir__),
+              encoding: 'UTF-8'
+            )
+
+            assert_includes script, "next: { label: '\\uB2E4\\uC74C', callback: 'continueValidation' }"
+            assert_includes script, 'function clearResult()'
+            assert_includes script, 'terminalResultShown = false;'
+          end
+
+          def test_next_callback_is_consumed_after_one_invocation
+            calls = 0
+            dialog = ExportProgressDialog.new
+            dialog.on_next { calls += 1 }
+
+            dialog.send(:handle_continue_validation)
+            dialog.send(:handle_continue_validation)
+
+            assert_equal 1, calls
+          end
+
           def test_clear_validation_focus_selection_executes_report_function
             executed_scripts = []
             fake_dialog = Struct.new(:executed_scripts) do

@@ -87,6 +87,37 @@ module ULOL
             assert_equal [200], runner_session.terminated_waits
           end
 
+          def test_crash_scan_cancel_uses_existing_validation_cancel_path
+            model = FakeModel.new('A')
+            progress = FakeProgress.new
+            state = {
+              val_running: true,
+              crash_scan_running: true,
+              completed: false,
+              temp_file_running: false
+            }
+            runner_session = FakeRunnerSession.new(finished: true)
+            session = ValidationSession.new(
+              model: model,
+              indoor_model: FakeIndoorModel.new(model),
+              progress: progress,
+              state: state
+            )
+            session.assign_val_session(runner_session)
+            dispatcher = Dispatcher.new
+            dispatcher.instance_variable_set(:@validation_operation_running, true)
+            dispatcher.send(:configure_validation_cancel_handler, session)
+
+            progress.cancel_callback.call
+
+            assert_equal [200], runner_session.terminated_waits
+            assert_equal [:crash_scan], progress.failed_steps
+            assert_equal false, state[:crash_scan_running]
+            assert_equal true, state[:cancelled]
+            assert_equal 'IndoorGML crash scan canceled', progress.result_calls.last[:title]
+            assert_equal 'All running val3dity probes were canceled.', progress.result_calls.last[:message]
+          end
+
           def test_cancel_cleans_workspace_after_process_termination
             model = FakeModel.new('A')
             workspace = FakeWorkspace.new
@@ -688,11 +719,14 @@ module ULOL
             attr_reader :fix_callback
             attr_reader :create_gml_callback
             attr_reader :result_message
+            attr_reader :cancel_callback
+            attr_reader :failed_steps
 
             def initialize
               @close_count = 0
               @result_calls = []
               @callbacks_cleared = false
+              @failed_steps = []
             end
 
             def on_create_gml(&block)
@@ -713,6 +747,14 @@ module ULOL
 
             def on_fix_validation_errors(&block)
               @fix_callback = block
+            end
+
+            def on_cancel(&block)
+              @cancel_callback = block
+            end
+
+            def fail(step)
+              @failed_steps << step
             end
 
             def result(payload)
