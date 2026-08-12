@@ -314,7 +314,103 @@ module ULOL
                          result[:reason]
           end
 
+          def test_non_solid_vertical_prisms_are_classified_by_cap_area_and_height
+            rechecker = Val3dityOverlapGeometryRechecker.new(
+              indoor_model: FakeIndoorModel.new([], nil),
+              tolerance: 0.001
+            )
+            intersection = {
+              status: :non_solid,
+              lower_dimensional: false,
+              volume: 1.0,
+              boundary_edge_count: 3,
+              nonmanifold_edge_count: 0
+            }
+
+            result = rechecker.send(
+              :resolve_non_solid_intersection,
+              intersection,
+              [],
+              vertical_prism_faces(0.0, 0.0, 10.0, 10.0, 0.0, 10.0),
+              vertical_prism_faces(9.0, 0.0, 12.0, 10.0, 0.0, 5.0)
+            )
+
+            assert_equal :reproduced, result[:status]
+            assert_equal 'REPRODUCED_AS_VERTICAL_PRISM_INTERSECTION', result[:reason]
+            assert_in_delta 50.0, result[:volume], 1.0e-9
+            assert_in_delta 10.0, result[:projected_overlap_area], 1.0e-9
+            assert_in_delta 5.0, result[:overlap_height], 1.0e-9
+            assert_equal 1.0, result[:raw_non_solid_volume]
+          end
+
+          def test_sub_tolerance_vertical_prism_sliver_is_boundary_contact
+            rechecker = Val3dityOverlapGeometryRechecker.new(
+              indoor_model: FakeIndoorModel.new([], nil),
+              tolerance: 0.001
+            )
+            intersection = {
+              status: :non_solid,
+              lower_dimensional: false,
+              volume: 1.0,
+              boundary_edge_count: 3,
+              nonmanifold_edge_count: 0
+            }
+
+            result = rechecker.send(
+              :resolve_non_solid_intersection,
+              intersection,
+              [],
+              vertical_prism_faces(0.0, 0.0, 10.0, 10.0, 0.0, 10.0),
+              vertical_prism_faces(9.9999999, 0.0, 12.0, 10.0, 0.0, 5.0)
+            )
+
+            assert_equal :not_reproduced, result[:status]
+            assert_equal 'VERTICAL_PRISM_BOUNDARY_CONTACT_ONLY', result[:reason]
+            assert_equal 0.0, result[:volume]
+            assert_operator result[:projected_overlap_effective_width], :<=, 0.001
+          end
+
           private
+
+          def vertical_prism_faces(min_x, min_y, max_x, max_y, min_z, max_z)
+            bottom = rectangle_points(min_x, min_y, max_x, max_y, min_z)
+            top = rectangle_points(min_x, min_y, max_x, max_y, max_z)
+            cap_triangles = lambda do |points|
+              [[points[0], points[1], points[2]], [points[0], points[2], points[3]]]
+            end
+
+            [
+              {
+                normal: FakePoint.new(0.0, 0.0, -1.0),
+                points: bottom,
+                triangles: cap_triangles.call(bottom),
+                interior_triangles: []
+              },
+              {
+                normal: FakePoint.new(0.0, 0.0, 1.0),
+                points: top,
+                triangles: cap_triangles.call(top),
+                interior_triangles: []
+              }
+            ] + 4.times.map do |index|
+              next_index = (index + 1) % 4
+              {
+                normal: FakePoint.new(1.0, 0.0, 0.0),
+                points: [bottom[index], bottom[next_index], top[next_index], top[index]],
+                triangles: [],
+                interior_triangles: []
+              }
+            end
+          end
+
+          def rectangle_points(min_x, min_y, max_x, max_y, z)
+            [
+              FakePoint.new(min_x, min_y, z),
+              FakePoint.new(max_x, min_y, z),
+              FakePoint.new(max_x, max_y, z),
+              FakePoint.new(min_x, max_y, z)
+            ]
+          end
 
           def finite_slab_candidate(min_x, max_x)
             {

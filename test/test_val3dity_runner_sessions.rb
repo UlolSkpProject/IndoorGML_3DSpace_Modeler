@@ -138,6 +138,36 @@ module ULOL
             assert_equal 0.0, decision[:actual_overlap_volume]
           end
 
+          def test_701_vertical_prism_reason_and_volume_are_preserved_when_kept
+            runner = Val3dityRunner.allocate
+            runner.instance_variable_set(:@indoor_model, FakeIndoorModel.new(nil))
+            runner.instance_variable_set(
+              :@overlap_geometry_rechecker,
+              Struct.new(:candidate) do
+                def best_candidate(_candidates, _code)
+                  candidate
+                end
+              end.new(nil)
+            )
+            analysis = {
+              intersection: {
+                status: :reproduced,
+                reason: 'REPRODUCED_AS_VERTICAL_PRISM_INTERSECTION',
+                volume: 50.0,
+                component_count: nil
+              },
+              adjacency_candidates: []
+            }
+
+            decision = runner.send(:overlap_recheck_701_decision, analysis)
+
+            assert_equal false, decision[:tolerated]
+            assert_equal 'kept', decision[:status]
+            assert_equal 'REPRODUCED_AS_VERTICAL_PRISM_INTERSECTION', decision[:reason]
+            assert_equal 50.0, decision[:actual_overlap_volume]
+            assert_equal true, decision[:sketchup_intersection_reproduced]
+          end
+
           private
 
           def reset_sessions
