@@ -23,10 +23,11 @@ module ULOL
             CellSpaceType::ANCHOR => 'navi:AnchorSpace'
           }.freeze
 
-          def initialize(snapshot:, coordinate_unit:, measure_step: nil)
+          def initialize(snapshot:, coordinate_unit:, measure_step: nil, include_dual_graph: true)
             @snapshot = snapshot
             @coordinate_unit = coordinate_unit
             @measure_step = measure_step
+            @include_dual_graph = include_dual_graph == true
           end
 
           def to_xml
@@ -47,7 +48,9 @@ module ULOL
             root.add_attribute('gml:id', ROOT_ID)
             append_nil_bounded_by(root)
             measure('append primalSpaceFeatures') { append_primal_space_features(root) }
-            measure('append multiLayeredGraph') { append_multi_layered_graph(root) }
+            if @include_dual_graph
+              measure('append multiLayeredGraph') { append_multi_layered_graph(root) }
+            end
             measure('format XML') { pretty_xml(doc) }
           end
 
@@ -117,8 +120,10 @@ module ULOL
               interior_shell.add_attribute('gml:id', "shell_#{cell_id}_interior_#{index + 1}")
               append_cell_surfaces(interior_shell, surfaces, cell_id)
             end
-            duality = cell.add_element('core:duality')
-            duality.add_attribute('xlink:href', internal_href(state_gml_id(cell_space.duality_state)))
+            if @include_dual_graph
+              duality = cell.add_element('core:duality')
+              duality.add_attribute('xlink:href', internal_href(state_gml_id(cell_space.duality_state)))
+            end
             append_navigable_space_codes(cell, cell_space) if tag.start_with?('navi:')
           end
 

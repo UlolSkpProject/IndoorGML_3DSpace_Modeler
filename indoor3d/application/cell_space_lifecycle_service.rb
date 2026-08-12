@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../utils/geometry/source_group'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -46,6 +48,7 @@ module ULOL
           end
 
           cell_group = @context.prepare_cell_group(sketchup_group)
+          Utils::Geometry.make_cell_space_edges_solid!(cell_group)
           cell_space = @cell_space_class.new(cell_group, resolved_cell_type, resolved_category_code)
           storey = @source_preparer.resolve_storey(
             sketchup_group,

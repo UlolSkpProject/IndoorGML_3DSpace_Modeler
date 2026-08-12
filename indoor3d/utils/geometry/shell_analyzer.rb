@@ -24,6 +24,15 @@ module ULOL
               tolerance,
               fixed_z: fixed_z
             )
+            unless best_point
+              best_point, = face_inset_inner_sample(
+                faces,
+                cell_space_entity.definition.bounds,
+                tolerance,
+                fixed_z: fixed_z
+              )
+              return best_point if best_point
+            end
             return find_shell_inner_centroid(cell_space_entity) unless best_point
 
             refined_point = refined_inner_sample(
@@ -47,6 +56,13 @@ module ULOL
             tolerance
           )
           unless best_point
+            best_point, = face_inset_inner_sample(
+              faces,
+              cell_space_entity.definition.bounds,
+              tolerance
+            )
+            return best_point if best_point
+
             raise ArgumentError, 'Unable to locate a verified point inside the CellSpace shell'
           end
 
@@ -98,6 +114,7 @@ module ULOL
             inners = loops.reject { |loop| loop == outer || loop.length < 3 }
             axis = dominant_axis(normal)
             {
+              face: face,
               outer: outer,
               inners: inners,
               loops: loops.select { |loop| loop.length >= 2 },
@@ -221,6 +238,79 @@ module ULOL
           [nil, nil, nil]
         end
         private_class_method :adaptive_inner_sample
+
+        # Axis-aligned grids can miss a narrow or oblique concave volume even
+        # when SketchUp reports a valid manifold solid. A triangle centroid is
+        # guaranteed to lie on its source face, so testing short offsets on both
+        # sides gives us verified candidates without trusting face orientation.
+        def self.face_inset_inner_sample(faces, bounds, tolerance, fixed_z: nil)
+          best_point = nil
+          best_distance = -Float::INFINITY
+          offsets = face_inset_offsets(bounds, tolerance)
+
+          faces.each do |face|
+            source_face = face[:face]
+            next unless source_face&.valid?
+
+            normal = source_face.normal
+            next unless normal&.valid? && normal.length > tolerance
+
+            normal = normal.clone
+            normal.normalize!
+            face_triangle_centers(source_face).each do |center|
+              offsets.each do |offset|
+                [offset, -offset].each do |signed_offset|
+                  point = offset_point(center, normal, signed_offset)
+                  point = point_with_fixed_z(point, fixed_z) if fixed_z
+                  next unless shell_contains_point?(faces, point, tolerance)
+
+                  distance = shell_distance(faces, point)
+                  next if distance <= tolerance || distance <= best_distance
+
+                  best_point = point
+                  best_distance = distance
+                end
+              end
+            end
+          end
+
+          [best_point, best_distance]
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Face-inset inner sample failed: #{e.class}: #{e.message}" if defined?(IndoorCore::Logger)
+          [nil, nil]
+        end
+        private_class_method :face_inset_inner_sample
+
+        def self.face_inset_offsets(bounds, tolerance)
+          extents = [bounds.width, bounds.height, bounds.depth].map(&:to_f).select { |value| value > tolerance }
+          scale = extents.min || tolerance
+          [
+            tolerance * 10.0,
+            scale * 0.001,
+            scale * 0.005,
+            scale * 0.01,
+            scale * 0.02,
+            scale * 0.05,
+            scale * 0.10,
+            scale * 0.20
+          ].select { |value| value > tolerance }.uniq.sort
+        end
+        private_class_method :face_inset_offsets
+
+        def self.face_triangle_centers(face)
+          mesh = face.mesh(0)
+          mesh.polygons.filter_map do |polygon|
+            points = polygon.first(3).map { |index| mesh.point_at(index.abs) }
+            next if points.length < 3 || points.any?(&:nil?)
+
+            Geom::Point3d.new(
+              points.sum(&:x) / 3.0,
+              points.sum(&:y) / 3.0,
+              points.sum(&:z) / 3.0
+            )
+          end
+        end
+        private_class_method :face_triangle_centers
 
         def self.refined_inner_sample(faces, bounds, point, distance, coarse_divisions, refine_divisions, tolerance, fixed_z: nil)
           step = shell_sample_step(bounds, coarse_divisions)

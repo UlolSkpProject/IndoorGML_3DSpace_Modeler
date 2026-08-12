@@ -213,6 +213,7 @@ function normalizePhase(phase) {
 var actionConfig = {
   createGml: { label: 'Create GML file', callback: 'createGml' },
   openReport: { label: 'Open report', callback: 'openReport' },
+  next: { label: '\uB2E4\uC74C', callback: 'continueValidation' },
   close: { label: 'Close', callback: 'closeDialog' }
 };
 
@@ -238,12 +239,32 @@ function setResult(payload) {
     button.type = 'button';
     button.textContent = config.label;
     button.addEventListener('click', function () {
+      button.disabled = true;
       if (typeof sketchup !== 'undefined' && sketchup[config.callback]) {
         sketchup[config.callback]();
       }
     });
     actions.appendChild(button);
   });
+  fitDialogToContent();
+}
+
+function clearResult() {
+  terminalResultShown = false;
+
+  var result = document.getElementById('result');
+  if (result) result.className = 'result hidden';
+
+  var title = document.getElementById('result-title');
+  if (title) title.textContent = '';
+
+  var message = document.getElementById('result-message');
+  if (message) message.textContent = '';
+
+  var actions = document.getElementById('result-actions');
+  if (actions) actions.innerHTML = '';
+
+  updateCancelVisibility();
   fitDialogToContent();
 }
 

@@ -650,7 +650,7 @@ module ULOL
             {
               tolerated: false,
               status: 'kept',
-              reason: 'REPRODUCED_AS_VALID_SKETCHUP_INTERSECTION',
+              reason: intersection[:reason] || 'REPRODUCED_AS_VALID_SKETCHUP_INTERSECTION',
               candidate: overlap_geometry_rechecker.best_candidate(analysis[:adjacency_candidates], 701),
               actual_overlap_volume: intersection[:volume],
               intersection_component_count: intersection[:component_count],

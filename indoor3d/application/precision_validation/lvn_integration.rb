@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'lvn_state'
+require_relative 'crash_state'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -10,6 +11,7 @@ module ULOL
           def initialize_scene(cell_space, **options)
             result = super
             LvnState.set_failed(cell_space, false)
+            CrashState.clear(cell_space)
             result
           end
         end
@@ -63,6 +65,41 @@ module ULOL
             result = super
             LvnState.set_failed(entity, false) if reset_failed
             result
+          end
+
+          def cell_space_closed(entity)
+            reset_failed = reset_lvn_failure_for_observed_change?(entity)
+            reset_crash = reset_crash_state_for_observed_change?(entity)
+            result = super
+            LvnState.set_failed(entity, false) if reset_failed
+            CrashState.clear(entity) if reset_crash
+            result
+          end
+
+          def mark_precision_crash_check_results(checked_cell_spaces:, crash_cell_spaces:)
+            checked = Array(checked_cell_spaces)
+            crash_ids = Array(crash_cell_spaces).map(&:object_id)
+            return 0 if checked.empty?
+
+            marked = 0
+            with_indoor_model_operation('Mark IndoorGML Precision Crash Check') do
+              sync do
+                checked.each do |cell_space|
+                  group = cell_space.respond_to?(:valid_sketchup_group) ? cell_space.valid_sketchup_group : nil
+                  next unless group&.valid?
+
+                  CrashState.set(cell_space, crashed: crash_ids.include?(cell_space.object_id))
+                  remember_cell_space_change_snapshot(group)
+                  marked += 1
+                end
+              end
+            end
+            marked
+          rescue StandardError => error
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Precision crash state marking failed: #{error.class}: #{error.message}"
+            )
+            0
           end
 
           private
@@ -148,8 +185,6 @@ module ULOL
           )
             rows = Array(initial_rows).dup
             successful_results = []
-            topology_metrics = nil
-            topology_sync_seconds = 0.0
 
             Array(execution_targets).each do |cell_space|
               row = normalize_cell_space_continue(
@@ -164,14 +199,6 @@ module ULOL
             end
 
             if successful_results.any?
-              topology_started_at = monotonic_time
-              with_indoor_model_operation('IndoorGML LVN Topology Synchronize') do
-                sync do
-                  topology_metrics = topology_coordinator.synchronize_all
-                end
-              end
-              topology_sync_seconds = monotonic_time - topology_started_at
-              invalidate_overlay_transition_points
               model = @model || Sketchup.active_model
               model.active_view.invalidate if model&.active_view
             end
@@ -181,7 +208,7 @@ module ULOL
               targets,
               rows,
               successful_results,
-              topology_metrics,
+              nil,
               activate_edit_context: activate_edit_context
             ).merge(
               undo_mode: Array(execution_targets).empty? ? :none : :per_cell_operations,
@@ -198,7 +225,6 @@ module ULOL
                 operation_total_seconds: nil,
                 operation_body_seconds: nil,
                 operation_boundary_overhead_seconds: nil,
-                topology_sync_seconds: topology_sync_seconds,
                 cell_spaces: successful_results.filter_map { |row| row[:diagnostic_profile] }
               }
               normalization_report[:diagnostic_profile] = timing_profile
@@ -393,6 +419,22 @@ module ULOL
             false
           end
 
+          # InstanceObserver#onClose is the geometry-edit commit boundary.  Do
+          # not invalidate a completed crash result for generic onChangeEntity
+          # notifications such as name, classification, or material updates.
+          def reset_crash_state_for_observed_change?(entity)
+            return false unless entity&.valid?
+            return false unless CrashState.checked?(entity)
+            return false if respond_to?(:observer_routing_suppressed?, true) &&
+                            send(:observer_routing_suppressed?)
+            return false if respond_to?(:guard_active?, true) &&
+                            (send(:guard_active?, :@syncing) || send(:guard_active?, :@erasing))
+
+            true
+          rescue StandardError
+            false
+          end
+
           def cell_space_change_kind(changed_fields)
             return nil if Array(changed_fields).empty?
 
@@ -402,18 +444,21 @@ module ULOL
           def recenter_cell_space_geometry(cell_space_entity, **options)
             result = super
             LvnState.set_failed(cell_space_entity, false) if result
+            CrashState.clear(cell_space_entity) if result
             result
           end
 
           def bake_cell_space_transform_scale(entity)
             result = super
             LvnState.set_failed(entity, false) if result
+            CrashState.clear(entity) if result
             result
           end
 
           def build_independent_cell_space(entity)
             cell_space = super
             LvnState.set_failed(entity, false)
+            CrashState.clear(entity)
             cell_space
           end
         end

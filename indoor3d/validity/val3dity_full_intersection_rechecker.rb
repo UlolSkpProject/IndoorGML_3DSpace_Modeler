@@ -59,7 +59,10 @@ module ULOL
               cell1[:entity], cell2[:entity], cell_id1, cell_id2
             )
             intersection = resolve_non_solid_intersection(
-              intersection, adjacency_candidates
+              intersection,
+              adjacency_candidates,
+              cell1[:faces],
+              cell2[:faces]
             )
 
             {
@@ -370,7 +373,9 @@ module ULOL
             }
           end
 
-          def resolve_non_solid_intersection(intersection, adjacency_candidates)
+          def resolve_non_solid_intersection(
+            intersection, adjacency_candidates, faces1 = nil, faces2 = nil
+          )
             return intersection unless intersection[:status] == :non_solid
 
             candidates = Array(adjacency_candidates)
@@ -395,10 +400,129 @@ module ULOL
               )
             end
 
+            prism_intersection = vertical_prism_intersection(faces1, faces2)
+            if prism_intersection
+              return intersection.merge(prism_intersection).merge(
+                raw_non_solid_volume: intersection[:volume]
+              )
+            end
+
             intersection.merge(
               status: :inconclusive,
               reason: 'BOOLEAN_INTERSECTION_INCONCLUSIVE'
             )
+          end
+
+          # SketchUp's native Boolean commonly returns an open shell when two
+          # vertical prisms share a floor or ceiling. For that constrained
+          # geometry we can classify the intersection without trusting the
+          # malformed Boolean result: projected cap area multiplied by the
+          # common Z height is the exact intersection volume.
+          def vertical_prism_intersection(faces1, faces2)
+            prism1 = vertical_prism_profile(faces1)
+            prism2 = vertical_prism_profile(faces2)
+            return nil unless prism1 && prism2
+
+            overlap = vertical_prism_cap_overlap(
+              prism1.fetch(:top_faces), prism2.fetch(:top_faces)
+            )
+            height = [prism1.fetch(:z_max), prism2.fetch(:z_max)].min -
+                     [prism1.fetch(:z_min), prism2.fetch(:z_min)].max
+            effective_width = projected_overlap_effective_width(overlap)
+            tolerance = @tolerance.to_f.abs
+
+            if height <= tolerance || effective_width <= tolerance
+              return {
+                status: :not_reproduced,
+                reason: 'VERTICAL_PRISM_BOUNDARY_CONTACT_ONLY',
+                volume: 0.0,
+                component_count: 0,
+                projected_overlap_area: overlap.fetch(:area),
+                projected_overlap_effective_width: effective_width,
+                overlap_height: [height, 0.0].max
+              }
+            end
+
+            {
+              status: :reproduced,
+              reason: 'REPRODUCED_AS_VERTICAL_PRISM_INTERSECTION',
+              volume: overlap.fetch(:area) * height,
+              component_count: nil,
+              projected_overlap_area: overlap.fetch(:area),
+              projected_overlap_effective_width: effective_width,
+              overlap_height: height
+            }
+          rescue StandardError
+            nil
+          end
+
+          def vertical_prism_profile(faces)
+            faces = Array(faces)
+            return nil if faces.empty?
+
+            angular_epsilon = 1.0e-6
+            points = faces.flat_map { |face| Array(face[:points]) }
+            return nil if points.empty?
+
+            z_min, z_max = points.map { |point| point.z.to_f }.minmax
+            return nil unless z_min && z_max
+            return nil if z_max - z_min <= @tolerance.to_f.abs
+
+            top_faces = []
+            bottom_faces = []
+            faces.each do |face|
+              normal = face[:normal]
+              normal_z = normal.z if normal&.respond_to?(:z)
+              return nil if normal_z.nil?
+
+              if normal_z.to_f.abs >= 1.0 - angular_epsilon
+                face_points = Array(face[:points])
+                return nil if face_points.empty?
+
+                average_z = face_points.sum { |point| point.z.to_f } /
+                            face_points.length.to_f
+                if (average_z - z_max).abs <= @tolerance.to_f.abs
+                  top_faces << face
+                elsif (average_z - z_min).abs <= @tolerance.to_f.abs
+                  bottom_faces << face
+                else
+                  return nil
+                end
+              elsif normal_z.to_f.abs > angular_epsilon
+                return nil
+              end
+            end
+            return nil if top_faces.empty? || bottom_faces.empty?
+
+            { top_faces: top_faces, z_min: z_min, z_max: z_max }
+          end
+
+          def vertical_prism_cap_overlap(top_faces1, top_faces2)
+            polygons = []
+            area = 0.0
+            Array(top_faces1).each do |face1|
+              Array(top_faces2).each do |face2|
+                overlap = coplanar_overlap_polygons(face1, face2, @tolerance)
+                area += overlap.fetch(:area).to_f
+                polygons.concat(Array(overlap[:polygons]))
+              end
+            end
+            { area: area, polygons: polygons }
+          end
+
+          def projected_overlap_effective_width(overlap)
+            area = overlap.fetch(:area).to_f
+            return 0.0 unless area.positive?
+
+            points = Array(overlap[:polygons]).flatten(1)
+            return 0.0 if points.empty?
+
+            xs = points.map { |point| point[0].to_f }
+            ys = points.map { |point| point[1].to_f }
+            maximum_extent = [xs.max - xs.min, ys.max - ys.min].max
+            return 0.0 unless maximum_extent.positive?
+
+            area / maximum_extent
           end
 
           def lower_dimensional_boundary_contact?(intersection, candidates)

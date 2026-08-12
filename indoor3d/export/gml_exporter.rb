@@ -22,12 +22,14 @@ module ULOL
             4 => { unit: 'm', factor: 0.0254, srs_name: 'urn:ulol:def:crs:local-m' }
           }.freeze
           def initialize(indoor_model, refresh_runtime_data: true, cell_spaces: nil, transitions: nil,
-                         transition_geometry_mode: ExportSnapshot::TRANSITION_GEOMETRY_ENDPOINTS)
+                         transition_geometry_mode: ExportSnapshot::TRANSITION_GEOMETRY_ENDPOINTS,
+                         include_dual_graph: true)
             @indoor_model = indoor_model
             @refresh_runtime_data = refresh_runtime_data
             @requested_cell_spaces = cell_spaces
             @requested_transitions = transitions
             @transition_geometry_mode = transition_geometry_mode
+            @include_dual_graph = include_dual_graph == true
           end
 
           def export(output_path: self.class.default_temp_gml_path)
@@ -127,7 +129,8 @@ module ULOL
             GmlWriter.new(
               snapshot: export_snapshot,
               coordinate_unit: export_coordinate_unit,
-              measure_step: method(:measure_export_step)
+              measure_step: method(:measure_export_step),
+              include_dual_graph: @include_dual_graph
             ).to_xml
           end
 

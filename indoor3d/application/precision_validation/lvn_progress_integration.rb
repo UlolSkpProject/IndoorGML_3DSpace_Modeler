@@ -65,10 +65,34 @@ module ULOL
 
         class LvnProgressTracker
           PLAN_PERCENT = 5
-          CELL_END_PERCENT = 90
-          TOPOLOGY_START_PERCENT = 92
-          TOPOLOGY_END_PERCENT = 98
+          CELL_END_PERCENT = 98
           FINISH_PERCENT = 99
+          NORMALIZER_STAGE_PROGRESS = {
+            source_entity_validation: [7, 'Validating CellSpace geometry'],
+            unique_definition_check: [10, 'Preparing an independent geometry definition'],
+            vertex_target_metrics: [14, 'Calculating normalized vertex targets'],
+            short_edge_sliver_plan: [17, 'Inspecting short-edge slivers'],
+            source_brep_snapshot: [22, 'Extracting the source boundary mesh'],
+            conforming_source: [30, 'Conforming source boundary segments'],
+            source_altitude_sliver_collapse: [34, 'Repairing source sliver triangles'],
+            grid_target_projection: [39, 'Projecting vertices to the local grid'],
+            triangle_shape_validation: [44, 'Validating normalized triangles'],
+            conforming_grid: [49, 'Conforming normalized boundary segments'],
+            triangle_mesh_inventory: [52, 'Building normalized mesh inventory'],
+            short_edge_sliver_collapse: [55, 'Collapsing repairable short-edge slivers'],
+            closed_mesh_and_intersection_validation: [66, 'Validating the closed normalized mesh'],
+            triangle_intersection_validation: [70, 'Checking triangle intersections'],
+            erase_source_geometry: [73, 'Replacing the source geometry'],
+            sketchup_face_rebuild: [80, 'Rebuilding SketchUp faces'],
+            rebuilt_geometry_snapshot: [84, 'Inspecting rebuilt geometry'],
+            triangle_rebuild_validation: [87, 'Validating rebuilt triangles'],
+            orient_and_coplanar_cleanup: [91, 'Orienting faces and cleaning coplanar edges'],
+            coplanar_shared_edge_cleanup: [93, 'Cleaning coplanar shared edges'],
+            final_entity_repair: [94, 'Applying final solid repairs'],
+            rebuilt_entity_validation: [95, 'Validating the rebuilt solid'],
+            final_grid_residual: [96, 'Checking final grid residuals'],
+            surface_equivalence: [97, 'Verifying surface equivalence']
+          }.freeze
 
           def initialize(adapter, logger: IndoorCore::Logger)
             @adapter = adapter
@@ -122,12 +146,14 @@ module ULOL
 
           def cell_started(cell_space)
             return false unless active_phase?
+
+            @current_cell_space_id = cell_space_id(cell_space)
             return false unless @phase_completed.zero?
 
             emit(
               percent: @last_percent,
               message: phase_message(1),
-              current: cell_space_id(cell_space)
+              current: @current_cell_space_id
             )
           end
 
@@ -144,35 +170,22 @@ module ULOL
             )
           end
 
-          def topology_started
-            @topology_running = true
+          def normalizer_stage_started(stage, details: nil)
+            progress = NORMALIZER_STAGE_PROGRESS[stage.to_sym]
+            return false unless progress
+
+            percent, message = progress
+            triangle_count = details[:triangle_count] if details.respond_to?(:[])
+            message = "#{message} (#{triangle_count} triangles)" if triangle_count.to_i.positive?
             emit(
-              percent: [@last_percent, TOPOLOGY_START_PERCENT].max,
-              phase: 'Topology Synchronize',
-              message: 'Synchronizing Adjacency and Transitions'
+              percent: normalizer_stage_percent(percent),
+              phase: 'Vertex Normalize',
+              message: message,
+              current: @current_cell_space_id
             )
-          end
-
-          def topology_finished
-            return false unless @topology_running
-
-            @topology_running = false
-            emit(
-              percent: [@last_percent, TOPOLOGY_END_PERCENT].max,
-              phase: 'Topology Synchronize',
-              message: 'Adjacency and Transition synchronization completed'
-            )
-          end
-
-          def topology_failed(error)
-            return false unless @topology_running
-
-            @topology_running = false
-            emit(
-              percent: @last_percent,
-              phase: 'Topology Synchronize',
-              message: "Topology synchronization failed (#{error.class})"
-            )
+          rescue StandardError => error
+            log_error('normalizer stage', error)
+            false
           end
 
           def finish(report = nil)
@@ -204,8 +217,8 @@ module ULOL
             @phase_start_percent = 0
             @phase_end_percent = 0
             @checkpoint = nil
-            @topology_running = false
             @last_percent = 0
+            @current_cell_space_id = nil
           end
 
           def active_phase?
@@ -216,6 +229,18 @@ module ULOL
             ratio = @phase_completed.fdiv(@phase_total)
             value = @phase_start_percent +
                     ((@phase_end_percent - @phase_start_percent) * ratio)
+            value.round
+          end
+
+          def normalizer_stage_percent(stage_percent)
+            return stage_percent unless active_phase?
+
+            stage_span = CELL_END_PERCENT - PLAN_PERCENT
+            ratio = (stage_percent.to_f - PLAN_PERCENT).fdiv(stage_span)
+            ratio = [[ratio, 0.0].max, 1.0].min
+            cell_ratio = (@phase_completed + ratio).fdiv(@phase_total)
+            value = @phase_start_percent +
+                    ((@phase_end_percent - @phase_start_percent) * cell_ratio)
             value.round
           end
 
@@ -331,21 +356,6 @@ module ULOL
           end
         end
 
-        module LvnProgressTopologyCoordinatorPatch
-          def synchronize_all(*arguments, **options)
-            tracker = LvnProgressContext.current
-            return super unless tracker&.active?
-
-            tracker.topology_started
-            result = super
-            tracker.topology_finished
-            result
-          rescue StandardError => error
-            tracker&.topology_failed(error)
-            raise
-          end
-        end
-
         def self.install_lvn_progress!
           if defined?(CommandDispatcher) &&
              !CommandDispatcher.ancestors.include?(LvnProgressCommandDispatcherPatch)
@@ -355,11 +365,6 @@ module ULOL
           if defined?(IndoorModel) &&
              !IndoorModel.ancestors.include?(LvnProgressIndoorModelPatch)
             IndoorModel.prepend(LvnProgressIndoorModelPatch)
-          end
-
-          if defined?(TopologyCoordinator) &&
-             !TopologyCoordinator.ancestors.include?(LvnProgressTopologyCoordinatorPatch)
-            TopologyCoordinator.prepend(LvnProgressTopologyCoordinatorPatch)
           end
 
           true
