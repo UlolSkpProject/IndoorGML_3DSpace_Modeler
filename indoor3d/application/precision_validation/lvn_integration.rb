@@ -148,8 +148,6 @@ module ULOL
           )
             rows = Array(initial_rows).dup
             successful_results = []
-            topology_metrics = nil
-            topology_sync_seconds = 0.0
 
             Array(execution_targets).each do |cell_space|
               row = normalize_cell_space_continue(
@@ -164,14 +162,6 @@ module ULOL
             end
 
             if successful_results.any?
-              topology_started_at = monotonic_time
-              with_indoor_model_operation('IndoorGML LVN Topology Synchronize') do
-                sync do
-                  topology_metrics = topology_coordinator.synchronize_all
-                end
-              end
-              topology_sync_seconds = monotonic_time - topology_started_at
-              invalidate_overlay_transition_points
               model = @model || Sketchup.active_model
               model.active_view.invalidate if model&.active_view
             end
@@ -181,7 +171,7 @@ module ULOL
               targets,
               rows,
               successful_results,
-              topology_metrics,
+              nil,
               activate_edit_context: activate_edit_context
             ).merge(
               undo_mode: Array(execution_targets).empty? ? :none : :per_cell_operations,
@@ -198,7 +188,6 @@ module ULOL
                 operation_total_seconds: nil,
                 operation_body_seconds: nil,
                 operation_boundary_overhead_seconds: nil,
-                topology_sync_seconds: topology_sync_seconds,
                 cell_spaces: successful_results.filter_map { |row| row[:diagnostic_profile] }
               }
               normalization_report[:diagnostic_profile] = timing_profile

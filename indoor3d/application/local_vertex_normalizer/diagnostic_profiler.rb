@@ -511,10 +511,11 @@ module ULOL
           record_event: true,
           **detail_keywords
         )
+          details = (details || {}).merge(detail_keywords)
+          notify_local_vertex_normalizer_progress(stage, details)
           profile = @local_vertex_normalizer_diagnostic_profile
           return yield unless profile
 
-          details = (details || {}).merge(detail_keywords)
           stage = stage.to_sym
           depth = profile[:depth]
           started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -583,6 +584,17 @@ module ULOL
               )
             end
           end
+        end
+
+        def notify_local_vertex_normalizer_progress(stage, details)
+          return false unless defined?(PrecisionValidation::LvnProgressContext)
+
+          tracker = PrecisionValidation::LvnProgressContext.current
+          return false unless tracker&.respond_to?(:normalizer_stage_started)
+
+          tracker.normalizer_stage_started(stage, details: details)
+        rescue StandardError
+          false
         end
 
         def diagnostic_entity_label(entity)

@@ -47,7 +47,6 @@ module ULOL
         LVN_NAMES = [
           'IndoorGML Local Vertex Normalize',
           'IndoorGML LVN A',
-          'IndoorGML LVN Topology Synchronize',
           'Reset CellSpace LVN Failure A',
           'Mark CellSpace LVN Failure A'
         ].freeze

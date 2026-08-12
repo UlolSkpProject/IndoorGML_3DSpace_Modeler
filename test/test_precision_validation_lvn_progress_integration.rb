@@ -65,13 +65,12 @@ module ULOL
             rows << normalize_cell_space_continue(cell_space)
           end
           successful = rows.count { |row| row[:status] == :normalized }
-          topology = topology_coordinator.synchronize_all if successful.positive?
           {
             cell_space_count: successful,
             already_normalized_cell_space_count: 0,
             normalization_failed_cell_space_count: rows.count { |row| row[:status] == :failed },
             skipped_previous_failure_cell_space_count: 0,
-            topology_metrics: topology,
+            topology_metrics: nil,
             cell_spaces: rows
           }
         end
@@ -152,10 +151,10 @@ module ULOL
           assert percentages.any? { |value| value.between?(1, 99) }
           assert_equal percentages.sort, percentages
           assert_equal %w[A B C], progress.details.filter_map { |payload| payload[:current] }.uniq
-          assert progress.details.any? { |payload| payload[:phase] == 'Topology Synchronize' }
+          refute progress.details.any? { |payload| payload[:phase] == 'Topology Synchronize' }
           assert_equal 2, report[:cell_space_count]
           assert_equal 1, report[:normalization_failed_cell_space_count]
-          assert_equal 1, model.topology_coordinator.calls
+          assert_equal 0, model.topology_coordinator.calls
           assert_nil PrecisionValidation::LvnProgressContext.current
         end
 
@@ -191,8 +190,6 @@ module ULOL
           tracker.cell_finished(cells[1], status: :failed)
           tracker.cell_finished(cells[2])
           tracker.cells_completed
-          tracker.topology_started
-          tracker.topology_finished
           tracker.finish(cell_space_count: 2, normalization_failed_cell_space_count: 1)
 
           percentages = progress.details.map { |payload| payload[:percent] }
@@ -219,6 +216,63 @@ module ULOL
             payload[:message].to_s.start_with?('CellSpace Normalize:')
           end
           assert_operator cell_updates, :<=, 102
+        end
+
+        def test_single_cell_reports_internal_normalizer_stages_monotonically
+          progress = Progress.new
+          tracker = PrecisionValidation::LvnProgressTracker.new(
+            PrecisionValidation::ValidationLvnProgressAdapter.new(progress)
+          )
+
+          tracker.start(total: 1)
+          tracker.plan_ready(rows: [], execution_targets: [CellSpace.new('A')])
+          tracker.begin_cells(total: 1)
+          tracker.cell_started(CellSpace.new('A'))
+          tracker.normalizer_stage_started(
+            :source_brep_snapshot,
+            details: { triangle_count: 24 }
+          )
+          tracker.normalizer_stage_started(
+            :closed_mesh_and_intersection_validation,
+            details: { triangle_count: 48 }
+          )
+          tracker.normalizer_stage_started(:sketchup_face_rebuild, details: {})
+          tracker.normalizer_stage_started(:surface_equivalence, details: {})
+
+          percentages = progress.details.map { |payload| payload[:percent] }
+          assert_equal [1, 5, 5, 5, 22, 66, 80, 97], percentages
+          assert_equal percentages.sort, percentages
+          assert progress.details.any? do |payload|
+            payload[:message].to_s.include?('24 triangles')
+          end
+          assert progress.details.drop(1).all? do |payload|
+            %w[CellSpace\ Normalize Vertex\ Normalize].include?(payload[:phase])
+          end
+        end
+
+        def test_internal_stages_are_scaled_to_each_cell_in_multi_cell_runs
+          progress = Progress.new
+          tracker = PrecisionValidation::LvnProgressTracker.new(
+            PrecisionValidation::ValidationLvnProgressAdapter.new(progress)
+          )
+          cells = %w[A B C].map { |id| CellSpace.new(id) }
+
+          tracker.start(total: cells.length)
+          tracker.plan_ready(rows: [], execution_targets: cells)
+          tracker.begin_cells(total: cells.length)
+          tracker.cell_started(cells[0])
+          tracker.normalizer_stage_started(:surface_equivalence, details: {})
+
+          first_cell_last_percent = progress.details.last[:percent]
+          assert_operator first_cell_last_percent, :<=, 36
+
+          tracker.cell_finished(cells[0])
+          tracker.cell_started(cells[1])
+          tracker.normalizer_stage_started(:surface_equivalence, details: {})
+
+          assert_operator progress.details.last[:percent], :<=, 67
+          assert_equal progress.details.map { |payload| payload[:percent] }.sort,
+                       progress.details.map { |payload| payload[:percent] }
         end
       end
     end

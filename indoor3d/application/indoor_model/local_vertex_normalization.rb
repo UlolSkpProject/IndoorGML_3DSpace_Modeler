@@ -80,7 +80,6 @@ module ULOL
                   operation_total_seconds: 0.0,
                   operation_body_seconds: 0.0,
                   operation_boundary_overhead_seconds: 0.0,
-                  topology_sync_seconds: 0.0,
                   cell_spaces: []
                 }
                 written_path = write_local_normalization_timing_report(
@@ -133,12 +132,9 @@ module ULOL
             report_requested = report == true
             verbose_diagnostics = diagnostics == true && !report_requested
             results = []
-            topology_metrics = nil
-            topology_sync_seconds = 0.0
             operation_body_seconds = 0.0
             batch_started_at = local_normalization_monotonic_time
             operation_body_started_at = nil
-            topology_started_at = nil
             operation_started_at = nil
             operation_total_seconds = 0.0
             LocalVertexNormalizer.last_diagnostic_profile = nil if report_requested
@@ -172,18 +168,6 @@ module ULOL
                   results << result
                   remember_cell_space_change_snapshot(cell_space.sketchup_group)
                 end
-
-                topology_started_at = local_normalization_monotonic_time
-                puts '[LVN DIAGNOSTIC] BATCH START topology_synchronize_all' if verbose_diagnostics
-                topology_metrics = topology_coordinator.synchronize_all
-                topology_sync_seconds =
-                  local_normalization_monotonic_time - topology_started_at
-                if verbose_diagnostics
-                  puts format(
-                    '[LVN DIAGNOSTIC] BATCH END   topology_synchronize_all duration=%.6fs',
-                    topology_sync_seconds
-                  )
-                end
               end
               operation_body_seconds =
                 local_normalization_monotonic_time - operation_body_started_at
@@ -191,14 +175,13 @@ module ULOL
             operation_total_seconds =
               local_normalization_monotonic_time - operation_started_at
 
-            invalidate_overlay_transition_points
             model = @model || Sketchup.active_model
             model.active_view.invalidate if model&.active_view
 
             normalization_report = aggregate_local_normalization_report(
               tolerance_mm,
               results,
-              topology_metrics,
+              nil,
               activate_edit_context: activate_edit_context
             )
             if diagnostics == true || report_requested
@@ -211,7 +194,6 @@ module ULOL
                 operation_body_seconds: operation_body_seconds,
                 operation_boundary_overhead_seconds:
                   operation_total_seconds - operation_body_seconds,
-                topology_sync_seconds: topology_sync_seconds,
                 cell_spaces: results.filter_map { |result| result[:diagnostic_profile] }
               }
               normalization_report[:diagnostic_profile] = timing_profile
@@ -231,11 +213,10 @@ module ULOL
               else
                 puts format(
                   '[LVN DIAGNOSTIC] BATCH END total=%.6fs operation=%.6fs ' \
-                  'operation_boundary=%.6fs topology_sync=%.6fs',
+                  'operation_boundary=%.6fs',
                   total_seconds,
                   operation_total_seconds,
-                  operation_total_seconds - operation_body_seconds,
-                  topology_sync_seconds
+                  operation_total_seconds - operation_body_seconds
                 )
               end
             end
@@ -249,9 +230,6 @@ module ULOL
                 if operation_body_started_at && operation_body_seconds.zero?
                   operation_body_seconds = now - operation_body_started_at
                 end
-                if topology_started_at && topology_sync_seconds.zero?
-                  topology_sync_seconds = now - topology_started_at
-                end
                 profiles = Array(results).filter_map { |result| result[:diagnostic_profile] }
                 failed_profile = LocalVertexNormalizer.last_diagnostic_profile
                 profiles << failed_profile if failed_profile && !profiles.include?(failed_profile)
@@ -264,7 +242,6 @@ module ULOL
                   operation_body_seconds: operation_body_seconds,
                   operation_boundary_overhead_seconds:
                     operation_total_seconds - operation_body_seconds,
-                  topology_sync_seconds: topology_sync_seconds,
                   cell_spaces: profiles
                 }
                 written_path = write_local_normalization_timing_report(
@@ -518,7 +495,6 @@ module ULOL
                 boundary_overhead_seconds:
                   timing_profile[:operation_boundary_overhead_seconds]
               },
-              topology_sync_seconds: timing_profile[:topology_sync_seconds],
               error: timing_profile[:error],
               geometry_totals: {
                 before: sum_profile_geometry_counts(solid_profiles, :geometry_before),

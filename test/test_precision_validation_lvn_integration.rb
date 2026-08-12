@@ -206,7 +206,8 @@ module ULOL
           assert_equal 2, report[:cell_space_count]
           assert_equal %i[normalized normalized], report[:cell_spaces].map { |row| row[:status] }
           assert_equal 0, model.baseline_call_count
-          assert_equal 1, model.topology_sync_count
+          assert_equal 0, model.topology_sync_count
+          refute_includes model.operation_names, 'IndoorGML LVN Topology Synchronize'
           assert_includes model.operation_names, 'IndoorGML LVN A'
           assert_includes model.operation_names, 'IndoorGML LVN C'
         end
@@ -224,7 +225,7 @@ module ULOL
           assert_equal 2, report[:cell_space_count]
           assert_equal 1, report[:normalization_failed_cell_space_count]
           assert_equal ['B'], report[:failed_cell_space_ids]
-          assert_equal 1, model.topology_sync_count
+          assert_equal 0, model.topology_sync_count
           assert_equal :per_cell_operations, report[:undo_mode]
           assert PrecisionValidation::LvnState.failed?(cells[1].group)
           assert_includes model.aborted_operations, 'IndoorGML LVN B'

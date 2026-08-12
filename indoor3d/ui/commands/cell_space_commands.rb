@@ -8,6 +8,39 @@ require_relative '../../application/progress/cell_space_create_progress_integrat
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
+      class CellSpaceVertexNormalizeProgressAdapter
+        def initialize(session, logger: IndoorCore::Logger)
+          @session = session
+          @logger = logger
+        end
+
+        def active?
+          @session&.active? == true
+        end
+
+        def detail(percent:, phase:, message:, current: nil)
+          return false unless active?
+
+          parts = [phase, message]
+          parts << current unless current.to_s.empty?
+          @session.update(
+            completed: percent,
+            message: parts.compact.map(&:to_s).reject(&:empty?).join(' - '),
+            telemetry: {
+              phase: phase,
+              current: current
+            }
+          )
+          true
+        rescue StandardError => error
+          @logger.puts(
+            "[IndoorGML] Vertex Normalize progress update failed: " \
+            "#{error.class}: #{error.message}"
+          )
+          false
+        end
+      end
+
       module CellSpaceCommands
         def convert_selected_solid_groups_to_cell_spaces
           return if respond_to?(:validation_operation_running?) && validation_operation_running?
@@ -156,7 +189,131 @@ module ULOL
           UiFeedback.notify("CellSpace type change failed:\n#{e.message}")
         end
 
+        def vertex_normalize_context_target?
+          !selected_vertex_normalize_cell_space.nil?
+        rescue StandardError
+          false
+        end
+
+        def vertex_normalize_selected_cell_space
+          return if respond_to?(:validation_operation_running?) && validation_operation_running?
+          return if @vertex_normalize_running == true
+
+          indoor_model = IndoorModel.current
+          cell_space = selected_vertex_normalize_cell_space(indoor_model)
+          unless cell_space
+            UiFeedback.notify('Select exactly one CellSpace to run Vertex Normalize.')
+            return nil
+          end
+
+          @vertex_normalize_running = true
+          progress_session = start_vertex_normalize_progress(cell_space)
+          adapter = CellSpaceVertexNormalizeProgressAdapter.new(progress_session)
+          tracker = PrecisionValidation::LvnProgressTracker.new(adapter)
+          report = PrecisionValidation::LvnProgressContext.with(tracker) do
+            indoor_model.local_vertex_normalize(cell_spaces: [cell_space])
+          end
+
+          complete_vertex_normalize_progress(progress_session, cell_space, report)
+          UiFeedback.notify(vertex_normalize_result_message(cell_space, report))
+          report
+        rescue StandardError => error
+          fail_vertex_normalize_progress(progress_session, error)
+          UiFeedback.notify("Vertex Normalize failed:\n#{error.message}")
+          nil
+        ensure
+          close_vertex_normalize_progress(progress_session)
+          @vertex_normalize_running = false
+        end
+
         private
+
+        def selected_vertex_normalize_cell_space(indoor_model = IndoorModel.current)
+          model = Sketchup.active_model
+          selection = model&.selection
+          entities = selection ? selection.to_a : []
+          return nil unless entities.length == 1
+
+          entity = entities.first
+          return nil unless entity&.valid?
+          return nil unless indoor_feature(entity) == 'CellSpace'
+
+          cell_space = indoor_model.find_cell_space_for_entity(entity)
+          cell_space if cell_space&.valid?
+        rescue StandardError
+          nil
+        end
+
+        def start_vertex_normalize_progress(cell_space)
+          model = Sketchup.active_model
+          session = ProductionProgress::ProductionProgressSession.new(
+            title: 'Vertex Normalize',
+            total: 100,
+            renderer: ProductionProgress::SketchupOverlayProgressRenderer.new(model: model),
+            cancellable: false,
+            metadata: {
+              operation: :cell_space_vertex_normalize,
+              cell_space_id: cell_space.id
+            }
+          )
+          session.start(message: "Preparing Vertex Normalize - #{cell_space.id}")
+          session
+        rescue StandardError => error
+          IndoorCore::Logger.puts(
+            "[IndoorGML] Vertex Normalize progress start failed: " \
+            "#{error.class}: #{error.message}"
+          )
+          nil
+        end
+
+        def complete_vertex_normalize_progress(session, cell_space, report)
+          return unless session&.active?
+
+          session.complete(
+            message: "Vertex Normalize completed - #{cell_space.id}",
+            telemetry: {
+              cell_space_id: cell_space.id,
+              vertex_count: report[:vertex_count].to_i,
+              moved_vertex_count: report[:moved_vertex_count].to_i,
+              removed_coplanar_edge_count: report[:coplanar_edge_removal_count].to_i
+            }
+          )
+        rescue StandardError => error
+          IndoorCore::Logger.puts(
+            "[IndoorGML] Vertex Normalize progress completion failed: " \
+            "#{error.class}: #{error.message}"
+          )
+          nil
+        end
+
+        def fail_vertex_normalize_progress(session, error)
+          return unless session&.active?
+
+          session.fail(error, message: "Vertex Normalize failed - #{error.message}")
+        rescue StandardError => progress_error
+          IndoorCore::Logger.puts(
+            "[IndoorGML] Vertex Normalize progress failure failed: " \
+            "#{progress_error.class}: #{progress_error.message}"
+          )
+          nil
+        end
+
+        def close_vertex_normalize_progress(session)
+          session&.close
+        rescue StandardError => error
+          IndoorCore::Logger.puts(
+            "[IndoorGML] Vertex Normalize progress close failed: " \
+            "#{error.class}: #{error.message}"
+          )
+          false
+        end
+
+        def vertex_normalize_result_message(cell_space, report)
+          "Vertex Normalize completed for #{cell_space.id}.\n" \
+            "Vertices: #{report[:vertex_count].to_i}\n" \
+            "Moved vertices: #{report[:moved_vertex_count].to_i}\n" \
+            "Removed coplanar edges: #{report[:coplanar_edge_removal_count].to_i}"
+        end
 
         def start_cell_space_create_progress(model, job_count)
           session = ProductionProgress::ProductionProgressSession.new(
