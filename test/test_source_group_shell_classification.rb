@@ -2,6 +2,10 @@
 
 require 'minitest/autorun'
 
+module Sketchup
+  class Edge; end unless const_defined?(:Edge, false)
+end
+
 require_relative '../indoor3d/utils/geometry/source_group'
 
 module ULOL
@@ -81,6 +85,73 @@ module ULOL
             else
               singleton.send(:remove_method, :shell_contains_point_in_faces?)
             end
+          end
+        end
+
+        class CellSpaceEdgeRenderingTest < Minitest::Test
+          class Edge < Sketchup::Edge
+            attr_accessor :hidden, :soft, :smooth
+
+            def initialize(hidden: false, soft: false, smooth: false, valid: true)
+              @hidden = hidden
+              @soft = soft
+              @smooth = smooth
+              @valid = valid
+            end
+
+            def valid?
+              @valid
+            end
+
+            def hidden?
+              @hidden
+            end
+
+            def soft?
+              @soft
+            end
+
+            def smooth?
+              @smooth
+            end
+          end
+
+          Definition = Struct.new(:entities) do
+            def valid?
+              true
+            end
+          end
+
+          Group = Struct.new(:definition)
+
+          def test_makes_hidden_soft_and_smooth_edges_solid
+            styled = Edge.new(hidden: true, soft: true, smooth: true)
+            hard = Edge.new
+            invalid = Edge.new(hidden: true, soft: true, smooth: true, valid: false)
+            group = Group.new(Definition.new([styled, hard, invalid, Object.new]))
+
+            changed_count = Geometry.make_cell_space_edges_solid!(group)
+
+            assert_equal 1, changed_count
+            refute styled.hidden?
+            refute styled.soft?
+            refute styled.smooth?
+            refute hard.hidden?
+            refute hard.soft?
+            refute hard.smooth?
+            assert invalid.hidden?
+            assert invalid.soft?
+            assert invalid.smooth?
+          end
+
+          def test_returns_zero_for_group_without_valid_definition
+            group = Group.new(Struct.new(:entities) do
+              def valid?
+                false
+              end
+            end.new([]))
+
+            assert_equal 0, Geometry.make_cell_space_edges_solid!(group)
           end
         end
       end

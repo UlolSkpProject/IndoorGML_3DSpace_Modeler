@@ -2,6 +2,10 @@
 
 require 'minitest/autorun'
 
+module Sketchup
+  class Edge; end unless const_defined?(:Edge, false)
+end
+
 require_relative '../indoor3d/domain/cell_space_type'
 require_relative '../indoor3d/integration/tag_cell_space_adapter'
 require_relative '../indoor3d/application/cell_space_lifecycle_service'
@@ -10,6 +14,40 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class CellSpaceLifecycleServiceTest < Minitest::Test
+        class StyledEdge < Sketchup::Edge
+          attr_accessor :hidden, :soft, :smooth
+
+          def initialize
+            @hidden = true
+            @soft = true
+            @smooth = true
+          end
+
+          def valid?
+            true
+          end
+
+          def hidden?
+            @hidden
+          end
+
+          def soft?
+            @soft
+          end
+
+          def smooth?
+            @smooth
+          end
+        end
+
+        DefinitionWithEntities = Struct.new(:entities) do
+          def valid?
+            true
+          end
+        end
+
+        GroupWithDefinition = Struct.new(:definition)
+
         def test_create_from_group_runs_existing_creation_sequence
           calls = []
           source_group = Object.new
@@ -78,6 +116,20 @@ module ULOL
             :write_attributes,
             :track_cell_space_entity
           ], calls
+        end
+
+        def test_create_from_group_makes_placed_group_edges_visible_and_hard
+          calls = []
+          edge = StyledEdge.new
+          placed_group = GroupWithDefinition.new(DefinitionWithEntities.new([edge]))
+          callbacks = lifecycle_callbacks(calls, placed_group: placed_group)
+          service = build_lifecycle_service(callbacks)
+
+          service.create_from_group(Object.new, cell_type: :input_type, category_code: 'Room')
+
+          refute edge.hidden?
+          refute edge.soft?
+          refute edge.smooth?
         end
 
         def test_create_from_group_uses_resolved_storey_from_source

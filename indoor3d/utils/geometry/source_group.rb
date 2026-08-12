@@ -4,6 +4,39 @@ module ULOL
   module Indoor3DGmlModeler
     module Utils
       module Geometry
+        # CellSpace geometry is rendered with explicit solid edges regardless of
+        # the source group's hidden/soft/smooth edge styling. The group has
+        # already been isolated by the creation workflow before this runs, so
+        # changing these flags does not affect a shared source definition.
+        def self.make_cell_space_edges_solid!(group)
+          return 0 unless group&.respond_to?(:definition)
+
+          definition = group.definition
+          return 0 unless definition&.respond_to?(:valid?) && definition.valid?
+          return 0 unless definition.respond_to?(:entities)
+
+          changed_count = 0
+          definition.entities.grep(Sketchup::Edge).each do |edge|
+            next unless edge&.valid?
+
+            changed = false
+            if edge.hidden?
+              edge.hidden = false
+              changed = true
+            end
+            if edge.soft?
+              edge.soft = false
+              changed = true
+            end
+            if edge.smooth?
+              edge.smooth = false
+              changed = true
+            end
+            changed_count += 1 if changed
+          end
+          changed_count
+        end
+
         def self.validate_cell_space_source_group(group)
           faces = group_faces(group)
           return { valid: false, reason: 'No faces found', component_count: 0, reversed_face_count: 0 } if faces.empty?
