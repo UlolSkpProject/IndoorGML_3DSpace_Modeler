@@ -50,11 +50,17 @@ module ULOL
           return unless @dual_overlay_command
 
           if IndoorModel.current.dual_overlay_visible?
-            @dual_overlay_command.menu_text = 'Hide State/Link Overlay'
+            @dual_overlay_command.menu_text = SeoulSpacePluginsMenu.text(
+              'Hide State/Link Overlay',
+              '그래프 숨기기'
+            )
             @dual_overlay_command.tooltip = 'Hide State and Transition overlay'
             @dual_overlay_command.status_bar_text = 'Hide State and Transition overlay'
           else
-            @dual_overlay_command.menu_text = 'Show State/Link Overlay'
+            @dual_overlay_command.menu_text = SeoulSpacePluginsMenu.text(
+              'Show State/Link Overlay',
+              '그래프 보이기'
+            )
             @dual_overlay_command.tooltip = 'Show State and Transition overlay'
             @dual_overlay_command.status_bar_text = 'Show State and Transition overlay'
           end
@@ -66,11 +72,17 @@ module ULOL
           return unless @geometry_command
 
           if IndoorModel.current.geometry_visible?
-            @geometry_command.menu_text = 'Hide Geometry'
+            @geometry_command.menu_text = SeoulSpacePluginsMenu.text(
+              'Hide Geometry',
+              'Geometry숨기기'
+            )
             @geometry_command.tooltip = 'Hide CellSpace geometry'
             @geometry_command.status_bar_text = 'Hide CellSpace geometry'
           else
-            @geometry_command.menu_text = 'Show Geometry'
+            @geometry_command.menu_text = SeoulSpacePluginsMenu.text(
+              'Show Geometry',
+              'Geometry보이기'
+            )
             @geometry_command.tooltip = 'Show CellSpace geometry'
             @geometry_command.status_bar_text = 'Show CellSpace geometry'
           end

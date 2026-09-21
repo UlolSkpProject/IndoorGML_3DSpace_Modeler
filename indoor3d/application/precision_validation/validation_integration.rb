@@ -601,25 +601,7 @@ module ULOL
           CommandDispatcher.prepend(CommandDispatcherPatch) unless
             CommandDispatcher.ancestors.include?(CommandDispatcherPatch)
 
-          install_precision_command!
           true
-        end
-
-        def self.install_precision_command!
-          return if @precision_command_installed
-          return unless defined?(UI)
-
-          command = UI::Command.new('IndoorGML 정밀검사') do
-            ULOL::Indoor3DGmlModeler.command_dispatcher.check_precision_validity
-          end
-          command.tooltip = '유형별 crash 격리 후 crash CellSpace만 Normalize하고 overlap_tol 0.01 mm로 검사'
-          command.status_bar_text = command.tooltip
-          command.set_validation_proc do
-            dispatcher = ULOL::Indoor3DGmlModeler.command_dispatcher
-            dispatcher.validation_operation_running? ? MF_GRAYED : MF_ENABLED
-          end
-          UI.menu('Extensions').add_item(command)
-          @precision_command_installed = true
         end
       end
 

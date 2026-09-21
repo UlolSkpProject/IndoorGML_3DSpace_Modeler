@@ -1,6 +1,34 @@
 require 'sketchup.rb'
 require_relative 'definition'
 
+unless defined?(SeoulSpacePluginsMenu)
+  module SeoulSpacePluginsMenu
+    def self.korean?
+      return false unless defined?(::Sketchup) && ::Sketchup.respond_to?(:get_locale)
+
+      ::Sketchup.get_locale.to_s.downcase.start_with?('ko')
+    end
+
+    def self.text(english, korean)
+      korean? ? korean : english
+    end
+
+    def self.menu
+      @menu ||= ::UI.menu('Extensions').add_submenu(
+        text('SeoulSpace Plugins', '서울시 공간구축사업 Plugins')
+      )
+    end
+
+    def self.add_group
+      target_menu = menu
+      target_menu.add_separator if @group_registered
+      result = yield(target_menu)
+      @group_registered = true
+      result
+    end
+  end
+end
+
 module ULOL
   include Sketchup
   include Geom
@@ -158,10 +186,14 @@ module ULOL
     unless file_loaded?(__FILE__)
       attach_model_observer()
       dispatcher = command_dispatcher
-      menu = UI.menu('Extensions').add_submenu('Indoor3DGML Modeler')
+      menu = SeoulSpacePluginsMenu.add_group do |parent_menu|
+        parent_menu.add_submenu(
+          SeoulSpacePluginsMenu.text('IndoorGML 3DSpace Modeler', 'IndoorGML 모델러')
+        )
+      end
 
       create_cell_space_command = create_command(
-        'Create CellSpace',
+        SeoulSpacePluginsMenu.text('Create CellSpace', 'CellSpace 생성'),
         'Convert selected solid groups to CellSpace',
         icon: 'create_cellspace.svg'
       ) do
@@ -188,7 +220,7 @@ module ULOL
         indoor_model.editing? && dispatcher.cell_space_type_change_available?(selected_cell_spaces) ? MF_ENABLED : MF_GRAYED
       end
       @edit_property_command = create_command(
-        'Edit CellSpace Property',
+        SeoulSpacePluginsMenu.text('Edit CellSpace Property', 'IndoorGML편집'),
         'Toggle IndoorGML editing',
         icon: 'edit_cellspace_property.svg'
       ) do
@@ -201,7 +233,7 @@ module ULOL
         IndoorCore::IndoorModel.current.editing? ? MF_CHECKED : MF_UNCHECKED
       end
       @geometry_command = create_command(
-        'Show Geometry',
+        SeoulSpacePluginsMenu.text('Show Geometry', 'Geometry보이기'),
         'Show CellSpace geometry',
         icon: 'toggle_geometry.svg'
       ) do
@@ -213,7 +245,7 @@ module ULOL
         IndoorCore::IndoorModel.current.geometry_visible? ? MF_CHECKED : MF_UNCHECKED
       end
       @dual_overlay_command = create_command(
-        'Show State/Link Overlay',
+        SeoulSpacePluginsMenu.text('Show State/Link Overlay', '그래프 보이기'),
         'Show State and Transition overlay',
         icon: 'toggle_dual_overlay.svg'
       ) do
@@ -235,7 +267,7 @@ module ULOL
         MF_ENABLED
       end
       export_command = create_command(
-        'Export GML',
+        SeoulSpacePluginsMenu.text('Export GML', '.gml 추출'),
         'Export GML without validity check',
         icon: 'export_gml.svg'
       ) do
@@ -245,7 +277,7 @@ module ULOL
         dispatcher.validation_operation_running? ? MF_GRAYED : MF_ENABLED
       end
       check_validity_command = create_command(
-        'Check Validity',
+        SeoulSpacePluginsMenu.text('Check Validity', '유효성 검증'),
         'Create temp GML and run validity check',
         icon: 'check_validity.svg'
       ) do
@@ -259,10 +291,8 @@ module ULOL
 
       menu.add_item(create_cell_space_command)
       menu.add_item(@edit_property_command)
-      menu.add_item(change_type_command)
       menu.add_item(@geometry_command)
       menu.add_item(@dual_overlay_command)
-      menu.add_item(@dual_overlay_scale_command)
       menu.add_item(export_command)
       menu.add_item(check_validity_command)
 
