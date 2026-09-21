@@ -4,7 +4,7 @@
 
 ![IndoorGML 3D Modeler](docs/images/preview.png)
 
-![Version](https://img.shields.io/badge/version-1.0.5-blue)
+![Version](https://img.shields.io/badge/version-1.0.6-blue)
 ![SketchUp](https://img.shields.io/badge/SketchUp-2026-brightgreen)
 ![IndoorGML](https://img.shields.io/badge/IndoorGML-1.0.3-orange)
 ![val3dity](https://img.shields.io/badge/val3dity-2.2.0-lightgrey)
@@ -73,7 +73,7 @@ v1.0.5는 검사 자체뿐 아니라 오류를 찾고, 안전하게 보정하고
 | 항목 | 값 | 정의 |
 | --- | --- | --- |
 | Extension/storage version | `1.0.3` | `Definition::INDOOR_GML_VERSION` |
-| Extension package version | `1.0.5` | `Indoor3DGmlModeler::EXTENSION_VERSION` |
+| Extension package version | `1.0.6` | `Indoor3DGmlModeler::EXTENSION_VERSION` |
 | IndoorGML XML schema version | `1.0` | `Definition::INDOOR_GML_SCHEMA_VERSION` |
 | Validator runtime | `val3dity-windows-x64-v2.2.0` | `Val3dityRunner::VENDOR_ROOT` |
 
@@ -122,6 +122,34 @@ Plugins/
 현재 진입 파일은 [indoor3d.rb](indoor3d.rb)이고, 실제 extension loader는 [indoor3d/core.rb](indoor3d/core.rb)를 로드합니다.
 
 ## Quick Start
+
+### 공통 TAG 코드표와 건축물 구분
+
+Create CellSpace 창에서 `지하철` 또는 `공공기관`을 선택합니다. 선택값은 모델에 저장됩니다.
+코드표의 `공공시설건물`과 `공공기관`은 모두 공공기관 구분으로 읽고, `구조`와 `공통`은 양쪽에 적용합니다.
+
+공통 파일은 `%APPDATA%/SketchUp/SketchUp 2026/SketchUp/SeoulSpace/tag_catalog.json`입니다.
+TAG Helper에서 관리하며, 이전 `SeoulSpace/TagHelper/catalog.json`은 자동 승계 전에도 읽을 수 있습니다.
+확장 로드 시 다음 항목의 코드와 타입만 메모리에 캐시합니다. TAG를 해석할 때 파일을 다시 읽지 않습니다.
+
+| 코드표의 중분류 (`(공간)` 접미사 포함) | CellSpace 타입 / 분류 |
+| --- | --- |
+| 문 | ConnectionSpace / Door |
+| 창문 | CellSpace / Window |
+| 엘리베이터 | TransitionSpace / Elevator |
+| 계단, 에스컬레이터 | TransitionSpace / Stair |
+| 그 외 `구분1` 또는 `구분2`가 RM인 TAG | GeneralSpace / Room |
+
+TAG는 `{층}{층}_{구분1}_{구분2}` 또는 `{층}{층}_{구분1}_{구분2}_{번호}` 형식만 검사합니다.
+층은 F01~F99 / B01~B99이고, `구분1`은 `FF`, `IP`, `IF`, `CV`, `MV`, `RM`, `IS`만 허용합니다.
+특수 타입으로 매핑되지 않은 TAG는 `구분1` 또는 `구분2`가 정확히 `RM`일 때만 Room입니다.
+예를 들어 코드표에 없는 `F01F01_IP_RM_99`는 Room이지만 `F01F01_FF_FC_99`와
+`F01F01_XX_RM_99`는 무시합니다. 무시한 TAG의 층 정보도 사용하지 않습니다.
+유효 TAG가 없으면 창에서 지정한 CellSpace 값을 사용합니다. 태그가 없는 하위 솔리드는 기존처럼 부모 TAG를 상속합니다.
+
+코드표 수정 후에는 SketchUp을 다시 시작해야 캐시가 갱신됩니다. 개발 중에는 Ruby Console에서
+`ULOL::Indoor3DGmlModeler::IndoorCore::TagCellSpaceAdapter.load_catalog!`로 명시적으로 갱신할 수 있습니다.
+코드표 읽기에 실패하면 Create CellSpace를 중단하고 안내하여 특수 타입이 잘못 Room으로 생성되는 것을 방지합니다.
 
 ### 1. Solid Group 준비
 

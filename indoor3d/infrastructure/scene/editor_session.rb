@@ -648,13 +648,15 @@ module ULOL
           @validation_focus_zoom_generation = @validation_focus_zoom_generation.to_i + 1
           generation = @validation_focus_zoom_generation
           schedule_validation_focus_camera_step(generation, expected_row_id, 'camera sequence') do
-            next if validation_focus_highlight_groups.empty?
+            groups = validation_focus_highlight_groups
+            next if groups.empty?
 
             view = Sketchup.active_model()&.active_view
             next unless view&.respond_to?(:zoom_extents)
-            next unless apply_validation_focus_camera_orientation(view)
 
             view.zoom_extents
+            next unless apply_validation_focus_camera_orientation(view, groups)
+
             view.zoom(0.7)
             view.invalidate
           end
@@ -664,30 +666,45 @@ module ULOL
           false
         end
 
-        def apply_validation_focus_camera_orientation(view)
+        def apply_validation_focus_camera_orientation(view, groups)
           camera = view.respond_to?(:camera) ? view.camera : nil
-          target = camera&.target
-          eye = camera&.eye
           return false unless camera&.respond_to?(:set)
-          return false unless target&.respond_to?(:x) && target.respond_to?(:y) && target.respond_to?(:z)
+          bounds = validation_focus_bounds(groups)
+          return false unless bounds
 
-          distance = eye&.respond_to?(:distance) ? eye.distance(target).to_f.abs : 0.0
-          distance = 1.0 unless distance.finite? && distance.positive?
-          target_point = Geom::Point3d.new(target.x.to_f, target.y.to_f, target.z.to_f)
+          target_point = bounds.center
+          direction = Geom::Vector3d.new(1.0, -1.0, 1.0)
+          direction.normalize!
+          current_eye = camera.respond_to?(:eye) ? camera.eye : nil
+          current_target = camera.respond_to?(:target) ? camera.target : nil
+          current_distance = if current_eye&.respond_to?(:distance) && current_target
+                               current_eye.distance(current_target).to_f.abs
+                             else
+                               0.0
+                             end
+          extent = [bounds.width.to_f, bounds.height.to_f, bounds.depth.to_f].max
+          distance = [current_distance, extent * 2.0, 1.0].max
+          required_z = bounds.max.z.to_f - target_point.z.to_f + [extent * 0.25, 1.0].max
+          distance = [distance, required_z / direction.z.to_f].max
+          eye_point = target_point.offset(direction, distance)
 
           camera.set(
-            Geom::Point3d.new(target_point.x, target_point.y, target_point.z + distance),
-            target_point,
-            Geom::Vector3d.new(0.0, 1.0, 0.0)
-          )
-
-          iso_offset = distance / Math.sqrt(3.0)
-          camera.set(
-            Geom::Point3d.new(target_point.x + iso_offset, target_point.y - iso_offset, target_point.z + iso_offset),
+            eye_point,
             target_point,
             Geom::Vector3d.new(-1.0, 1.0, 2.0)
           )
           true
+        end
+
+        def validation_focus_bounds(groups)
+          bounds = Geom::BoundingBox.new
+          Array(groups).each do |group|
+            next unless group&.valid?
+
+            group_bounds = group.bounds
+            8.times { |index| bounds.add(group_bounds.corner(index)) }
+          end
+          bounds.valid? ? bounds : nil
         end
 
         def schedule_validation_focus_camera_step(generation, expected_row_id, label, &step)

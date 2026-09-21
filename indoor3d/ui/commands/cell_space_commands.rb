@@ -71,6 +71,8 @@ module ULOL
             return unless creation_options
 
             cell_type, category_code, storey = creation_options
+            # Reclassify after the building type has been chosen in the dialog.
+            conversion_jobs = CellSpaceConversionJobBuilder.new(entities: groups).build
             conversion_jobs = CellSpaceConversionJobBuilder.apply_fallback_storey(conversion_jobs, storey)
             progress_session = start_cell_space_create_progress(model, conversion_jobs.length)
 
@@ -132,6 +134,7 @@ module ULOL
             return unless creation_options
 
             cell_type, category_code, storey = creation_options
+            conversion_jobs = CellSpaceConversionJobBuilder.new(entities: groups).build
             conversion_jobs = CellSpaceConversionJobBuilder.apply_fallback_storey(conversion_jobs, storey)
 
             result = indoor_model.convert_cell_space_jobs_bulk_local_grid(

@@ -50,6 +50,7 @@ module ULOL
     require_relative 'domain/transition'
 
     require_relative 'integration/tag_cell_space_adapter'
+    IndoorCore::TagCellSpaceAdapter.load_catalog!
 
     require_relative 'infrastructure/observers/observer_helpers'
     require_relative 'infrastructure/observers/cell_space_observer'
