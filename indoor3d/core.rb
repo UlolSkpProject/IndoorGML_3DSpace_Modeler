@@ -15,7 +15,7 @@ unless defined?(SeoulSpacePluginsMenu)
 
     def self.menu
       @menu ||= ::UI.menu('Extensions').add_submenu(
-        text('SeoulSpace Plugins', '서울시 공간구축사업 Plugins')
+        text('SeoulSpace Plugins', 'SeoulSpace 플러그인')
       )
     end
 
