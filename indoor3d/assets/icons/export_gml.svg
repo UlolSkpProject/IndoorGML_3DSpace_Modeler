@@ -5,5 +5,7 @@
   <circle cx="9.2" cy="18.2" r="1.7" fill="#60A5FA" stroke="#1F2937" stroke-width="0.9"/>
   <circle cx="13.1" cy="12.8" r="1.7" fill="#60A5FA" stroke="#1F2937" stroke-width="0.9"/>
   <circle cx="17" cy="17" r="1.7" fill="#60A5FA" stroke="#1F2937" stroke-width="0.9"/>
+  <text x="12.2" y="25.4" text-anchor="middle" fill="#1F2937"
+        font-family="Arial, Helvetica, sans-serif" font-size="5.2" font-weight="700">.gml</text>
   <path d="M18.5 20.2H25.1V17.6L30 22.3L25.1 27V24.4H18.5Z" fill="#228BE6" stroke="#1F2937" stroke-width="1.2" stroke-linejoin="round"/>
 </svg>
