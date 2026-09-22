@@ -1,6 +1,8 @@
 :root {
+  color-scheme: dark;
   --bg: #1c1c1b;
   --panel: #242422;
+  --surface-2: #2b2a28;
   --field-bg: #1c1c1b;
   --border: #373633;
   --field-border: #4a4945;
@@ -9,9 +11,13 @@
   --text-muted: #85827b;
   --text-subtle: #6f6c65;
   --focus: #8ab4f8;
-  --radius: 8px;
-
+  --success: #3ebc71;
+  --warning: #f0c36a;
+  --danger: #f97066;
+  --radius: 7px;
   --control-height: 34px;
+  --ui-font: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", Arial, sans-serif;
+  --mono-font: Consolas, "Malgun Gothic", monospace;
 }
 
 * {
@@ -30,7 +36,7 @@ body {
   overflow: hidden;
   background: var(--bg);
   color: var(--text);
-  font-family: Arial, sans-serif;
+  font-family: var(--ui-font);
   font-size: 12px;
 }
 
@@ -285,7 +291,7 @@ input[type="number"] {
   outline: none;
   background: var(--field-bg);
   color: var(--text);
-  font-family: Arial, sans-serif;
+  font-family: var(--ui-font);
   font-size: 12px;
 }
 
@@ -441,7 +447,7 @@ button {
   min-height: 34px;
   border-radius: 7px;
   cursor: pointer;
-  font-family: Arial, sans-serif;
+  font-family: var(--ui-font);
   font-size: 12px;
   font-weight: 700;
 }
