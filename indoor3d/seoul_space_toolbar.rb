@@ -41,6 +41,7 @@ unless defined?(SeoulSpaceToolbar)
 
       def schedule_build
         return if @built
+        return unless ::UI.respond_to?(:start_timer)
 
         cancel_timer
         @timer_id = ::UI.start_timer(FALLBACK_DELAY, false) do
