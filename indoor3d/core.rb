@@ -20,6 +20,14 @@ unless defined?(SeoulSpacePluginsMenu)
         korean? ? korean : english
       end
 
+      def add_group
+        target_menu = menu
+        target_menu.add_separator if @group_registered
+        result = yield(target_menu)
+        @group_registered = true
+        result
+      end
+
       def register(group, order:, &builder)
         raise ArgumentError, 'menu builder is required' unless builder
         @groups[group.to_sym] = { order: Integer(order), builder: builder }
