@@ -1,5 +1,24 @@
 * { box-sizing: border-box; }
 
+:root {
+  color-scheme: dark;
+  --bg: #1c1c1b;
+  --surface: #242422;
+  --surface-2: #2b2a28;
+  --border: #373633;
+  --border-strong: #4a4945;
+  --text: #d8d6d0;
+  --text-strong: #e8e6e0;
+  --muted: #85827b;
+  --primary: #8ab4f8;
+  --success: #3ebc71;
+  --warning: #f0c36a;
+  --danger: #f97066;
+  --radius: 7px;
+  --ui-font: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", Arial, sans-serif;
+  --mono-font: Consolas, "Malgun Gothic", monospace;
+}
+
 html {
   user-select: none;
   -webkit-user-select: none;
@@ -8,13 +27,13 @@ html {
 body {
   margin: 0;
   padding: 16px;
-  font-family: Arial, sans-serif;
-  color: #d8d6d0;
-  background: #1c1c1b;
+  font-family: var(--ui-font);
+  color: var(--text);
+  background: var(--bg);
 }
 
 .title {
-  color: #85827b;
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: .08em;
@@ -38,7 +57,7 @@ ul {
 
 .icon {
   width: 18px;
-  color: #85827b;
+  color: var(--muted);
   font-size: 13px;
   line-height: 19px;
   text-align: center;
@@ -61,14 +80,14 @@ ul {
   align-items: center;
   gap: 7px;
   height: 21px;
-  color: #85827b;
+  color: var(--muted);
   font-size: 12px;
   font-weight: 400;
 }
 
 .sub-icon {
   width: 16px;
-  color: #85827b;
+  color: var(--muted);
   font-size: 12px;
   text-align: center;
 }
@@ -77,32 +96,32 @@ ul {
   line-height: 18px;
 }
 
-.pending { color: #85827b; }
-.running { color: #8ab4f8; font-weight: 700; }
-.complete { color: #3ebc71; }
-.failed { color: #f97066; font-weight: 700; }
+.pending { color: var(--muted); }
+.running { color: var(--primary); font-weight: 700; }
+.complete { color: var(--success); }
+.failed { color: var(--danger); font-weight: 700; }
 
 .running > .icon,
 .substeps .running .sub-icon {
-  color: #8ab4f8;
+  color: var(--primary);
 }
 
 .complete > .icon,
 .substeps .complete .sub-icon {
-  color: #3ebc71;
+  color: var(--success);
 }
 
 .failed > .icon,
 .substeps .failed .sub-icon {
-  color: #f97066;
+  color: var(--danger);
 }
 
 .detail {
   margin-top: 14px;
   padding: 11px;
-  border: 1px solid #373633;
-  border-radius: 8px;
-  background: #242422;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
 }
 
 .hidden {
@@ -113,7 +132,7 @@ ul {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: #e8e6e0;
+  color: var(--text-strong);
   font-size: 12px;
   font-weight: 700;
   gap: 12px;
@@ -123,7 +142,7 @@ ul {
 .bar {
   width: 100%;
   height: 8px;
-  background: #33322f;
+  background: var(--surface-2);
   border-radius: 999px;
   overflow: hidden;
   margin-bottom: 9px;
@@ -132,14 +151,14 @@ ul {
 .bar-fill {
   width: 0%;
   height: 100%;
-  background: #8ab4f8;
+  background: var(--primary);
   border-radius: 999px;
   transition: width 0.15s ease-out;
 }
 
 .detail-message {
   min-height: 17px;
-  color: #b9b6ae;
+  color: var(--text);
   font-size: 12px;
   line-height: 1.45;
   margin-bottom: 3px;
@@ -147,8 +166,8 @@ ul {
 
 .detail-current {
   min-height: 16px;
-  color: #85827b;
-  font-family: Consolas, Monaco, monospace;
+  color: var(--muted);
+  font-family: var(--mono-font);
   font-size: 10px;
   line-height: 1.4;
   white-space: pre-wrap;
@@ -164,9 +183,9 @@ ul {
 .result {
   margin-top: 14px;
   padding: 11px;
-  border: 1px solid #373633;
-  border-radius: 8px;
-  background: #242422;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
 }
 
 .result.success {
@@ -179,7 +198,7 @@ ul {
 }
 
 .result-title {
-  color: #e8e6e0;
+  color: var(--text-strong);
   cursor: text;
   font-size: 13px;
   font-weight: 700;
@@ -189,17 +208,17 @@ ul {
 }
 
 .result.success .result-title {
-  color: #3ebc71;
+  color: var(--success);
 }
 
 .result.failed .result-title,
 .result.error .result-title {
-  color: #f97066;
+  color: var(--danger);
 }
 
 .result-message {
   min-height: 18px;
-  color: #b9b6ae;
+  color: var(--text);
   cursor: text;
   font-size: 12px;
   line-height: 1.45;
@@ -219,10 +238,10 @@ ul {
 .result-actions button,
 .detail-actions button {
   padding: 7px 10px;
-  border: 1px solid #4a4945;
-  border-radius: 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
   background: transparent;
-  color: #d8d6d0;
+  color: var(--text);
   cursor: pointer;
   font-size: 12px;
   font-weight: 700;
