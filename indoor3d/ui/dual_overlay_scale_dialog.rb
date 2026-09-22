@@ -117,21 +117,25 @@ module ULOL
               <meta charset="utf-8">
               <style>
                 :root {
+                  color-scheme: dark;
                   --bg: #1c1c1b;
                   --panel: #242422;
+                  --surface-2: #2b2a28;
                   --border: #373633;
                   --field-border: #4a4945;
                   --track: #33322f;
                   --text: #d8d6d0;
                   --text-strong: #e8e6e0;
                   --text-muted: #85827b;
-                  --focus: #60a5fa;
-                  --knob: #fab005;
-                  --knob-border: #111827;
-                  --state: #2378ff;
-                  --state-soft: rgba(35, 120, 255, 0.20);
-                  --state-border: #3b82f6;
-                  --radius: 8px;
+                  --focus: #8ab4f8;
+                  --knob: #8ab4f8;
+                  --knob-border: #4a4945;
+                  --state: #8ab4f8;
+                  --state-soft: rgba(138, 180, 248, 0.12);
+                  --state-border: #5378af;
+                  --radius: 7px;
+                  --control-height: 34px;
+                  --ui-font: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", Arial, sans-serif;
                 }
                 * {
                   box-sizing: border-box;
@@ -145,7 +149,7 @@ module ULOL
                   margin: 0;
                   padding: 16px;
                   overflow: hidden;
-                  font-family: Arial, sans-serif;
+                  font-family: var(--ui-font);
                   color: var(--text);
                   background: var(--bg);
                   font-size: 12px;
@@ -167,7 +171,7 @@ module ULOL
                   text-transform: uppercase;
                 }
                 .value {
-                  color: #93c5fd;
+                  color: var(--focus);
                   font-size: 18px;
                   font-weight: 700;
                   font-variant-numeric: tabular-nums;
@@ -245,27 +249,27 @@ module ULOL
                 }
                 button {
                   min-width: 72px;
-                  height: 30px;
+                  height: var(--control-height);
                   border: 1px solid var(--field-border);
-                  border-radius: 7px;
+                  border-radius: var(--radius);
                   background: transparent;
                   color: var(--text);
                   cursor: pointer;
-                  font-family: Arial, sans-serif;
+                  font-family: var(--ui-font);
                   font-size: 12px;
                   font-weight: 700;
                 }
                 button:hover {
-                  border-color: #6a6760;
+                  border-color: var(--field-border);
                 }
                 button.primary {
                   background: var(--state-soft);
                   border-color: var(--state-border);
-                  color: #93c5fd;
+                  color: var(--focus);
                 }
                 button.primary:hover {
-                  border-color: #60a5fa;
-                  background: rgba(35, 120, 255, 0.28);
+                  border-color: var(--focus);
+                  background: rgba(138, 180, 248, 0.18);
                 }
               </style>
             </head>
