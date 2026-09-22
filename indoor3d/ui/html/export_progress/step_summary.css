@@ -2,7 +2,7 @@
   max-width: 360px;
   margin: 1px 0 9px;
   padding-left: 8px;
-  border-left: 2px solid #4a4945;
+  border-left: 2px solid var(--border-strong);
   color: var(--text);
   font-size: 11px;
   font-weight: 400;
