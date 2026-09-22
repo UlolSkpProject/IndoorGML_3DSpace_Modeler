@@ -1,5 +1,6 @@
 require 'sketchup.rb'
 require_relative 'definition'
+require_relative 'seoul_space_toolbar'
 
 unless defined?(SeoulSpacePluginsMenu)
   module SeoulSpacePluginsMenu
@@ -301,18 +302,22 @@ module ULOL
         dispatcher.add_context_menu_items(context_menu)
       end
 
-      toolbar = UI::Toolbar.new('SeoulSpace IndoorGML Modeler')
-      toolbar.add_item(create_cell_space_command)
-      toolbar.add_item(@edit_property_command)
-      toolbar.add_item(change_type_command)
-      toolbar.add_separator
-      toolbar.add_item(@geometry_command)
-      toolbar.add_item(@dual_overlay_command)
-      toolbar.add_item(@dual_overlay_scale_command)
-      toolbar.add_separator
-      toolbar.add_item(export_command)
-      toolbar.add_item(check_validity_command)
-      toolbar.show()
+      SeoulSpaceToolbar.register(
+        :indoorgml,
+        order: 40,
+        items: [
+          create_cell_space_command,
+          @edit_property_command,
+          change_type_command,
+          :separator,
+          @geometry_command,
+          @dual_overlay_command,
+          @dual_overlay_scale_command,
+          :separator,
+          export_command,
+          check_validity_command
+        ]
+      )
       file_loaded(__FILE__)
     end
 
