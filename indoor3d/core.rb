@@ -4,7 +4,7 @@ require_relative 'seoul_space_toolbar'
 
 unless defined?(SeoulSpacePluginsMenu)
   module SeoulSpacePluginsMenu
-    EXPECTED_GROUPS = %i[tag rm verify indoorgml obj].freeze
+    EXPECTED_GROUPS = %i[tag rm verify indoorgml obj manager].freeze
     FALLBACK_DELAY = 0.25
     @groups = {}
     @timer_id = nil
