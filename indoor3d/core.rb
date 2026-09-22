@@ -235,12 +235,6 @@ module ULOL
     unless file_loaded?(__FILE__)
       attach_model_observer()
       dispatcher = command_dispatcher
-      menu = SeoulSpacePluginsMenu.add_group do |parent_menu|
-        parent_menu.add_submenu(
-          SeoulSpacePluginsMenu.text('SeoulSpace IndoorGML Modeler', 'SeoulSpace IndoorGML Modeler')
-        )
-      end
-
       create_cell_space_command = create_command(
         SeoulSpacePluginsMenu.text('Create CellSpace', 'CellSpace 생성'),
         'Convert selected solid groups to CellSpace',
@@ -338,12 +332,17 @@ module ULOL
       dispatcher.update_geometry_command()
       dispatcher.update_dual_overlay_command()
 
-      menu.add_item(create_cell_space_command)
-      menu.add_item(@edit_property_command)
-      menu.add_item(@geometry_command)
-      menu.add_item(@dual_overlay_command)
-      menu.add_item(export_command)
-      menu.add_item(check_validity_command)
+      SeoulSpacePluginsMenu.register(:indoorgml, order: 40) do |parent_menu|
+        menu = parent_menu.add_submenu(
+          SeoulSpacePluginsMenu.text('SeoulSpace IndoorGML Modeler', 'SeoulSpace IndoorGML Modeler')
+        )
+        menu.add_item(create_cell_space_command)
+        menu.add_item(@edit_property_command)
+        menu.add_item(@geometry_command)
+        menu.add_item(@dual_overlay_command)
+        menu.add_item(export_command)
+        menu.add_item(check_validity_command)
+      end
 
       UI.add_context_menu_handler do |context_menu|
         dispatcher.add_context_menu_items(context_menu)
@@ -356,11 +355,9 @@ module ULOL
           create_cell_space_command,
           @edit_property_command,
           change_type_command,
-          :separator,
           @geometry_command,
           @dual_overlay_command,
           @dual_overlay_scale_command,
-          :separator,
           export_command,
           check_validity_command
         ]
