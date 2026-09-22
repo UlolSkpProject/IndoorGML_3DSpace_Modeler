@@ -4,28 +4,75 @@ require_relative 'seoul_space_toolbar'
 
 unless defined?(SeoulSpacePluginsMenu)
   module SeoulSpacePluginsMenu
-    def self.korean?
-      return false unless defined?(::Sketchup) && ::Sketchup.respond_to?(:get_locale)
+    EXPECTED_GROUPS = %i[tag rm verify indoorgml obj].freeze
+    FALLBACK_DELAY = 0.25
+    @groups = {}
+    @timer_id = nil
+    @built = false
 
-      ::Sketchup.get_locale.to_s.downcase.start_with?('ko')
-    end
+    class << self
+      def korean?
+        return false unless defined?(::Sketchup) && ::Sketchup.respond_to?(:get_locale)
+        ::Sketchup.get_locale.to_s.downcase.start_with?('ko')
+      end
 
-    def self.text(english, korean)
-      korean? ? korean : english
-    end
+      def text(english, korean)
+        korean? ? korean : english
+      end
 
-    def self.menu
-      @menu ||= ::UI.menu('Extensions').add_submenu(
-        text('SeoulSpace Plugins', 'SeoulSpace 플러그인')
-      )
-    end
+      def register(group, order:, &builder)
+        raise ArgumentError, 'menu builder is required' unless builder
+        @groups[group.to_sym] = { order: Integer(order), builder: builder }
 
-    def self.add_group
-      target_menu = menu
-      target_menu.add_separator if @group_registered
-      result = yield(target_menu)
-      @group_registered = true
-      result
+        if ready?
+          cancel_timer
+          build
+        else
+          schedule_build
+        end
+      end
+
+      private
+
+      def menu
+        @menu ||= ::UI.menu('Extensions').add_submenu(
+          text('SeoulSpace Plugins', 'SeoulSpace 플러그인')
+        )
+      end
+
+      def ready?
+        (EXPECTED_GROUPS - @groups.keys).empty?
+      end
+
+      def schedule_build
+        return if @built
+        return unless ::UI.respond_to?(:start_timer)
+        cancel_timer
+        @timer_id = ::UI.start_timer(FALLBACK_DELAY, false) do
+          @timer_id = nil
+          build
+        end
+      end
+
+      def cancel_timer
+        return unless @timer_id
+        ::UI.stop_timer(@timer_id)
+        @timer_id = nil
+      rescue StandardError
+        @timer_id = nil
+      end
+
+      def build
+        return if @built || @groups.empty?
+        target_menu = menu
+        @groups.values.sort_by { |group| group[:order] }.each_with_index do |group, index|
+          target_menu.add_separator if index.positive?
+          group[:builder].call(target_menu)
+        end
+        @built = true
+      rescue StandardError => e
+        puts "[SeoulSpacePluginsMenu] Build failed: #{e.class}: #{e.message}"
+      end
     end
   end
 end
