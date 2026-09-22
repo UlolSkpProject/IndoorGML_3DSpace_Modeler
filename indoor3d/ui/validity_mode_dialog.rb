@@ -86,7 +86,7 @@ module ULOL
 
         def build_dialog
           html_dialog = UI::HtmlDialog.new(
-            dialog_title: 'IndoorGML Validity Check',
+            dialog_title: 'IndoorGML 유효성 검사',
             preferences_key: 'ULOL.Indoor3DGmlModeler.ValidityMode',
             scrollable: false,
             resizable: false,
