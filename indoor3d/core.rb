@@ -263,6 +263,10 @@ module ULOL
       ) do
         dispatcher.convert_selected_solid_groups_to_cell_spaces()
       end
+      create_cell_space_command.tooltip = SeoulSpacePluginsMenu.text(
+        'Create CellSpace',
+        'CellSpace 생성'
+      )
       create_cell_space_command.set_validation_proc do
         dispatcher.validation_operation_running? ? MF_GRAYED : MF_ENABLED
       end
@@ -276,6 +280,10 @@ module ULOL
       ) do
         dispatcher.change_selected_cell_space_type()
       end
+      change_type_command.tooltip = SeoulSpacePluginsMenu.text(
+        'Change CellSpace Type',
+        'CellSpace Type 변경'
+      )
       change_type_command.set_validation_proc do
         next MF_GRAYED if dispatcher.validation_operation_running?
         next MF_GRAYED unless indoor_gml_elements_available?
@@ -297,6 +305,10 @@ module ULOL
       ) do
         dispatcher.toggle_indoor_gml_editing()
       end
+      @edit_property_command.tooltip = SeoulSpacePluginsMenu.text(
+        'Edit IndoorGML',
+        'IndoorGML 편집'
+      )
 
       @edit_property_command.set_validation_proc do
         next MF_GRAYED if dispatcher.validation_operation_running?
@@ -314,6 +326,10 @@ module ULOL
       ) do
         dispatcher.toggle_geometry()
       end
+      @geometry_command.tooltip = SeoulSpacePluginsMenu.text(
+        'Show Geometry',
+        'Geometry 표시'
+      )
       dispatcher.geometry_command = @geometry_command
       @geometry_command.set_validation_proc do
         next MF_GRAYED unless indoor_gml_elements_available?
@@ -331,6 +347,10 @@ module ULOL
       ) do
         dispatcher.toggle_dual_overlay()
       end
+      @dual_overlay_command.tooltip = SeoulSpacePluginsMenu.text(
+        'Show Graph',
+        'Graph 표시'
+      )
       dispatcher.dual_overlay_command = @dual_overlay_command
       @dual_overlay_command.set_validation_proc do
         next MF_GRAYED unless indoor_gml_elements_available?
@@ -348,6 +368,10 @@ module ULOL
       ) do
         dispatcher.open_dual_overlay_scale_dialog()
       end
+      @dual_overlay_scale_command.tooltip = SeoulSpacePluginsMenu.text(
+        'Change State Size',
+        'State 크기 변경'
+      )
       @dual_overlay_scale_command.set_validation_proc do
         indoor_gml_elements_available? ? MF_ENABLED : MF_GRAYED
       end
@@ -361,6 +385,10 @@ module ULOL
       ) do
         dispatcher.export_gml()
       end
+      export_command.tooltip = SeoulSpacePluginsMenu.text(
+        'Export GML',
+        'GML 내보내기'
+      )
       export_command.set_validation_proc do
         next MF_GRAYED if dispatcher.validation_operation_running?
 
@@ -376,6 +404,10 @@ module ULOL
       ) do
         dispatcher.check_validity()
       end
+      check_validity_command.tooltip = SeoulSpacePluginsMenu.text(
+        'Validity Check',
+        '유효성 검사'
+      )
       check_validity_command.set_validation_proc do
         next MF_GRAYED if dispatcher.validation_operation_running?
 
