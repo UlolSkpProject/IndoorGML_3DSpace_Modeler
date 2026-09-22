@@ -189,7 +189,7 @@ module ULOL
       dispatcher = command_dispatcher
       menu = SeoulSpacePluginsMenu.add_group do |parent_menu|
         parent_menu.add_submenu(
-          SeoulSpacePluginsMenu.text('IndoorGML 3DSpace Modeler', 'IndoorGML 모델러')
+          SeoulSpacePluginsMenu.text('SeoulSpace IndoorGML Modeler', 'SeoulSpace IndoorGML Modeler')
         )
       end
 
@@ -268,7 +268,7 @@ module ULOL
         MF_ENABLED
       end
       export_command = create_command(
-        SeoulSpacePluginsMenu.text('Export GML', '.gml 추출'),
+        SeoulSpacePluginsMenu.text('GML Export', 'GML 내보내기'),
         'Export GML without validity check',
         icon: 'export_gml.svg'
       ) do
@@ -278,7 +278,7 @@ module ULOL
         dispatcher.validation_operation_running? ? MF_GRAYED : MF_ENABLED
       end
       check_validity_command = create_command(
-        SeoulSpacePluginsMenu.text('Check Validity', '유효성 검증'),
+        SeoulSpacePluginsMenu.text('Validity Check', '유효성 검사'),
         'Create temp GML and run validity check',
         icon: 'check_validity.svg'
       ) do
@@ -301,7 +301,7 @@ module ULOL
         dispatcher.add_context_menu_items(context_menu)
       end
 
-      toolbar = UI::Toolbar.new('Indoor3DGML Modeler')
+      toolbar = UI::Toolbar.new('SeoulSpace IndoorGML Modeler')
       toolbar.add_item(create_cell_space_command)
       toolbar.add_item(@edit_property_command)
       toolbar.add_item(change_type_command)
