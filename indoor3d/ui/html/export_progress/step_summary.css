@@ -3,7 +3,7 @@
   margin: 1px 0 9px;
   padding-left: 8px;
   border-left: 2px solid #4a4945;
-  color: #b9b6ae;
+  color: var(--text);
   font-size: 11px;
   font-weight: 400;
   line-height: 1.45;
@@ -12,16 +12,16 @@
 }
 
 .step-summary.success {
-  border-left-color: #327a4f;
-  color: #8fd5aa;
+  border-left-color: var(--success);
+  color: var(--success);
 }
 
 .step-summary.warning {
-  border-left-color: #9b762d;
-  color: #f0c36a;
+  border-left-color: var(--warning);
+  color: var(--warning);
 }
 
 .step-summary.error {
-  border-left-color: #7a2e2a;
-  color: #f97066;
+  border-left-color: var(--danger);
+  color: var(--danger);
 }
