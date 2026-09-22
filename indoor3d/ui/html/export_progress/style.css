@@ -189,7 +189,7 @@ ul {
 }
 
 .result.success {
-  border-color: #327a4f;
+  border-color: var(--primary);
 }
 
 .result.failed,
@@ -249,6 +249,6 @@ ul {
 
 .result-actions button:hover,
 .detail-actions button:hover {
-  background: #12261a;
-  border-color: #327a4f;
+  background: var(--surface-2);
+  border-color: var(--primary);
 }
