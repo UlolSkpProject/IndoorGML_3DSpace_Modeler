@@ -4,6 +4,9 @@
     <path d="M5 9.85V20.55L14.5 25.9V15.2Z" fill="#90CAF9"/>
     <path d="M14.5 15.2V25.9L24 20.55V9.85Z" fill="#BBDEFB"/>
   </g>
+  <rect x="6.7" y="10.4" width="13.6" height="6.4" rx="1.1" fill="#F03E3E" fill-opacity="0.88" stroke="#1F2937" stroke-width="0.9"/>
+  <text x="13.5" y="15.1" text-anchor="middle" fill="#FFFFFF"
+        font-family="Arial, Helvetica, sans-serif" font-size="5.4" font-weight="700">RM</text>
   <circle cx="23.5" cy="22.5" r="6" fill="#40C057" stroke="#1F2937" stroke-width="1.2"/>
   <path d="M23.5 19.2V25.8M20.2 22.5H26.8" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round"/>
 </svg>
