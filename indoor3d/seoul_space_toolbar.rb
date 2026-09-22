@@ -5,7 +5,7 @@ require 'sketchup.rb'
 
 unless defined?(SeoulSpaceToolbar)
   module SeoulSpaceToolbar
-    TOOLBAR_NAME = 'SeoulSpace'.freeze
+    TOOLBAR_NAME = '서울시 공간정보구축 Tools'.freeze
     EXPECTED_GROUPS = %i[tag rm verify indoorgml obj manager].freeze
     FALLBACK_DELAY = 0.25
 
