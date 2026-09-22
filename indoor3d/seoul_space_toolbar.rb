@@ -64,7 +64,8 @@ unless defined?(SeoulSpaceToolbar)
 
         @toolbar = ::UI::Toolbar.new(TOOLBAR_NAME)
 
-        @groups.values.sort_by { |group| group[:order] }.each do |group|
+        @groups.values.sort_by { |group| group[:order] }.each_with_index do |group, index|
+          @toolbar.add_separator if index.positive?
           group[:items].each do |item|
             item == :separator ? @toolbar.add_separator : @toolbar.add_item(item)
           end
