@@ -71,7 +71,7 @@ unless defined?(SeoulSpaceToolbar)
 
         last_state = @toolbar.get_last_state
         @toolbar.restore
-        @toolbar.show if defined?(TB_NEVER_SHOWN) && last_state == TB_NEVER_SHOWN
+        @toolbar.show if defined?(::TB_NEVER_SHOWN) && last_state == ::TB_NEVER_SHOWN
 
         @built = true
       rescue StandardError => e
