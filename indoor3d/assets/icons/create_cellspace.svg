@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
-  <path d="M12 3.5 L20 8 L12 12.5 L4 8 Z" fill="#e3f2fd" stroke="#1f2937" stroke-width="1.3" stroke-linejoin="round"/>
-  <path d="M4 8 L4 16 L12 20.5 L12 12.5 Z" fill="#90caf9" stroke="#1f2937" stroke-width="1.3" stroke-linejoin="round"/>
-  <path d="M12 12.5 L12 20.5 L20 16 L20 8 Z" fill="#bbdefb" stroke="#1f2937" stroke-width="1.3" stroke-linejoin="round"/>
-  <rect x="3.25" y="6.26" width="17.5" height="11.48" rx="1.7" fill="#e03131" opacity="0.75" stroke="#1f2937" stroke-width="0.55"/>
-  <text x="12" y="14.7" font-family="Arial, sans-serif" font-size="7.06" font-weight="bold" fill="#1f2937" text-anchor="middle">RM</text>
-  <circle cx="18.5" cy="18" r="3.5" fill="#2f9e44"/>
-  <path d="M18.5 16.5 L18.5 19.5 M17 18 L20 18" stroke="#ffffff" stroke-width="1.3" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+  <g stroke="#1F2937" stroke-width="1.2" stroke-linejoin="round">
+    <path d="M14.5 4.5L24 9.85L14.5 15.2L5 9.85Z" fill="#E3F2FD"/>
+    <path d="M5 9.85V20.55L14.5 25.9V15.2Z" fill="#90CAF9"/>
+    <path d="M14.5 15.2V25.9L24 20.55V9.85Z" fill="#BBDEFB"/>
+  </g>
+  <circle cx="23.5" cy="22.5" r="6" fill="#40C057" stroke="#1F2937" stroke-width="1.2"/>
+  <path d="M23.5 19.2V25.8M20.2 22.5H26.8" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round"/>
 </svg>
