@@ -1,8 +1,8 @@
-# IndoorGML 3D Modeler
+# SeoulSpace IndoorGML Modeler
 
 > SketchUp 2026에서 solid group을 IndoorGML CellSpace로 변환하고, dual graph를 편집·검증·Export하는 Ruby Extension입니다.
 
-![IndoorGML 3D Modeler](docs/images/preview.png)
+![SeoulSpace IndoorGML Modeler](docs/images/preview.png)
 
 ![Version](https://img.shields.io/badge/version-1.0.6-blue)
 ![SketchUp](https://img.shields.io/badge/SketchUp-2026-brightgreen)
@@ -11,7 +11,7 @@
 
 ## Overview
 
-IndoorGML 3D Modeler는 SketchUp 모델 안의 manifold solid group을 IndoorGML `CellSpace` 런타임 객체로 관리하고, 인접한 CellSpace 사이의 `State`/`Transition` dual graph를 자동으로 동기화합니다.
+SeoulSpace IndoorGML Modeler는 SketchUp 모델 안의 manifold solid group을 IndoorGML `CellSpace` 런타임 객체로 관리하고, 인접한 CellSpace 사이의 `State`/`Transition` dual graph를 자동으로 동기화합니다.
 
 주요 목표는 다음과 같습니다.
 
@@ -26,7 +26,7 @@ IndoorGML 3D Modeler는 SketchUp 모델 안의 manifold solid group을 IndoorGML
 
 v1.0.5는 검사 자체뿐 아니라 오류를 찾고, 안전하게 보정하고, 다시 확인하는 전체 Validation 워크플로를 확장합니다.
 
-- `Check Validity` 실행 시 **빠른 검사**와 **정밀검사** 중 선택
+- `Validity Check` 실행 시 **빠른 검사**와 **정밀검사** 중 선택
 - 정밀검사에서 유형별 geometry-only crash 탐색 후 원인 CellSpace에만 **Local Vertex Normalization(LVN)** 수행
 - LVN 실패 시 해당 CellSpace만 원복하고 이미 성공한 CellSpace 결과는 유지
 - 이미 정규화된 CellSpace와 이전 실패 CellSpace를 구분하여 불필요한 반복 처리 방지
@@ -183,7 +183,7 @@ CellSpace를 이동하거나 타입·층 정보를 변경하면 runtime attribut
 
 ### 5. Validity Check
 
-`Check Validity`를 실행하고 검사 profile을 선택합니다.
+`Validity Check`를 실행하고 검사 profile을 선택합니다.
 
 - **빠른 검사**: 현재 geometry를 바꾸지 않고 val3dity와 Extension 701/704 재검사를 수행
 - **정밀검사**: CellSpace별 LVN 후 물리 허용오차 0.01 mm를 적용해 val3dity 검사
@@ -205,7 +205,7 @@ CellSpace를 이동하거나 타입·층 정보를 변경하면 runtime attribut
 | Show/Hide State/Link Overlay | ![](indoor3d/assets/icons/toggle_dual_overlay.svg) | State/Transition Overlay 표시 토글 |
 | Dual Overlay Scale | ![](indoor3d/assets/icons/dual_overlay_scale.svg) | State 표시 크기 조절 |
 | Export GML | ![](indoor3d/assets/icons/export_gml.svg) | IndoorGML 1.0 GML 파일 저장 |
-| Check Validity | ![](indoor3d/assets/icons/check_validity.svg) | 검사 profile 선택 후 Validation 실행 |
+| Validity Check | ![](indoor3d/assets/icons/check_validity.svg) | 검사 profile 선택 후 Validation 실행 |
 
 Context menu는 상황에 따라 `Edit IndoorGML`, `Change CellSpace Type` 등 IndoorGML 편집 항목을 추가합니다.
 
@@ -374,7 +374,7 @@ GML 좌표:
 
 ## Validity Check
 
-`Check Validity`를 실행하면 빠른 검사와 정밀검사 선택 dialog가 표시됩니다. 두 profile은 동일한 진행 dialog, 종료 코드 판정, report, 오류 focus, Fix Mode를 사용하지만 geometry 처리와 overlap 판정 경로가 다릅니다.
+`Validity Check`를 실행하면 빠른 검사와 정밀검사 선택 dialog가 표시됩니다. 두 profile은 동일한 진행 dialog, 종료 코드 판정, report, 오류 focus, Fix Mode를 사용하지만 geometry 처리와 overlap 판정 경로가 다릅니다.
 
 ### 빠른 검사
 
@@ -453,7 +453,7 @@ Validation report에서 오류 행을 선택하면 관련 CellSpace와 오류 ge
 - PrimalSpaceFeatures 직접 자식 group 편집 지원
 - 오류 요소만 다시 검사하는 부분 재검사 지원
 
-부분 재검사 통과는 전체 모델의 최종 유효성을 의미하지 않습니다. 수정 완료 후 전체 `Check Validity`를 다시 실행해야 합니다.
+부분 재검사 통과는 전체 모델의 최종 유효성을 의미하지 않습니다. 수정 완료 후 전체 `Validity Check`를 다시 실행해야 합니다.
 
 ### Validation 실행 중 동작
 
