@@ -225,6 +225,16 @@ module ULOL
       command
     end
 
+    def self.indoor_gml_elements_available?
+      indoor_model = IndoorCore::IndoorModel.current
+      [indoor_model.cell_spaces, indoor_model.states, indoor_model.transitions].any? do |items|
+        Array(items).any?
+      end
+    rescue StandardError => e
+      IndoorCore::Logger.puts "[IndoorGML] Element availability check failed: #{e.class}: #{e.message}"
+      false
+    end
+
     def self.assign_command_icon(command, icon)
       path = icon_path(icon)
       return unless File.exist?(path)
@@ -245,7 +255,10 @@ module ULOL
       dispatcher = command_dispatcher
       create_cell_space_command = create_command(
         SeoulSpacePluginsMenu.text('Create CellSpace', 'CellSpace 생성'),
-        'Convert selected solid groups to CellSpace',
+        SeoulSpacePluginsMenu.text(
+          'Convert selected Solid Groups to CellSpace.',
+          '선택한 Solid Group을 CellSpace로 변환합니다.'
+        ),
         icon: 'create_cellspace.svg'
       ) do
         dispatcher.convert_selected_solid_groups_to_cell_spaces()
@@ -255,13 +268,17 @@ module ULOL
       end
       change_type_command = create_command(
         'Change CellSpace Type',
-        'Change selected CellSpace type',
+        SeoulSpacePluginsMenu.text(
+          'Change the selected CellSpace type.',
+          '선택한 CellSpace의 Type을 변경합니다.'
+        ),
         icon: 'change_cellspace_type.svg'
       ) do
         dispatcher.change_selected_cell_space_type()
       end
       change_type_command.set_validation_proc do
         next MF_GRAYED if dispatcher.validation_operation_running?
+        next MF_GRAYED unless indoor_gml_elements_available?
 
         indoor_model = IndoorCore::IndoorModel.current
         selected_cell_spaces = dispatcher.selected_indoor_gml_entities.select do |entity|
@@ -272,7 +289,10 @@ module ULOL
       end
       @edit_property_command = create_command(
         SeoulSpacePluginsMenu.text('Edit CellSpace Property', 'IndoorGML편집'),
-        'Toggle IndoorGML editing',
+        SeoulSpacePluginsMenu.text(
+          'Edit IndoorGML elements.',
+          'IndoorGML 요소를 편집합니다.'
+        ),
         icon: 'edit_cellspace_property.svg'
       ) do
         dispatcher.toggle_indoor_gml_editing()
@@ -280,62 +300,86 @@ module ULOL
 
       @edit_property_command.set_validation_proc do
         next MF_GRAYED if dispatcher.validation_operation_running?
+        next MF_GRAYED unless indoor_gml_elements_available?
 
         IndoorCore::IndoorModel.current.editing? ? MF_CHECKED : MF_UNCHECKED
       end
       @geometry_command = create_command(
         SeoulSpacePluginsMenu.text('Show Geometry', 'Geometry보이기'),
-        'Show CellSpace geometry',
+        SeoulSpacePluginsMenu.text(
+          'Show or hide Geometry.',
+          'Geometry를 보이거나 숨깁니다.'
+        ),
         icon: 'toggle_geometry.svg'
       ) do
         dispatcher.toggle_geometry()
       end
       dispatcher.geometry_command = @geometry_command
       @geometry_command.set_validation_proc do
+        next MF_GRAYED unless indoor_gml_elements_available?
+
         dispatcher.update_geometry_command()
         IndoorCore::IndoorModel.current.geometry_visible? ? MF_CHECKED : MF_UNCHECKED
       end
       @dual_overlay_command = create_command(
         SeoulSpacePluginsMenu.text('Show State/Link Overlay', '그래프 보이기'),
-        'Show State and Transition overlay',
+        SeoulSpacePluginsMenu.text(
+          'Show or hide the State/Transition Graph.',
+          'State/Transition Graph를 보이거나 숨깁니다.'
+        ),
         icon: 'toggle_dual_overlay.svg'
       ) do
         dispatcher.toggle_dual_overlay()
       end
       dispatcher.dual_overlay_command = @dual_overlay_command
       @dual_overlay_command.set_validation_proc do
+        next MF_GRAYED unless indoor_gml_elements_available?
+
         dispatcher.update_dual_overlay_command()
         IndoorCore::IndoorModel.current.dual_overlay_visible? ? MF_CHECKED : MF_UNCHECKED
       end
       @dual_overlay_scale_command = create_command(
         'State/Link Overlay Scale',
-        'Adjust State/Link overlay state radius scale',
+        SeoulSpacePluginsMenu.text(
+          'Change the State display size.',
+          'State 표시 크기를 변경합니다.'
+        ),
         icon: 'dual_overlay_scale.svg'
       ) do
         dispatcher.open_dual_overlay_scale_dialog()
       end
       @dual_overlay_scale_command.set_validation_proc do
-        MF_ENABLED
+        indoor_gml_elements_available? ? MF_ENABLED : MF_GRAYED
       end
       export_command = create_command(
         SeoulSpacePluginsMenu.text('GML Export', 'GML 내보내기'),
-        'Export GML without validity check',
+        SeoulSpacePluginsMenu.text(
+          'Export IndoorGML.',
+          'IndoorGML을 내보냅니다.'
+        ),
         icon: 'export_gml.svg'
       ) do
         dispatcher.export_gml()
       end
       export_command.set_validation_proc do
-        dispatcher.validation_operation_running? ? MF_GRAYED : MF_ENABLED
+        next MF_GRAYED if dispatcher.validation_operation_running?
+
+        indoor_gml_elements_available? ? MF_ENABLED : MF_GRAYED
       end
       check_validity_command = create_command(
         SeoulSpacePluginsMenu.text('Validity Check', '유효성 검사'),
-        'Create temp GML and run validity check',
+        SeoulSpacePluginsMenu.text(
+          'Validate IndoorGML.',
+          'IndoorGML 유효성을 검사합니다.'
+        ),
         icon: 'check_validity.svg'
       ) do
         dispatcher.check_validity()
       end
       check_validity_command.set_validation_proc do
-        dispatcher.validation_operation_running? ? MF_GRAYED : MF_ENABLED
+        next MF_GRAYED if dispatcher.validation_operation_running?
+
+        indoor_gml_elements_available? ? MF_ENABLED : MF_GRAYED
       end
       dispatcher.update_geometry_command()
       dispatcher.update_dual_overlay_command()
