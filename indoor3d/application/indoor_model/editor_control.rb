@@ -4,6 +4,7 @@ require 'fileutils'
 require 'json'
 require_relative '../../validity/validation_focus_report_mapper'
 require_relative '../../ui/ui_feedback'
+require_relative '../../ui/cell_space_create_dialog'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -410,14 +411,17 @@ module ULOL
               )
               @editor_session.selection_changed()
               Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
-              UiFeedback.publish_result(
-                ConversionMessageFormatter.result_message(result.converted_count, result.errors),
-                errors: result.errors
+              CellSpaceCreateDialog.show_conversion_result(
+                result,
+                title: 'CellSpace 변환 완료'
               )
               true
             rescue StandardError => e
               IndoorCore::Logger.puts "[IndoorGML] Selected solid group conversion failed: #{e.class}: #{e.message}"
-              UiFeedback.defer_modal("CellSpace conversion failed:\n#{e.message}")
+              CellSpaceCreateDialog.show_error_dialog(
+                e.message,
+                title: 'CellSpace 변환 실패'
+              )
               false
             end
           end
