@@ -391,7 +391,7 @@ module ULOL
 
         def publish_cell_space_command_result(result, title: 'CellSpace 변환 완료')
           CellSpaceCreateDialog.show_conversion_result(result, title: title)
-        endd
+        end
       end
     end
   end
