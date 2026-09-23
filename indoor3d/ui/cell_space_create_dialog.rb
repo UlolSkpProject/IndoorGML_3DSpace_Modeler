@@ -59,11 +59,13 @@ module ULOL
 
         def initialize
           @payload = nil
+          @pending_result_payload = nil
           @on_submit = nil
         end
 
         def show(payload, &on_submit)
           @payload = payload
+          @pending_result_payload = nil
           @on_submit = on_submit
           ensure_dialog
           @dialog.set_size(WIDTH, FORM_HEIGHT)
@@ -78,16 +80,16 @@ module ULOL
 
         def show_result(result, title: 'CellSpace 생성 완료')
           ensure_dialog
-          payload = self.class.result_payload(result, title: title)
+          @pending_result_payload = self.class.result_payload(result, title: title)
           @dialog.set_size(WIDTH, RESULT_HEIGHT)
           @dialog.show unless visible?
-          execute("window.CellSpaceCreateDialog.showResult(#{JSON.generate(payload)})")
+          push_result(@pending_result_payload)
           self
         end
 
         def show_error(message, title: 'CellSpace 생성 실패')
           ensure_dialog
-          payload = {
+          @pending_result_payload = {
             title: title,
             status: 'error',
             converted_count: 0,
@@ -97,7 +99,7 @@ module ULOL
           }
           @dialog.set_size(WIDTH, RESULT_HEIGHT)
           @dialog.show unless visible?
-          execute("window.CellSpaceCreateDialog.showResult(#{JSON.generate(payload)})")
+          push_result(@pending_result_payload)
           self
         end
 
@@ -122,14 +124,18 @@ module ULOL
             height: FORM_HEIGHT,
             style: ::UI::HtmlDialog::STYLE_DIALOG
           )
-          @dialog.set_html(html)
+          @dialog.set_html(HtmlDialogSafety.inject_external_file_drop_guard(html))
           register_callbacks(@dialog)
           @dialog
         end
 
         def register_callbacks(dialog)
           dialog.add_action_callback('ready') do
-            push_form(@payload) if @payload
+            if @pending_result_payload
+              push_result(@pending_result_payload)
+            elsif @payload
+              push_form(@payload)
+            end
           end
           dialog.add_action_callback('submit') do |_context, json|
             selection = JSON.parse(json.to_s)
@@ -146,6 +152,8 @@ module ULOL
           dialog.add_action_callback('close') { close }
           dialog.set_on_closed do
             @dialog = nil
+            @payload = nil
+            @pending_result_payload = nil
             @on_submit = nil
           end
         end
@@ -154,6 +162,12 @@ module ULOL
           return unless payload
 
           execute("window.CellSpaceCreateDialog.showForm(#{JSON.generate(payload)})")
+        end
+
+        def push_result(payload)
+          return unless payload
+
+          execute("window.CellSpaceCreateDialog.showResult(#{JSON.generate(payload)})")
         end
 
         def visible?
