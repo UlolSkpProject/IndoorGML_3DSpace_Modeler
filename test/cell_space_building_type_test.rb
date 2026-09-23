@@ -13,17 +13,6 @@ module Sketchup
   end
 end
 
-module UI
-  class << self
-    attr_accessor :response, :arguments
-
-    def inputbox(*args)
-      self.arguments = args
-      response
-    end
-  end
-end
-
 class CellSpaceBuildingTypeTest < Minitest::Test
   Core = ULOL::Indoor3DGmlModeler::IndoorCore
   Adapter = Core::TagCellSpaceAdapter
@@ -52,18 +41,40 @@ class CellSpaceBuildingTypeTest < Minitest::Test
   end
 
   def test_creation_dialog_selects_and_remembers_building_before_classification
-    UI.response = ['공공기관', 'Room : GeneralSpace', 'F02']
-    options = @command.send(:prompt_cell_space_creation_options, 'Create CellSpace', default_storey: 'F01')
+    payload = @command.send(
+      :cell_space_creation_dialog_payload,
+      'Create CellSpace',
+      default_storey: 'F01'
+    )
+
+    assert_equal 'subway', payload[:selected_building]
+    assert_equal(
+      [
+        { value: 'subway', label: '지하철' },
+        { value: 'public', label: '공공기관' }
+      ],
+      payload[:building_types]
+    )
+
+    options = @command.send(
+      :resolve_cell_space_creation_dialog_selection,
+      {
+        'building_type' => 'public',
+        'cell_space_label' => 'Room : GeneralSpace',
+        'storey' => 'F02'
+      }
+    )
 
     assert_equal [Core::CellSpaceType::GENERAL, 'Room', 'F02'], options
-    assert_equal '지하철|공공기관', UI.arguments[2][0]
     assert_equal 'public', Adapter.building_type
     assert_equal [Core::CellSpaceType::TRANSITION, 'Elevator'], Adapter.cell_space_type_from_tag('F01F03_MV_FC_02')
 
-    UI.response = false
-    assert_nil @command.send(:prompt_cell_space_creation_options, 'Create CellSpace', default_storey: 'F01')
-    assert_equal '공공기관', UI.arguments[1][0]
-    assert_equal 'public', Adapter.building_type
+    next_payload = @command.send(
+      :cell_space_creation_dialog_payload,
+      'Create CellSpace',
+      default_storey: 'F01'
+    )
+    assert_equal 'public', next_payload[:selected_building]
   end
 
   def test_models_keep_independent_building_settings
