@@ -71,30 +71,45 @@ module ULOL
           [option[:cell_type], option[:category_code]]
         end
 
-        def prompt_cell_space_creation_options(title, default_target: nil, default_storey: CellSpace::DEFAULT_STOREY)
-          building_types = SharedTagCatalog::BUILDING_TYPES
-          building_label = building_types.fetch(TagCellSpaceAdapter.building_type)
+        def cell_space_creation_dialog_payload(title, default_target: nil, default_storey: CellSpace::DEFAULT_STOREY)
           if TagCellSpaceAdapter.catalog.error
-            UiFeedback.notify('공통 객체코드표를 읽지 못했습니다. TAG Helper에서 코드표를 확인한 뒤 SketchUp을 다시 시작해주세요.')
+            UiFeedback.notify('공통 객체코드표를 읽지 못했습니다. Tag Helper에서 코드표를 확인한 뒤 SketchUp을 다시 시작해주세요.')
             return nil
           end
+
+          building_types = SharedTagCatalog::BUILDING_TYPES
           options = CellSpaceCategory.selection_options
-          labels = options.map { |option| option[:label] }
           default_option = options.find do |option|
             default_target && option[:cell_type] == default_target[0] && option[:category_code] == default_target[1]
           end || options.first
-          result = UI.inputbox(
-            ['건축물 구분', 'CellSpace (유효 TAG가 없을 때)', '층 (F01 또는 F01~F03)'],
-            [building_label, default_option[:label], default_storey.to_s.empty? ? CellSpace::DEFAULT_STOREY : default_storey],
-            [building_types.values.join('|'), labels.join('|'), ''],
-            title
-          )
-          return nil unless result
 
-          selected_building = building_types.key(result[0])
+          {
+            title: title,
+            description: '선택한 Solid Group을 CellSpace로 변환합니다.',
+            building_types: building_types.map { |value, label| { value: value.to_s, label: label.to_s } },
+            selected_building: TagCellSpaceAdapter.building_type.to_s,
+            cell_space_options: options.map { |option| { value: option[:label].to_s, label: option[:label].to_s } },
+            selected_cell_space: default_option[:label].to_s,
+            storey: default_storey.to_s.empty? ? CellSpace::DEFAULT_STOREY : default_storey.to_s
+          }
+        end
+
+        def resolve_cell_space_creation_dialog_selection(selection, default_target: nil)
+          values = selection.is_a?(Hash) ? selection : {}
+          building_type = values['building_type'] || values[:building_type]
+          cell_space_label = values['cell_space_label'] || values[:cell_space_label]
+          storey = (values['storey'] || values[:storey]).to_s.strip
+
+          building_types = SharedTagCatalog::BUILDING_TYPES
+          selected_building = building_types.key?(building_type.to_s) ? building_type.to_s : TagCellSpaceAdapter.building_type.to_s
           TagCellSpaceAdapter.set_building_type(Sketchup.active_model, selected_building)
-          option = options.find { |candidate| candidate[:label] == result[1] } || default_option
-          storey = result[2].to_s.strip
+
+          options = CellSpaceCategory.selection_options
+          default_option = options.find do |option|
+            default_target && option[:cell_type] == default_target[0] && option[:category_code] == default_target[1]
+          end || options.first
+          option = options.find { |candidate| candidate[:label].to_s == cell_space_label.to_s } || default_option
+
           storey = CellSpace::DEFAULT_STOREY if storey.empty?
           [option[:cell_type], option[:category_code], storey]
         end

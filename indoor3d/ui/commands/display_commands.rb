@@ -54,15 +54,29 @@ module ULOL
               'Hide State/Link Overlay',
               '그래프 숨기기'
             )
-            @dual_overlay_command.tooltip = 'Hide State and Transition overlay'
-            @dual_overlay_command.status_bar_text = 'Hide State and Transition overlay'
+            description = SeoulSpacePluginsMenu.text(
+              'Hide the State/Transition Graph.',
+              'State/Transition Graph를 숨깁니다.'
+            )
+            @dual_overlay_command.tooltip = SeoulSpacePluginsMenu.text(
+              'Hide Graph',
+              'Graph 숨김'
+            )
+            @dual_overlay_command.status_bar_text = description
           else
             @dual_overlay_command.menu_text = SeoulSpacePluginsMenu.text(
               'Show State/Link Overlay',
               '그래프 보이기'
             )
-            @dual_overlay_command.tooltip = 'Show State and Transition overlay'
-            @dual_overlay_command.status_bar_text = 'Show State and Transition overlay'
+            description = SeoulSpacePluginsMenu.text(
+              'Show the State/Transition Graph.',
+              'State/Transition Graph를 표시합니다.'
+            )
+            @dual_overlay_command.tooltip = SeoulSpacePluginsMenu.text(
+              'Show Graph',
+              'Graph 표시'
+            )
+            @dual_overlay_command.status_bar_text = description
           end
         rescue StandardError => e
           Logger.puts "[IndoorGML] Dual overlay command update failed: #{e.class}: #{e.message}"
@@ -76,15 +90,29 @@ module ULOL
               'Hide Geometry',
               'Geometry숨기기'
             )
-            @geometry_command.tooltip = 'Hide CellSpace geometry'
-            @geometry_command.status_bar_text = 'Hide CellSpace geometry'
+            description = SeoulSpacePluginsMenu.text(
+              'Hide Geometry.',
+              'Geometry를 숨깁니다.'
+            )
+            @geometry_command.tooltip = SeoulSpacePluginsMenu.text(
+              'Hide Geometry',
+              'Geometry 숨김'
+            )
+            @geometry_command.status_bar_text = description
           else
             @geometry_command.menu_text = SeoulSpacePluginsMenu.text(
               'Show Geometry',
               'Geometry보이기'
             )
-            @geometry_command.tooltip = 'Show CellSpace geometry'
-            @geometry_command.status_bar_text = 'Show CellSpace geometry'
+            description = SeoulSpacePluginsMenu.text(
+              'Show Geometry.',
+              'Geometry를 표시합니다.'
+            )
+            @geometry_command.tooltip = SeoulSpacePluginsMenu.text(
+              'Show Geometry',
+              'Geometry 표시'
+            )
+            @geometry_command.status_bar_text = description
           end
         rescue StandardError => e
           Logger.puts "[IndoorGML] Geometry command update failed: #{e.class}: #{e.message}"

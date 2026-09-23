@@ -1,30 +1,125 @@
 require 'sketchup.rb'
 require_relative 'definition'
+require_relative 'seoul_space_toolbar'
 
-unless defined?(SeoulSpacePluginsMenu)
-  module SeoulSpacePluginsMenu
-    def self.korean?
+module SeoulSpacePluginsMenu
+  desired_groups = %i[tag rm verify indoorgml obj manager].freeze
+  if const_defined?(:EXPECTED_GROUPS, false) && const_get(:EXPECTED_GROUPS) != desired_groups
+    remove_const(:EXPECTED_GROUPS)
+  end
+  const_set(:EXPECTED_GROUPS, desired_groups) unless const_defined?(:EXPECTED_GROUPS, false)
+  const_set(:FALLBACK_DELAY, 0.25) unless const_defined?(:FALLBACK_DELAY, false)
+
+  @groups ||= {}
+  @timer_id = nil unless instance_variable_defined?(:@timer_id)
+  @built = false unless instance_variable_defined?(:@built)
+  @built_groups ||= if @built
+                      @groups.keys.each_with_object({}) { |key, memo| memo[key] = true }
+                    else
+                      {}
+                    end
+  @group_registered = false unless instance_variable_defined?(:@group_registered)
+
+  class << self
+    def korean?
       return false unless defined?(::Sketchup) && ::Sketchup.respond_to?(:get_locale)
 
       ::Sketchup.get_locale.to_s.downcase.start_with?('ko')
     end
 
-    def self.text(english, korean)
+    def text(english, korean)
       korean? ? korean : english
     end
 
-    def self.menu
-      @menu ||= ::UI.menu('Extensions').add_submenu(
-        text('SeoulSpace Plugins', '서울시 공간구축사업 Plugins')
-      )
-    end
-
-    def self.add_group
+    # Compatibility for older extensions that still add a group directly.
+    def add_group
       target_menu = menu
       target_menu.add_separator if @group_registered
       result = yield(target_menu)
       @group_registered = true
       result
+    end
+
+    def register(group, order:, &builder)
+      raise ArgumentError, 'menu builder is required' unless builder
+
+      key = group.to_sym
+      @groups[key] = {
+        order: Integer(order),
+        builder: builder
+      }
+
+      if @built
+        append_group(key)
+      elsif ready?
+        cancel_timer
+        build
+      else
+        schedule_build
+      end
+    end
+
+    private
+
+    def menu
+      @menu ||= ::UI.menu('Extensions').add_submenu(
+        text('SeoulSpace Plugins', 'SeoulSpace 플러그인')
+      )
+    end
+
+    def ready?
+      (EXPECTED_GROUPS - @groups.keys).empty?
+    end
+
+    def schedule_build
+      return if @built
+      return unless ::UI.respond_to?(:start_timer)
+
+      cancel_timer
+      @timer_id = ::UI.start_timer(FALLBACK_DELAY, false) do
+        @timer_id = nil
+        build
+      end
+    end
+
+    def cancel_timer
+      return unless @timer_id
+
+      ::UI.stop_timer(@timer_id)
+      @timer_id = nil
+    rescue StandardError
+      @timer_id = nil
+    end
+
+    def build
+      return if @built || @groups.empty?
+
+      target_menu = menu
+      @built_groups = {}
+
+      @groups.sort_by { |_key, group| group[:order] }.each_with_index do |(key, group), index|
+        target_menu.add_separator if index.positive?
+        group[:builder].call(target_menu)
+        @built_groups[key] = true
+      end
+
+      @built = true
+    rescue StandardError => e
+      puts "[SeoulSpacePluginsMenu] Build failed: #{e.class}: #{e.message}"
+    end
+
+    def append_group(key)
+      return if @built_groups[key]
+
+      group = @groups[key]
+      return unless group
+
+      target_menu = menu
+      target_menu.add_separator unless @built_groups.empty?
+      group[:builder].call(target_menu)
+      @built_groups[key] = true
+    rescue StandardError => e
+      puts "[SeoulSpacePluginsMenu] Late group append failed (#{key}): #{e.class}: #{e.message}"
     end
   end
 end
@@ -169,6 +264,16 @@ module ULOL
       command
     end
 
+    def self.indoor_gml_elements_available?
+      indoor_model = IndoorCore::IndoorModel.current
+      [indoor_model.cell_spaces, indoor_model.states, indoor_model.transitions].any? do |items|
+        Array(items).any?
+      end
+    rescue StandardError => e
+      IndoorCore::Logger.puts "[IndoorGML] Element availability check failed: #{e.class}: #{e.message}"
+      false
+    end
+
     def self.assign_command_icon(command, icon)
       path = icon_path(icon)
       return unless File.exist?(path)
@@ -187,31 +292,40 @@ module ULOL
     unless file_loaded?(__FILE__)
       attach_model_observer()
       dispatcher = command_dispatcher
-      menu = SeoulSpacePluginsMenu.add_group do |parent_menu|
-        parent_menu.add_submenu(
-          SeoulSpacePluginsMenu.text('IndoorGML 3DSpace Modeler', 'IndoorGML 모델러')
-        )
-      end
-
       create_cell_space_command = create_command(
         SeoulSpacePluginsMenu.text('Create CellSpace', 'CellSpace 생성'),
-        'Convert selected solid groups to CellSpace',
+        SeoulSpacePluginsMenu.text(
+          'Convert selected Solid Groups to CellSpace.',
+          '선택한 Solid Group을 CellSpace로 변환합니다.'
+        ),
         icon: 'create_cellspace.svg'
       ) do
         dispatcher.convert_selected_solid_groups_to_cell_spaces()
       end
+      create_cell_space_command.tooltip = SeoulSpacePluginsMenu.text(
+        'Create CellSpace',
+        'CellSpace 생성'
+      )
       create_cell_space_command.set_validation_proc do
         dispatcher.validation_operation_running? ? MF_GRAYED : MF_ENABLED
       end
       change_type_command = create_command(
         'Change CellSpace Type',
-        'Change selected CellSpace type',
+        SeoulSpacePluginsMenu.text(
+          'Change the selected CellSpace type.',
+          '선택한 CellSpace의 Type을 변경합니다.'
+        ),
         icon: 'change_cellspace_type.svg'
       ) do
         dispatcher.change_selected_cell_space_type()
       end
+      change_type_command.tooltip = SeoulSpacePluginsMenu.text(
+        'Change CellSpace Type',
+        'CellSpace Type 변경'
+      )
       change_type_command.set_validation_proc do
         next MF_GRAYED if dispatcher.validation_operation_running?
+        next MF_GRAYED unless indoor_gml_elements_available?
 
         indoor_model = IndoorCore::IndoorModel.current
         selected_cell_spaces = dispatcher.selected_indoor_gml_entities.select do |entity|
@@ -222,97 +336,155 @@ module ULOL
       end
       @edit_property_command = create_command(
         SeoulSpacePluginsMenu.text('Edit CellSpace Property', 'IndoorGML편집'),
-        'Toggle IndoorGML editing',
+        SeoulSpacePluginsMenu.text(
+          'Edit IndoorGML elements.',
+          'IndoorGML 요소를 편집합니다.'
+        ),
         icon: 'edit_cellspace_property.svg'
       ) do
         dispatcher.toggle_indoor_gml_editing()
       end
+      @edit_property_command.tooltip = SeoulSpacePluginsMenu.text(
+        'Edit IndoorGML',
+        'IndoorGML 편집'
+      )
 
       @edit_property_command.set_validation_proc do
         next MF_GRAYED if dispatcher.validation_operation_running?
+        next MF_GRAYED unless indoor_gml_elements_available?
 
         IndoorCore::IndoorModel.current.editing? ? MF_CHECKED : MF_UNCHECKED
       end
       @geometry_command = create_command(
         SeoulSpacePluginsMenu.text('Show Geometry', 'Geometry보이기'),
-        'Show CellSpace geometry',
+        SeoulSpacePluginsMenu.text(
+          'Show or hide Geometry.',
+          'Geometry를 보이거나 숨깁니다.'
+        ),
         icon: 'toggle_geometry.svg'
       ) do
         dispatcher.toggle_geometry()
       end
+      @geometry_command.tooltip = SeoulSpacePluginsMenu.text(
+        'Show Geometry',
+        'Geometry 표시'
+      )
       dispatcher.geometry_command = @geometry_command
       @geometry_command.set_validation_proc do
+        next MF_GRAYED unless indoor_gml_elements_available?
+
         dispatcher.update_geometry_command()
         IndoorCore::IndoorModel.current.geometry_visible? ? MF_CHECKED : MF_UNCHECKED
       end
       @dual_overlay_command = create_command(
         SeoulSpacePluginsMenu.text('Show State/Link Overlay', '그래프 보이기'),
-        'Show State and Transition overlay',
+        SeoulSpacePluginsMenu.text(
+          'Show or hide the State/Transition Graph.',
+          'State/Transition Graph를 보이거나 숨깁니다.'
+        ),
         icon: 'toggle_dual_overlay.svg'
       ) do
         dispatcher.toggle_dual_overlay()
       end
+      @dual_overlay_command.tooltip = SeoulSpacePluginsMenu.text(
+        'Show Graph',
+        'Graph 표시'
+      )
       dispatcher.dual_overlay_command = @dual_overlay_command
       @dual_overlay_command.set_validation_proc do
+        next MF_GRAYED unless indoor_gml_elements_available?
+
         dispatcher.update_dual_overlay_command()
         IndoorCore::IndoorModel.current.dual_overlay_visible? ? MF_CHECKED : MF_UNCHECKED
       end
       @dual_overlay_scale_command = create_command(
         'State/Link Overlay Scale',
-        'Adjust State/Link overlay state radius scale',
+        SeoulSpacePluginsMenu.text(
+          'Change the State display size.',
+          'State 표시 크기를 변경합니다.'
+        ),
         icon: 'dual_overlay_scale.svg'
       ) do
         dispatcher.open_dual_overlay_scale_dialog()
       end
+      @dual_overlay_scale_command.tooltip = SeoulSpacePluginsMenu.text(
+        'Change State Size',
+        'State 크기 변경'
+      )
       @dual_overlay_scale_command.set_validation_proc do
-        MF_ENABLED
+        indoor_gml_elements_available? ? MF_ENABLED : MF_GRAYED
       end
       export_command = create_command(
-        SeoulSpacePluginsMenu.text('Export GML', '.gml 추출'),
-        'Export GML without validity check',
+        SeoulSpacePluginsMenu.text('GML Export', 'GML 내보내기'),
+        SeoulSpacePluginsMenu.text(
+          'Export IndoorGML.',
+          'IndoorGML을 내보냅니다.'
+        ),
         icon: 'export_gml.svg'
       ) do
         dispatcher.export_gml()
       end
+      export_command.tooltip = SeoulSpacePluginsMenu.text(
+        'Export GML',
+        'GML 내보내기'
+      )
       export_command.set_validation_proc do
-        dispatcher.validation_operation_running? ? MF_GRAYED : MF_ENABLED
+        next MF_GRAYED if dispatcher.validation_operation_running?
+
+        indoor_gml_elements_available? ? MF_ENABLED : MF_GRAYED
       end
       check_validity_command = create_command(
-        SeoulSpacePluginsMenu.text('Check Validity', '유효성 검증'),
-        'Create temp GML and run validity check',
+        SeoulSpacePluginsMenu.text('Validity Check', '유효성 검사'),
+        SeoulSpacePluginsMenu.text(
+          'Validate IndoorGML.',
+          'IndoorGML 유효성을 검사합니다.'
+        ),
         icon: 'check_validity.svg'
       ) do
         dispatcher.check_validity()
       end
+      check_validity_command.tooltip = SeoulSpacePluginsMenu.text(
+        'Validity Check',
+        '유효성 검사'
+      )
       check_validity_command.set_validation_proc do
-        dispatcher.validation_operation_running? ? MF_GRAYED : MF_ENABLED
+        next MF_GRAYED if dispatcher.validation_operation_running?
+
+        indoor_gml_elements_available? ? MF_ENABLED : MF_GRAYED
       end
       dispatcher.update_geometry_command()
       dispatcher.update_dual_overlay_command()
 
-      menu.add_item(create_cell_space_command)
-      menu.add_item(@edit_property_command)
-      menu.add_item(@geometry_command)
-      menu.add_item(@dual_overlay_command)
-      menu.add_item(export_command)
-      menu.add_item(check_validity_command)
+      SeoulSpacePluginsMenu.register(:indoorgml, order: 40) do |parent_menu|
+        menu = parent_menu.add_submenu(
+          SeoulSpacePluginsMenu.text('SeoulSpace IndoorGML Modeler', 'SeoulSpace IndoorGML Modeler')
+        )
+        menu.add_item(create_cell_space_command)
+        menu.add_item(@edit_property_command)
+        menu.add_item(@geometry_command)
+        menu.add_item(@dual_overlay_command)
+        menu.add_item(export_command)
+        menu.add_item(check_validity_command)
+      end
 
       UI.add_context_menu_handler do |context_menu|
         dispatcher.add_context_menu_items(context_menu)
       end
 
-      toolbar = UI::Toolbar.new('Indoor3DGML Modeler')
-      toolbar.add_item(create_cell_space_command)
-      toolbar.add_item(@edit_property_command)
-      toolbar.add_item(change_type_command)
-      toolbar.add_separator
-      toolbar.add_item(@geometry_command)
-      toolbar.add_item(@dual_overlay_command)
-      toolbar.add_item(@dual_overlay_scale_command)
-      toolbar.add_separator
-      toolbar.add_item(export_command)
-      toolbar.add_item(check_validity_command)
-      toolbar.show()
+      SeoulSpaceToolbar.register(
+        :indoorgml,
+        order: 40,
+        items: [
+          create_cell_space_command,
+          @edit_property_command,
+          change_type_command,
+          @geometry_command,
+          @dual_overlay_command,
+          @dual_overlay_scale_command,
+          export_command,
+          check_validity_command
+        ]
+      )
       file_loaded(__FILE__)
     end
 

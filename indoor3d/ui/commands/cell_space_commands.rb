@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../ui_feedback'
+require_relative '../cell_space_create_dialog'
 require_relative '../../application/progress/production_progress_session'
 require_relative '../overlays/production_progress_overlay'
 require_relative '../../application/progress/cell_space_create_progress_integration'
@@ -43,116 +44,13 @@ module ULOL
 
       module CellSpaceCommands
         def convert_selected_solid_groups_to_cell_spaces
-          return if respond_to?(:validation_operation_running?) && validation_operation_running?
-
-          progress_session = nil
-          begin
-            model = Sketchup.active_model()
-            indoor_model = IndoorModel.current
-            unless indoor_model.prepare_cell_space_creation_active_context(model)
-              raise 'Failed to prepare active context for CellSpace conversion'
-            end
-            original_active_path = active_path_snapshot(model)
-            groups = model.selection().to_a.select { |entity| convertible_container?(entity) }
-            conversion_jobs = CellSpaceConversionJobBuilder.new(entities: groups).build
-
-            if conversion_jobs.empty?
-              UiFeedback.notify('Select one or more solid groups to convert to CellSpace.')
-              return
-            end
-
-            targets = conversion_jobs.map { |job| job[:target] }.compact.uniq
-            storeys = conversion_jobs.map { |job| job[:storey].to_s }.reject(&:empty?).uniq
-            creation_options = prompt_cell_space_creation_options(
-              'Convert Solid Groups to CellSpace',
-              default_target: targets.length == 1 ? targets.first : nil,
-              default_storey: storeys.length == 1 ? storeys.first : CellSpace::DEFAULT_STOREY
-            )
-            return unless creation_options
-
-            cell_type, category_code, storey = creation_options
-            # Reclassify after the building type has been chosen in the dialog.
-            conversion_jobs = CellSpaceConversionJobBuilder.new(entities: groups).build
-            conversion_jobs = CellSpaceConversionJobBuilder.apply_fallback_storey(conversion_jobs, storey)
-            progress_session = start_cell_space_create_progress(model, conversion_jobs.length)
-
-            result = ProductionProgress::CellSpaceProgressContext.with(progress_session) do
-              indoor_model.convert_cell_space_jobs_bulk(
-                conversion_jobs,
-                fallback_target: [cell_type, category_code],
-                original_active_path: original_active_path,
-                operation_name: 'Convert Solid Groups to CellSpace',
-                activate_root_context: true
-              )
-            end
-            finish_cell_space_create_progress(progress_session, result)
-            close_cell_space_create_progress(progress_session)
-            progress_session = nil
-            publish_cell_space_command_result(result)
-          rescue StandardError => e
-            fail_cell_space_create_progress(progress_session, e)
-            close_cell_space_create_progress(progress_session)
-            progress_session = nil
-            if model && defined?(original_active_path) && original_active_path
-              IndoorModel.current.with_active_path_enforcement_suspended do
-                restore_active_path(model, original_active_path)
-              end
-            end
-            UiFeedback.notify("CellSpace conversion failed:\n#{e.message}")
-          ensure
-            close_cell_space_create_progress(progress_session)
-          end
+          open_cell_space_create_dialog(local_grid: false)
         end
 
         # Optional command. It intentionally is not connected to the
         # existing menu command so the current CellSpace creation path stays intact.
         def convert_selected_solid_groups_to_cell_spaces_local_grid
-          return if respond_to?(:validation_operation_running?) && validation_operation_running?
-
-          begin
-            model = Sketchup.active_model()
-            indoor_model = IndoorModel.current
-            unless indoor_model.prepare_cell_space_creation_active_context(model)
-              raise 'Failed to prepare active context for CellSpace conversion'
-            end
-            original_active_path = active_path_snapshot(model)
-            groups = model.selection().to_a.select { |entity| convertible_container?(entity) }
-            conversion_jobs = CellSpaceConversionJobBuilder.new(entities: groups).build
-
-            if conversion_jobs.empty?
-              UiFeedback.notify('Select one or more solid groups to convert to CellSpace.')
-              return
-            end
-
-            targets = conversion_jobs.map { |job| job[:target] }.compact.uniq
-            storeys = conversion_jobs.map { |job| job[:storey].to_s }.reject(&:empty?).uniq
-            creation_options = prompt_cell_space_creation_options(
-              'Convert Solid Groups to CellSpace Local Grid',
-              default_target: targets.length == 1 ? targets.first : nil,
-              default_storey: storeys.length == 1 ? storeys.first : CellSpace::DEFAULT_STOREY
-            )
-            return unless creation_options
-
-            cell_type, category_code, storey = creation_options
-            conversion_jobs = CellSpaceConversionJobBuilder.new(entities: groups).build
-            conversion_jobs = CellSpaceConversionJobBuilder.apply_fallback_storey(conversion_jobs, storey)
-
-            result = indoor_model.convert_cell_space_jobs_bulk_local_grid(
-              conversion_jobs,
-              fallback_target: [cell_type, category_code],
-              original_active_path: original_active_path,
-              operation_name: 'Convert Solid Groups to CellSpace Local Grid',
-              activate_root_context: true
-            )
-            publish_cell_space_command_result(result)
-          rescue StandardError => e
-            if model && defined?(original_active_path) && original_active_path
-              IndoorModel.current.with_active_path_enforcement_suspended do
-                restore_active_path(model, original_active_path)
-              end
-            end
-            UiFeedback.notify("CellSpace Local Grid conversion failed:\n#{e.message}")
-          end
+          open_cell_space_create_dialog(local_grid: true)
         end
 
         def change_selected_cell_space_type
@@ -230,6 +128,124 @@ module ULOL
         end
 
         private
+
+        def open_cell_space_create_dialog(local_grid:)
+          return if respond_to?(:validation_operation_running?) && validation_operation_running?
+
+          model = Sketchup.active_model
+          indoor_model = IndoorModel.current
+          unless indoor_model.prepare_cell_space_creation_active_context(model)
+            raise 'Failed to prepare active context for CellSpace conversion'
+          end
+
+          original_active_path = active_path_snapshot(model)
+          groups = model.selection.to_a.select { |entity| convertible_container?(entity) }
+          conversion_jobs = CellSpaceConversionJobBuilder.new(entities: groups).build
+          if conversion_jobs.empty?
+            UiFeedback.notify('Select one or more solid groups to convert to CellSpace.')
+            return
+          end
+
+          targets = conversion_jobs.map { |job| job[:target] }.compact.uniq
+          storeys = conversion_jobs.map { |job| job[:storey].to_s }.reject(&:empty?).uniq
+          default_target = targets.length == 1 ? targets.first : nil
+          default_storey = storeys.length == 1 ? storeys.first : CellSpace::DEFAULT_STOREY
+          title = local_grid ? 'Create CellSpace · Local Grid' : 'Create CellSpace'
+          payload = cell_space_creation_dialog_payload(
+            title,
+            default_target: default_target,
+            default_storey: default_storey
+          )
+          return unless payload
+
+          @cell_space_create_dialog&.close
+          dialog = CellSpaceCreateDialog.new
+          @cell_space_create_dialog = dialog
+          dialog.show(payload) do |selection|
+            execute_cell_space_create_dialog(
+              dialog: dialog,
+              model: model,
+              indoor_model: indoor_model,
+              original_active_path: original_active_path,
+              groups: groups,
+              default_target: default_target,
+              selection: selection,
+              local_grid: local_grid
+            )
+          end
+          dialog
+        rescue StandardError => error
+          IndoorCore::Logger.puts(
+            "[IndoorGML] Create CellSpace dialog failed: #{error.class}: #{error.message}"
+          )
+          UiFeedback.notify("CellSpace creation failed: #{error.message}")
+          nil
+        end
+
+        def execute_cell_space_create_dialog(dialog:, model:, indoor_model:, original_active_path:, groups:, default_target:, selection:, local_grid:)
+          progress_session = nil
+          raise 'The active model changed while Create CellSpace was open.' unless Sketchup.active_model.equal?(model)
+
+          cell_type, category_code, storey = resolve_cell_space_creation_dialog_selection(
+            selection,
+            default_target: default_target
+          )
+
+          valid_groups = groups.select do |group|
+            group.respond_to?(:valid?) ? group.valid? : true
+          rescue StandardError
+            false
+          end
+          conversion_jobs = CellSpaceConversionJobBuilder.new(entities: valid_groups).build
+          conversion_jobs = CellSpaceConversionJobBuilder.apply_fallback_storey(conversion_jobs, storey)
+          raise 'No valid Solid Groups remain for CellSpace creation.' if conversion_jobs.empty?
+
+          result =
+            if local_grid
+              indoor_model.convert_cell_space_jobs_bulk_local_grid(
+                conversion_jobs,
+                fallback_target: [cell_type, category_code],
+                original_active_path: original_active_path,
+                operation_name: 'Convert Solid Groups to CellSpace Local Grid',
+                activate_root_context: true
+              )
+            else
+              progress_session = start_cell_space_create_progress(model, conversion_jobs.length)
+              ProductionProgress::CellSpaceProgressContext.with(progress_session) do
+                indoor_model.convert_cell_space_jobs_bulk(
+                  conversion_jobs,
+                  fallback_target: [cell_type, category_code],
+                  original_active_path: original_active_path,
+                  operation_name: 'Convert Solid Groups to CellSpace',
+                  activate_root_context: true
+                )
+              end
+            end
+
+          finish_cell_space_create_progress(progress_session, result) unless local_grid
+          close_cell_space_create_progress(progress_session)
+          progress_session = nil
+          dialog.show_result(result, title: 'CellSpace 생성 완료')
+          result
+        rescue StandardError => error
+          fail_cell_space_create_progress(progress_session, error)
+          close_cell_space_create_progress(progress_session)
+          progress_session = nil
+
+          if model && original_active_path
+            IndoorModel.current.with_active_path_enforcement_suspended do
+              restore_active_path(model, original_active_path)
+            end
+          end
+
+          IndoorCore::Logger.puts(
+            "[IndoorGML] CellSpace creation failed: #{error.class}: #{error.message}"
+          )
+          dialog.show_error(error.message, title: 'CellSpace 생성 실패')
+          nil
+        ensure
+          close_cell_space_create_progress(progress_session)
+        end
 
         def selected_vertex_normalize_cell_space(indoor_model = IndoorModel.current)
           model = Sketchup.active_model
@@ -373,36 +389,8 @@ module ULOL
           false
         end
 
-        def publish_cell_space_command_result(result)
-          message = ConversionMessageFormatter.result_message(
-            result.converted_count,
-            result.errors
-          )
-
-          metrics = result.metrics || {}
-          if metrics[:total_duration]
-            message << "\n\n----------------------------------------"
-            message << "\nCreate CellSpace 시간 요약"
-            message << format(
-              "\n  시작 전 검사                : %.3f sec",
-              metrics[:preflight_duration].to_f
-            )
-            message << format(
-              "\n  CellSpace/State 생성       : %.3f sec",
-              metrics[:cell_space_state_duration].to_f
-            )
-            message << format(
-              "\n  Adjacency/Transition 생성  : %.3f sec",
-              metrics[:adjacency_transition_duration].to_f
-            )
-            message << format(
-              "\n  전체 시간                   : %.3f sec",
-              metrics[:total_duration].to_f
-            )
-            message << "\n----------------------------------------"
-          end
-
-          UiFeedback.publish_result(message, errors: result.errors)
+        def publish_cell_space_command_result(result, title: 'CellSpace 변환 완료')
+          CellSpaceCreateDialog.show_conversion_result(result, title: title)
         end
       end
     end
