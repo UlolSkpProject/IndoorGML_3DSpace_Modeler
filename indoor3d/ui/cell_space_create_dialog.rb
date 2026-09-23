@@ -18,6 +18,11 @@ module ULOL
             @result_dialog.show_result(result, title: title)
           end
 
+          def show_error_dialog(message, title: 'CellSpace 변환 실패')
+            @result_dialog ||= new
+            @result_dialog.show_error(message, title: title)
+          end
+
           def result_payload(result, title:)
             errors = Array(result&.errors)
             converted_count = result&.converted_count.to_i
