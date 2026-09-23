@@ -3,14 +3,16 @@
 
 require 'json'
 require_relative 'html_dialog_safety'
+require_relative 'html_dialog_metrics'
 
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class CellSpaceCreateDialog
         WIDTH = 520
-        FORM_HEIGHT = 430
-        RESULT_HEIGHT = 520
+        INITIAL_HEIGHT = 320
+        MIN_CONTENT_HEIGHT = 120
+        WINDOW_CHROME_HEIGHT = HtmlDialogMetrics::WINDOW_CHROME_HEIGHT
 
         class << self
           def show_conversion_result(result, title: 'CellSpace 변환 완료')
@@ -68,7 +70,6 @@ module ULOL
           @pending_result_payload = nil
           @on_submit = on_submit
           ensure_dialog
-          @dialog.set_size(WIDTH, FORM_HEIGHT)
           @dialog.show
           push_form(payload)
           self
@@ -81,7 +82,6 @@ module ULOL
         def show_result(result, title: 'CellSpace 생성 완료')
           ensure_dialog
           @pending_result_payload = self.class.result_payload(result, title: title)
-          @dialog.set_size(WIDTH, RESULT_HEIGHT)
           @dialog.show unless visible?
           push_result(@pending_result_payload)
           self
@@ -97,7 +97,6 @@ module ULOL
             errors: [{ group: '', reason: message.to_s }],
             metrics: {}
           }
-          @dialog.set_size(WIDTH, RESULT_HEIGHT)
           @dialog.show unless visible?
           push_result(@pending_result_payload)
           self
@@ -121,7 +120,7 @@ module ULOL
             scrollable: false,
             resizable: false,
             width: WIDTH,
-            height: FORM_HEIGHT,
+            height: INITIAL_HEIGHT,
             style: ::UI::HtmlDialog::STYLE_DIALOG
           )
           @dialog.set_html(HtmlDialogSafety.inject_external_file_drop_guard(html))
@@ -136,6 +135,9 @@ module ULOL
             elsif @payload
               push_form(@payload)
             end
+          end
+          dialog.add_action_callback('resizeDialog') do |_context, content_height, chrome_height|
+            resize_to_content(content_height, chrome_height)
           end
           dialog.add_action_callback('submit') do |_context, json|
             selection = JSON.parse(json.to_s)
@@ -168,6 +170,19 @@ module ULOL
           return unless payload
 
           execute("window.CellSpaceCreateDialog.showResult(#{JSON.generate(payload)})")
+        end
+
+        def resize_to_content(content_height, chrome_height)
+          return unless @dialog
+
+          content = [content_height.to_i, MIN_CONTENT_HEIGHT].max
+          chrome = chrome_height.to_i
+          chrome = WINDOW_CHROME_HEIGHT unless chrome.positive?
+          @dialog.set_size(WIDTH, content + chrome)
+        rescue StandardError => error
+          IndoorCore::Logger.puts(
+            "[IndoorGML] Create CellSpace dialog resize failed: #{error.class}: #{error.message}"
+          ) if defined?(IndoorCore::Logger)
         end
 
         def visible?
@@ -215,9 +230,11 @@ module ULOL
                 }
 
                 * { box-sizing: border-box; }
-                html, body { margin: 0; min-height: 100%; }
+                html, body { margin: 0; }
+                html { overflow: hidden; }
                 body {
                   padding: 18px;
+                  overflow: hidden;
                   color: var(--text);
                   background: var(--background);
                   font-family: var(--ui-font);
@@ -315,7 +332,7 @@ module ULOL
 
                 .processing {
                   display: grid;
-                  min-height: 280px;
+                  min-height: 160px;
                   place-items: center;
                   text-align: center;
                 }
@@ -485,10 +502,27 @@ module ULOL
                     if (selected !== undefined && selected !== null) select.value = selected;
                   }
 
+                  function fitDialogToContent() {
+                    window.requestAnimationFrame(function () {
+                      window.requestAnimationFrame(function () {
+                        if (!window.sketchup || !window.sketchup.resizeDialog) return;
+
+                        var bodyRect = document.body.getBoundingClientRect();
+                        var contentHeight = Math.ceil(bodyRect.height);
+                        var outerHeight = Number(window.outerHeight || 0);
+                        var innerHeight = Number(window.innerHeight || 0);
+                        var chromeHeight = Math.max(0, Math.ceil(outerHeight - innerHeight));
+
+                        window.sketchup.resizeDialog(String(contentHeight), String(chromeHeight));
+                      });
+                    });
+                  }
+
                   function showOnly(view) {
                     formView.hidden = view !== formView;
                     processingView.hidden = view !== processingView;
                     resultView.hidden = view !== resultView;
+                    fitDialogToContent();
                   }
 
                   function metricRow(label, value) {
