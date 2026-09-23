@@ -51,4 +51,33 @@ class CellSpaceCreateDialogTest < Minitest::Test
 
     assert_equal 'error', payload[:status]
   end
+  FakeDialog = Struct.new(:sizes) do
+    def set_size(width, height)
+      sizes << [width, height]
+    end
+  end
+
+  def test_resize_includes_measured_window_chrome
+    dialog = Dialog.new
+    fake = FakeDialog.new([])
+    dialog.instance_variable_set(:@dialog, fake)
+
+    dialog.send(:resize_to_content, 286, 38)
+
+    assert_equal [[Dialog::WIDTH, 324]], fake.sizes
+  end
+
+  def test_resize_falls_back_to_shared_window_chrome_height
+    dialog = Dialog.new
+    fake = FakeDialog.new([])
+    dialog.instance_variable_set(:@dialog, fake)
+
+    dialog.send(:resize_to_content, 286, 0)
+
+    assert_equal(
+      [[Dialog::WIDTH, 286 + Dialog::WINDOW_CHROME_HEIGHT]],
+      fake.sizes
+    )
+  end
+
 end
