@@ -10,6 +10,7 @@ unless defined?(SeoulSpaceToolbar)
     FALLBACK_DELAY = 0.25
 
     @groups = {}
+    @built_groups = {}
     @timer_id = nil
     @built = false
 
@@ -21,7 +22,9 @@ unless defined?(SeoulSpaceToolbar)
           items: Array(items).dup
         }
 
-        if ready?
+        if @built
+          append_group(key)
+        elsif ready?
           cancel_timer
           build
         else
@@ -63,12 +66,11 @@ unless defined?(SeoulSpaceToolbar)
         return if @built || @groups.empty?
 
         @toolbar = ::UI::Toolbar.new(TOOLBAR_NAME)
+        @built_groups = {}
 
-        @groups.values.sort_by { |group| group[:order] }.each_with_index do |group, index|
-          @toolbar.add_separator if index.positive?
-          group[:items].each do |item|
-            item == :separator ? @toolbar.add_separator : @toolbar.add_item(item)
-          end
+        @groups.sort_by { |_key, group| group[:order] }.each_with_index do |(key, group), index|
+          append_group_items(group, separator: index.positive?)
+          @built_groups[key] = true
         end
 
         last_state = @toolbar.get_last_state
@@ -78,6 +80,34 @@ unless defined?(SeoulSpaceToolbar)
         @built = true
       rescue StandardError => e
         puts "[SeoulSpaceToolbar] Build failed: #{e.class}: #{e.message}"
+      end
+
+      def append_group(key)
+        return if @built_groups[key]
+
+        group = @groups[key]
+        return unless group
+
+        unless @toolbar
+          @built = false
+          build
+          return
+        end
+
+        was_visible = @toolbar.visible?
+        append_group_items(group, separator: @toolbar.length.positive?)
+        @built_groups[key] = true
+        @toolbar.show if was_visible
+      rescue StandardError => e
+        puts "[SeoulSpaceToolbar] Late group append failed (#{key}): #{e.class}: #{e.message}"
+      end
+
+      def append_group_items(group, separator:)
+        @toolbar.add_separator if separator
+
+        group[:items].each do |item|
+          item == :separator ? @toolbar.add_separator : @toolbar.add_item(item)
+        end
       end
     end
   end
