@@ -4,7 +4,7 @@
 
 ![SeoulSpace IndoorGML Modeler](docs/images/preview.png)
 
-![Version](https://img.shields.io/badge/version-1.0.6-blue)
+![Version](https://img.shields.io/badge/version-1.0.7-blue)
 ![SketchUp](https://img.shields.io/badge/SketchUp-2026-brightgreen)
 ![IndoorGML](https://img.shields.io/badge/IndoorGML-1.0.3-orange)
 ![val3dity](https://img.shields.io/badge/val3dity-2.2.0-lightgrey)
@@ -73,7 +73,7 @@ v1.0.5는 검사 자체뿐 아니라 오류를 찾고, 안전하게 보정하고
 | 항목 | 값 | 정의 |
 | --- | --- | --- |
 | Extension/storage version | `1.0.3` | `Definition::INDOOR_GML_VERSION` |
-| Extension package version | `1.0.6` | `Indoor3DGmlModeler::EXTENSION_VERSION` |
+| Extension package version | `1.0.7` | `Indoor3DGmlModeler::EXTENSION_VERSION` |
 | IndoorGML XML schema version | `1.0` | `Definition::INDOOR_GML_SCHEMA_VERSION` |
 | Validator runtime | `val3dity-windows-x64-v2.2.0` | `Val3dityRunner::VENDOR_ROOT` |
 

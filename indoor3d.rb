@@ -9,7 +9,7 @@ module ULOL
 
     unless const_defined?(:EXTENSION, false)
       EXTENSION_NAME = "SeoulSpace IndoorGML Modeler"
-      EXTENSION_VERSION = "1.0.6"
+      EXTENSION_VERSION = "1.0.7"
       EXTENSION_CREATOR = "ULOL"
       EXTENSION_DESCRIPTION = "SketchUp2026에서 IndoorGML(v1.0.3) 실내 공간 모델을 구축하고 CellSpace 변환, 위상 연결, GML 내보내기, geometry 검증을 수행하는 Extension."
 
