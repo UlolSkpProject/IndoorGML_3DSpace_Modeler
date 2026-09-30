@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'shared_tag_catalog'
+require_relative '../domain/model_building_type'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -20,8 +21,10 @@ module ULOL
 
         def self.building_type(model = nil)
           model ||= Sketchup.active_model if defined?(Sketchup)
-          value = model&.get_attribute(SETTINGS_DICTIONARY, BUILDING_TYPE_KEY, 'subway')
-          SharedTagCatalog::BUILDING_TYPES.key?(value) ? value : 'subway'
+          value = model&.get_attribute(SETTINGS_DICTIONARY, BUILDING_TYPE_KEY, nil)
+          return value if SharedTagCatalog::BUILDING_TYPES.key?(value)
+
+          ModelBuildingType.from_model(model)
         end
 
         def self.set_building_type(model, value)
