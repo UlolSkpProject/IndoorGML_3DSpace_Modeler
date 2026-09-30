@@ -11,7 +11,7 @@ module ULOL
       EXTENSION_NAME = "IndoorGML Modeler"
       EXTENSION_VERSION = "1.0.7"
       EXTENSION_CREATOR = "ULOL"
-      EXTENSION_DESCRIPTION = "IndoorGML(v1.0.3) 실내 공간 모델을 구축하고 CellSpace 변환, 위상 연결, GML 내보내기, geometry 검증을 수행"
+      EXTENSION_DESCRIPTION = "IndoorGML(v1.0.3) 실내 공간 모델구축,  CellSpace 변환, 위상 연결, GML 내보내기, 유효성 검증 도구"
 
       EXTENSION = SketchupExtension.new(
         EXTENSION_NAME,
