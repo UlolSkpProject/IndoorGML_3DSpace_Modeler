@@ -4,4 +4,4 @@ indoor3d/tmp/
 /scripts/
 /fixtures/
 /dev/recheck_snapshots/
-/indoor3d/native/build/
+/indoor3d/native/adjacency/build/
