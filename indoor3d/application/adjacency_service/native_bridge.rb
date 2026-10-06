@@ -9,6 +9,11 @@ module ULOL
         PROTOCOL_VERSION = 1
         NORMAL_TOLERANCE = 0.000001
         POLL_INTERVAL_SECONDS = 0.01
+        INPUT_HEADER_SIZE = 32
+        CELL_FIXED_SIZE = 80
+        FACE_FIXED_SIZE = 56
+        VEC3_SIZE = 24
+        TRIANGLE_SIZE = 72
 
         NATIVE_EXTENSION_PATH = File.expand_path(
           File.join(__dir__, '..', '..', 'native', 'adjacency', 'indoor_gml_adjacency_native.so')
@@ -136,12 +141,17 @@ module ULOL
 
         def encode_input(snapshots)
           snapshots = Array(snapshots)
-          records = snapshots.each_with_index.map do |snapshot, cell_index|
-            encode_cell(snapshot, cell_index)
+          buffer = String.new(
+            capacity: encoded_input_size(snapshots),
+            encoding: Encoding::BINARY
+          )
+          buffer << INPUT_MAGIC
+          append_pack(buffer, [PROTOCOL_VERSION, snapshots.length, 0], 'Q<Q<Q<')
+
+          snapshots.each_with_index do |snapshot, cell_index|
+            append_cell(buffer, snapshot, cell_index)
           end
-          INPUT_MAGIC +
-            [PROTOCOL_VERSION, snapshots.length, 0].pack('Q<Q<Q<') +
-            records.join
+          buffer
         end
 
         def decode_result(bytes, snapshots)
@@ -235,72 +245,112 @@ module ULOL
           }
         end
 
-        def encode_cell(snapshot, cell_index)
+        def encoded_input_size(snapshots)
+          total = INPUT_HEADER_SIZE
+          snapshots.each do |snapshot|
+            faces = Array(Hash(snapshot)[:faces])
+            total += CELL_FIXED_SIZE
+            faces.each do |face|
+              total += encoded_face_size(face)
+            end
+          end
+          total
+        end
+        private_class_method :encoded_input_size
+
+        def encoded_face_size(face)
+          face = Hash(face)
+          points = Array(face[:points])
+          triangles = Array(face[:triangles])
+          FACE_FIXED_SIZE +
+            (points.length * VEC3_SIZE) +
+            (triangles.length * TRIANGLE_SIZE)
+        end
+        private_class_method :encoded_face_size
+
+        def append_cell(buffer, snapshot, cell_index)
           snapshot = Hash(snapshot)
           bounds = Hash(snapshot.fetch(:bounds))
-          min = vec3(bounds.fetch(:min), "cell #{cell_index} bounds min")
-          max = vec3(bounds.fetch(:max), "cell #{cell_index} bounds max")
+          minimum = Array(bounds.fetch(:min))
+          maximum = Array(bounds.fetch(:max))
+          validate_vec3!(minimum, 'cell bounds min')
+          validate_vec3!(maximum, 'cell bounds max')
           3.times do |axis|
-            raise ProtocolError, "cell #{cell_index} bounds are inverted" if min[axis] > max[axis]
+            raise ProtocolError, "cell #{cell_index} bounds are inverted" if minimum[axis] > maximum[axis]
           end
 
           faces = Array(snapshot[:faces])
-          face_records = faces.each_with_index.map do |face, face_index|
-            encode_face(face, cell_index, face_index)
+          record_size = CELL_FIXED_SIZE
+          faces.each { |face| record_size += encoded_face_size(face) }
+
+          append_pack(buffer, [record_size, cell_index, faces.length, 0], 'Q<Q<Q<Q<')
+          append_vec3(buffer, minimum, 'cell bounds min')
+          append_vec3(buffer, maximum, 'cell bounds max')
+
+          faces.each_with_index do |face, face_index|
+            append_face(buffer, face, cell_index, face_index)
           end
-          body = face_records.join
-          record_size = 80 + body.bytesize
-          [record_size, cell_index, faces.length, 0].pack('Q<Q<Q<Q<') +
-            (min + max).pack('E6') +
-            body
         end
-        private_class_method :encode_cell
+        private_class_method :append_cell
 
-        def encode_face(face, cell_index, face_index)
+        def append_face(buffer, face, cell_index, face_index)
           face = Hash(face)
-          normal = vec3(face.fetch(:normal), "cell #{cell_index} face #{face_index} normal")
-          points = Array(face[:points]).map.with_index do |point, point_index|
-            vec3(point, "cell #{cell_index} face #{face_index} point #{point_index}")
-          end
+          normal = Array(face.fetch(:normal))
+          points = Array(face[:points])
+          triangles = Array(face[:triangles])
+          face_label = "cell #{cell_index} face #{face_index}"
+
+          validate_vec3!(normal, "#{face_label} normal")
           if points.length < 3
-            raise ProtocolError, "cell #{cell_index} face #{face_index} has fewer than 3 outer points"
+            raise ProtocolError, "#{face_label} has fewer than 3 outer points"
           end
 
-          triangles = Array(face[:triangles]).map.with_index do |triangle, triangle_index|
+          record_size =
+            FACE_FIXED_SIZE +
+            (points.length * VEC3_SIZE) +
+            (triangles.length * TRIANGLE_SIZE)
+          append_pack(buffer, [record_size, points.length, triangles.length, 0], 'Q<Q<Q<Q<')
+          append_vec3(buffer, normal, "#{face_label} normal")
+
+          points.each do |point|
+            append_vec3(buffer, point, "#{face_label} outer point")
+          end
+
+          triangles.each_with_index do |triangle, triangle_index|
             vertices = Array(triangle)
             unless vertices.length == 3
-              raise ProtocolError,
-                    "cell #{cell_index} face #{face_index} triangle #{triangle_index} is not a triangle"
+              raise ProtocolError, "#{face_label} triangle #{triangle_index} is not a triangle"
             end
-            vertices.map.with_index do |point, point_index|
-              vec3(
-                point,
-                "cell #{cell_index} face #{face_index} triangle #{triangle_index} point #{point_index}"
-              )
+            vertices.each do |point|
+              append_vec3(buffer, point, "#{face_label} triangle point")
             end
           end
-
-          point_bytes = points.flatten.pack('E*')
-          triangle_bytes = triangles.flatten.pack('E*')
-          record_size = 56 + point_bytes.bytesize + triangle_bytes.bytesize
-          [record_size, points.length, triangles.length, 0].pack('Q<Q<Q<Q<') +
-            normal.pack('E3') +
-            point_bytes +
-            triangle_bytes
         end
-        private_class_method :encode_face
+        private_class_method :append_face
 
-        def vec3(value, label)
+        def append_vec3(buffer, value, label)
           values = Array(value)
+          validate_vec3!(values, label)
+          append_pack(buffer, values, 'E3')
+        end
+        private_class_method :append_vec3
+
+        def validate_vec3!(values, label)
           raise ProtocolError, "#{label} must contain exactly 3 values" unless values.length == 3
 
-          values.map.with_index do |component, index|
-            finite_f64(Float(component), "#{label}[#{index}]")
-          rescue ArgumentError, TypeError
-            raise ProtocolError, "#{label}[#{index}] is not numeric"
+          values.each_with_index do |component, index|
+            unless component.is_a?(Numeric) && component.finite?
+              raise ProtocolError, "#{label}[#{index}] is not a finite number"
+            end
           end
         end
-        private_class_method :vec3
+        private_class_method :validate_vec3!
+
+        def append_pack(buffer, values, format)
+          values.pack(format, buffer: buffer)
+          buffer
+        end
+        private_class_method :append_pack
 
         def finite_f64(value, label)
           number = Float(value)

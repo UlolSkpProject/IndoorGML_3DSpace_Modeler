@@ -15,6 +15,10 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_equal 0, bytes.byteslice(24, 8).unpack1('Q<')
   end
 
+  def test_optimized_input_encoding_is_byte_identical_to_legacy_layout
+    assert_equal legacy_encode_input(sample_snapshots), Bridge.encode_input(sample_snapshots)
+  end
+
   def test_result_decoding_restores_snapshot_face_references
     snapshots = sample_snapshots
     candidate =
@@ -47,6 +51,33 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_raises(Bridge::ProtocolError) do
       Bridge.decode_result(bytes, sample_snapshots)
     end
+  end
+
+  def legacy_encode_input(snapshots)
+    records = snapshots.each_with_index.map do |snapshot, cell_index|
+      faces = Array(snapshot[:faces])
+      face_records = faces.map do |face|
+        points = Array(face[:points])
+        triangles = Array(face[:triangles])
+        point_bytes = points.flatten.pack('E*')
+        triangle_bytes = triangles.flatten.pack('E*')
+        record_size = 56 + point_bytes.bytesize + triangle_bytes.bytesize
+        [record_size, points.length, triangles.length, 0].pack('Q<Q<Q<Q<') +
+          Array(face[:normal]).pack('E3') +
+          point_bytes +
+          triangle_bytes
+      end
+      body = face_records.join
+      bounds = snapshot.fetch(:bounds)
+      record_size = 80 + body.bytesize
+      [record_size, cell_index, faces.length, 0].pack('Q<Q<Q<Q<') +
+        (Array(bounds.fetch(:min)) + Array(bounds.fetch(:max))).pack('E6') +
+        body
+    end
+
+    "IGMLADJ\0".b +
+      [1, snapshots.length, 0].pack('Q<Q<Q<') +
+      records.join
   end
 
   private
