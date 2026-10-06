@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
+project(IndoorGMLAdjacencyNative LANGUAGES CXX)
+
 set(RUBY_ROOT "${CMAKE_CURRENT_LIST_DIR}/../shared/third_party/ruby")
 
 add_library(indoor_gml_adjacency_native MODULE)
