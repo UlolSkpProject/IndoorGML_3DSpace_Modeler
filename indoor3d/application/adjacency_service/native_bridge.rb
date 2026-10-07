@@ -201,6 +201,10 @@ module ULOL
 
           owns_session = false
           snapshots = Array(snapshots)
+          unless keys.nil?
+            keys = Array(keys)
+            raise ProtocolError, 'incremental adjacency key count mismatch' unless keys.length == snapshots.length
+          end
           dirty = Array(dirty_indices).map { |index| Integer(index) }.uniq.sort
           raise ProtocolError, 'incremental adjacency requires at least one dirty Cell' if dirty.empty?
 

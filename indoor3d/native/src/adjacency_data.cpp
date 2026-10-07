@@ -237,6 +237,11 @@ CellData parse_cell(
         {
             throw std::invalid_argument("cell flags contain unsupported bits");
         }
+        if ((flags & CELL_FLAG_ADJACENCY_DIRTY) != 0 &&
+            (flags & CELL_FLAG_ADJACENCY_TARGET) == 0)
+        {
+            throw std::invalid_argument("dirty adjacency cell must also be an adjacency target");
+        }
     }
 
     if (cell_index != expected_index)
