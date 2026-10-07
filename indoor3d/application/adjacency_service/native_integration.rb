@@ -10,13 +10,21 @@ module ULOL
           def synchronize_for(cell_space)
             return super unless cell_space&.valid? && cell_space.duality_state&.valid?
             return super unless NativeAdjacencyBridge.incremental_supported?
-
-            entries = adjacency_snapshot_entries
-            dirty_index = entries.index { |entry| entry[:cell_space] == cell_space }
-            return super if dirty_index.nil?
+            return super if NativeAdjacencyBridge.shared_session_active?
 
             reset_run_metrics
             started_at = monotonic_time
+            eligible_cells = Array(@registry.cell_spaces).select do |candidate|
+              candidate&.valid? && candidate.duality_state&.valid?
+            end
+            entries = adjacency_snapshot_entries(eligible_cells)
+            # Incremental mode must never silently omit a valid comparison partner.
+            # If any snapshot cannot be built, preserve the old Ruby synchronize_for
+            # behavior for the whole target Cell instead.
+            return super unless entries.length == eligible_cells.length
+
+            dirty_index = entries.index { |entry| entry[:cell_space] == cell_space }
+            return super if dirty_index.nil?
 
             pair_results = begin
               compute_native_incremental_pair_results(

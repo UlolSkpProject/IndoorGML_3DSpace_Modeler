@@ -135,6 +135,7 @@ module ULOL
           native_module = native
           parse_started_at = monotonic_time
           loaded_count = native_module.load_batch(input_bytes).to_i
+          owns_session = true
           parse_duration = elapsed_since(parse_started_at)
           unless loaded_count == snapshots.length
             raise ProtocolError,
@@ -197,7 +198,9 @@ module ULOL
 
         def compute_incremental(snapshots, dirty_indices:, tolerance:, keys: nil, &block)
           raise ProtocolError, 'native extension does not support incremental adjacency' unless incremental_supported?
+          raise ProtocolError, 'cannot start incremental adjacency while a shared geometry session is active' if shared_session_active?
 
+          owns_session = false
           snapshots = Array(snapshots)
           dirty = Array(dirty_indices).map { |index| Integer(index) }.uniq.sort
           raise ProtocolError, 'incremental adjacency requires at least one dirty Cell' if dirty.empty?
@@ -207,8 +210,6 @@ module ULOL
               raise ProtocolError, "incremental dirty cell index #{index} is out of range"
             end
           end
-
-          close_geometry_session if shared_session_active?
 
           serialization_started_at = monotonic_time
           dirty_lookup = dirty.each_with_object({}) { |index, out| out[index] = true }
@@ -257,12 +258,13 @@ module ULOL
 
           decoded.merge(metrics: metrics.freeze)
         ensure
-          begin
-            native_module&.clear_session
-          rescue StandardError
-            nil
+          if owns_session
+            begin
+              native_module&.clear_session
+            rescue StandardError
+              nil
+            end
           end
-          reset_shared_session_state
         end
 
         def compute(snapshots, tolerance:, keys: nil, &block)
