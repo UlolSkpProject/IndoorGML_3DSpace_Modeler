@@ -1,3 +1,11 @@
 {
-    "cmake.sourceDirectory": "C:/ProgramData/SketchUp/SketchUp 2026/SketchUp/Devs/IndoorGML_3DSpace_Modeler/indoor3d/native"
+    "cmake.sourceDirectory": "C:/ProgramData/SketchUp/SketchUp 2026/SketchUp/Devs/IndoorGML_3DSpace_Modeler/indoor3d/native",
+    "files.exclude": {
+        "**/indoor3d/native/**/build": true,
+        "**/indoor3d/native/**/CMakeFiles": true
+    },
+    "search.exclude": {
+        "**/indoor3d/native/**/build": true,
+        "**/indoor3d/native/**/CMakeFiles": true
+    }
 }

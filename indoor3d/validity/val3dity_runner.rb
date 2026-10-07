@@ -8,7 +8,8 @@ require_relative 'val3dity_process_adapter'
 require_relative 'val3dity_report_schema'
 require_relative 'val3dity_report_renderer'
 require_relative 'val3dity_overlap_recheck_policy'
-require_relative 'val3dity_overlap_geometry_rechecker'
+require_relative 'val3dity_full_intersection_rechecker'
+require_relative 'validity_native_bridge'
 require_relative 'val3dity_run_orchestration'
 require_relative 'xml_input_validator'
 
@@ -478,8 +479,9 @@ module ULOL
           end
 
           def recheck_overlap_errors!(raw_report, progress: nil, progress_step: nil)
-            @overlap_recheck_pair_analysis = {}
-            @overlap_recheck_701_decisions = {}
+            requests = overlap_recheck_policy.recheck_requests(raw_report)
+            prepare_validity_recheck_batch(requests)
+
             tracker = {
               total: overlap_recheck_policy.count_recheckable_errors(raw_report),
               processed: 0,
@@ -506,6 +508,10 @@ module ULOL
                 )
               }
             ) { |code, cell_id1, cell_id2| recheck_cell_pair(code, cell_id1, cell_id2) }
+          ensure
+            @validity_native_results = nil
+            @validity_core_704_results = nil
+            @validity_native_ran = false
           end
 
           def preserve_strict_validation!(raw_report)
@@ -539,11 +545,184 @@ module ULOL
             IndoorCore::Logger.puts "[IndoorGML] overlap recheck progress failed: #{e.class}: #{e.message}"
           end
 
+          def prepare_validity_recheck_batch(requests)
+            @validity_native_results = {}
+            @validity_core_704_results = {}
+            @validity_native_ran = false
+            return if Array(requests).empty?
+
+            entries = validation_snapshot_entries(requests)
+            return if entries.empty?
+
+            snapshots = entries.map { |entry| entry.fetch(:snapshot) }
+            keys = entries.map { |entry| entry.fetch(:report_id) }
+            index_by_id = keys.each_with_index.to_h
+            native_requests = Array(requests).filter_map do |request|
+              cells = Array(request[:cells])
+              first = index_by_id[cells[0]]
+              second = index_by_id[cells[1]]
+              next if first.nil? || second.nil?
+
+              {
+                first: [first, second].min,
+                second: [first, second].max,
+                code: request[:code].to_i
+              }
+            end
+
+            if ValidityNativeBridge.available?
+              begin
+                batch = ValidityNativeBridge.compute(
+                  snapshots,
+                  native_requests,
+                  overlap_tolerance: OVERLAP_RECHECK_TOLERANCE
+                )
+                Array(batch[:results]).each do |result|
+                  first_id = keys.fetch(result[:first])
+                  second_id = keys.fetch(result[:second])
+                  @validity_native_results[
+                    validity_result_key(result[:code], first_id, second_id)
+                  ] = result
+                end
+                @validity_native_ran = true
+                return
+              rescue StandardError => e
+                IndoorCore::Logger.puts(
+                  "[IndoorGML] Native validity batch failed; using conservative compatibility paths: " \
+                  "#{e.class}: #{e.message}"
+                )
+              end
+            end
+
+            prepare_core_704_compatibility_results(
+              requests,
+              snapshots,
+              keys,
+              index_by_id
+            )
+          end
+
+          def validation_snapshot_entries(requests)
+            indoor_model = @indoor_model || IndoorModel.current
+            seen = {}
+            Array(requests).flat_map { |request| Array(request[:cells]) }.filter_map do |report_id|
+              next if seen[report_id]
+
+              seen[report_id] = true
+              cell_space = indoor_model&.find_cell_space_by_normalized_id(report_id)
+              next unless cell_space&.valid?
+
+              group = cell_space.valid_sketchup_group
+              next unless group&.valid?
+
+              snapshot = Utils::Geometry.adjacency_snapshot(group)
+              next unless snapshot
+
+              {
+                report_id: report_id,
+                cell_space: cell_space,
+                snapshot: snapshot
+              }.freeze
+            end
+          end
+
+          def prepare_core_704_compatibility_results(
+            requests,
+            snapshots,
+            keys,
+            index_by_id
+          )
+            requested_704 = Array(requests).select { |request| request[:code].to_i == 704 }
+            return if requested_704.empty?
+            return unless NativeAdjacencyBridge.available?
+
+            result = NativeAdjacencyBridge.compute(
+              snapshots,
+              tolerance: OVERLAP_RECHECK_TOLERANCE,
+              keys: keys
+            )
+            adjacent = Array(result[:pair_results]).each_with_object({}) do |pair, out|
+              out[[pair[0].to_i, pair[1].to_i]] = pair[2]
+            end
+
+            requested_704.each do |request|
+              cells = Array(request[:cells])
+              first = index_by_id[cells[0]]
+              second = index_by_id[cells[1]]
+              next if first.nil? || second.nil?
+
+              pair = [[first, second].min, [first, second].max]
+              axis = adjacent[pair]
+              @validity_core_704_results[
+                validity_result_key(704, cells[0], cells[1])
+              ] = {
+                status: axis ? :adjacent : :not_adjacent,
+                axis: axis
+              }.freeze
+            end
+          rescue StandardError => e
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Core Native 704 compatibility check failed: #{e.class}: #{e.message}"
+            )
+          end
+
           def recheck_cell_pair(code, cell_id1, cell_id2)
-            analysis = overlap_recheck_pair_analysis(cell_id1, cell_id2)
+            if code.to_i == 701
+              recheck_701_cell_pair(cell_id1, cell_id2)
+            else
+              recheck_704_cell_pair(cell_id1, cell_id2)
+            end
+          end
+
+          def recheck_701_cell_pair(cell_id1, cell_id2)
+            result = @validity_native_results &&
+              @validity_native_results[validity_result_key(701, cell_id1, cell_id2)]
+
+            case result && result[:status]
+            when :no_overlap
+              return overlap_recheck_result(
+                701,
+                [cell_id1, cell_id2],
+                true,
+                'NATIVE_NO_POSITIVE_VOLUME_INTERSECTION',
+                status: 'suppressed',
+                actual_overlap_volume: 0.0,
+                intersection_component_count: 0
+              )
+            when :thin_overlap
+              return overlap_recheck_result(
+                701,
+                [cell_id1, cell_id2],
+                true,
+                'NATIVE_OVERLAP_WITHIN_VALIDATION_TOLERANCE',
+                status: 'suppressed',
+                actual_overlap_volume: result[:volume],
+                intersection_component_count: result[:component_count]
+              )
+            when :overlap
+              store_native_validity_overlap_geometry(
+                [cell_id1, cell_id2],
+                result
+              )
+              return overlap_recheck_result(
+                701,
+                [cell_id1, cell_id2],
+                false,
+                'NATIVE_POSITIVE_VOLUME_OVERLAP',
+                status: 'kept',
+                actual_overlap_volume: result[:volume],
+                intersection_component_count: result[:component_count]
+              )
+            end
+
+            fallback_701_cell_pair(cell_id1, cell_id2)
+          end
+
+          def fallback_701_cell_pair(cell_id1, cell_id2)
+            analysis = full_overlap_rechecker.pair_analysis(cell_id1, cell_id2)
             if analysis[:status] == :inconclusive
               return overlap_recheck_result(
-                code,
+                701,
                 [cell_id1, cell_id2],
                 false,
                 analysis[:reason],
@@ -551,114 +730,131 @@ module ULOL
               )
             end
 
-            decision = code == 701 ? overlap_recheck_701_decision(analysis) : overlap_recheck_704_decision(analysis)
-            candidate = decision[:candidate] || {}
+            intersection = Hash(analysis[:intersection])
+            if intersection[:status] == :not_reproduced
+              return overlap_recheck_result(
+                701,
+                [cell_id1, cell_id2],
+                true,
+                intersection[:reason] || 'NO_VALID_INTERSECTION_GROUP_RETURNED',
+                status: 'suppressed',
+                actual_overlap_volume: 0.0,
+                intersection_component_count: 0
+              )
+            end
+
+            if intersection[:status] == :reproduced
+              return overlap_recheck_result(
+                701,
+                [cell_id1, cell_id2],
+                false,
+                intersection[:reason] || 'REPRODUCED_AS_VALID_SKETCHUP_INTERSECTION',
+                status: 'kept',
+                actual_overlap_volume: intersection[:volume],
+                intersection_component_count: intersection[:component_count]
+              )
+            end
 
             overlap_recheck_result(
-              code,
+              701,
               [cell_id1, cell_id2],
-              decision[:tolerated],
-              decision[:reason],
-              status: decision[:status],
-              distance: candidate[:distance],
-              overlap_area: candidate[:overlap_area],
-              normal_thickness: decision[:normal_thickness],
-              actual_overlap_volume: decision[:actual_overlap_volume],
-              intersection_component_count: decision[:intersection_component_count]
+              false,
+              intersection[:reason] || 'BOOLEAN_INTERSECTION_INCONCLUSIVE',
+              status: 'inconclusive',
+              actual_overlap_volume: intersection[:volume],
+              intersection_component_count: intersection[:component_count]
             )
           end
 
-          def overlap_recheck_pair_analysis(cell_id1, cell_id2)
-            overlap_geometry_rechecker.pair_analysis(cell_id1, cell_id2)
-          end
+          def recheck_704_cell_pair(cell_id1, cell_id2)
+            key = validity_result_key(704, cell_id1, cell_id2)
+            result = @validity_native_results && @validity_native_results[key]
 
-          def overlap_recheck_704_decision(analysis)
-            candidate = overlap_geometry_rechecker.best_candidate(analysis[:adjacency_candidates], 704)
-            unless candidate
-              return {
-                tolerated: false,
-                status: 'kept',
-                reason: overlap_geometry_rechecker.missing_pair_reason(704),
-                candidate: nil,
-                actual_overlap_volume: analysis.dig(:intersection, :volume),
-                intersection_component_count: analysis.dig(:intersection, :component_count)
-              }
+            if @validity_native_ran
+              return exact_704_result(cell_id1, cell_id2, result)
             end
 
-            overlap_decision = cached_701_decision(analysis)
-            if overlap_decision[:status] == 'inconclusive'
-              return overlap_decision.merge(
-                tolerated: false,
-                status: 'inconclusive',
-                reason: overlap_decision[:reason],
-                candidate: candidate
+            compatibility = @validity_core_704_results &&
+              @validity_core_704_results[key]
+            exact_704_result(cell_id1, cell_id2, compatibility)
+          end
+
+          def exact_704_result(cell_id1, cell_id2, result)
+            case result && result[:status]
+            when :adjacent
+              overlap_recheck_result(
+                704,
+                [cell_id1, cell_id2],
+                true,
+                'NATIVE_EXACT_FACE_ADJACENCY',
+                status: 'suppressed'
+              )
+            when :not_adjacent
+              overlap_recheck_result(
+                704,
+                [cell_id1, cell_id2],
+                false,
+                'NATIVE_NO_EXACT_FACE_ADJACENCY',
+                status: 'kept'
+              )
+            else
+              overlap_recheck_result(
+                704,
+                [cell_id1, cell_id2],
+                false,
+                'NATIVE_EXACT_ADJACENCY_INCONCLUSIVE',
+                status: 'inconclusive'
               )
             end
-            if overlap_decision[:sketchup_intersection_reproduced]
-              return {
-                tolerated: false,
-                status: 'kept',
-                reason: 'REPRODUCED_AS_VALID_SKETCHUP_INTERSECTION',
-                candidate: candidate,
-                actual_overlap_volume: overlap_decision[:actual_overlap_volume],
-                intersection_component_count: overlap_decision[:intersection_component_count]
-              }
-            end
-
-            {
-              tolerated: true,
-              status: 'suppressed',
-              reason: overlap_geometry_rechecker.tolerated_reason(704, candidate),
-              candidate: candidate,
-              actual_overlap_volume: overlap_decision[:actual_overlap_volume],
-              intersection_component_count: overlap_decision[:intersection_component_count]
-            }
           end
 
-          def cached_701_decision(analysis)
-            key = analysis[:cells].sort.join('|')
-            @overlap_recheck_701_decisions ||= {}
-            @overlap_recheck_701_decisions[key] ||= overlap_recheck_701_decision(analysis)
+          def validity_result_key(code, cell_id1, cell_id2)
+            [code.to_i, *[cell_id1.to_s, cell_id2.to_s].sort]
           end
 
-          def overlap_recheck_701_decision(analysis)
-            intersection = analysis[:intersection]
-            if intersection[:status] == :inconclusive
-              return {
-                tolerated: false,
-                status: 'inconclusive',
-                reason: intersection[:reason],
-                candidate: nil,
-                actual_overlap_volume: nil,
-                intersection_component_count: nil,
-                sketchup_intersection_reproduced: nil
-              }
-            end
+          def store_native_validity_overlap_geometry(cell_ids, result)
+            vertices = Array(result[:vertices])
+            triangle_indices = Array(result[:triangles])
+            return false if vertices.empty? || triangle_indices.empty?
 
-            if intersection[:status] == :not_reproduced
-              return {
-                tolerated: true,
-                status: 'suppressed',
-                reason: intersection[:reason] || 'NO_VALID_INTERSECTION_GROUP_RETURNED',
-                candidate: overlap_geometry_rechecker.best_candidate(analysis[:adjacency_candidates], 701),
-                actual_overlap_volume: 0.0,
-                intersection_component_count: 0,
-                sketchup_intersection_reproduced: false
-              }
+            indoor_model = @indoor_model || IndoorModel.current
+            root = indoor_model&.primal_group
+            points = vertices.map do |coordinates|
+              local = Geom::Point3d.new(*Array(coordinates).map(&:to_f))
+              Utils::Transformation.root_local_point_to_model(local, root)
             end
-
-            {
-              tolerated: false,
-              status: 'kept',
-              reason: intersection[:reason] || 'REPRODUCED_AS_VALID_SKETCHUP_INTERSECTION',
-              candidate: overlap_geometry_rechecker.best_candidate(analysis[:adjacency_candidates], 701),
-              actual_overlap_volume: intersection[:volume],
-              intersection_component_count: intersection[:component_count],
-              sketchup_intersection_reproduced: true
-            }
+            triangles = triangle_indices.map do |indices|
+              Array(indices).map { |index| points.fetch(index.to_i) }
+            end
+            ValidationErrorGeometryResolver.store_overlap_geometry(
+              model: @model || indoor_model&.model || Sketchup.active_model,
+              cell_ids: cell_ids,
+              geometry: {
+                status: :ready,
+                triangles: triangles,
+                edges: [],
+                volume_in3: result[:volume].to_f
+              }
+            )
+          rescue StandardError => e
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Native validity overlap overlay cache failed: #{e.class}: #{e.message}"
+            )
+            false
           end
 
-          def overlap_recheck_result(code, cell_ids, tolerated, reason, status: nil, distance: nil, overlap_area: nil, normal_thickness: nil, actual_overlap_volume: nil, intersection_component_count: nil)
+          def overlap_recheck_result(
+            code,
+            cell_ids,
+            tolerated,
+            reason,
+            status: nil,
+            distance: nil,
+            overlap_area: nil,
+            normal_thickness: nil,
+            actual_overlap_volume: nil,
+            intersection_component_count: nil
+          )
             overlap_recheck_policy.recheck_result(
               code,
               cell_ids,
@@ -679,9 +875,9 @@ module ULOL
             )
           end
 
-          def overlap_geometry_rechecker
+          def full_overlap_rechecker
             indoor_model = @indoor_model || IndoorModel.current
-            @overlap_geometry_rechecker ||= Val3dityOverlapGeometryRechecker.new(
+            @full_overlap_rechecker ||= Val3dityFullIntersectionRechecker.new(
               indoor_model: indoor_model,
               model: @model || indoor_model&.model,
               tolerance: OVERLAP_RECHECK_TOLERANCE,
