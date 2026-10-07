@@ -38,6 +38,6 @@ module ULOL
 end
 
 require_relative 'geometry/polygon2d'
-require_relative 'geometry/adjacency_detector'
+require_relative 'geometry/face_geometry'
 require_relative 'geometry/shell_analyzer'
 require_relative 'geometry/source_group'

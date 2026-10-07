@@ -8,9 +8,15 @@ module ULOL
       class AdjacencyService
         module NativeAdjacencyIntegration
           def synchronize_for(cell_space)
-            return super unless cell_space&.valid? && cell_space.duality_state&.valid?
-            return super unless NativeAdjacencyBridge.incremental_supported?
-            return super if NativeAdjacencyBridge.shared_session_active?
+            return if cell_space.nil? || !cell_space.valid? || !cell_space.duality_state&.valid?
+            unless NativeAdjacencyBridge.incremental_supported?
+              raise NativeAdjacencyBridge::ProtocolError,
+                    'Native incremental adjacency backend is unavailable'
+            end
+            if NativeAdjacencyBridge.shared_session_active?
+              raise NativeAdjacencyBridge::ProtocolError,
+                    'incremental adjacency cannot start while a shared Native session is active'
+            end
 
             reset_run_metrics
             started_at = monotonic_time
@@ -18,13 +24,16 @@ module ULOL
               candidate&.valid? && candidate.duality_state&.valid?
             end
             entries = adjacency_snapshot_entries(eligible_cells)
-            # Incremental mode must never silently omit a valid comparison partner.
-            # If any snapshot cannot be built, preserve the old Ruby synchronize_for
-            # behavior for the whole target Cell instead.
-            return super unless entries.length == eligible_cells.length
+            unless entries.length == eligible_cells.length
+              raise NativeAdjacencyBridge::ProtocolError,
+                    'Native incremental adjacency snapshot is incomplete'
+            end
 
             dirty_index = entries.index { |entry| entry[:cell_space] == cell_space }
-            return super if dirty_index.nil?
+            unless dirty_index
+              raise NativeAdjacencyBridge::ProtocolError,
+                    'Native incremental adjacency target is missing from the snapshot'
+            end
 
             pair_results = begin
               compute_native_incremental_pair_results(
@@ -38,10 +47,9 @@ module ULOL
               @last_native_adjacency_used = false
               clear_snapshot_waypoint_contexts
               IndoorCore::Logger.puts(
-                "[IndoorGML] Native incremental adjacency failed; falling back to Ruby: " \
-                "#{@last_native_fallback_reason}"
+                "[IndoorGML] Native incremental adjacency failed: #{@last_native_fallback_reason}"
               ) if defined?(IndoorCore::Logger)
-              return super
+              raise
             end
 
             apply_started_at = monotonic_time
@@ -72,7 +80,10 @@ module ULOL
           end
 
           def compute_pair_results(entries, tolerance:, progress: nil)
-            return super unless NativeAdjacencyBridge.available?
+            unless NativeAdjacencyBridge.available?
+              raise NativeAdjacencyBridge::ProtocolError,
+                    'Native adjacency backend is unavailable'
+            end
 
             prepare_snapshot_waypoint_contexts(entries)
             snapshots = entries.map { |entry| entry[:snapshot] }.freeze
@@ -194,9 +205,9 @@ module ULOL
             @last_native_adjacency_used = false
             clear_snapshot_waypoint_contexts
             IndoorCore::Logger.puts(
-              "[IndoorGML] Native adjacency failed; falling back to Ruby: #{@last_native_fallback_reason}"
+              "[IndoorGML] Native adjacency failed: #{@last_native_fallback_reason}"
             ) if defined?(IndoorCore::Logger)
-            super
+            raise
           end
 
           def compute_native_incremental_pair_results(entries, dirty_indices:, tolerance:)

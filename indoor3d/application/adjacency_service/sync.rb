@@ -19,19 +19,7 @@ module ULOL
         def synchronize_for(cell_space)
           return if cell_space.nil? || !cell_space.valid? || !cell_space.duality_state&.valid?
 
-          @registry.cell_spaces.each do |other_cell_space|
-            next if other_cell_space.nil? || other_cell_space == cell_space
-            next unless other_cell_space.valid? && other_cell_space.duality_state&.valid?
-
-            pair_key = cell_pair_key(cell_space, other_cell_space)
-            adjacency_axis = Utils::Geometry.adjacency_axis(cell_space.sketchup_group, other_cell_space.sketchup_group)
-            if transition_allowed_for_axis?(adjacency_axis)
-              @registry.set_adjacent_pair(pair_key, cell_space, other_cell_space)
-              @transition_builder.call(cell_space, other_cell_space)
-            else
-              @transition_eraser.call(pair_key)
-            end
-          end
+          raise NotImplementedError, 'Adjacency calculation requires the Native geometry backend'
         end
 
         def synchronize_all(transition_builder: nil, transition_eraser: nil, progress: nil)
@@ -150,123 +138,8 @@ module ULOL
           entries.freeze
         end
 
-        def compute_pair_results(entries, tolerance:, progress: nil)
-          snapshots = entries.map { |entry| entry[:snapshot] }.freeze
-          candidate_started_at = monotonic_time
-          pair_indices = candidate_pair_indices(snapshots, tolerance, progress: progress)
-          @last_candidate_generation_duration = elapsed_since(candidate_started_at)
-          @last_pair_comparison_count = pair_indices.length
-          return [] if pair_indices.empty?
-
-          started_at = monotonic_time
-          compute_pair_chunk(snapshots, pair_indices, tolerance, progress: progress)
-        ensure
-          @last_detailed_computation_duration = elapsed_since(started_at) if started_at
-        end
-
-        def candidate_pair_indices(snapshots, tolerance, progress: nil)
-          pairs = []
-          count = snapshots.length
-          total = count * (count - 1) / 2
-          completed = 0
-          emit_stage_start(
-            progress,
-            stage: :candidate_generation,
-            name: 'Adjacency 후보 생성',
-            total: total,
-            message: "Adjacency 후보 pair 생성: 0 / #{total}"
-          )
-
-          (0...count).each do |index1|
-            ((index1 + 1)...count).each do |index2|
-              if candidate_bounds_touch?(
-                snapshots[index1][:bounds],
-                snapshots[index2][:bounds],
-                tolerance
-              )
-                pairs << [index1, index2]
-              end
-
-              completed += 1
-              emit_stage_progress(
-                progress,
-                stage: :candidate_generation,
-                name: 'Adjacency 후보 생성',
-                total: total,
-                completed: completed,
-                message: "Adjacency 후보 pair 생성: #{completed} / #{total}"
-              ) if progress_checkpoint?(completed, total)
-            end
-          end
-
-          emit_stage_finish(
-            progress,
-            stage: :candidate_generation,
-            name: 'Adjacency 후보 생성',
-            total: total,
-            completed: total,
-            message: "Adjacency 후보 생성 완료: #{pairs.length}개",
-            telemetry: {
-              evaluated_pair_count: total,
-              candidate_pair_count: pairs.length
-            }
-          )
-          pairs.freeze
-        end
-
-        def candidate_bounds_touch?(bounds1, bounds2, tolerance)
-          candidate_axis_overlap_or_touch?(bounds1[:min][0], bounds1[:max][0], bounds2[:min][0], bounds2[:max][0], tolerance) &&
-            candidate_axis_overlap_or_touch?(bounds1[:min][1], bounds1[:max][1], bounds2[:min][1], bounds2[:max][1], tolerance) &&
-            candidate_axis_overlap_or_touch?(bounds1[:min][2], bounds1[:max][2], bounds2[:min][2], bounds2[:max][2], tolerance)
-        end
-
-        def candidate_axis_overlap_or_touch?(min1, max1, min2, max2, tolerance)
-          [min1, min2].max <= [max1, max2].min + tolerance
-        end
-
-        def compute_pair_chunk(snapshots, pair_indices, tolerance, progress: nil)
-          total = pair_indices.length
-          emit_stage_start(
-            progress,
-            stage: :detailed_computation,
-            name: 'Adjacency 상세 판정',
-            total: total,
-            message: "Adjacency 상세 판정: 0 / #{total}"
-          )
-
-          results = []
-          pair_indices.each_with_index do |(index1, index2), index|
-            axis = Utils::Geometry.adjacency_axis_from_snapshots(
-              snapshots[index1],
-              snapshots[index2],
-              tolerance: tolerance
-            )
-            results << [index1, index2, axis] unless axis.nil?
-
-            completed = index + 1
-            emit_stage_progress(
-              progress,
-              stage: :detailed_computation,
-              name: 'Adjacency 상세 판정',
-              total: total,
-              completed: completed,
-              message: "Adjacency 상세 판정: #{completed} / #{total}"
-            ) if progress_checkpoint?(completed, total)
-          end
-
-          emit_stage_finish(
-            progress,
-            stage: :detailed_computation,
-            name: 'Adjacency 상세 판정',
-            total: total,
-            completed: total,
-            message: "Adjacency 상세 판정 완료: #{results.length}개 인접",
-            telemetry: {
-              candidate_pair_count: total,
-              adjacent_pair_count: results.length
-            }
-          )
-          results
+        def compute_pair_results(_entries, tolerance:, progress: nil)
+          raise NotImplementedError, 'Adjacency calculation requires the Native geometry backend'
         end
 
         def apply_pair_results(entries, pair_results, transition_builder:, transition_eraser:, stale_pair_keys: nil, progress: nil)

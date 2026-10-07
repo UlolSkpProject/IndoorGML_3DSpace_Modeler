@@ -86,17 +86,6 @@ module ULOL
             end
           end
 
-          def candidate_pair_indices(snapshots, tolerance, **keywords)
-            delegate_without_progress([snapshots, tolerance], keywords) do |args, filtered|
-              super(*args, **filtered)
-            end
-          end
-
-          def compute_pair_chunk(snapshots, pair_indices, tolerance, **keywords)
-            delegate_without_progress([snapshots, pair_indices, tolerance], keywords) do |args, filtered|
-              super(*args, **filtered)
-            end
-          end
 
           def apply_pair_results(
             entries,

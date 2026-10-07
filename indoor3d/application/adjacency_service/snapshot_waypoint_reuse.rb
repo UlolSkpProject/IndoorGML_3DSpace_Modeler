@@ -35,61 +35,7 @@ module ULOL
           end
         end
 
-        module SnapshotWaypointGeometryQuery
-          def analyze_snapshot_pair(snapshot1, snapshot2, tolerance:)
-            faces1 = snapshot1.is_a?(Hash) ? snapshot1[:faces] : nil
-            faces2 = snapshot2.is_a?(Hash) ? snapshot2[:faces] : nil
-            return unsupported_snapshot_analysis unless faces1.is_a?(Array) && faces2.is_a?(Array)
-            return unsupported_snapshot_analysis if faces1.empty? || faces2.empty?
-
-            tolerance_value = tolerance.to_f
-            area_tolerance = tolerance_value * tolerance_value
-            axis = nil
-            adjacent = false
-            waypoint_candidates = []
-
-            faces1.each do |face1|
-              faces2.each do |face2|
-                next unless snapshot_normals_opposite?(face1[:normal], face2[:normal])
-                next unless snapshot_points_on_plane?(
-                  face2[:points],
-                  face1[:normal],
-                  face1[:points].first,
-                  tolerance_value
-                )
-
-                overlap = snapshot_overlap_analysis(face1, face2, area_tolerance)
-                next unless overlap[:adjacent]
-
-                adjacent = true
-                face_axis = dominant_snapshot_axis(face1[:normal])
-                axis ||= face_axis
-                metrics = overlap[:waypoint_metrics]
-                next unless metrics
-
-                waypoint_candidates << {
-                  area: metrics[:area],
-                  centroid_2d: metrics[:centroid_2d],
-                  axis: face_axis,
-                  face1: face1,
-                  face2: face2
-                }.freeze
-              end
-            end
-
-            {
-              supported: true,
-              adjacent: adjacent,
-              axis: axis,
-              waypoint_snapshot_candidates: waypoint_candidates.freeze
-            }.freeze
-          rescue StandardError => e
-            IndoorCore::Logger.puts(
-              "[IndoorGML] Snapshot waypoint pair analysis failed: #{e.class}: #{e.message}"
-            ) if defined?(IndoorCore::Logger)
-            unsupported_snapshot_analysis
-          end
-
+        module SnapshotWaypointGeometryConversion
           def waypoint_candidates_from_snapshot_context(
             context,
             state1_point:,
@@ -130,89 +76,6 @@ module ULOL
           end
 
           private
-
-          def unsupported_snapshot_analysis
-            {
-              supported: false,
-              adjacent: false,
-              axis: nil,
-              waypoint_snapshot_candidates: [].freeze
-            }.freeze
-          end
-
-          def snapshot_overlap_analysis(face1, face2, area_tolerance)
-            axis = dominant_snapshot_axis(face1[:normal])
-            adjacent_area = 0.0
-            weighted_x = 0.0
-            weighted_y = 0.0
-            waypoint_area = 0.0
-
-            Array(face1[:triangles]).each do |triangle1|
-              polygon1 = project_snapshot_points(triangle1, axis)
-              Array(face2[:triangles]).each do |triangle2|
-                polygon2 = project_snapshot_points(triangle2, axis)
-                overlap = Utils::Geometry.send(:clip_polygon, polygon1, polygon2)
-                area = Utils::Geometry.send(:polygon_area_2d, overlap).abs
-                adjacent_area += area
-                next if overlap.length < 3 || area <= area_tolerance
-
-                centroid = Utils::Geometry.send(:polygon_centroid_2d, overlap)
-                weighted_x += centroid[0] * area
-                weighted_y += centroid[1] * area
-                waypoint_area += area
-              end
-            end
-
-            waypoint_metrics = if waypoint_area > area_tolerance
-                                 {
-                                   area: waypoint_area,
-                                   centroid_2d: [
-                                     weighted_x / waypoint_area,
-                                     weighted_y / waypoint_area
-                                   ]
-                                 }
-                               end
-            {
-              adjacent: adjacent_area > area_tolerance,
-              waypoint_metrics: waypoint_metrics
-            }
-          end
-
-          def project_snapshot_points(points, axis)
-            Array(points).map do |point|
-              case axis
-              when :x then [point[1].to_f, point[2].to_f]
-              when :y then [point[0].to_f, point[2].to_f]
-              else [point[0].to_f, point[1].to_f]
-              end
-            end
-          end
-
-          def dominant_snapshot_axis(vector)
-            values = { x: vector[0].abs, y: vector[1].abs, z: vector[2].abs }
-            values.max_by { |_axis, value| value }.first
-          end
-
-          def snapshot_normals_opposite?(normal1, normal2)
-            (snapshot_dot(normal1, normal2) + 1.0).abs <= 0.000001
-          end
-
-          def snapshot_points_on_plane?(points, normal, plane_point, tolerance)
-            Array(points).all? do |point|
-              vector = [
-                point[0] - plane_point[0],
-                point[1] - plane_point[1],
-                point[2] - plane_point[2]
-              ]
-              snapshot_dot(vector, normal).abs <= tolerance
-            end
-          end
-
-          def snapshot_dot(vector1, vector2)
-            (vector1[0] * vector2[0]) +
-              (vector1[1] * vector2[1]) +
-              (vector1[2] * vector2[2])
-          end
 
           def geometry_candidate_from_snapshot(candidate)
             face1 = geometry_face(candidate[:face1])
@@ -275,73 +138,6 @@ module ULOL
           end
 
           private
-
-          def compute_pair_results(entries, tolerance:, progress: nil)
-            prepare_snapshot_waypoint_contexts(entries)
-            super
-          end
-
-          def compute_pair_chunk(snapshots, pair_indices, tolerance, progress: nil)
-            total = pair_indices.length
-            emit_stage_start(
-              progress,
-              stage: :detailed_computation,
-              name: 'Adjacency 상세 판정',
-              total: total,
-              message: "Adjacency 상세 판정: 0 / #{total}"
-            )
-
-            results = []
-            pair_indices.each_with_index do |(index1, index2), index|
-              started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-              analysis = AdjacencyService::GeometryQuery.analyze_snapshot_pair(
-                snapshots[index1],
-                snapshots[index2],
-                tolerance: tolerance
-              )
-              record_snapshot_waypoint_pair_analysis(
-                Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at
-              )
-
-              if analysis[:supported]
-                if analysis[:adjacent]
-                  store_snapshot_waypoint_context(index1, index2, analysis)
-                  results << [index1, index2, analysis[:axis]] unless analysis[:axis].nil?
-                end
-              else
-                axis = Utils::Geometry.adjacency_axis_from_snapshots(
-                  snapshots[index1],
-                  snapshots[index2],
-                  tolerance: tolerance
-                )
-                results << [index1, index2, axis] unless axis.nil?
-              end
-
-              completed = index + 1
-              emit_stage_progress(
-                progress,
-                stage: :detailed_computation,
-                name: 'Adjacency 상세 판정',
-                total: total,
-                completed: completed,
-                message: "Adjacency 상세 판정: #{completed} / #{total}"
-              ) if progress_checkpoint?(completed, total)
-            end
-
-            emit_stage_finish(
-              progress,
-              stage: :detailed_computation,
-              name: 'Adjacency 상세 판정',
-              total: total,
-              completed: total,
-              message: "Adjacency 상세 판정 완료: #{results.length}개 인접",
-              telemetry: {
-                candidate_pair_count: total,
-                adjacent_pair_count: results.length
-              }
-            )
-            results
-          end
 
           def apply_pair_results(
             entries,
@@ -411,16 +207,6 @@ module ULOL
             @snapshot_waypoint_metrics_mutex ||= Mutex.new
           end
 
-          def record_snapshot_waypoint_pair_analysis(elapsed)
-            @snapshot_waypoint_metrics_mutex ||= Mutex.new
-            @snapshot_waypoint_metrics_mutex.synchronize do
-              @snapshot_waypoint_pair_analysis_count =
-                @snapshot_waypoint_pair_analysis_count.to_i + 1
-              @snapshot_waypoint_pair_analysis_duration =
-                @snapshot_waypoint_pair_analysis_duration.to_f + elapsed.to_f
-            end
-          end
-
           def record_snapshot_waypoint_conversion_fallback
             @snapshot_waypoint_context_fallbacks =
               @snapshot_waypoint_context_fallbacks.to_i + 1
@@ -446,8 +232,8 @@ module ULOL
           end
         end
 
-        GeometryQuery.singleton_class.prepend(SnapshotWaypointGeometryQuery) unless
-          GeometryQuery.singleton_class.ancestors.include?(SnapshotWaypointGeometryQuery)
+        GeometryQuery.singleton_class.prepend(SnapshotWaypointGeometryConversion) unless
+          GeometryQuery.singleton_class.ancestors.include?(SnapshotWaypointGeometryConversion)
         prepend SnapshotWaypointService unless ancestors.include?(SnapshotWaypointService)
       end
     end
