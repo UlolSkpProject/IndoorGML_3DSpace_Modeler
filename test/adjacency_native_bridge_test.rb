@@ -24,7 +24,7 @@ class AdjacencyNativeBridgeTest < Minitest::Test
       sample_snapshots,
       [
         { needs_state: true, fixed_z: 0.25 },
-        { needs_state: false }
+        { needs_state: false, adjacency_dirty: true }
       ]
     )
 
@@ -36,6 +36,9 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_equal 0, bytes.byteslice(first_cell + 8, 8).unpack1('Q<')
     assert_equal 7, bytes.byteslice(first_cell + 16, 8).unpack1('Q<')
     assert_equal 0.25, bytes.byteslice(first_cell + 88, 8).unpack1('E')
+    second_cell = first_cell + bytes.byteslice(first_cell, 8).unpack1('Q<')
+    assert_equal 1, bytes.byteslice(second_cell + 8, 8).unpack1('Q<')
+    assert_equal 10, bytes.byteslice(second_cell + 16, 8).unpack1('Q<')
   end
 
   def test_state_result_decoder_maps_cell_indices_to_points

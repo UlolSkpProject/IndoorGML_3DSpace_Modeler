@@ -229,7 +229,10 @@ CellData parse_cell(
             throw std::invalid_argument("cell reserved field is non-zero");
         }
         const std::uint64_t known_flags =
-            CELL_FLAG_NEEDS_STATE | CELL_FLAG_ADJACENCY_TARGET | CELL_FLAG_HAS_FIXED_Z;
+            CELL_FLAG_NEEDS_STATE |
+            CELL_FLAG_ADJACENCY_TARGET |
+            CELL_FLAG_HAS_FIXED_Z |
+            CELL_FLAG_ADJACENCY_DIRTY;
         if ((flags & ~known_flags) != 0)
         {
             throw std::invalid_argument("cell flags contain unsupported bits");

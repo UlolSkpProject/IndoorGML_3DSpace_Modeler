@@ -21,6 +21,7 @@ module ULOL
         CELL_FLAG_NEEDS_STATE = 1 << 0
         CELL_FLAG_ADJACENCY_TARGET = 1 << 1
         CELL_FLAG_HAS_FIXED_Z = 1 << 2
+        CELL_FLAG_ADJACENCY_DIRTY = 1 << 3
 
         NATIVE_EXTENSION_PATH = File.expand_path(
           File.join(__dir__, '..', '..', 'native', 'indoor_gml_native.so')
@@ -93,6 +94,10 @@ module ULOL
           ].all? { |name| native_module.respond_to?(name) }
         rescue StandardError
           false
+        end
+
+        def incremental_supported?
+          shared_session_supported?
         end
 
         def load_error
@@ -188,6 +193,76 @@ module ULOL
         rescue StandardError
           reset_shared_session_state
           false
+        end
+
+        def compute_incremental(snapshots, dirty_indices:, tolerance:, keys: nil, &block)
+          raise ProtocolError, 'native extension does not support incremental adjacency' unless incremental_supported?
+
+          snapshots = Array(snapshots)
+          dirty = Array(dirty_indices).map { |index| Integer(index) }.uniq.sort
+          raise ProtocolError, 'incremental adjacency requires at least one dirty Cell' if dirty.empty?
+
+          dirty.each do |index|
+            if index.negative? || index >= snapshots.length
+              raise ProtocolError, "incremental dirty cell index #{index} is out of range"
+            end
+          end
+
+          close_geometry_session if shared_session_active?
+
+          serialization_started_at = monotonic_time
+          dirty_lookup = dirty.each_with_object({}) { |index, out| out[index] = true }
+          options = snapshots.each_index.map do |index|
+            {
+              needs_state: false,
+              adjacency_dirty: dirty_lookup.key?(index)
+            }
+          end
+          input_bytes = encode_geometry_input(snapshots, options)
+          serialization_duration = elapsed_since(serialization_started_at)
+
+          native_module = native
+          parse_started_at = monotonic_time
+          loaded_count = native_module.load_batch(input_bytes).to_i
+          parse_duration = elapsed_since(parse_started_at)
+          unless loaded_count == snapshots.length
+            raise ProtocolError,
+                  "native incremental adjacency loaded #{loaded_count} cells, expected #{snapshots.length}"
+          end
+          yield(:loaded, { cell_count: loaded_count }) if block_given?
+
+          candidate_count =
+            native_module.start_adjacency_check(tolerance.to_f, NORMAL_TOLERANCE).to_i
+          progress = normalize_hash(native_module.get_progress)
+          progress[:candidate_count] = candidate_count
+          yield(:candidate_complete, progress) if block_given?
+
+          poll_adjacency_progress(native_module) do |event, payload|
+            yield(event, payload) if block_given?
+          end
+
+          decode_started_at = monotonic_time
+          output_bytes = native_module.get_adjacency_result_bytes
+          decoded = decode_result(output_bytes, snapshots)
+          decode_duration = elapsed_since(decode_started_at)
+
+          metrics = normalize_hash(native_module.get_metrics)
+          metrics[:serialization_duration] = serialization_duration
+          metrics[:parse_duration] = parse_duration
+          metrics[:result_decode_duration] = decode_duration
+          metrics[:input_bytes] = input_bytes.bytesize
+          metrics[:output_bytes] = output_bytes.bytesize
+          metrics[:candidate_count] = candidate_count unless metrics.key?(:candidate_count)
+          metrics[:incremental_dirty_count] = dirty.length
+
+          decoded.merge(metrics: metrics.freeze)
+        ensure
+          begin
+            native_module&.clear_session
+          rescue StandardError
+            nil
+          end
+          reset_shared_session_state
         end
 
         def compute(snapshots, tolerance:, keys: nil, &block)
@@ -501,6 +576,7 @@ module ULOL
           minimum, maximum, faces = cell_geometry(snapshot, cell_index)
           flags = CELL_FLAG_ADJACENCY_TARGET
           flags |= CELL_FLAG_NEEDS_STATE if option[:needs_state] == true
+          flags |= CELL_FLAG_ADJACENCY_DIRTY if option[:adjacency_dirty] == true
 
           fixed_z = option[:fixed_z]
           unless fixed_z.nil?

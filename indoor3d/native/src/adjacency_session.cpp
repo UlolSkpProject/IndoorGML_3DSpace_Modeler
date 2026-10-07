@@ -229,18 +229,27 @@ std::size_t AdjacencySession::start_adjacency_check(
     {
         if (cell.adjacency_target()) adjacency_cells.push_back(cell);
     }
-    candidates_ = z_sweep_candidates(adjacency_cells, length_tolerance_);
-
-    // z_sweep_candidates indices refer to adjacency_cells positions. Convert them
-    // back to session CellData positions while preserving the original cell indices.
-    std::vector<PairIndex> mapped;
-    mapped.reserve(candidates_.size());
-    for (const PairIndex& pair : candidates_)
-    {
-        mapped.push_back(PairIndex{
-            adjacency_cells[pair.first].index,
-            adjacency_cells[pair.second].index
+    const bool incremental =
+        std::any_of(adjacency_cells.begin(), adjacency_cells.end(), [](const CellData& cell) {
+            return cell.adjacency_dirty();
         });
+
+    const std::vector<PairIndex> sweep_candidates =
+        z_sweep_candidates(adjacency_cells, length_tolerance_);
+
+    // Keep the already-validated Z-sweep semantics unchanged. Incremental mode only
+    // filters the sweep output before the expensive exact face narrow phase.
+    // With no dirty flags this is byte-for-byte the previous full-adjacency behavior.
+    std::vector<PairIndex> mapped;
+    mapped.reserve(sweep_candidates.size());
+    for (const PairIndex& pair : sweep_candidates)
+    {
+        const CellData& first = adjacency_cells[pair.first];
+        const CellData& second = adjacency_cells[pair.second];
+        if (incremental && !first.adjacency_dirty() && !second.adjacency_dirty())
+            continue;
+
+        mapped.push_back(PairIndex{first.index, second.index});
     }
     candidates_ = std::move(mapped);
 

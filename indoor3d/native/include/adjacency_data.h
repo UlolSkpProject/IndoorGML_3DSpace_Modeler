@@ -10,6 +10,7 @@ namespace IndoorGMLAdjacencyNative
 constexpr std::uint64_t CELL_FLAG_NEEDS_STATE = 1ull << 0;
 constexpr std::uint64_t CELL_FLAG_ADJACENCY_TARGET = 1ull << 1;
 constexpr std::uint64_t CELL_FLAG_HAS_FIXED_Z = 1ull << 2;
+constexpr std::uint64_t CELL_FLAG_ADJACENCY_DIRTY = 1ull << 3;
 
 struct Vec3
 {
@@ -47,6 +48,7 @@ struct CellData
     bool needs_state() const { return (flags & CELL_FLAG_NEEDS_STATE) != 0; }
     bool adjacency_target() const { return (flags & CELL_FLAG_ADJACENCY_TARGET) != 0; }
     bool has_fixed_z() const { return (flags & CELL_FLAG_HAS_FIXED_Z) != 0; }
+    bool adjacency_dirty() const { return (flags & CELL_FLAG_ADJACENCY_DIRTY) != 0; }
 };
 
 struct PairIndex
