@@ -93,8 +93,8 @@ std::size_t AdjacencySession::start_state_check()
 
     if (state_targets_.empty())
     {
-        completed_.store(true, std::memory_order_release);
         state_.store(SessionState::StateComplete, std::memory_order_release);
+        completed_.store(true, std::memory_order_release);
         return 0;
     }
 
@@ -160,8 +160,8 @@ void AdjacencySession::state_worker_loop()
     {
         state_duration_.store(elapsed_seconds(phase_started_at_), std::memory_order_release);
         running_.store(false, std::memory_order_release);
-        completed_.store(true, std::memory_order_release);
         state_.store(SessionState::StateComplete, std::memory_order_release);
+        completed_.store(true, std::memory_order_release);
     }
 }
 
@@ -251,8 +251,8 @@ std::size_t AdjacencySession::start_adjacency_check(
 
     if (candidates_.empty())
     {
-        completed_.store(true, std::memory_order_release);
         state_.store(SessionState::AdjacencyComplete, std::memory_order_release);
+        completed_.store(true, std::memory_order_release);
         return 0;
     }
 
@@ -319,8 +319,8 @@ void AdjacencySession::adjacency_worker_loop()
     {
         narrow_phase_duration_.store(elapsed_seconds(phase_started_at_), std::memory_order_release);
         running_.store(false, std::memory_order_release);
-        completed_.store(true, std::memory_order_release);
         state_.store(SessionState::AdjacencyComplete, std::memory_order_release);
+        completed_.store(true, std::memory_order_release);
     }
 }
 
