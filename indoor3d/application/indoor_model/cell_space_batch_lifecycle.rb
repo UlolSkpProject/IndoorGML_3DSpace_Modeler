@@ -357,8 +357,8 @@ module ULOL
 
             unless defined?(NativeAdjacencyBridge) &&
                    NativeAdjacencyBridge.shared_session_supported?
-              pending.each { |cell_space| recenter_prepared_cell_space_state_ruby(cell_space) }
-              return yield
+              raise NativeAdjacencyBridge::ProtocolError,
+                    'Native State backend is unavailable; rebuild indoor_gml_native.so'
             end
 
             pending_by_id = pending.each_with_object({}) { |cell_space, out| out[cell_space.id] = cell_space }
@@ -374,13 +374,11 @@ module ULOL
             available_ids = session_entries.each_with_object({}) do |entry, out|
               out[entry[:cell_space].id] = true
             end
-            pending.each do |cell_space|
-              next if available_ids[cell_space.id]
-
-              recenter_prepared_cell_space_state_ruby(cell_space)
-              pending_by_id.delete(cell_space.id)
+            missing = pending.reject { |cell_space| available_ids[cell_space.id] }
+            unless missing.empty?
+              raise NativeAdjacencyBridge::ProtocolError,
+                    "Native State snapshot missing for CellSpace(s): #{missing.map(&:id).join(', ')}"
             end
-            return yield if pending_by_id.empty?
 
             snapshots = session_entries.map { |entry| entry[:snapshot] }
             keys = session_entries.map { |entry| entry[:cell_space].id }
@@ -393,9 +391,8 @@ module ULOL
               fixed_offset = fixed_state_height_offset(cell_space)
               fixed_z = native_state_fixed_parent_z(cell_space)
               if !fixed_offset.nil? && fixed_z.nil?
-                recenter_prepared_cell_space_state_ruby(cell_space)
-                pending_by_id.delete(cell_space.id)
-                next({ needs_state: false })
+                raise NativeAdjacencyBridge::ProtocolError,
+                      "Native State fixed-Z preparation failed for #{cell_space.id}"
               end
 
               {
@@ -403,8 +400,6 @@ module ULOL
                 fixed_z: fixed_z
               }
             end
-            return yield if pending_by_id.empty?
-
             state_progress = native_state_progress_sink
             emit_native_state_progress(
               state_progress,
@@ -458,12 +453,9 @@ module ULOL
             rescue StandardError => e
               NativeAdjacencyBridge.close_geometry_session
               IndoorCore::Logger.puts(
-                "[IndoorGML] Native State batch failed; using Ruby fallback: #{e.class}: #{e.message}"
+                "[IndoorGML] Native State batch failed: #{e.class}: #{e.message}"
               ) if defined?(IndoorCore::Logger)
-              pending_by_id.each_value do |cell_space|
-                recenter_prepared_cell_space_state_ruby(cell_space)
-              end
-              return yield
+              raise
             end
 
             points = Hash(state_result[:points])
@@ -472,18 +464,11 @@ module ULOL
               next unless cell_space
 
               coordinates = points[index]
-              if coordinates
-                begin
-                  apply_native_state_parent_point(cell_space, coordinates)
-                  next
-                rescue StandardError => e
-                  IndoorCore::Logger.puts(
-                    "[IndoorGML] Native State apply failed for #{cell_space.id}; " \
-                    "using Ruby fallback: #{e.class}: #{e.message}"
-                  ) if defined?(IndoorCore::Logger)
-                end
+              unless coordinates
+                raise NativeAdjacencyBridge::ProtocolError,
+                      "Native State result missing for #{cell_space.id}"
               end
-              recenter_prepared_cell_space_state_ruby(cell_space)
+              apply_native_state_parent_point(cell_space, coordinates)
             end
 
             yield

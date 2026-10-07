@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../adjacency_service/native_bridge'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -529,20 +531,73 @@ module ULOL
             cell_space_entity,
             fixed_z_offset_from_bottom: nil
           )
-            fixed_z = if fixed_z_offset_from_bottom.nil?
-                        nil
-                      else
-                        fixed_local_z_from_world_offset(
-                          cell_space_entity,
-                          fixed_z_offset_from_bottom
-                        )
-                      end
-            center = Utils::Geometry.find_shell_inner_centroid(
+            center = native_state_local_point_for_entity(
               cell_space_entity,
-              fixed_z: fixed_z
+              fixed_z_offset_from_bottom: fixed_z_offset_from_bottom
             )
             apply_cell_space_local_center(cell_space_entity, center)
             center
+          end
+
+          def native_state_local_point_for_entity(
+            cell_space_entity,
+            fixed_z_offset_from_bottom: nil
+          )
+            unless cell_space_entity&.valid?
+              raise ArgumentError, 'CellSpace entity is invalid during Native State calculation'
+            end
+            unless NativeAdjacencyBridge.shared_session_supported?
+              raise NativeAdjacencyBridge::ProtocolError,
+                    'Native State backend is unavailable; rebuild indoor_gml_native.so'
+            end
+            if NativeAdjacencyBridge.shared_session_active?
+              raise NativeAdjacencyBridge::ProtocolError,
+                    'standalone Native State calculation cannot reuse an active shared session'
+            end
+
+            snapshot = Utils::Geometry.adjacency_snapshot(cell_space_entity)
+            unless snapshot
+              raise NativeAdjacencyBridge::ProtocolError,
+                    'CellSpace geometry snapshot is unavailable for Native State calculation'
+            end
+
+            fixed_z = native_state_fixed_parent_z_for_entity(
+              cell_space_entity,
+              fixed_z_offset_from_bottom
+            )
+            if !fixed_z_offset_from_bottom.nil? && fixed_z.nil?
+              raise NativeAdjacencyBridge::ProtocolError,
+                    'fixed-Z preparation failed for Native State calculation'
+            end
+
+            key = if cell_space_entity.respond_to?(:persistent_id)
+                    cell_space_entity.persistent_id
+                  else
+                    cell_space_entity.object_id
+                  end
+            opened = false
+            NativeAdjacencyBridge.open_geometry_session(
+              [snapshot],
+              keys: [key],
+              state_options: [{ needs_state: true, fixed_z: fixed_z }]
+            )
+            opened = true
+            result = NativeAdjacencyBridge.compute_state_from_open_session
+            coordinates = Hash(result[:points])[0]
+            unless coordinates
+              raise NativeAdjacencyBridge::ProtocolError,
+                    'Native State backend did not return an interior point'
+            end
+
+            values = Array(coordinates).map(&:to_f)
+            unless values.length == 3 && values.all?(&:finite?)
+              raise NativeAdjacencyBridge::ProtocolError,
+                    'Native State backend returned invalid coordinates'
+            end
+            parent_point = Geom::Point3d.new(values[0], values[1], values[2])
+            parent_point.transform(cell_space_entity.transformation.inverse)
+          ensure
+            NativeAdjacencyBridge.close_geometry_session if opened
           end
 
           def apply_native_state_parent_point(cell_space, coordinates)
@@ -560,24 +615,21 @@ module ULOL
             local_point
           end
 
-          def recenter_prepared_cell_space_state_ruby(cell_space)
-            return nil unless cell_space&.valid?
-
-            center = recenter_prepared_cell_space_geometry(
-              cell_space.sketchup_group,
-              fixed_z_offset_from_bottom: fixed_state_height_offset(cell_space)
-            )
-            remember_cell_space_change_snapshot(cell_space.sketchup_group)
-            center
-          end
-
           def native_state_fixed_parent_z(cell_space)
             offset = fixed_state_height_offset(cell_space)
             return nil if offset.nil?
 
-            group = cell_space.sketchup_group
-            local_z = fixed_local_z_from_world_offset(group, offset)
-            Geom::Point3d.new(0.0, 0.0, local_z).transform(group.transformation).z.to_f
+            native_state_fixed_parent_z_for_entity(cell_space.sketchup_group, offset)
+          end
+
+          def native_state_fixed_parent_z_for_entity(cell_space_entity, offset)
+            return nil if offset.nil?
+
+            local_z = fixed_local_z_from_world_offset(cell_space_entity, offset)
+            Geom::Point3d.new(0.0, 0.0, local_z)
+                         .transform(cell_space_entity.transformation)
+                         .z
+                         .to_f
           rescue StandardError => e
             IndoorCore::Logger.puts(
               "[IndoorGML] Native State fixed Z preparation failed: #{e.class}: #{e.message}"

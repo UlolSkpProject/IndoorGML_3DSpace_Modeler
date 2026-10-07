@@ -286,17 +286,9 @@ module ULOL
             cell_space_entity,
             fixed_z_offset_from_bottom: nil
           )
-            fixed_z = if fixed_z_offset_from_bottom.nil?
-                        nil
-                      else
-                        fixed_local_z_from_world_offset(
-                          cell_space_entity,
-                          fixed_z_offset_from_bottom
-                        )
-                      end
-            raw_center = Utils::Geometry.find_shell_inner_centroid(
+            raw_center = native_state_local_point_for_entity(
               cell_space_entity,
-              fixed_z: fixed_z
+              fixed_z_offset_from_bottom: fixed_z_offset_from_bottom
             )
             return local_grid_recenter_report(false, raw_center, raw_center) if
               raw_center.distance(ORIGIN) <= 0.001
@@ -305,15 +297,7 @@ module ULOL
               raw_center,
               LOCAL_GRID_TOLERANCE_MM
             )
-
-            set_group_transformation(
-              cell_space_entity,
-              cell_space_entity.transformation * Geom::Transformation.translation(snapped_center)
-            )
-            cell_space_entity.definition.entities.transform_entities(
-              Geom::Transformation.translation(snapped_center.vector_to(ORIGIN)),
-              cell_space_entity.definition.entities.to_a
-            )
+            apply_cell_space_local_center(cell_space_entity, snapped_center)
 
             local_grid_recenter_report(true, raw_center, snapped_center)
           end
