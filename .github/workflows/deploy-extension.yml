@@ -17,145 +17,21 @@ on:
 
   push:
     tags:
-      - "v*"
+      - 'v*'
 
 permissions:
   contents: write
 
-concurrency:
-  group: ulol-extension-repository-deploy
-  cancel-in-progress: false
-
-env:
-  PAGES_BASE_URL: https://ulolskpproject.github.io/ULOL-Extension-Repository
-
 jobs:
   deploy:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Extension Repo
-        uses: actions/checkout@v5
-
-      - name: Checkout Deploy Repo
-        uses: actions/checkout@v5
-        with:
-          repository: UlolSkpProject/ULOL-Extension-Repository
-          token: ${{ secrets.DEPLOY_TOKEN }}
-          path: deploy_repo
-
-      - name: Resolve Deploy Options
-        shell: bash
-        run: |
-          VISIBILITY="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.visibility || '' }}"
-          DISTRIBUTION="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.distribution || '' }}"
-
-          if [ -z "$VISIBILITY" ] || [ -z "$DISTRIBUTION" ]; then
-            TAG_NAME="${GITHUB_REF_NAME}"
-
-            VISIBILITY="visible"
-            DISTRIBUTION="active"
-
-            if [[ "$TAG_NAME" == *"-hidden-"* ]] || [[ "$TAG_NAME" == *"-hidden" ]]; then
-              VISIBILITY="hidden"
-            fi
-
-            if [[ "$TAG_NAME" == *"-preview" ]]; then
-              DISTRIBUTION="preview"
-            elif [[ "$TAG_NAME" == *"-deprecated" ]]; then
-              DISTRIBUTION="deprecated"
-            elif [[ "$TAG_NAME" == *"-disabled" ]]; then
-              DISTRIBUTION="disabled"
-            elif [[ "$TAG_NAME" == *"-active" ]]; then
-              DISTRIBUTION="active"
-            fi
-          fi
-
-          echo "INPUT_VISIBILITY=$VISIBILITY" >> "$GITHUB_ENV"
-          echo "INPUT_DISTRIBUTION=$DISTRIBUTION" >> "$GITHUB_ENV"
-
-      - name: Extract Metadata
-        id: metadata
-        shell: bash
-        run: python3 deploy_repo/scripts/extract_metadata.py
-        env:
-          LOADER_FILE: indoor3d.rb
-
-      - name: Export Metadata
-        shell: bash
-        run: |
-          {
-            echo "EXTENSION_ID=indoor3d"
-            echo "LOADER_FILE=indoor3d.rb"
-            echo "SOURCE_DIR=indoor3d"
-            echo "EXTENSION_NAME=${{ steps.metadata.outputs.name }}"
-            echo "EXTENSION_VERSION=${{ steps.metadata.outputs.version }}"
-            echo "EXTENSION_CREATOR=${{ steps.metadata.outputs.creator }}"
-            echo "EXTENSION_DESCRIPTION=${{ steps.metadata.outputs.description }}"
-          } >> "$GITHUB_ENV"
-
-      - name: Keep Only Native Runtime Files
-        shell: bash
-        run: |
-          if [ -d "$SOURCE_DIR/native" ]; then
-            find "$SOURCE_DIR/native" -type f ! -name '*.so' -delete
-            find "$SOURCE_DIR/native" -type l -delete
-
-            if find "$SOURCE_DIR/native" -mindepth 1 ! -type d ! \( -type f -name '*.so' \) -print -quit | grep -q .; then
-              echo "ERROR: Native development files remain in the deployment tree." >&2
-              exit 1
-            fi
-
-            find "$SOURCE_DIR/native" -depth -type d -empty -delete
-          fi
-
-      - name: Build RBZ
-        shell: bash
-        run: bash deploy_repo/scripts/build_rbz.sh
-
-      - name: Copy RBZ
-        shell: bash
-        run: |
-          mkdir -p "deploy_repo/rbz/${EXTENSION_ID}"
-          cp "$RBZ_NAME" "deploy_repo/rbz/${EXTENSION_ID}/${RBZ_NAME}"
-
-      - name: Update Manifest
-        shell: bash
-        run: python3 deploy_repo/scripts/update_manifest.py
-        env:
-          INPUT_VISIBILITY: ${{ env.INPUT_VISIBILITY }}
-          INPUT_DISTRIBUTION: ${{ env.INPUT_DISTRIBUTION }}
-          INPUT_CATEGORY: SeoulSpace
-          INPUT_RELEASE_NOTE_URL: "https://u-lo-l.notion.site/Indoor-Modeler-35fbe883973b80d1be3be90372b712ed"
-          MANIFEST_PATH: deploy_repo/manifest.json
-          PAGES_BASE_URL: ${{ env.PAGES_BASE_URL }}
-
-      - name: Commit Manifest and RBZ
-        shell: bash
-        run: |
-          cd deploy_repo
-
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-
-          git fetch origin main
-          git add manifest.json rbz
-
-          if git diff --cached --quiet; then
-            echo "No changes"
-            exit 0
-          fi
-
-          git commit -m "Deploy ${EXTENSION_ID} ${EXTENSION_VERSION}"
-
-          for i in 1 2 3 4 5; do
-            if git pull --rebase origin main && git push origin main; then
-              exit 0
-            fi
-
-            echo "Push failed. Retrying in $((i * 3)) seconds..."
-            sleep $((i * 3))
-          done
-
-          echo "Failed to push after retries"
-          exit 1
+    uses: UlolSkpProject/ULOL-Extension-Repository/.github/workflows/deploy-extension.yml@main
+    with:
+      extension_id: indoor3d
+      loader_file: indoor3d.rb
+      visibility: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.visibility || '' }}
+      distribution: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.distribution || '' }}
+      category: SeoulSpace
+      release_note_url: "https://u-lo-l.notion.site/Indoor-Modeler-35fbe883973b80d1be3be90372b712ed"
+      native_so_only: true
+    secrets:
+      DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
