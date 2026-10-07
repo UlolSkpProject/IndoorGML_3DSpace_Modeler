@@ -15,6 +15,7 @@ target_sources(indoor_gml_native PRIVATE
     src/native_entry.cpp
     src/native_api.cpp
     src/adjacency_data.cpp
+    src/adjacency_checker.cpp
     src/adjacency_session.cpp
     src/state_locator.cpp
 )
