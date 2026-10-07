@@ -19,6 +19,41 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_equal legacy_encode_input(sample_snapshots), Bridge.encode_input(sample_snapshots)
   end
 
+  def test_geometry_v2_encoding_carries_state_flags
+    bytes = Bridge.encode_geometry_input(
+      sample_snapshots,
+      [
+        { needs_state: true, fixed_z: 0.25 },
+        { needs_state: false }
+      ]
+    )
+
+    assert_equal "IGMLADJ\0".b, bytes.byteslice(0, 8)
+    assert_equal 2, bytes.byteslice(8, 8).unpack1('Q<')
+    assert_equal 2, bytes.byteslice(16, 8).unpack1('Q<')
+
+    first_cell = 32
+    assert_equal 0, bytes.byteslice(first_cell + 8, 8).unpack1('Q<')
+    assert_equal 7, bytes.byteslice(first_cell + 16, 8).unpack1('Q<')
+    assert_equal 0.25, bytes.byteslice(first_cell + 88, 8).unpack1('E')
+  end
+
+  def test_state_result_decoder_maps_cell_indices_to_points
+    bytes =
+      "IGMLSTA\0".b +
+      [1, 2, 0].pack('Q<Q<Q<') +
+      [0].pack('Q<') + [1.0, 2.0, 3.0].pack('E3') +
+      [1].pack('Q<') + [4.0, 5.0, 6.0].pack('E3')
+
+    assert_equal(
+      {
+        0 => [1.0, 2.0, 3.0],
+        1 => [4.0, 5.0, 6.0]
+      },
+      Bridge.decode_state_result(bytes)
+    )
+  end
+
   def test_result_decoding_restores_snapshot_face_references
     snapshots = sample_snapshots
     candidate =

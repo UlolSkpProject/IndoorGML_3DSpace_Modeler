@@ -18,7 +18,8 @@ module ULOL
           cell_space.set_storey(storey)
           @recenter_cell_space_geometry.call(
             cell_space.sketchup_group,
-            fixed_z_offset_from_bottom: @fixed_state_height_offset.call(cell_space)
+            fixed_z_offset_from_bottom: @fixed_state_height_offset.call(cell_space),
+            defer_center: true
           )
           @name_cell_space_entity.call(cell_space)
         end
@@ -108,6 +109,7 @@ module ULOL
             return [] if plan.empty?
 
             created = []
+            native_state_cells = []
             with_validation_focus_mutation_batch do
               with_bulk_cell_space_conversion do
                 with_indoor_model_operation(operation_name, force: true) do
@@ -116,14 +118,16 @@ module ULOL
                     service = request[:local_grid] ?
                       cell_space_lifecycle_service_local_grid :
                       cell_space_lifecycle_service
-                    created << service.create_from_group_deferred(
+                    created_cell = service.create_from_group_deferred(
                       request[:source],
                       cell_type: request[:cell_type],
                       category_code: request[:category_code],
                       storey: request[:storey]
                     )
+                    created << created_cell
+                    native_state_cells << created_cell unless request[:local_grid]
                   end
-                  finalize_cell_space_batch(created)
+                  finalize_cell_space_batch(created, state_cells: native_state_cells)
                 end
               end
             end
@@ -332,16 +336,108 @@ module ULOL
             cell_spaces,
             synchronize_topology: true,
             apply_lock_policy: true,
-            clear_dirty_topology: true
+            clear_dirty_topology: true,
+            state_cells: []
           )
             valid_cell_spaces = Array(cell_spaces).select { |cell_space| cell_space&.valid? }
             return {} if valid_cell_spaces.empty?
 
-            apply_cell_space_materials_batch(valid_cell_spaces)
-            metrics = synchronize_topology ? synchronize_topology_after_bulk_conversion : {}
-            apply_indoor_lock_policy() if apply_lock_policy
-            clear_bulk_dirty_topology() if clear_dirty_topology
-            metrics || {}
+            with_native_state_geometry_session(state_cells) do
+              apply_cell_space_materials_batch(valid_cell_spaces)
+              metrics = synchronize_topology ? synchronize_topology_after_bulk_conversion : {}
+              apply_indoor_lock_policy() if apply_lock_policy
+              clear_bulk_dirty_topology() if clear_dirty_topology
+              metrics || {}
+            end
+          end
+
+          def with_native_state_geometry_session(state_cells)
+            pending = Array(state_cells).select { |cell_space| cell_space&.valid? }.uniq
+            return yield if pending.empty?
+
+            unless defined?(NativeAdjacencyBridge) &&
+                   NativeAdjacencyBridge.shared_session_supported?
+              pending.each { |cell_space| recenter_prepared_cell_space_state_ruby(cell_space) }
+              return yield
+            end
+
+            pending_by_id = pending.each_with_object({}) { |cell_space, out| out[cell_space.id] = cell_space }
+            session_entries = Array(@feature_registry.cell_spaces).uniq.filter_map do |cell_space|
+              next unless cell_space&.valid? && cell_space.duality_state&.valid?
+
+              snapshot = Utils::Geometry.adjacency_snapshot(cell_space.sketchup_group)
+              next unless snapshot
+
+              { cell_space: cell_space, snapshot: snapshot }
+            end
+
+            available_ids = session_entries.each_with_object({}) do |entry, out|
+              out[entry[:cell_space].id] = true
+            end
+            pending.each do |cell_space|
+              next if available_ids[cell_space.id]
+
+              recenter_prepared_cell_space_state_ruby(cell_space)
+              pending_by_id.delete(cell_space.id)
+            end
+            return yield if pending_by_id.empty?
+
+            snapshots = session_entries.map { |entry| entry[:snapshot] }
+            keys = session_entries.map { |entry| entry[:cell_space].id }
+            state_options = session_entries.map do |entry|
+              cell_space = entry[:cell_space]
+              if pending_by_id.key?(cell_space.id)
+                {
+                  needs_state: true,
+                  fixed_z: native_state_fixed_parent_z(cell_space)
+                }
+              else
+                { needs_state: false }
+              end
+            end
+
+            begin
+              NativeAdjacencyBridge.open_geometry_session(
+                snapshots,
+                keys: keys,
+                state_options: state_options
+              )
+              state_result = NativeAdjacencyBridge.compute_state_from_open_session
+            rescue StandardError => e
+              NativeAdjacencyBridge.close_geometry_session
+              IndoorCore::Logger.puts(
+                "[IndoorGML] Native State batch failed; using Ruby fallback: #{e.class}: #{e.message}"
+              ) if defined?(IndoorCore::Logger)
+              pending_by_id.each_value do |cell_space|
+                recenter_prepared_cell_space_state_ruby(cell_space)
+              end
+              return yield
+            end
+
+            points = Hash(state_result[:points])
+            session_entries.each_with_index do |entry, index|
+              cell_space = pending_by_id[entry[:cell_space].id]
+              next unless cell_space
+
+              coordinates = points[index]
+              if coordinates
+                begin
+                  apply_native_state_parent_point(cell_space, coordinates)
+                  next
+                rescue StandardError => e
+                  IndoorCore::Logger.puts(
+                    "[IndoorGML] Native State apply failed for #{cell_space.id}; " \
+                    "using Ruby fallback: #{e.class}: #{e.message}"
+                  ) if defined?(IndoorCore::Logger)
+                end
+              end
+              recenter_prepared_cell_space_state_ruby(cell_space)
+            end
+
+            yield
+          ensure
+            NativeAdjacencyBridge.close_geometry_session if
+              defined?(NativeAdjacencyBridge) && NativeAdjacencyBridge.shared_session_active?
           end
 
           def apply_cell_space_materials_batch(cell_spaces)

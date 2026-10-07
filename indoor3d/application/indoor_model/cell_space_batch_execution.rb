@@ -102,20 +102,23 @@ module ULOL
                 cell_space
               end,
               synchronize_all: proc do
-                # Persist every newly-created CellSpace once before topology starts,
-                # preserving the old topology-visible attribute state and the
-                # existing IndoorModel snapshot side effects. The batch dedup cache
-                # then turns repeated transition/state persistence for unchanged
-                # CellSpaces into no-ops.
-                @attribute_serializer.with_cell_space_write_flush do
-                  created.each do |cell_space|
-                    next unless cell_space&.valid?
+                state_cells = local_grid ? [] : created
+                with_native_state_geometry_session(state_cells) do
+                  # Persist every newly-created CellSpace once before topology starts,
+                  # preserving the old topology-visible attribute state and the
+                  # existing IndoorModel snapshot side effects. The batch dedup cache
+                  # then turns repeated transition/state persistence for unchanged
+                  # CellSpaces into no-ops.
+                  @attribute_serializer.with_cell_space_write_flush do
+                    created.each do |cell_space|
+                      next unless cell_space&.valid?
 
-                    write_attributes(cell_space)
+                      write_attributes(cell_space)
+                    end
                   end
+                  apply_cell_space_materials_batch(created)
+                  synchronize_topology_after_bulk_conversion
                 end
-                apply_cell_space_materials_batch(created)
-                synchronize_topology_after_bulk_conversion
               end,
               apply_lock_policy: proc { apply_indoor_lock_policy },
               runtime_snapshot: proc { bulk_conversion_runtime_snapshot },

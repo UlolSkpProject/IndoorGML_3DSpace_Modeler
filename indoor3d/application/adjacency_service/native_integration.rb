@@ -40,7 +40,7 @@ module ULOL
               message: "Adjacency 후보 pair 생성: 0 / #{theoretical_pair_count}"
             )
 
-            native_result = NativeAdjacencyBridge.compute(snapshots, tolerance: tolerance) do |event, payload|
+            native_result = NativeAdjacencyBridge.compute(\n              snapshots,\n              tolerance: tolerance,\n              keys: entries.map { |entry| entry[:cell_space].id }\n            ) do |event, payload|
               case event
               when :candidate_complete
                 native_candidate_count = payload[:candidate_count].to_i

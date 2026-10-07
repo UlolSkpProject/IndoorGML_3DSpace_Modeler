@@ -502,25 +502,101 @@ module ULOL
             candidate[:alignment] > current[:alignment]
           end
 
-          def recenter_cell_space_geometry(cell_space_entity, fixed_z_offset_from_bottom: nil)
+          def recenter_cell_space_geometry(
+            cell_space_entity,
+            fixed_z_offset_from_bottom: nil,
+            defer_center: false
+          )
             with_indoor_model_operation('IndoorGML Recenter CellSpace Geometry', transparent: true) do
-              if ALIGN_CELL_SPACE_LOCAL_CENTER_TO_DOMINANT_WALLS
-                align_cell_space_local_axes_to_dominant_walls(cell_space_entity)
-              end
-              fixed_z = fixed_z_offset_from_bottom.nil? ? nil : fixed_local_z_from_world_offset(cell_space_entity, fixed_z_offset_from_bottom)
-              center = Utils::Geometry.find_shell_inner_centroid(cell_space_entity, fixed_z: fixed_z)
-              # IndoorCore::Logger.puts "[IndoorGML] recenter_cell_space_geometry center=#{center} distance=#{center.distance(ORIGIN)}"
-              next if center.distance(ORIGIN) <= 0.001
+              prepare_cell_space_geometry_for_state(cell_space_entity)
+              next true if defer_center
 
-              set_group_transformation(
+              recenter_prepared_cell_space_geometry(
                 cell_space_entity,
-                cell_space_entity.transformation * Geom::Transformation.translation(center)
-              )
-              cell_space_entity.definition.entities.transform_entities(
-                Geom::Transformation.translation(center.vector_to(ORIGIN)),
-                cell_space_entity.definition.entities.to_a
+                fixed_z_offset_from_bottom: fixed_z_offset_from_bottom
               )
             end
+          end
+
+          def prepare_cell_space_geometry_for_state(cell_space_entity)
+            if ALIGN_CELL_SPACE_LOCAL_CENTER_TO_DOMINANT_WALLS
+              align_cell_space_local_axes_to_dominant_walls(cell_space_entity)
+            end
+            true
+          end
+
+          def recenter_prepared_cell_space_geometry(
+            cell_space_entity,
+            fixed_z_offset_from_bottom: nil
+          )
+            fixed_z = if fixed_z_offset_from_bottom.nil?
+                        nil
+                      else
+                        fixed_local_z_from_world_offset(
+                          cell_space_entity,
+                          fixed_z_offset_from_bottom
+                        )
+                      end
+            center = Utils::Geometry.find_shell_inner_centroid(
+              cell_space_entity,
+              fixed_z: fixed_z
+            )
+            apply_cell_space_local_center(cell_space_entity, center)
+            center
+          end
+
+          def apply_native_state_parent_point(cell_space, coordinates)
+            group = cell_space&.sketchup_group
+            raise ArgumentError, 'CellSpace is invalid during Native State apply' unless
+              cell_space&.valid? && group&.valid?
+
+            values = Array(coordinates).map(&:to_f)
+            raise ArgumentError, 'Native State point must contain 3 coordinates' unless values.length == 3
+
+            parent_point = Geom::Point3d.new(values[0], values[1], values[2])
+            local_point = parent_point.transform(group.transformation.inverse)
+            apply_cell_space_local_center(group, local_point)
+            remember_cell_space_change_snapshot(group)
+            local_point
+          end
+
+          def recenter_prepared_cell_space_state_ruby(cell_space)
+            return nil unless cell_space&.valid?
+
+            center = recenter_prepared_cell_space_geometry(
+              cell_space.sketchup_group,
+              fixed_z_offset_from_bottom: fixed_state_height_offset(cell_space)
+            )
+            remember_cell_space_change_snapshot(cell_space.sketchup_group)
+            center
+          end
+
+          def native_state_fixed_parent_z(cell_space)
+            offset = fixed_state_height_offset(cell_space)
+            return nil if offset.nil?
+
+            group = cell_space.sketchup_group
+            local_z = fixed_local_z_from_world_offset(group, offset)
+            Geom::Point3d.new(0.0, 0.0, local_z).transform(group.transformation).z.to_f
+          rescue StandardError => e
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Native State fixed Z preparation failed: #{e.class}: #{e.message}"
+            )
+            nil
+          end
+
+          def apply_cell_space_local_center(cell_space_entity, center)
+            return center if center.distance(ORIGIN) <= 0.001
+
+            set_group_transformation(
+              cell_space_entity,
+              cell_space_entity.transformation * Geom::Transformation.translation(center)
+            )
+            cell_space_entity.definition.entities.transform_entities(
+              Geom::Transformation.translation(center.vector_to(ORIGIN)),
+              cell_space_entity.definition.entities.to_a
+            )
+            center
           end
 
           def fixed_local_z_from_world_offset(cell_space_entity, offset_from_world_bottom)
