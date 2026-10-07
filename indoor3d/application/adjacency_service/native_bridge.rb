@@ -23,8 +23,16 @@ module ULOL
         CELL_FLAG_HAS_FIXED_Z = 1 << 2
         CELL_FLAG_ADJACENCY_DIRTY = 1 << 3
 
-        NATIVE_EXTENSION_PATH = File.expand_path(
+        CORE_NATIVE_EXTENSION_PATH = File.expand_path(
+          File.join(__dir__, '..', '..', 'native', 'core', 'indoor_gml_native.so')
+        ).freeze
+        LEGACY_NATIVE_EXTENSION_PATH = File.expand_path(
           File.join(__dir__, '..', '..', 'native', 'indoor_gml_native.so')
+        ).freeze
+        NATIVE_EXTENSION_PATH = (
+          File.exist?(CORE_NATIVE_EXTENSION_PATH) ?
+            CORE_NATIVE_EXTENSION_PATH :
+            LEGACY_NATIVE_EXTENSION_PATH
         ).freeze
 
         class ProtocolError < StandardError; end
