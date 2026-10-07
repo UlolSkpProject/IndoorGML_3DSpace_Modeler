@@ -79,6 +79,54 @@ CellData unit_box_cell()
     return cell;
 }
 
+void add_rect_face(
+    CellData& cell,
+    Vec3 normal,
+    Vec3 a,
+    Vec3 b,
+    Vec3 c,
+    Vec3 d
+)
+{
+    FaceData result;
+    result.normal = normal;
+    result.outer_points = {a,b,c,d};
+    result.triangles = {triangle(a,b,c), triangle(a,c,d)};
+    cell.faces.push_back(std::move(result));
+}
+
+CellData u_prism_cell()
+{
+    CellData cell;
+    cell.index = 0;
+    cell.flags = CELL_FLAG_NEEDS_STATE;
+    cell.bounds = box(0,0,0,3,3,1);
+
+    // Floor/top are three non-overlapping rectangles that tile the U cross-section.
+    add_rect_face(cell,{0,0,-1},{0,0,0},{3,0,0},{3,1,0},{0,1,0});
+    add_rect_face(cell,{0,0,-1},{0,1,0},{1,1,0},{1,3,0},{0,3,0});
+    add_rect_face(cell,{0,0,-1},{2,1,0},{3,1,0},{3,3,0},{2,3,0});
+    add_rect_face(cell,{0,0, 1},{0,0,1},{0,1,1},{3,1,1},{3,0,1});
+    add_rect_face(cell,{0,0, 1},{0,1,1},{0,3,1},{1,3,1},{1,1,1});
+    add_rect_face(cell,{0,0, 1},{2,1,1},{2,3,1},{3,3,1},{3,1,1});
+
+    const std::array<Vec3,8> polygon{{
+        {0,0,0},{3,0,0},{3,3,0},{2,3,0},
+        {2,1,0},{1,1,0},{1,3,0},{0,3,0}
+    }};
+    for (std::size_t i=0; i<polygon.size(); ++i)
+    {
+        const Vec3 a = polygon[i];
+        const Vec3 b = polygon[(i+1)%polygon.size()];
+        const Vec3 a_top{a.x,a.y,1};
+        const Vec3 b_top{b.x,b.y,1};
+        const Vec3 edge{b.x-a.x,b.y-a.y,0};
+        const Vec3 normal{edge.y,-edge.x,0};
+        add_rect_face(cell,normal,a,b,b_top,a_top);
+    }
+    return cell;
+}
+
 void test_z_sweep_matches_bruteforce()
 {
     std::vector<CellData> cells(5);
@@ -136,6 +184,19 @@ void test_state_volume_centroid_on_box()
     require(!metrics.used_bvh, "box should not build BVH");
 }
 
+void test_state_concave_u_uses_bvh_fallback()
+{
+    CellData cell = u_prism_cell();
+    StateSearchMetrics metrics;
+    const std::optional<Vec3> point = find_state_point(cell, 0.001, &metrics);
+    require(point.has_value(), "concave U-prism State point was not found");
+    require(metrics.used_bvh, "concave U-prism should require BVH fallback");
+    const bool in_left = point->x > 0.0 && point->x < 1.0 && point->y > 0.0 && point->y < 3.0;
+    const bool in_right = point->x > 2.0 && point->x < 3.0 && point->y > 0.0 && point->y < 3.0;
+    const bool in_bottom = point->x > 0.0 && point->x < 3.0 && point->y > 0.0 && point->y < 1.0;
+    require(in_left || in_right || in_bottom, "concave U-prism fallback point is outside");
+}
+
 void test_state_fixed_z()
 {
     CellData cell = unit_box_cell();
@@ -153,6 +214,7 @@ int main()
     test_z_sweep_matches_bruteforce();
     test_shared_face_analysis();
     test_state_volume_centroid_on_box();
+    test_state_concave_u_uses_bvh_fallback();
     test_state_fixed_z();
     return 0;
 }

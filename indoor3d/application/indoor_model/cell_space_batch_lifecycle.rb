@@ -502,7 +502,7 @@ module ULOL
             nil
           end
 
-          def emit_native_state_progress(sink, payload)
+          def emit_native_state_progress(sink, **payload)
             return false unless sink&.respond_to?(:call)
 
             sink.call(payload.freeze)

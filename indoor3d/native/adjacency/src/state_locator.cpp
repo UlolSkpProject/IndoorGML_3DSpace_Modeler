@@ -225,7 +225,14 @@ std::vector<const Triangle*> triangle_pointers(const CellData& cell)
     std::vector<const Triangle*> triangles;
     for (const FaceData& face : cell.faces)
     {
-        for (const Triangle& triangle : face.triangles) triangles.push_back(&triangle);
+        for (const Triangle& triangle : face.triangles)
+        {
+            const Vec3 edge1 = subtract(triangle.points[1], triangle.points[0]);
+            const Vec3 edge2 = subtract(triangle.points[2], triangle.points[0]);
+            if (length_squared(cross(edge1, edge2)) <= EPSILON * EPSILON)
+                continue;
+            triangles.push_back(&triangle);
+        }
     }
     return triangles;
 }
