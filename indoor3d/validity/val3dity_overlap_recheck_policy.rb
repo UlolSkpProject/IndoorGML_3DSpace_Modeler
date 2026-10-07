@@ -43,6 +43,43 @@ module ULOL
             count
           end
 
+          def recheck_requests(raw_report)
+            requests = []
+            collect = lambda do |errors, *context|
+              Array(errors).each do |error|
+                code = error_code_number(error && error['code'])
+                next unless RECHECKABLE_CODES.include?(code)
+
+                text = ([error] + context).map do |value|
+                  value.is_a?(Hash) ? value.to_json : value.to_s
+                end.join(' ')
+                cell_ids = text.scan(/cell_[A-Za-z0-9_.-]+/).uniq
+                next if cell_ids.length < 2
+
+                requests << {
+                  code: code,
+                  cells: [cell_ids[0], cell_ids[1]].freeze
+                }.freeze
+              end
+            end
+
+            collect.call(Array(raw_report['dataset_errors']), raw_report['input_file'])
+            Array(raw_report['features']).each do |feature|
+              collect.call(Array(feature['errors']), feature['id'])
+              Array(feature['primitives']).each do |primitive|
+                collect.call(
+                  Array(primitive['errors']),
+                  feature['id'],
+                  primitive['id']
+                )
+              end
+            end
+
+            requests.uniq do |request|
+              [request[:code], *request[:cells].map(&:to_s).sort]
+            end.freeze
+          end
+
           def apply!(raw_report, on_result: nil, before_refresh: nil, &pair_rechecker)
             raise ArgumentError, 'pair_rechecker block is required' unless pair_rechecker
 
