@@ -4,3 +4,4 @@ project(IndoorGMLNative LANGUAGES CXX)
 
 add_subdirectory(shared/geometry)
 add_subdirectory(core)
+add_subdirectory(validity)
