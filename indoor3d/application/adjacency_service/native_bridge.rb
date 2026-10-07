@@ -23,7 +23,7 @@ module ULOL
         CELL_FLAG_HAS_FIXED_Z = 1 << 2
 
         NATIVE_EXTENSION_PATH = File.expand_path(
-          File.join(__dir__, '..', '..', 'native', 'adjacency', 'indoor_gml_adjacency_native.so')
+          File.join(__dir__, '..', '..', 'native', 'indoor_gml_native.so')
         ).freeze
 
         class ProtocolError < StandardError; end

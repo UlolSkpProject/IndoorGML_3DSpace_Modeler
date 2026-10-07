@@ -6,7 +6,7 @@
 #define INDOOR_GML_NATIVE_EXPORT
 #endif
 
-extern "C" INDOOR_GML_NATIVE_EXPORT void Init_indoor_gml_adjacency_native()
+extern "C" INDOOR_GML_NATIVE_EXPORT void Init_indoor_gml_native()
 {
     VALUE ulol_module = rb_define_module("ULOL");
     VALUE modeler_module = rb_define_module_under(ulol_module, "Indoor3DGmlModeler");
