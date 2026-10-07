@@ -15,9 +15,13 @@ using namespace IndoorGMLAdjacencyNative;
 
 constexpr std::uint8_t INPUT_MAGIC[8] = {'I', 'G', 'M', 'L', 'A', 'D', 'J', '\0'};
 constexpr std::uint8_t OUTPUT_MAGIC[8] = {'I', 'G', 'M', 'L', 'R', 'E', 'S', '\0'};
-constexpr std::uint64_t PROTOCOL_VERSION = 1;
+constexpr std::uint8_t STATE_OUTPUT_MAGIC[8] = {'I', 'G', 'M', 'L', 'S', 'T', 'A', '\0'};
+constexpr std::uint64_t INPUT_VERSION_V1 = 1;
+constexpr std::uint64_t INPUT_VERSION_V2 = 2;
+constexpr std::uint64_t RESULT_VERSION = 1;
 constexpr std::size_t INPUT_HEADER_SIZE = 32;
-constexpr std::size_t CELL_FIXED_SIZE = 80;
+constexpr std::size_t CELL_FIXED_SIZE_V1 = 80;
+constexpr std::size_t CELL_FIXED_SIZE_V2 = 96;
 constexpr std::size_t FACE_FIXED_SIZE = 56;
 constexpr std::size_t PAIR_FIXED_SIZE = 40;
 constexpr std::size_t CANDIDATE_SIZE = 56;
@@ -54,25 +58,10 @@ public:
         return value;
     }
 
-    void skip(std::size_t length)
-    {
-        read_bytes(length);
-    }
-
-    const std::uint8_t* current() const
-    {
-        return data_ + position_;
-    }
-
-    std::size_t remaining() const
-    {
-        return size_ - position_;
-    }
-
-    bool finished() const
-    {
-        return position_ == size_;
-    }
+    void skip(std::size_t length) { read_bytes(length); }
+    const std::uint8_t* current() const { return data_ + position_; }
+    std::size_t remaining() const { return size_ - position_; }
+    bool finished() const { return position_ == size_; }
 
 private:
     void require(std::size_t length) const
@@ -112,10 +101,7 @@ public:
         append_u64(bits);
     }
 
-    std::vector<std::uint8_t> take()
-    {
-        return std::move(bytes_);
-    }
+    std::vector<std::uint8_t> take() { return std::move(bytes_); }
 
 private:
     std::vector<std::uint8_t> bytes_;
@@ -132,10 +118,6 @@ std::size_t checked_size(std::uint64_t value, const char* label)
 
 std::uint64_t checked_u64(std::size_t value, const char* label)
 {
-    if (value > static_cast<std::size_t>(std::numeric_limits<std::uint64_t>::max()))
-    {
-        throw std::overflow_error(std::string(label) + " does not fit uint64");
-    }
     return static_cast<std::uint64_t>(value);
 }
 
@@ -167,8 +149,7 @@ FaceData parse_face(const std::uint8_t* data, std::size_t size)
 
     const std::size_t outer_count = checked_size(reader.read_u64(), "outer point count");
     const std::size_t triangle_count = checked_size(reader.read_u64(), "triangle count");
-    const std::uint64_t reserved = reader.read_u64();
-    if (reserved != 0)
+    if (reader.read_u64() != 0)
     {
         throw std::invalid_argument("face reserved field is non-zero");
     }
@@ -212,22 +193,49 @@ FaceData parse_face(const std::uint8_t* data, std::size_t size)
     return face;
 }
 
-CellData parse_cell(const std::uint8_t* data, std::size_t size, std::size_t expected_index)
+CellData parse_cell(
+    const std::uint8_t* data,
+    std::size_t size,
+    std::size_t expected_index,
+    std::uint64_t version
+)
 {
     Reader reader(data, size);
+    const std::size_t fixed_size =
+        version == INPUT_VERSION_V1 ? CELL_FIXED_SIZE_V1 : CELL_FIXED_SIZE_V2;
     const std::size_t record_size = checked_size(reader.read_u64(), "cell record size");
-    if (record_size != size || record_size < CELL_FIXED_SIZE)
+    if (record_size != size || record_size < fixed_size)
     {
         throw std::invalid_argument("cell record size is invalid");
     }
 
     const std::size_t cell_index = checked_size(reader.read_u64(), "cell index");
-    const std::size_t face_count = checked_size(reader.read_u64(), "face count");
-    const std::uint64_t reserved = reader.read_u64();
-    if (reserved != 0)
+    std::uint64_t flags = CELL_FLAG_ADJACENCY_TARGET;
+    std::size_t face_count = 0;
+    if (version == INPUT_VERSION_V1)
     {
-        throw std::invalid_argument("cell reserved field is non-zero");
+        face_count = checked_size(reader.read_u64(), "face count");
+        if (reader.read_u64() != 0)
+        {
+            throw std::invalid_argument("cell reserved field is non-zero");
+        }
     }
+    else
+    {
+        flags = reader.read_u64();
+        face_count = checked_size(reader.read_u64(), "face count");
+        if (reader.read_u64() != 0)
+        {
+            throw std::invalid_argument("cell reserved field is non-zero");
+        }
+        const std::uint64_t known_flags =
+            CELL_FLAG_NEEDS_STATE | CELL_FLAG_ADJACENCY_TARGET | CELL_FLAG_HAS_FIXED_Z;
+        if ((flags & ~known_flags) != 0)
+        {
+            throw std::invalid_argument("cell flags contain unsupported bits");
+        }
+    }
+
     if (cell_index != expected_index)
     {
         throw std::invalid_argument("cell indices must be contiguous and ordered");
@@ -235,6 +243,7 @@ CellData parse_cell(const std::uint8_t* data, std::size_t size, std::size_t expe
 
     CellData cell;
     cell.index = cell_index;
+    cell.flags = flags;
     cell.bounds.minimum = read_vec3(reader, "cell bounds minimum");
     cell.bounds.maximum = read_vec3(reader, "cell bounds maximum");
     if (cell.bounds.minimum.x > cell.bounds.maximum.x ||
@@ -242,6 +251,12 @@ CellData parse_cell(const std::uint8_t* data, std::size_t size, std::size_t expe
         cell.bounds.minimum.z > cell.bounds.maximum.z)
     {
         throw std::invalid_argument("cell bounds are inverted");
+    }
+
+    if (version == INPUT_VERSION_V2)
+    {
+        cell.fixed_z = reader.read_double();
+        require_finite(cell.fixed_z, "cell fixed z");
     }
 
     if (face_count > reader.remaining() / FACE_FIXED_SIZE)
@@ -302,7 +317,7 @@ std::vector<CellData> parse_input_batch(const std::uint8_t* data, std::size_t si
         throw std::invalid_argument("adjacency input magic mismatch");
     }
     const std::uint64_t version = reader.read_u64();
-    if (version != PROTOCOL_VERSION)
+    if (version != INPUT_VERSION_V1 && version != INPUT_VERSION_V2)
     {
         throw std::invalid_argument("unsupported adjacency input version");
     }
@@ -311,7 +326,10 @@ std::vector<CellData> parse_input_batch(const std::uint8_t* data, std::size_t si
     {
         throw std::invalid_argument("adjacency input reserved field is non-zero");
     }
-    if (cell_count > reader.remaining() / CELL_FIXED_SIZE)
+
+    const std::size_t minimum_cell_size =
+        version == INPUT_VERSION_V1 ? CELL_FIXED_SIZE_V1 : CELL_FIXED_SIZE_V2;
+    if (cell_count > reader.remaining() / minimum_cell_size)
     {
         throw std::invalid_argument("cell count exceeds adjacency input");
     }
@@ -326,11 +344,11 @@ std::vector<CellData> parse_input_batch(const std::uint8_t* data, std::size_t si
         }
         Reader size_reader(reader.current(), reader.remaining());
         const std::size_t cell_size = checked_size(size_reader.read_u64(), "cell record size");
-        if (cell_size < CELL_FIXED_SIZE || cell_size > reader.remaining())
+        if (cell_size < minimum_cell_size || cell_size > reader.remaining())
         {
             throw std::invalid_argument("cell record boundary is invalid");
         }
-        cells.push_back(parse_cell(reader.current(), cell_size, index));
+        cells.push_back(parse_cell(reader.current(), cell_size, index, version));
         reader.skip(cell_size);
     }
 
@@ -368,7 +386,7 @@ std::vector<std::uint8_t> serialize_result_batch(std::vector<PairResult> results
 
     Writer writer;
     writer.append_bytes(OUTPUT_MAGIC, sizeof(OUTPUT_MAGIC));
-    writer.append_u64(PROTOCOL_VERSION);
+    writer.append_u64(RESULT_VERSION);
     writer.append_u64(checked_u64(results.size(), "pair count"));
     writer.append_u64(checked_u64(candidate_total, "candidate total"));
 
@@ -405,6 +423,38 @@ std::vector<std::uint8_t> serialize_result_batch(std::vector<PairResult> results
         }
     }
 
+    return writer.take();
+}
+
+std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointResult> results)
+{
+    std::sort(results.begin(), results.end(), [](const StatePointResult& first, const StatePointResult& second) {
+        return first.cell_index < second.cell_index;
+    });
+    for (std::size_t index = 1; index < results.size(); ++index)
+    {
+        if (results[index - 1].cell_index == results[index].cell_index)
+        {
+            throw std::invalid_argument("duplicate state result cell index");
+        }
+    }
+
+    Writer writer;
+    writer.append_bytes(STATE_OUTPUT_MAGIC, sizeof(STATE_OUTPUT_MAGIC));
+    writer.append_u64(RESULT_VERSION);
+    writer.append_u64(checked_u64(results.size(), "state result count"));
+    writer.append_u64(0);
+
+    for (const StatePointResult& result : results)
+    {
+        require_finite(result.point.x, "state point x");
+        require_finite(result.point.y, "state point y");
+        require_finite(result.point.z, "state point z");
+        writer.append_u64(checked_u64(result.cell_index, "state cell index"));
+        writer.append_double(result.point.x);
+        writer.append_double(result.point.y);
+        writer.append_double(result.point.z);
+    }
     return writer.take();
 }
 } // namespace IndoorGMLAdjacencyNative

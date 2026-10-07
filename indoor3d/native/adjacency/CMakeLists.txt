@@ -11,11 +11,13 @@ target_sources(indoor_gml_adjacency_native PRIVATE
     include/adjacency_data.h
     include/adjacency_checker.h
     include/adjacency_session.h
+    include/state_locator.h
     src/native_entry.cpp
     src/native_api.cpp
     src/adjacency_data.cpp
     src/adjacency_checker.cpp
     src/adjacency_session.cpp
+    src/state_locator.cpp
 )
 
 target_include_directories(indoor_gml_adjacency_native PRIVATE
@@ -58,6 +60,7 @@ if(BUILD_TESTING)
         test/adjacency_test.cpp
         src/adjacency_data.cpp
         src/adjacency_checker.cpp
+        src/state_locator.cpp
     )
     target_include_directories(indoor_gml_adjacency_native_test PRIVATE
         "${CMAKE_CURRENT_LIST_DIR}/include"
