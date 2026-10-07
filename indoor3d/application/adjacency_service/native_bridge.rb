@@ -135,7 +135,6 @@ module ULOL
           native_module = native
           parse_started_at = monotonic_time
           loaded_count = native_module.load_batch(input_bytes).to_i
-          owns_session = true
           parse_duration = elapsed_since(parse_started_at)
           unless loaded_count == snapshots.length
             raise ProtocolError,
@@ -225,6 +224,7 @@ module ULOL
           native_module = native
           parse_started_at = monotonic_time
           loaded_count = native_module.load_batch(input_bytes).to_i
+          owns_session = true
           parse_duration = elapsed_since(parse_started_at)
           unless loaded_count == snapshots.length
             raise ProtocolError,
