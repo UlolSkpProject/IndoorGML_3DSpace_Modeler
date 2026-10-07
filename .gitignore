@@ -5,3 +5,15 @@ indoor3d/tmp/
 /fixtures/
 /dev/recheck_snapshots/
 /indoor3d/native/build/
+indoor3d/native/**/build/
+indoor3d/native/**/CMakeFiles/
+indoor3d/native/**/CMakeCache.txt
+indoor3d/native/**/cmake_install.cmake
+indoor3d/native/**/CTestTestfile.cmake
+indoor3d/native/core/*.so
+indoor3d/native/validity/*.so
+*.obj
+*.o
+*.pdb
+*.ilk
+*.exp
