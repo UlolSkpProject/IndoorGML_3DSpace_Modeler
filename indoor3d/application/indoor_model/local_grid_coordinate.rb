@@ -282,6 +282,44 @@ module ULOL
             true
           end
 
+          def apply_native_state_parent_point_local_grid(
+            cell_space,
+            coordinates,
+            frame_report: nil
+          )
+            group = cell_space&.sketchup_group
+            raise ArgumentError, 'CellSpace is invalid during Local Grid Native State apply' unless
+              cell_space&.valid? && group&.valid?
+
+            values = Array(coordinates).map(&:to_f)
+            unless values.length == 3 && values.all?(&:finite?)
+              raise ArgumentError, 'Native State point must contain 3 finite coordinates'
+            end
+
+            parent_point = Geom::Point3d.new(values[0], values[1], values[2])
+            raw_center = parent_point.transform(group.transformation.inverse)
+            snapped_center = snap_local_grid_point(
+              raw_center,
+              LOCAL_GRID_TOLERANCE_MM
+            )
+            applied = snapped_center.distance(ORIGIN) > 0.001
+            apply_cell_space_local_center(group, snapped_center) if applied
+            remember_cell_space_change_snapshot(group)
+
+            recenter_report = local_grid_recenter_report(
+              applied,
+              raw_center,
+              snapped_center
+            )
+            log_local_grid_coordinate_report(
+              cell_space,
+              frame_report || local_grid_frame_report(false, false, nil, nil),
+              recenter_report,
+              normalized: :unchecked
+            )
+            snapped_center
+          end
+
           def recenter_cell_space_geometry_local_grid(
             cell_space_entity,
             fixed_z_offset_from_bottom: nil

@@ -351,7 +351,7 @@ module ULOL
             end
           end
 
-          def with_native_state_geometry_session(state_cells)
+          def with_native_state_geometry_session(state_cells, point_applier: nil)
             pending = Array(state_cells).select { |cell_space| cell_space&.valid? }.uniq
             return yield if pending.empty?
 
@@ -361,6 +361,7 @@ module ULOL
                     'Native State backend is unavailable; rebuild indoor_gml_native.so'
             end
 
+            state_point_applier = point_applier || method(:apply_native_state_parent_point)
             pending_by_id = pending.each_with_object({}) { |cell_space, out| out[cell_space.id] = cell_space }
             session_entries = Array(@feature_registry.cell_spaces).uniq.filter_map do |cell_space|
               next unless cell_space&.valid? && cell_space.duality_state&.valid?
@@ -468,7 +469,7 @@ module ULOL
                 raise NativeAdjacencyBridge::ProtocolError,
                       "Native State result missing for #{cell_space.id}"
               end
-              apply_native_state_parent_point(cell_space, coordinates)
+              state_point_applier.call(cell_space, coordinates)
             end
 
             yield

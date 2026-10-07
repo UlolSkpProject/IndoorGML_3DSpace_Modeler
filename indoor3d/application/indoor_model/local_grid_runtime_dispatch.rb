@@ -52,9 +52,26 @@ module ULOL
               sync do
                 prepare_primal_children_for_initial_load if initial_model_load
                 restore_runtime_from_current_model(persist_repaired_ids: true)
-                hard_refresh_runtime_cell_spaces_local_grid
-                apply_initial_cell_space_materials if initial_model_load
-                rebuild_runtime_transitions_from_cell_adjacency
+
+                state_cells, frame_reports = prepare_runtime_cell_space_frames_local_grid
+                point_applier = proc do |cell_space, coordinates|
+                  apply_native_state_parent_point_local_grid(
+                    cell_space,
+                    coordinates,
+                    frame_report: frame_reports[cell_space.id]
+                  )
+                end
+
+                with_native_state_geometry_session(
+                  state_cells,
+                  point_applier: point_applier
+                ) do
+                  state_cells.each do |cell_space|
+                    write_cell_space_attributes(cell_space)
+                  end
+                  apply_initial_cell_space_materials if initial_model_load
+                  rebuild_runtime_transitions_from_cell_adjacency
+                end
               end
 
               invalidate_overlay_transition_points
@@ -179,38 +196,29 @@ module ULOL
           true
         end
 
-        def hard_refresh_runtime_cell_spaces_local_grid
-          @cell_spaces.each do |cell_space|
+        def prepare_runtime_cell_space_frames_local_grid
+          prepared = []
+          reports = {}
+
+          Array(@cell_spaces).each do |cell_space|
             next unless cell_space&.valid?
 
-            hard_refresh_cell_space_coordinates_local_grid(cell_space)
-            write_cell_space_attributes(cell_space)
-          rescue StandardError => e
-            IndoorCore::Logger.puts(
-              '[IndoorGML] Runtime CellSpace Local Grid hard refresh skipped: ' \
-              "cell=#{cell_space&.id} #{e.class}: #{e.message}"
-            )
+            begin
+              ensure_cell_space_is_child_of_primal_space!(cell_space)
+              frame_report = align_cell_space_local_frame_local_grid(
+                cell_space.sketchup_group
+              )
+              prepared << cell_space
+              reports[cell_space.id] = frame_report
+            rescue StandardError => e
+              IndoorCore::Logger.puts(
+                '[IndoorGML] Runtime CellSpace Local Grid frame preparation skipped: ' \
+                "cell=#{cell_space&.id} #{e.class}: #{e.message}"
+              )
+            end
           end
-        end
 
-        def hard_refresh_cell_space_coordinates_local_grid(cell_space)
-          return false unless cell_space&.valid?
-
-          ensure_cell_space_is_child_of_primal_space!(cell_space)
-          group = cell_space.sketchup_group
-          frame_report = align_cell_space_local_frame_local_grid(group)
-          recenter_report = recenter_cell_space_geometry_local_grid(
-            group,
-            fixed_z_offset_from_bottom: fixed_state_height_offset(cell_space)
-          )
-
-          log_local_grid_coordinate_report(
-            cell_space,
-            frame_report,
-            recenter_report,
-            normalized: :unchecked
-          )
-          true
+          [prepared.freeze, reports.freeze]
         end
       end
     end
