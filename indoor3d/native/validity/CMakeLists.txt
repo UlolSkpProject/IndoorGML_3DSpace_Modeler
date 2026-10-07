@@ -64,3 +64,28 @@ foreach(CONFIGURATION Debug Release RelWithDebInfo MinSizeRel)
         "RUNTIME_OUTPUT_DIRECTORY_${CONFIGURATION_UPPER}" "${CMAKE_CURRENT_LIST_DIR}"
     )
 endforeach()
+
+if(BUILD_TESTING)
+    add_executable(indoor_gml_validity_native_test
+        test/validity_test.cpp
+        src/validity_checker.cpp
+        src/overlap_thickness.cpp
+    )
+    target_include_directories(indoor_gml_validity_native_test PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/include"
+        "${MANIFOLD_ROOT}/include"
+    )
+    target_link_libraries(indoor_gml_validity_native_test PRIVATE
+        indoor_gml_geometry
+        "${MANIFOLD_ROOT}/lib/manifold.lib"
+    )
+    target_compile_features(indoor_gml_validity_native_test PRIVATE cxx_std_17)
+    if(MSVC)
+        target_compile_definitions(indoor_gml_validity_native_test PRIVATE NOMINMAX)
+        target_compile_options(indoor_gml_validity_native_test PRIVATE "/EHsc")
+    endif()
+    add_test(
+        NAME indoor_gml_validity_native_semantics
+        COMMAND indoor_gml_validity_native_test
+    )
+endif()

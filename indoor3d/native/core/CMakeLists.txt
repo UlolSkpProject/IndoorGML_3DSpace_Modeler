@@ -54,8 +54,6 @@ foreach(CONFIGURATION Debug Release RelWithDebInfo MinSizeRel)
     )
 endforeach()
 
-include(CTest)
-
 if(BUILD_TESTING)
     add_executable(indoor_gml_native_test
         test/adjacency_test.cpp
