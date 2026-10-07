@@ -339,6 +339,9 @@ module ULOL
           previous_index = nil
           result_count.times do
             cell_index = checked_count(reader.read_u64, 'State cell index')
+            if @shared_session_keys && cell_index >= @shared_session_keys.length
+              raise ProtocolError, "State cell index #{cell_index} is out of range"
+            end
             if previous_index && cell_index <= previous_index
               raise ProtocolError, 'native State result indices are not strictly increasing'
             end

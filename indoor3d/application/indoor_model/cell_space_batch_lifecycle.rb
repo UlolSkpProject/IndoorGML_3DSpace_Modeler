@@ -386,15 +386,35 @@ module ULOL
             keys = session_entries.map { |entry| entry[:cell_space].id }
             state_options = session_entries.map do |entry|
               cell_space = entry[:cell_space]
-              if pending_by_id.key?(cell_space.id)
-                {
-                  needs_state: true,
-                  fixed_z: native_state_fixed_parent_z(cell_space)
-                }
-              else
-                { needs_state: false }
+              unless pending_by_id.key?(cell_space.id)
+                next({ needs_state: false })
               end
+
+              fixed_offset = fixed_state_height_offset(cell_space)
+              fixed_z = native_state_fixed_parent_z(cell_space)
+              if !fixed_offset.nil? && fixed_z.nil?
+                recenter_prepared_cell_space_state_ruby(cell_space)
+                pending_by_id.delete(cell_space.id)
+                next({ needs_state: false })
+              end
+
+              {
+                needs_state: true,
+                fixed_z: fixed_z
+              }
             end
+            return yield if pending_by_id.empty?
+
+            state_progress = native_state_progress_sink
+            emit_native_state_progress(
+              state_progress,
+              event: :stage_start,
+              stage: :state_position,
+              name: 'State 내부점 계산',
+              total: pending_by_id.length,
+              message: "State 내부점 계산: 0 / #{pending_by_id.length}"
+            )
+            last_state_progress = -1
 
             begin
               NativeAdjacencyBridge.open_geometry_session(
@@ -402,7 +422,39 @@ module ULOL
                 keys: keys,
                 state_options: state_options
               )
-              state_result = NativeAdjacencyBridge.compute_state_from_open_session
+              state_result = NativeAdjacencyBridge.compute_state_from_open_session do |_event, payload|
+                current = payload[:current].to_i
+                total = payload[:total].to_i
+                next if current == last_state_progress
+
+                last_state_progress = current
+                emit_native_state_progress(
+                  state_progress,
+                  event: :stage_progress,
+                  stage: :state_position,
+                  name: 'State 내부점 계산',
+                  total: total,
+                  completed: current,
+                  message: "State 내부점 계산: #{current} / #{total}"
+                )
+              end
+              state_metrics = Hash(state_result[:metrics])
+              emit_native_state_progress(
+                state_progress,
+                event: :stage_finish,
+                stage: :state_position,
+                name: 'State 내부점 계산',
+                total: pending_by_id.length,
+                completed: pending_by_id.length,
+                message: 'State 내부점 계산 완료',
+                telemetry: {
+                  native_success_count: state_metrics[:state_success_count].to_i,
+                  volume_centroid_success_count:
+                    state_metrics[:state_volume_centroid_success_count].to_i,
+                  bvh_count: state_metrics[:state_bvh_count].to_i,
+                  duration: state_metrics[:state_duration].to_f
+                }
+              )
             rescue StandardError => e
               NativeAdjacencyBridge.close_geometry_session
               IndoorCore::Logger.puts(
@@ -436,8 +488,26 @@ module ULOL
 
             yield
           ensure
-            NativeAdjacencyBridge.close_geometry_session if
-              defined?(NativeAdjacencyBridge) && NativeAdjacencyBridge.shared_session_active?
+            if defined?(NativeAdjacencyBridge) &&
+               NativeAdjacencyBridge.shared_session_active?
+              NativeAdjacencyBridge.close_geometry_session
+            end
+          end
+
+          def native_state_progress_sink
+            return nil unless defined?(ProductionProgress::AdjacencyProgressContext)
+
+            ProductionProgress::AdjacencyProgressContext.current
+          rescue StandardError
+            nil
+          end
+
+          def emit_native_state_progress(sink, payload)
+            return false unless sink&.respond_to?(:call)
+
+            sink.call(payload.freeze)
+          rescue StandardError
+            false
           end
 
           def apply_cell_space_materials_batch(cell_spaces)
