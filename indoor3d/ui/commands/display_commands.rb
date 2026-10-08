@@ -153,10 +153,6 @@ module ULOL
             menu.add_item('Change CellSpace Type') { change_selected_cell_space_type() }
           end
 
-          if !validation_operation_running? && vertex_normalize_context_target?
-            indoor_menu = menu.add_submenu('IndoorGML 3D Modeler')
-            indoor_menu.add_item('Vertex Normalize') { vertex_normalize_selected_cell_space() }
-          end
         rescue StandardError => e
           Logger.puts "[IndoorGML] Context menu failed: #{e.class}: #{e.message}"
         end

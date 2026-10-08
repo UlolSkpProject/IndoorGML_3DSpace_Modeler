@@ -161,9 +161,6 @@ module ULOL
     require_relative 'infrastructure/preferences/dual_overlay_preferences'
 
     require_relative 'application/storey_filter'
-    require_relative 'application/local_vertex_normalizer'
-    require_relative 'application/local_vertex_normalizer/coplanar_shared_edge_groups'
-    require_relative 'application/local_vertex_normalizer/pipeline'
 
     require_relative 'infrastructure/scene/scene_group_guard'
     require_relative 'infrastructure/scene/entity_copy_helper'
@@ -181,7 +178,6 @@ module ULOL
     require_relative 'application/indoor_model/observer_routing'
     require_relative 'application/indoor_model/entity_relocation'
     require_relative 'application/indoor_model/primal_normalization'
-    require_relative 'application/indoor_model/local_vertex_normalization'
     require_relative 'application/indoor_model/edit_mode_selection_projection'
     require_relative 'application/indoor_model/editor_control'
     require_relative 'application/indoor_model'
