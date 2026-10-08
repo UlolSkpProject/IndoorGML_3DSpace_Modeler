@@ -43,7 +43,6 @@ module ULOL
             @open_report_callback = nil
             @validation_focus_callback = nil
             @fix_validation_callback = nil
-            @next_callback = nil
             @cancel_callback = nil
             @request_close_callback = nil
             @ready_callback = nil
@@ -183,10 +182,6 @@ module ULOL
             @fix_validation_callback = block
           end
 
-          def on_next(&block)
-            @next_callback = block
-          end
-
           def on_cancel(&block)
             @cancel_callback = block
           end
@@ -278,9 +273,6 @@ module ULOL
             dialog.add_action_callback('fixValidationErrors') do |_context|
               @fix_validation_callback&.call
             end
-            dialog.add_action_callback('continueValidation') do |_context|
-              handle_continue_validation
-            end
             dialog.add_action_callback('cancelValidation') do |_context|
               @cancel_callback&.call
             end
@@ -314,12 +306,6 @@ module ULOL
                 )
               end
             end
-          end
-
-          def handle_continue_validation
-            callback = @next_callback
-            @next_callback = nil
-            callback&.call
           end
 
           def handle_report_dom_ready

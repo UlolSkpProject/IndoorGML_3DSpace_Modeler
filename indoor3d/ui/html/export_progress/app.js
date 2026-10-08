@@ -213,7 +213,6 @@ function normalizePhase(phase) {
 var actionConfig = {
   createGml: { label: 'Create GML file', callback: 'createGml' },
   openReport: { label: 'Open report', callback: 'openReport' },
-  next: { label: '\uB2E4\uC74C', callback: 'continueValidation' },
   close: { label: 'Close', callback: 'closeDialog' }
 };
 
