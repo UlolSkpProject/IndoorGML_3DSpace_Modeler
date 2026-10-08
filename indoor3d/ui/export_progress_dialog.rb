@@ -195,7 +195,6 @@ module ULOL
             @open_report_callback = nil
             @validation_focus_callback = nil
             @fix_validation_callback = nil
-            @next_callback = nil
             @cancel_callback = nil
             @request_close_callback = nil
             @ready_callback = nil

@@ -20,22 +20,17 @@ SeoulSpace IndoorGML Modeler는 SketchUp 모델 안의 manifold solid group을 I
 - State/Transition을 SketchUp geometry가 아닌 Overlay로 표시
 - `.skp` 저장 후 다시 열어도 CellSpace runtime을 attribute에서 복원
 - val3dity v2.2.0과 Extension 재검사 정책으로 Geometry/Topology 오류 확인
-- 빠른 검사와 crash CellSpace 선택형 Local Vertex Normalization 기반 정밀검사 제공
+- Geometry를 변경하지 않는 빠른 유효성 검사 제공
 
 ## v1.0.5 Highlights
 
 v1.0.5는 검사 자체뿐 아니라 오류를 찾고, 안전하게 보정하고, 다시 확인하는 전체 Validation 워크플로를 확장합니다.
 
-- `Validity Check` 실행 시 **빠른 검사**와 **정밀검사** 중 선택
-- 정밀검사에서 유형별 geometry-only crash 탐색 후 원인 CellSpace에만 **Local Vertex Normalization(LVN)** 수행
-- LVN 실패 시 해당 CellSpace만 원복하고 이미 성공한 CellSpace 결과는 유지
-- 이미 정규화된 CellSpace와 이전 실패 CellSpace를 구분하여 불필요한 반복 처리 방지
 - Validation report의 오류 geometry를 viewport Overlay로 표시하고 오류 범위에 focus
 - 빠른 검사의 701/704 재검사를 현재 SketchUp 원본 CellSpace geometry 기준으로 수행
 - 선택한 CellSpace의 IndoorGML 의미만 제거하여 일반 Solid Group으로 복원
-- Validation 진행률, LVN 통계, 재실행 session 정리, Fix Mode와 runtime 복원 안정성 개선
+- Validation 진행률, 재실행 session 정리, Fix Mode와 runtime 복원 안정성 개선
 
-정밀검사는 geometry를 실제로 변경할 수 있는 Beta 기능입니다. CellSpace별 독립 작업과 rollback을 사용하므로 하나의 특수 형상에서 실패하더라도 다른 성공 결과를 함께 폐기하지 않습니다.
 
 ## Project Scope
 
@@ -51,7 +46,7 @@ v1.0.5는 검사 자체뿐 아니라 오류를 찾고, 안전하게 보정하고
 - `.skp` 저장 후 재오픈 시 IndoorGML 정보 복원
 - Edit Mode, visibility filter, geometry toggle, State/Transition Overlay
 - 선택 CellSpace의 IndoorGML 속성 제거 및 일반 Solid Group 복원
-- 빠른 검사와 LVN 기반 정밀검사
+- 빠른 검사 및 701/704 Overlap 재검사
 - Validation report, 오류 geometry Overlay, focus, Fix Mode
 - val3dity 기반 Validation과 GML Export
 
@@ -83,12 +78,7 @@ v1.0.5는 검사 자체뿐 아니라 오류를 찾고, 안전하게 보정하고
 
 Validation은 XML well-formedness 확인과 val3dity 2.2.0 검사를 수행합니다. XSD validation은 수행하지 않습니다. 모든 val3dity 실행에는 GML 좌표 단위 기준 `--planarity_d2p_tol 0.025`가 적용됩니다.
 
-검사 profile에 따라 pipeline이 달라집니다.
-
-| Profile | Geometry 변경 | val3dity overlap 설정 | Extension 701/704 재검사 |
-| --- | --- | --- | --- |
-| 빠른 검사 | 없음 | `--overlap_tol -1` | 수행 |
-| 정밀검사 | crash 대상만 LVN으로 변경 가능 | 0.01 mm를 GML 좌표 단위로 변환 | 수행하지 않음 |
+빠른 검사는 Geometry를 변경하지 않으며, `--overlap_tol -1`로 val3dity를 실행한 뒤 Extension 701/704 재검사를 수행합니다.
 
 최종 결과는 일관되게 다음 세 상태로 보고합니다.
 
@@ -183,10 +173,7 @@ CellSpace를 이동하거나 타입·층 정보를 변경하면 runtime attribut
 
 ### 5. Validity Check
 
-`Validity Check`를 실행하고 검사 profile을 선택합니다.
-
-- **빠른 검사**: 현재 geometry를 바꾸지 않고 val3dity와 Extension 701/704 재검사를 수행
-- **정밀검사**: CellSpace별 LVN 후 물리 허용오차 0.01 mm를 적용해 val3dity 검사
+`Validity Check`를 실행하면 빠른 검사가 즉시 시작됩니다. 현재 geometry를 변경하지 않고 val3dity와 Extension 701/704 재검사를 수행합니다.
 
 오류가 있으면 report에서 대상 CellSpace와 오류 geometry를 확인하고 Fix Mode로 수정합니다. 부분 재검사를 통과했더라도 최종 납품 전에는 전체 검사를 다시 실행해야 합니다.
 
@@ -205,7 +192,7 @@ CellSpace를 이동하거나 타입·층 정보를 변경하면 runtime attribut
 | Show/Hide State/Link Overlay | ![](indoor3d/assets/icons/toggle_dual_overlay.svg) | State/Transition Overlay 표시 토글 |
 | Dual Overlay Scale | ![](indoor3d/assets/icons/dual_overlay_scale.svg) | State 표시 크기 조절 |
 | Export GML | ![](indoor3d/assets/icons/export_gml.svg) | IndoorGML 1.0 GML 파일 저장 |
-| Validity Check | ![](indoor3d/assets/icons/check_validity.svg) | 검사 profile 선택 후 Validation 실행 |
+| Validity Check | ![](indoor3d/assets/icons/check_validity.svg) | 빠른 유효성 검사 즉시 실행 |
 
 Context menu는 상황에 따라 `Edit IndoorGML`, `Change CellSpace Type` 등 IndoorGML 편집 항목을 추가합니다.
 
@@ -333,7 +320,6 @@ IndoorGML runtime 데이터는 SketchUp attribute dictionary `IndoorGml`에 저�
 - `storey`
 - `duality_state_id`
 - navigation semantic override fields
-- LVN 완료 또는 이전 실패 상태
 
 파일을 다시 열면 `RuntimeRestorer`가 PrimalGroup 아래의 CellSpace attribute를 읽어 `CellSpace`와 `State`를 복원합니다. Transition은 저장된 선형 geometry가 아니라 CellSpace adjacency를 다시 계산해 runtime에서 재구성합니다.
 
@@ -374,7 +360,7 @@ GML 좌표:
 
 ## Validity Check
 
-`Validity Check`를 실행하면 빠른 검사와 정밀검사 선택 dialog가 표시됩니다. 두 profile은 동일한 진행 dialog, 종료 코드 판정, report, 오류 focus, Fix Mode를 사용하지만 geometry 처리와 overlap 판정 경로가 다릅니다.
+`Validity Check`를 실행하면 모드 선택 없이 빠른 검사가 시작됩니다. 기존 Progress Dialog, Report, 오류 Focus 및 Fix Mode를 사용합니다.
 
 ### 빠른 검사
 
@@ -390,56 +376,6 @@ GML 좌표:
 6. 최종 JSON과 HTML report 생성
 
 빠른 재검사는 비솔리드 교차 결과, edge-only 접촉, 허용오차 경계의 접촉을 구분하며 파괴적인 Boolean 실패가 원본 CellSpace를 변경하지 않도록 합니다.
-
-### 정밀검사
-
-Dual graph를 제외한 geometry-only 입력으로 val3dity crash 대상을 먼저 격리하고, 해당 CellSpace만 정규화하는 Beta 검사입니다.
-
-1. CellSpace를 `Room 전체`, `Stair 전반 50%`, `Stair 후반 50%`, `Door / Elevator / Window / Anchor`의 4개 초기 묶음으로 분류
-2. 각 묶음의 Dual graph를 제외한 geometry-only GML 생성
-3. 최대 4개의 val3dity 프로세스를 병렬 실행하고, crash 묶음을 재귀적으로 4분할
-4. crash CellSpace 목록을 표시하고 사용자가 **다음**을 누를 때까지 대기
-5. 식별된 crash CellSpace만 definition-local 좌표계에서 Local Vertex Normalize
-6. LVN 실패 CellSpace만 원복하고 `lvn_failed` 상태 기록
-7. LVN 결과를 표시하고 사용자가 **다음**을 누르면 전체 모델 임시 GML 생성
-8. val3dity 2.2.0 실행
-   - 물리 허용오차 0.01 mm를 현재 GML 좌표 단위로 변환하여 `--overlap_tol`에 전달
-   - `--planarity_d2p_tol 0.025`
-9. 최종 JSON과 HTML report 생성
-
-하나의 CellSpace가 원인이라면 단일 항목까지 격리합니다. 여러 CellSpace 조합에서만 crash가 재현되고 개별 4분할에서는 재현되지 않으면 해당 부모 묶음을 보수적으로 LVN 대상으로 처리합니다.
-
-진행 dialog는 초기 묶음별 crash 상태, 생성·완료된 분할 job 수, 실행·대기 수, 최대 분할 depth, AABB에 도달한 job의 누적 CellSpace 수와 격리된 CellSpace 수를 실시간으로 표시합니다. Crash 탐색 중 취소하면 현재 실행 중인 모든 val3dity probe process를 함께 종료합니다.
-
-각 crash probe는 val3dity 출력에서 `Constructing AABB tree`를 확인하면 Nef 생성 단계를 통과한 것으로 판정합니다. 해당 process를 즉시 종료하고 정상 job으로 기록하여 AABB tree 및 CellSpace intersection 계산은 생략합니다. AABB 진입 전에 비정상 종료된 job만 crash로 판정하여 4분할합니다.
-
-Crash 검사가 끝난 CellSpace는 `IndoorGml` attribute dictionary의 `precision_crash_checked`, `precision_crash_detected` 값으로 결과를 보존합니다. Geometry가 변경되지 않은 CellSpace는 다음 정밀검사에서 probe를 생략하며, 이전 crash CellSpace는 저장된 결과를 LVN 대상으로 재사용합니다. CellSpace 변경이 관찰되면 두 값은 제거되어 다음 검사 대상에 다시 포함됩니다.
-
-정밀검사에서는 Extension의 별도 701/704 재검사를 수행하지 않습니다.
-
-### Local Vertex Normalization
-
-LVN은 기존 정점을 단순 이동하는 대신 solid shell을 다시 구성하여 정점 병합 과정에서 GML ring이나 triangle topology가 손상되는 문제를 줄입니다.
-
-주요 처리:
-
-- 기본 0.001 mm 단위 정점 정규화
-- coplanar face와 shared edge 정리
-- 공선 정점과 축소된 sliver triangle 복구
-- 수평면과 공유 Edge 높이 정렬
-- triangle intersection과 patch 재구성
-- 정규화 후 manifold solid와 topology 재검증
-
-CellSpace별 독립 작업 원칙:
-
-- 하나의 CellSpace 실패는 해당 CellSpace에만 rollback
-- 다른 CellSpace의 성공 결과는 유지
-- 이미 정규화된 CellSpace는 반복 처리 생략
-- 이전 실패 CellSpace는 geometry가 변경되기 전까지 재시도 생략
-- geometry 수정 시 실패 상태를 해제하여 재시도 가능
-- 성공한 CellSpace가 있을 때만 필요한 topology 동기화 수행
-
-완료 화면은 `성공`, `기존 완료`, `실패`, `이전 실패 생략`을 구분하여 표시합니다.
 
 ### Report, 오류 Overlay와 Fix Mode
 
@@ -482,7 +418,6 @@ val3dity process가 실행되는 동안 `IndoorGML_PrimalSpaceFeatures`는 잠�
 | Duality/Connects | 끊어진 참조가 Export에 남을 수 있음 | Export snapshot에서 유효 관계만 작성 |
 | GML 생성 | 외부 converter 내부 구조 확인 어려움 | Ruby exporter로 Core/Navigation subset 직접 생성 |
 | Validation | report만으로 오류 위치 추적이 어려움 | report ID와 오류 geometry를 viewport focus로 연결 |
-| Geometry 보정 | 한 형상 실패가 전체 보정 결과를 무효화할 수 있음 | CellSpace별 LVN operation과 개별 rollback |
 | 701/704 재검사 | export GML 재구성 geometry와 현재 모델 불일치 가능 | 현재 SketchUp 원본 geometry 분석, Boolean만 clone 사용 |
 
 최근 안정화 작업:
@@ -495,7 +430,6 @@ val3dity process가 실행되는 동안 `IndoorGML_PrimalSpaceFeatures`는 잠�
 - Windows process handle 상속을 stdout/stderr pipe로 제한
 - Validation 재실행 전 이전 dialog/report/session 정리
 - CellSpace 생성·타입 변경·속성 제거 후 topology와 Overlay refresh 범위 최적화
-- LVN 실패 CellSpace만 원복하고 성공 CellSpace 결과 유지
 
 ## Architecture
 
@@ -507,8 +441,6 @@ indoor3d/
 ├── application/
 │   ├── adjacency_service/         # adjacency sync and geometry query
 │   ├── indoor_model/              # IndoorModel mixins and lifecycle
-│   ├── local_vertex_normalizer/   # CellSpace-local geometry normalization
-│   └── precision_validation/      # Fast/Precision validation integration
 ├── infrastructure/
 │   ├── observers/                 # SketchUp observer adapters
 │   ├── persistence/               # AttributeSerializer, RuntimeRestorer
@@ -556,8 +488,6 @@ ruby -Itest test\run_all.rb
 ## Known Limitations
 
 - Validation은 bundled Windows x64 val3dity runtime에 의존합니다.
-- 정밀검사는 Beta 기능이며 geometry를 변경할 수 있고 모델 규모에 따라 수십 분에서 수시간이 걸릴 수 있습니다.
-- 정밀검사에서 이전 실패로 표시된 CellSpace는 geometry가 수정되기 전까지 LVN 재시도를 생략합니다.
 - Export는 IndoorGML 1.0 Core/Navigation의 단일 SpaceLayer 모델만 생성합니다.
 - Transition 생성 정책은 현재 CellSpace 타입과 수직/수평 방향을 구분하지 않습니다.
 - State/Transition을 사용자가 직접 생성·연결·해제하는 topology editor는 없습니다.

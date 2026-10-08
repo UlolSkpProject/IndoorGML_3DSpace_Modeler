@@ -156,8 +156,6 @@ module ULOL
           #   1. decide/apply the final local frame;
           #   2. recenter using a translation snapped to the 0.001 mm grid.
           #
-          # LVN is optional functionality and must only run through its explicit
-          # console/API entrypoint.
           def initialize_cell_space_coordinates_local_grid(cell_space)
             raise ArgumentError, 'CellSpace is invalid during Local Grid initialization' unless cell_space&.valid?
 
@@ -174,7 +172,7 @@ module ULOL
 
           # Refresh policy:
           # - evaluate/apply the local frame;
-          # - recenter without implicitly invoking optional LVN.
+          # - recenter the geometry in the local frame.
           def refresh_cell_space_coordinates_local_grid(cell_space)
             return false unless cell_space&.valid?
 
