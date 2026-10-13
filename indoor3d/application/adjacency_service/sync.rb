@@ -73,12 +73,10 @@ module ULOL
         def erase_for(cell_space)
           return if cell_space.nil?
 
-          pair_keys = if @registry.respond_to?(:adjacent_pair_keys_for_cell) &&
-                         @registry.respond_to?(:transition_pair_keys_for_cell)
-                        @registry.adjacent_pair_keys_for_cell(cell_space.id) |
-                          @registry.transition_pair_keys_for_cell(cell_space.id)
+          pair_keys = if @registry.respond_to?(:transition_pair_keys_for_cell)
+                        @registry.transition_pair_keys_for_cell(cell_space.id)
                       else
-                        (@registry.adjacent_pair_keys | @registry.transition_pair_keys).select do |pair_key|
+                        @registry.transition_pair_keys.select do |pair_key|
                           pair_key.split(':').include?(cell_space.id)
                         end
                       end
@@ -147,7 +145,7 @@ module ULOL
           pair_results.each do |index1, index2, adjacency_axis|
             cell1 = entries[index1][:cell_space]
             cell2 = entries[index2][:cell_space]
-            next unless transition_allowed_for_axis?(adjacency_axis)
+            next unless transition_pair_eligible?(cell1, cell2, adjacency_axis)
 
             pair_key = cell_pair_key(cell1, cell2)
             next_pairs[pair_key] = [cell1, cell2]
@@ -177,8 +175,7 @@ module ULOL
               message: "Transition 반영: #{completed} / #{total}"
             ) if progress_checkpoint?(completed, total)
           end
-          next_pairs.each do |pair_key, (cell1, cell2)|
-            @registry.set_adjacent_pair(pair_key, cell1, cell2)
+          next_pairs.each do |_pair_key, (cell1, cell2)|
             transition_builder.call(cell1, cell2)
             completed += 1
             emit_stage_progress(
@@ -207,7 +204,7 @@ module ULOL
 
         def stale_pair_keys(next_pair_keys)
           next_pair_key_set = next_pair_keys.each_with_object({}) { |pair_key, set| set[pair_key] = true }
-          (@registry.adjacent_pair_keys | @registry.transition_pair_keys).reject do |pair_key|
+          @registry.transition_pair_keys.reject do |pair_key|
             next_pair_key_set[pair_key]
           end
         end
@@ -218,26 +215,26 @@ module ULOL
           cells.each_with_index do |cell1, index|
             cells[(index + 1)..].to_a.each do |cell2|
               pair_key = cell_pair_key(cell1, cell2)
-              adjacent = if @registry.respond_to?(:adjacent_pair?)
-                           @registry.adjacent_pair?(pair_key)
-                         else
-                           @registry.adjacent_pair_keys.include?(pair_key)
-                         end
               transition = if @registry.respond_to?(:transition_for_pair)
                              !@registry.transition_for_pair(pair_key).nil?
                            else
                              @registry.transition_pair_keys.include?(pair_key)
                            end
-              next unless adjacent || transition
-
-              keys << pair_key
+              keys << pair_key if transition
             end
           end
           keys
         end
 
-        def transition_allowed_for_axis?(adjacency_axis)
-          return !adjacency_axis.nil?
+        def transition_pair_eligible?(cell1, cell2, adjacency_axis)
+          return false if adjacency_axis.nil?
+          return false if cell1.nil? || cell2.nil? || cell1.equal?(cell2)
+          return false unless cell1.valid? && cell2.valid?
+          return false unless cell1.navigable? && cell2.navigable?
+          return false unless cell1.duality_state&.valid?
+          return false unless cell2.duality_state&.valid?
+
+          true
         end
 
         def reset_run_metrics

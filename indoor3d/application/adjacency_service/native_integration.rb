@@ -247,15 +247,7 @@ module ULOL
           end
 
           def pair_keys_for_incremental_cell(cell_space)
-            if @registry.respond_to?(:adjacent_pair_keys_for_cell) &&
-               @registry.respond_to?(:transition_pair_keys_for_cell)
-              @registry.adjacent_pair_keys_for_cell(cell_space.id) |
-                @registry.transition_pair_keys_for_cell(cell_space.id)
-            else
-              (@registry.adjacent_pair_keys | @registry.transition_pair_keys).select do |pair_key|
-                pair_key.split(':').include?(cell_space.id)
-              end
-            end
+            @registry.transition_pair_keys_for_cell(cell_space.id)
           end
 
           def build_metrics(started_at)

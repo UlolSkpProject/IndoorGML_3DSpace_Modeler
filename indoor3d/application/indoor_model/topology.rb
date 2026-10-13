@@ -239,7 +239,6 @@ module ULOL
             return if transition.nil?
 
             erase_transition(transition)
-            @feature_registry.delete_adjacent_pair(pair_key)
           end
 
           def erase_transition(transition)
@@ -284,10 +283,7 @@ module ULOL
 
             @transitions.select { |transition| transition.connected_to?(state) }.each do |transition|
               pair_key = transition_cell_pair_key(transition)
-              if pair_key
-                @feature_registry.delete_transition_for_pair(pair_key)
-                @feature_registry.delete_adjacent_pair(pair_key)
-              end
+              @feature_registry.delete_transition_for_pair(pair_key) if pair_key
               erase_transition(transition)
             end
           end
@@ -438,7 +434,6 @@ module ULOL
             unregister_runtime_transition_from_states(transition)
             transition.erase!
             @feature_registry.remove_transition(transition)
-            @feature_registry.delete_adjacent_pair(pair_key)
           end
 
           def register_runtime_transition_with_states(transition)
