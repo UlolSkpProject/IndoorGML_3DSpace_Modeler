@@ -10,15 +10,12 @@ module ULOL
         # - used for initial model/extension load and explicit hard refreshes
         # - may evaluate/rewrite CellSpace local axes
         # - finishes with a 0.001 mm grid-snapped recenter
-        # - never invokes optional LVN implicitly
         #
         # Soft refresh:
         # - runtime/topology reconstruction only
         # - never evaluates or rewrites local axes
-        # - never invokes LVN
         # - never recenters CellSpace geometry
         #
-        # LVN remains available through its explicit console/API entrypoint.
 
         def refresh_runtime_data(initial_model_load: false)
           if initial_model_load
