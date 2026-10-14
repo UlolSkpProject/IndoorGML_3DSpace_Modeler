@@ -264,25 +264,38 @@ module ULOL
 
           # Runtime-only debug graphs; only active, valid CellSpaces render.
           def debug_reference_graphs
-            store = @debug_reference_graph_by_cell_id || {}
+            after = ReferenceGraphDebugMode.after?
+            source = @debug_reference_graph_by_cell_id || {}
             Array(@feature_registry&.cell_spaces).filter_map do |cell_space|
               next unless cell_space&.valid?
 
-              store[cell_space.id]
+              cell_id = cell_space.id
+              after ? (simplified_debug_reference_graph_for(cell_id) || source[cell_id]) : source[cell_id]
             end
           end
 
           def debug_reference_points_by_kind
-            store = @debug_reference_points_by_cell_id || {}
+            after = ReferenceGraphDebugMode.after?
+            originals = @debug_reference_points_by_cell_id || {}
             by_kind = Hash.new { |hash, key| hash[key] = [] }
             Array(@feature_registry&.cell_spaces).each do |cell_space|
               next unless cell_space&.valid?
 
-              Array(store[cell_space.id]).each do |entry|
-                if entry.is_a?(Hash)
-                  by_kind[entry[:kind].to_i] << entry[:point]
-                else
-                  by_kind[0] << entry # Legacy in-memory data
+              cell_id = cell_space.id
+              simplified = simplified_debug_reference_graph_for(cell_id) if after
+              if simplified
+                # After mode shows only retained black Final points. Their
+                # native purple/red source diagnostics remain in originals.
+                Array(simplified[:nodes]).drop(1).each do |node|
+                  by_kind[4] << node[:point]
+                end
+              else
+                Array(originals[cell_id]).each do |entry|
+                  if entry.is_a?(Hash)
+                    by_kind[entry[:kind].to_i] << entry[:point]
+                  else
+                    by_kind[0] << entry # Legacy in-memory data
+                  end
                 end
               end
             end
@@ -605,15 +618,42 @@ module ULOL
               [first, second].freeze
             end
             @debug_reference_graph_by_cell_id ||= {}
-            @debug_reference_graph_by_cell_id[cell_space.id] = {
+            original = {
               nodes: nodes.freeze,
               edges: edges.freeze
             }.freeze
+            @debug_reference_graph_by_cell_id[cell_space.id] = original
+
+            # Invalidate the lazy reduced cache only when Native supplies
+            # new geometry. Before mode remains at its prior processing cost.
+            @debug_reference_graph_simplified_by_cell_id&.delete(cell_space.id)
             true
           rescue StandardError
             # Debug rendering must never block the State/CellSpace lifecycle.
             @debug_reference_graph_by_cell_id&.delete(cell_space.id)
+            @debug_reference_graph_simplified_by_cell_id&.delete(cell_space.id)
             false
+          end
+
+          # Lazy, non-destructive reduction. The original Native graph remains
+          # authoritative and is used unmodified in Before mode.
+          def simplified_debug_reference_graph_for(cell_id)
+            cache = (@debug_reference_graph_simplified_by_cell_id ||= {})
+            return cache[cell_id] if cache.key?(cell_id)
+
+            source = @debug_reference_graph_by_cell_id&.[](cell_id)
+            return nil unless source && !Array(source[:nodes]).empty?
+
+            cache[cell_id] = ReferenceGraphSimplifier.simplify(source)
+          rescue StandardError => error
+            # Cache a failed attempt, so repeated overlay frames do not
+            # repeatedly run a potentially expensive simplifier.
+            cache[cell_id] = nil if cache
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Reference graph simplification skipped cell=#{cell_id}: " \
+              "#{error.class}: #{error.message}"
+            ) if defined?(IndoorCore::Logger)
+            nil
           end
 
           def clear_debug_reference_points(cell_space)
@@ -621,6 +661,7 @@ module ULOL
 
             @debug_reference_points_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_by_cell_id&.delete(cell_space.id)
+            @debug_reference_graph_simplified_by_cell_id&.delete(cell_space.id)
             true
           end
 
