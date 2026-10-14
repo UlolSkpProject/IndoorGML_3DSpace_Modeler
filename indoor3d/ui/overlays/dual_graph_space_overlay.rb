@@ -15,6 +15,10 @@ module ULOL
             indoor_model: @indoor_model,
             transform_context: self
           )
+          @reference_graph_debug_renderer = ReferenceGraphDebugOverlayRenderer.new(
+            indoor_model: @indoor_model,
+            transform_context: self
+          )
           @state_renderer = StateOverlayRenderer.new(indoor_model: @indoor_model, transform_context: self)
           super(OVERLAY_ID, OVERLAY_NAME, description: 'Shows IndoorGML state and transition geometry.')
         end
@@ -28,7 +32,9 @@ module ULOL
           return unless draw_dual_overlay?
 
           state_radius_scale = DualOverlayPreferences.state_radius_scale
+          @reference_graph_debug_renderer.draw_circles(view)
           @transition_renderer.draw(view) unless validation_focus_active?
+          @reference_graph_debug_renderer.draw_edges(view)
           @reference_point_debug_renderer.draw(view)
           @state_renderer.draw(view, state_radius_scale: state_radius_scale)
         rescue StandardError => e
@@ -87,6 +93,7 @@ module ULOL
           )
           extent_points.each { |point| bounds.add(point) }
           @reference_point_debug_renderer.extent_points.each { |point| bounds.add(point) }
+          @reference_graph_debug_renderer.extent_points.each { |point| bounds.add(point) }
         end
 
         def validation_focus_active?

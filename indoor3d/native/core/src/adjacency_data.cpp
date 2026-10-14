@@ -20,7 +20,7 @@ constexpr std::uint64_t INPUT_VERSION_V1 = 1;
 constexpr std::uint64_t INPUT_VERSION_V2 = 2;
 constexpr std::uint64_t INPUT_VERSION_V3 = 3;
 constexpr std::uint64_t RESULT_VERSION = 1;
-constexpr std::uint64_t STATE_RESULT_VERSION = 4;
+constexpr std::uint64_t STATE_RESULT_VERSION = 5;
 constexpr std::size_t INPUT_HEADER_SIZE = 32;
 constexpr std::size_t CELL_FIXED_SIZE_V1 = 80;
 constexpr std::size_t CELL_FIXED_SIZE_V2 = 96;
@@ -497,6 +497,37 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
             writer.append_double(point.y);
             writer.append_double(point.z);
             writer.append_u64(kind);
+        }
+
+        if (result.graph_node_points.size() != result.graph_node_radii.size())
+            throw std::invalid_argument("debug graph node/radius count mismatch");
+        writer.append_u64(checked_u64(result.graph_node_points.size(), "debug graph node count"));
+        for (std::size_t i = 0; i < result.graph_node_points.size(); ++i)
+        {
+            const Vec3& point = result.graph_node_points[i];
+            const double radius = result.graph_node_radii[i];
+            require_finite(point.x, "debug graph node x");
+            require_finite(point.y, "debug graph node y");
+            require_finite(point.z, "debug graph node z");
+            require_finite(radius, "debug graph node radius");
+            if (radius < 0.0)
+                throw std::invalid_argument("negative debug graph node radius");
+            writer.append_double(point.x);
+            writer.append_double(point.y);
+            writer.append_double(point.z);
+            writer.append_double(radius);
+        }
+        if (result.graph_edge_indices.size() % 2 != 0)
+            throw std::invalid_argument("debug graph edge indices must be paired");
+        writer.append_u64(checked_u64(result.graph_edge_indices.size() / 2, "debug graph edge count"));
+        for (std::size_t i = 0; i < result.graph_edge_indices.size(); i += 2)
+        {
+            const std::uint64_t first = result.graph_edge_indices[i];
+            const std::uint64_t second = result.graph_edge_indices[i + 1];
+            if (first >= second || second >= result.graph_node_points.size())
+                throw std::invalid_argument("invalid debug graph edge indices");
+            writer.append_u64(first);
+            writer.append_u64(second);
         }
     }
     return writer.take();

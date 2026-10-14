@@ -612,6 +612,44 @@ void test_smooth_concave_wall_retains_safe_navigation_candidates()
             "smooth concave wall produced excessive purple candidates");
 }
 
+void test_room_visibility_graph_circle_overlap_and_blocked_los()
+{
+    CellData room = unit_box_cell();
+    room.category = CellSpaceCategory::Room;
+    const Vec3 state{0.5, 0.5, 0.5};
+    const std::vector<ReferencePoint> points{
+        {{0.2, 0.5, 0.5}, ReferencePointKind::Final},
+        {{0.8, 0.5, 0.5}, ReferencePointKind::Final},
+        {{0.3, 0.3, 0.5}, ReferencePointKind::Corner}
+    };
+    const ReferenceGraphDebug graph =
+        build_room_reference_visibility_graph(room, state, points, 0.001);
+    require(graph.nodes.size() == 3,
+            "graph must contain State and Final refs, not diagnostic candidates");
+    require(graph.edges.size() == 3,
+            "three mutually visible, overlapping circles should form three edges");
+    require(std::abs(graph.nodes[0].radius - 1.0) < 1.0e-9,
+            "State circle radius must be 1.0x local width (2x clearance)");
+    require(std::abs(graph.nodes[1].radius - 0.4) < 1.0e-9,
+            "Final circle radius must be 1.0x local width");
+    for (const ReferenceGraphEdge& edge : graph.edges)
+        require(edge.first < edge.second && edge.second < graph.nodes.size(),
+                "graph edges must reference valid nodes");
+
+    const CellData u = u_prism_cell();
+    const std::vector<ReferencePoint> blocked_points{
+        {{0.5, 2.5, 0.5}, ReferencePointKind::Final},
+        {{2.5, 2.5, 0.5}, ReferencePointKind::Final}
+    };
+    const ReferenceGraphDebug blocked =
+        build_room_reference_visibility_graph(u, {1.5, 0.5, 0.5},
+                                               blocked_points, 0.001);
+    require(blocked.nodes.size() == 3, "U room must preserve both Final nodes");
+    for (const ReferenceGraphEdge& edge : blocked.edges)
+        require(!(edge.first == 1 && edge.second == 2),
+                "overlapping circle centers must not connect across a Room wall");
+}
+
 void test_non_room_reference_points_are_empty()
 {
     const std::array<CellSpaceCategory,4> categories{{
@@ -652,5 +690,6 @@ int main()
     test_concave_room_reference_points();
     test_state_anchored_room_reference_cluster();
     test_non_room_reference_points_are_empty();
+    test_room_visibility_graph_circle_overlap_and_blocked_los();
     return 0;
 }

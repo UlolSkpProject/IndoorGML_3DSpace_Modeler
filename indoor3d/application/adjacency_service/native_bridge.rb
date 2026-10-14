@@ -10,7 +10,8 @@ module ULOL
         PROTOCOL_VERSION = 1
         GEOMETRY_PROTOCOL_VERSION = 3
         REFERENCE_POINTS_RESULT_VERSION = 2
-        STATE_RESULT_VERSION = 4
+        STATE_RESULT_VERSION = 5
+        PREVIOUS_STATE_RESULT_VERSION = 4
         LEGACY_STATE_RESULT_VERSION = 3
         NORMAL_TOLERANCE = 0.000001
         POLL_INTERVAL_SECONDS = 0.01
@@ -426,7 +427,8 @@ module ULOL
 
           version = reader.read_u64
           unless [PROTOCOL_VERSION, REFERENCE_POINTS_RESULT_VERSION,
-                  LEGACY_STATE_RESULT_VERSION, STATE_RESULT_VERSION].include?(version)
+                  LEGACY_STATE_RESULT_VERSION, PREVIOUS_STATE_RESULT_VERSION,
+                  STATE_RESULT_VERSION].include?(version)
             raise ProtocolError, "unsupported native State result version #{version}"
           end
 
@@ -438,6 +440,8 @@ module ULOL
           reference_points = {}
           reference_kinds = {}
           reference_statuses = {}
+          graph_nodes = {}
+          graph_edges = {}
           previous_index = nil
           result_count.times do
             cell_index = checked_count(reader.read_u64, 'State cell index')
@@ -470,9 +474,9 @@ module ULOL
                   finite_f64(reader.read_f64, 'reference y'),
                   finite_f64(reader.read_f64, 'reference z')
                 ].freeze
-                kind = version >= STATE_RESULT_VERSION ?
+                kind = version >= PREVIOUS_STATE_RESULT_VERSION ?
                   checked_count(reader.read_u64, 'reference kind') : 0
-                if version >= STATE_RESULT_VERSION && ![1, 2, 3, 4].include?(kind)
+                if version >= PREVIOUS_STATE_RESULT_VERSION && ![1, 2, 3, 4].include?(kind)
                   raise ProtocolError, "invalid reference point kind #{kind}"
                 end
                 kinds << kind
@@ -480,6 +484,34 @@ module ULOL
             end
             reference_points[cell_index] = references.freeze
             reference_kinds[cell_index] = kinds.freeze
+
+            nodes = []
+            edges = []
+            if version >= STATE_RESULT_VERSION
+              node_count = checked_count(reader.read_u64, 'debug graph node count')
+              node_count.times do
+                center = [
+                  finite_f64(reader.read_f64, 'debug graph node x'),
+                  finite_f64(reader.read_f64, 'debug graph node y'),
+                  finite_f64(reader.read_f64, 'debug graph node z')
+                ].freeze
+                radius = finite_f64(reader.read_f64, 'debug graph radius')
+                raise ProtocolError, 'negative debug graph radius' if radius.negative?
+
+                nodes << { point: center, radius: radius }.freeze
+              end
+              edge_count = checked_count(reader.read_u64, 'debug graph edge count')
+              edge_count.times do
+                first = checked_count(reader.read_u64, 'debug graph edge first')
+                second = checked_count(reader.read_u64, 'debug graph edge second')
+                if first >= second || second >= node_count
+                  raise ProtocolError, 'debug graph edge indices are invalid'
+                end
+                edges << [first, second].freeze
+              end
+            end
+            graph_nodes[cell_index] = nodes.freeze
+            graph_edges[cell_index] = edges.freeze
           end
 
           raise ProtocolError, 'native State result has trailing bytes' unless reader.finished?
@@ -487,7 +519,9 @@ module ULOL
             points: points.freeze,
             reference_points: reference_points.freeze,
             reference_kinds: reference_kinds.freeze,
-            reference_statuses: reference_statuses.freeze
+            reference_statuses: reference_statuses.freeze,
+            graph_nodes: graph_nodes.freeze,
+            graph_edges: graph_edges.freeze
           }.freeze
         end
 

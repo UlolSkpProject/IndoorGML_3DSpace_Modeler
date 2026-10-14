@@ -37,10 +37,30 @@ struct ReferencePoint
     ReferencePointKind kind = ReferencePointKind::Face;
 };
 
+struct ReferenceGraphNode
+{
+    Vec3 point;
+    double radius = 0.0;
+};
+
+struct ReferenceGraphEdge
+{
+    std::size_t first = 0;
+    std::size_t second = 0;
+};
+
+struct ReferenceGraphDebug
+{
+    // Node zero is always State; all other nodes are Final references.
+    std::vector<ReferenceGraphNode> nodes;
+    std::vector<ReferenceGraphEdge> edges;
+};
+
 struct CellSpaceInteriorPointResult
 {
     std::optional<Vec3> state_point;
     std::vector<ReferencePoint> reference_points;
+    ReferenceGraphDebug debug_graph;
     StateSearchMetrics state_metrics;
     ReferencePointStatus reference_status = ReferencePointStatus::NotAttempted;
 };
@@ -54,6 +74,14 @@ std::optional<Vec3> find_state_point(
 std::vector<ReferencePoint> find_reference_points(
     const CellData& cell,
     const Vec3& state_point,
+    double tolerance
+);
+
+// Room-only, non-mutating diagnostic graph. No references are merged here.
+ReferenceGraphDebug build_room_reference_visibility_graph(
+    const CellData& cell,
+    const Vec3& state_point,
+    const std::vector<ReferencePoint>& reference_points,
     double tolerance
 );
 

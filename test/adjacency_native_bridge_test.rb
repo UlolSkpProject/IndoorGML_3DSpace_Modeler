@@ -57,6 +57,30 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     )
   end
 
+  def test_state_result_v5_includes_debug_graph_and_preserves_v4
+    v4 = "IGMLSTA\0".b + [4, 1, 0].pack('Q<3')
+    v4 << [0].pack('Q<') << [0.5, 0.5, 0.5].pack('E3')
+    v4 << [1, 0].pack('Q<2')
+    prior = Bridge.decode_state_result(v4)
+    assert_equal [], prior[:graph_nodes][0]
+    assert_equal [], prior[:graph_edges][0]
+    assert_equal [0.5, 0.5, 0.5], prior[:points][0]
+
+    v5 = "IGMLSTA\0".b + [5, 1, 0].pack('Q<3')
+    v5 << [0].pack('Q<') << [0.5, 0.5, 0.5].pack('E3')
+    v5 << [1, 1].pack('Q<2')
+    v5 << [0.25, 0.5, 0.5].pack('E3') << [4].pack('Q<')
+    v5 << [2].pack('Q<')
+    v5 << [0.5, 0.5, 0.5, 1.0].pack('E4')
+    v5 << [0.25, 0.5, 0.5, 0.5].pack('E4')
+    v5 << [1, 0, 1].pack('Q<3')
+    decoded = Bridge.decode_state_result(v5)
+    assert_equal 4, decoded[:reference_kinds][0][0]
+    assert_equal 2, decoded[:graph_nodes][0].length
+    assert_equal({ point: [0.5, 0.5, 0.5], radius: 1.0 }, decoded[:graph_nodes][0][0])
+    assert_equal [[0, 1]], decoded[:graph_edges][0]
+  end
+
   def test_result_decoding_restores_snapshot_face_references
     snapshots = sample_snapshots
     candidate =

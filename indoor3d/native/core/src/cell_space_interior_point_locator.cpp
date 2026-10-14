@@ -1355,6 +1355,66 @@ std::vector<ReferencePoint> find_reference_points(
     return points;
 }
 
+// Build a diagnostic visibility graph from State and *final* reference nodes.
+// Radius is one full local corridor width (2x nearest XY vertical wall
+// clearance); it does NOT modify the existing 0.15x clustering policy.
+ReferenceGraphDebug build_room_reference_visibility_graph(
+    const CellData& cell,
+    const Vec3& state_point,
+    const std::vector<ReferencePoint>& reference_points,
+    double tolerance
+)
+{
+    ReferenceGraphDebug graph;
+    if (!std::isfinite(tolerance) || tolerance <= 0.0) return graph;
+
+    const std::vector<WallSegment> walls =
+        wall_segments_at_z(cell, state_point.z, tolerance);
+    if (walls.empty()) return graph;
+
+    const std::vector<const Triangle*> triangles = triangle_pointers(cell);
+    if (triangles.empty()) return graph;
+    TriangleBvh bvh(triangles);
+    if (bvh.empty()) return graph;
+
+    const auto add_node = [&](const Vec3& point) {
+        const double radius = 2.0 * nearest_wall_clearance(walls, point);
+        if (!std::isfinite(radius) || radius < 0.0) return;
+        graph.nodes.push_back({point, radius});
+    };
+    add_node(state_point);
+    if (graph.nodes.empty()) return graph;
+
+    for (const ReferencePoint& reference : reference_points)
+    {
+        if (reference.kind != ReferencePointKind::Final) continue;
+        add_node(reference.point);
+    }
+
+    // AABB-free pair test: only intersecting circles can form an Edge.
+    // The current experimental graph is per CellSpace and is never used
+    // for Transition computation or destructive reference simplification.
+    for (std::size_t i = 0; i < graph.nodes.size(); ++i)
+    {
+        const ReferenceGraphNode& first = graph.nodes[i];
+        for (std::size_t j = i + 1; j < graph.nodes.size(); ++j)
+        {
+            const ReferenceGraphNode& second = graph.nodes[j];
+            const double radius_sum = first.radius + second.radius;
+            if (radius_sum <= tolerance ||
+                distance_xy_squared(first.point, second.point) >
+                    radius_sum * radius_sum)
+                continue;
+            if (crosses_wall_slice(walls, first.point, second.point, tolerance))
+                continue;
+            if (!clear_path(bvh, first.point, second.point, tolerance))
+                continue;
+            graph.edges.push_back({i, j});
+        }
+    }
+    return graph;
+}
+
 CellSpaceInteriorPointResult locate_cell_space_interior_points(
     const CellData& cell,
     double tolerance
@@ -1378,6 +1438,18 @@ CellSpaceInteriorPointResult locate_cell_space_interior_points(
                 tolerance
             );
             result.reference_status = ReferencePointStatus::Succeeded;
+            // Debug-only output: isolate graph failures from State and the
+            // already-computed final Reference Points.
+            try
+            {
+                result.debug_graph = build_room_reference_visibility_graph(
+                    cell, *result.state_point, result.reference_points, tolerance
+                );
+            }
+            catch (...)
+            {
+                result.debug_graph = {};
+            }
             break;
         case CellSpaceCategory::Stair:
             // TODO: Generate Stair reference points using the State-to-floor distance scale.

@@ -1,0 +1,151 @@
+# frozen_string_literal: true
+
+module ULOL
+  module Indoor3DGmlModeler
+    module IndoorCore
+      # Runtime-only visualization of overlapping XY circles and their
+      # unobstructed lines of sight within each Room CellSpace.
+      class ReferenceGraphDebugOverlayRenderer
+        CIRCLE_COLOR = Sketchup::Color.new(255, 255, 255, 64)
+        CIRCLE_OUTLINE_COLOR = Sketchup::Color.new(255, 255, 255, 110)
+        EDGE_COLOR = Sketchup::Color.new(0, 0, 0)
+        CIRCLE_SEGMENTS = 48
+
+        def initialize(indoor_model:, transform_context:)
+          @indoor_model = indoor_model
+          @transform_context = transform_context
+        end
+
+        def draw_circles(view)
+          each_graph do |graph|
+            graph[:nodes].each do |node|
+              radius = node[:radius].to_f
+              next unless radius.positive? && radius.finite?
+
+              circle = circle_in_root_local(node[:point], radius)
+              next if circle.empty?
+
+              rendered = render_points(circle)
+              # Triangulate the fan explicitly: GL_TRIANGLES is supported
+              # consistently by SketchUp's View#draw implementation.
+              center = render_point(node[:point])
+              triangles = []
+              rendered.each_with_index do |point, index|
+                triangles.push(center, point, rendered[(index + 1) % rendered.length])
+              end
+
+              view.drawing_color = CIRCLE_COLOR
+              view.draw(GL_TRIANGLES, triangles)
+              view.drawing_color = CIRCLE_OUTLINE_COLOR
+              view.line_width = 1
+              view.line_stipple = '' if view.respond_to?(:line_stipple=)
+              view.draw(GL_LINE_STRIP, rendered + [rendered.first])
+            end
+          end
+        rescue StandardError => error
+          log_debug_error(:circles, error)
+        ensure
+          view.line_width = 1 if view.respond_to?(:line_width=)
+        end
+
+        def draw_edges(view)
+          view.drawing_color = EDGE_COLOR
+          view.line_width = 1
+          view.line_stipple = '' if view.respond_to?(:line_stipple=)
+          each_graph do |graph|
+            nodes = graph[:nodes]
+            segments = graph[:edges].filter_map do |first, second|
+              next unless nodes[first] && nodes[second]
+
+              [nodes[first][:point], nodes[second][:point]]
+            end
+            view.draw(GL_LINES, render_points(segments.flatten(1))) unless segments.empty?
+          end
+        rescue StandardError => error
+          log_debug_error(:edges, error)
+        ensure
+          view.line_width = 1 if view.respond_to?(:line_width=)
+        end
+
+        def extent_points
+          extents = []
+          each_graph do |graph|
+            graph[:nodes].each do |node|
+              center = node[:point]
+              radius = node[:radius].to_f
+              next unless center && radius.finite?
+
+              # Four transformed corners enclose an XY disk even under a
+              # rotated root-group transform (max/min independently below).
+              extents.concat(render_points([
+                Geom::Point3d.new(center.x - radius, center.y - radius, center.z),
+                Geom::Point3d.new(center.x - radius, center.y + radius, center.z),
+                Geom::Point3d.new(center.x + radius, center.y - radius, center.z),
+                Geom::Point3d.new(center.x + radius, center.y + radius, center.z)
+              ]))
+            end
+          end
+          return [] if extents.empty?
+
+          xs = extents.map(&:x)
+          ys = extents.map(&:y)
+          zs = extents.map(&:z)
+          [
+            Geom::Point3d.new(xs.min, ys.min, zs.min),
+            Geom::Point3d.new(xs.max, ys.max, zs.max)
+          ]
+        rescue StandardError
+          []
+        end
+
+        private
+
+        def each_graph
+          Array(@indoor_model.debug_reference_graphs).each do |graph|
+            next unless graph && graph[:nodes] && graph[:edges]
+
+            yield graph
+          end
+        end
+
+        def circle_in_root_local(center, radius)
+          Array.new(CIRCLE_SEGMENTS) do |i|
+            angle = 2.0 * Math::PI * i / CIRCLE_SEGMENTS
+            Geom::Point3d.new(
+              center.x + radius * Math.cos(angle),
+              center.y + radius * Math.sin(angle),
+              center.z
+            )
+          end
+        end
+
+        def render_points(points)
+          if @transform_context.respond_to?(:overlay_render_points)
+            @transform_context.overlay_render_points(points)
+          else
+            points.map { |point| render_point(point) }
+          end
+        end
+
+        def render_point(point)
+          @transform_context.overlay_render_point(point)
+        end
+
+        def log_debug_error(stage, error)
+          @reported_errors ||= {}
+          return if @reported_errors[stage]
+
+          @reported_errors[stage] = true
+          if defined?(IndoorCore::Logger)
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Reference graph overlay #{stage} failed: " \
+              "#{error.class}: #{error.message}"
+            )
+          end
+        rescue StandardError
+          nil
+        end
+      end
+    end
+  end
+end

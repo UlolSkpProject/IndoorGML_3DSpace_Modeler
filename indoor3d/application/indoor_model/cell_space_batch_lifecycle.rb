@@ -262,6 +262,16 @@ module ULOL
             debug_reference_points_by_kind.values.flatten
           end
 
+          # Runtime-only debug graphs; only active, valid CellSpaces render.
+          def debug_reference_graphs
+            store = @debug_reference_graph_by_cell_id || {}
+            Array(@feature_registry&.cell_spaces).filter_map do |cell_space|
+              next unless cell_space&.valid?
+
+              store[cell_space.id]
+            end
+          end
+
           def debug_reference_points_by_kind
             store = @debug_reference_points_by_cell_id || {}
             by_kind = Hash.new { |hash, key| hash[key] = [] }
@@ -489,6 +499,8 @@ module ULOL
             reference_points = Hash(state_result[:reference_points])
             reference_kinds = Hash(state_result[:reference_kinds])
             reference_statuses = Hash(state_result[:reference_statuses])
+            graph_nodes = Hash(state_result[:graph_nodes])
+            graph_edges = Hash(state_result[:graph_edges])
             session_entries.each_with_index do |entry, index|
               cell_space = pending_by_id[entry[:cell_space].id]
               next unless cell_space
@@ -506,6 +518,9 @@ module ULOL
               end
               store_debug_reference_points(
                 cell_space, reference_points[index], kinds: reference_kinds[index]
+              )
+              store_debug_reference_graph(
+                cell_space, graph_nodes[index], graph_edges[index]
               )
               state_point_applier.call(cell_space, coordinates)
             end
@@ -566,10 +581,46 @@ module ULOL
             points
           end
 
+          def store_debug_reference_graph(cell_space, node_data, edge_data)
+            return false unless cell_space&.valid?
+
+            nodes = Array(node_data).filter_map do |record|
+              raw = Hash(record)
+              coordinates = Array(raw[:point])
+              next unless coordinates.length == 3
+              values = coordinates.map(&:to_f)
+              radius = raw[:radius].to_f
+              next unless values.all?(&:finite?) && radius.finite? && radius >= 0.0
+
+              {
+                point: Geom::Point3d.new(*values),
+                radius: radius
+              }.freeze
+            end
+            edges = Array(edge_data).filter_map do |indices|
+              first, second = Array(indices)
+              next unless first.is_a?(Integer) && second.is_a?(Integer)
+              next unless first >= 0 && first < second && second < nodes.length
+
+              [first, second].freeze
+            end
+            @debug_reference_graph_by_cell_id ||= {}
+            @debug_reference_graph_by_cell_id[cell_space.id] = {
+              nodes: nodes.freeze,
+              edges: edges.freeze
+            }.freeze
+            true
+          rescue StandardError
+            # Debug rendering must never block the State/CellSpace lifecycle.
+            @debug_reference_graph_by_cell_id&.delete(cell_space.id)
+            false
+          end
+
           def clear_debug_reference_points(cell_space)
             return false unless cell_space
 
             @debug_reference_points_by_cell_id&.delete(cell_space.id)
+            @debug_reference_graph_by_cell_id&.delete(cell_space.id)
             true
           end
 

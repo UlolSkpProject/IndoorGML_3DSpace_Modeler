@@ -147,6 +147,23 @@ void AdjacencySession::state_worker_loop()
                         static_cast<std::uint64_t>(reference.kind)
                     );
                 }
+                state_result.graph_node_points.reserve(result.debug_graph.nodes.size());
+                state_result.graph_node_radii.reserve(result.debug_graph.nodes.size());
+                for (const ReferenceGraphNode& node : result.debug_graph.nodes)
+                {
+                    state_result.graph_node_points.push_back(node.point);
+                    state_result.graph_node_radii.push_back(node.radius);
+                }
+                state_result.graph_edge_indices.reserve(result.debug_graph.edges.size() * 2);
+                for (const ReferenceGraphEdge& edge : result.debug_graph.edges)
+                {
+                    state_result.graph_edge_indices.push_back(
+                        static_cast<std::uint64_t>(edge.first)
+                    );
+                    state_result.graph_edge_indices.push_back(
+                        static_cast<std::uint64_t>(edge.second)
+                    );
+                }
                 local_results.push_back(std::move(state_result));
                 if (metrics.volume_centroid_succeeded)
                     state_volume_centroid_success_count_.fetch_add(1, std::memory_order_relaxed);
