@@ -271,6 +271,8 @@ module ULOL
 
               cell_id = cell_space.id
               case selected_mode
+              when :connected
+                room_internal_connected_graph_for(cell_id)
               when :internal
                 room_internal_graph_for(cell_id)
               when :optimized
@@ -288,7 +290,12 @@ module ULOL
             end
           end
 
-          # Immutable per-CellSpace graph; Native LOS edges + distance weights.
+          # Snapshot after Kruskal, before the extra Shortcut pass.
+          def room_internal_connected_graph_for(cell_id)
+            @room_internal_connected_by_cell_id&.[](cell_id.to_s)
+          end
+
+          # Final per-CellSpace graph after Kruskal + second Shortcut.
           def room_internal_graph_for(cell_id)
             @room_internal_graph_by_cell_id&.[](cell_id.to_s)
           end
@@ -304,6 +311,7 @@ module ULOL
               # An unavailable Native LOS graph must never masquerade as an
               # internal graph by falling back to old candidate diagnostics.
               next if selected_mode == :internal && !room_internal_graph_for(cell_id)
+              next if selected_mode == :connected && !room_internal_connected_graph_for(cell_id)
 
               displayed = case selected_mode
                           when :after then simplified_debug_reference_graph_for(cell_id)
@@ -313,6 +321,7 @@ module ULOL
                                                  collapsed_debug_reference_graph_for(cell_id) ||
                                                  simplified_debug_reference_graph_for(cell_id)
                           when :internal then room_internal_graph_for(cell_id)
+                          when :connected then room_internal_connected_graph_for(cell_id)
                           end
               if displayed
                 # After mode shows only retained black Final points. Their
@@ -692,6 +701,7 @@ module ULOL
             @debug_reference_graph_collapsed_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_optimized_by_cell_id&.delete(cell_space.id)
             @room_internal_graph_by_cell_id&.delete(cell_space.id)
+            @room_internal_connected_by_cell_id&.delete(cell_space.id)
             true
           rescue StandardError
             # Debug rendering must never block the State/CellSpace lifecycle.
@@ -700,6 +710,7 @@ module ULOL
             @debug_reference_graph_collapsed_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_optimized_by_cell_id&.delete(cell_space.id)
             @room_internal_graph_by_cell_id&.delete(cell_space.id)
+            @room_internal_connected_by_cell_id&.delete(cell_space.id)
             false
           end
 
@@ -793,12 +804,33 @@ module ULOL
                 session_index, pairs, tolerance: tolerance
               )
             end
-            graph = RoomInternalVisibilityGraph.build(
+            connected = RoomInternalVisibilityGraph.build(
               optimized, los_batch: los_batch
             )
-            (@room_internal_graph_by_cell_id ||= {})[cell_space.id] = graph
+            (@room_internal_connected_by_cell_id ||= {})[cell_space.id] = connected
+
+            # Reapply the same State/degree-2/projection/Native LOS rule
+            # on the connected graph. Preserve the Kruskal snapshot so a
+            # failure in this optional diagnostic step changes nothing else.
+            final = begin
+              RoomInternalGraphPostOptimizer.optimize(
+                connected, los_batch: los_batch
+              )
+            rescue StandardError => error
+              IndoorCore::Logger.puts(
+                "[IndoorGML] Room internal second Shortcut skipped cell=#{cell_space.id}: " \
+                "#{error.class}: #{error.message}"
+              ) if defined?(IndoorCore::Logger)
+              connected.merge(
+                postopt_removed_count: 0,
+                postopt_los_checked_pairs: 0,
+                postopt_failed: true
+              ).freeze
+            end
+            (@room_internal_graph_by_cell_id ||= {})[cell_space.id] = final
           rescue StandardError => error
             @room_internal_graph_by_cell_id&.delete(cell_space.id)
+            @room_internal_connected_by_cell_id&.delete(cell_space.id)
             IndoorCore::Logger.puts(
               "[IndoorGML] Room internal visibility graph skipped cell=#{cell_space.id}: " \
               "#{error.class}: #{error.message}"
@@ -833,6 +865,7 @@ module ULOL
             @debug_reference_graph_collapsed_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_optimized_by_cell_id&.delete(cell_space.id)
             @room_internal_graph_by_cell_id&.delete(cell_space.id)
+            @room_internal_connected_by_cell_id&.delete(cell_space.id)
             true
           end
 

@@ -175,6 +175,7 @@ module ULOL
     require_relative 'application/adjacency_service/reference_graph_loop_collapser'
     require_relative 'application/adjacency_service/reference_graph_shortcut_optimizer'
     require_relative 'application/adjacency_service/room_internal_visibility_graph'
+    require_relative 'application/adjacency_service/room_internal_graph_post_optimizer'
     require_relative 'application/adjacency_service/reference_graph_debug_mode'
     require_relative 'application/indoor_model/runtime_support'
     require_relative 'application/indoor_model/scene_groups'
