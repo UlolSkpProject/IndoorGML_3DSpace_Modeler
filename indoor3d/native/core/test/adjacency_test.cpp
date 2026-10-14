@@ -177,6 +177,35 @@ CellData shallow_reflex_prism_cell(double notch_depth)
     return cell;
 }
 
+// A concave arc with two successive ~11-degree reflex turns.
+// Each corner alone would be ignored by the old 200-degree cutoff.
+CellData gradual_reflex_arc()
+{
+    CellData cell;
+    cell.index = 0;
+    cell.category = CellSpaceCategory::Room;
+    cell.flags = CELL_FLAG_NEEDS_STATE;
+    cell.bounds = box(0,0,0,6,6,1);
+    const std::vector<Vec3> ring{
+        {0,0,0},{6,0,0},{6,6,0},{5,5.5,0},
+        {4,5.2,0},{3,5.1,0},{2,5,0},{0,5,0}
+    };
+    const Vec3 center{3,2,0};
+    for (std::size_t i = 0; i < ring.size(); ++i)
+    {
+        const Vec3 a = ring[i];
+        const Vec3 b = ring[(i+1)%ring.size()];
+        const Vec3 a_top{a.x,a.y,1};
+        const Vec3 b_top{b.x,b.y,1};
+        const Vec3 center_top{center.x,center.y,1};
+        cell.faces.push_back(face({0,0,-1},{triangle(center,b,a)}));
+        cell.faces.push_back(face({0,0, 1},{triangle(center_top,a_top,b_top)}));
+        const Vec3 edge{b.x-a.x,b.y-a.y,0};
+        add_rect_face(cell,{edge.y,-edge.x,0},a,b,b_top,a_top);
+    }
+    return cell;
+}
+
 void test_z_sweep_matches_bruteforce()
 {
     std::vector<CellData> cells(5);
@@ -465,6 +494,54 @@ void test_room_reflex_threshold_200_degrees()
                 "only purple Corner candidate generation is allowed");
 }
 
+void test_cumulative_reflex_turn_on_curved_wall()
+{
+    const CellData cell = gradual_reflex_arc();
+    const std::vector<ReferencePoint> points =
+        find_reference_points(cell, {3,2,0.5}, 0.001);
+    bool has_corner = false;
+    for (const ReferencePoint& point : points)
+    {
+        require(point.kind != ReferencePointKind::Face,
+                "cumulative curve must not generate Face midpoint candidates");
+        if (point.kind == ReferencePointKind::Corner) has_corner = true;
+    }
+    require(has_corner,
+            "multiple 180-200 degree reflex corners must generate a purple reference");
+}
+
+void test_local_width_limits_cluster_radius()
+{
+    const CellData cell = shallow_reflex_prism_cell(0.5);
+    const std::vector<ReferencePoint> initial =
+        find_reference_points(cell, {2,0.5,0.5}, 0.001);
+    std::optional<Vec3> corner;
+    for (const ReferencePoint& p : initial)
+        if (p.kind == ReferencePointKind::Corner) corner = p.point;
+    require(corner.has_value(), "local-width fixture Corner missing");
+
+    // Previously 0.18 * AABB short side (4) = 0.72, so 0.6 merged.
+    // The narrower local cross-section now sets a stricter limit.
+    const Vec3 state{corner->x+0.6, corner->y, corner->z};
+    const std::vector<ReferencePoint> points =
+        find_reference_points(cell, state, 0.001);
+    bool has_final_corner = false;
+    bool merged_with_state = false;
+    for (const ReferencePoint& p : points)
+    {
+        if (p.kind == ReferencePointKind::Final &&
+            std::abs(p.point.x-corner->x) < 1.0e-9 &&
+            std::abs(p.point.y-corner->y) < 1.0e-9)
+            has_final_corner = true;
+        if (p.kind == ReferencePointKind::Merged &&
+            std::abs(p.point.x-state.x) < 1.0e-9 &&
+            std::abs(p.point.y-state.y) < 1.0e-9)
+            merged_with_state = true;
+    }
+    require(has_final_corner, "local-radius test lost unmerged final Corner");
+    require(!merged_with_state, "local-radius test incorrectly absorbed Corner into State");
+}
+
 void test_non_room_reference_points_are_empty()
 {
     const std::array<CellSpaceCategory,4> categories{{
@@ -499,6 +576,8 @@ int main()
     test_room_reference_points_share_state_height();
     test_convex_room_uses_state_only();
     test_room_reflex_threshold_200_degrees();
+    test_cumulative_reflex_turn_on_curved_wall();
+    test_local_width_limits_cluster_radius();
     test_concave_room_reference_points();
     test_state_anchored_room_reference_cluster();
     test_non_room_reference_points_are_empty();

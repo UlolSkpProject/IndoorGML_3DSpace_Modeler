@@ -20,11 +20,12 @@ using namespace IndoorGMLAdjacencyNative;
 constexpr double EPSILON = 1.0e-12;
 constexpr std::size_t BVH_LEAF_TRIANGLES = 6;
 constexpr std::size_t MAX_SEARCH_NODES = 200000;
-// Experimental Room-only reference points. This does not affect State or Adjacency.
-// Merged reference radius is intentionally configurable until a final scale is chosen.
-constexpr double ROOM_REFERENCE_CLUSTER_RADIUS_FRACTION = 0.18;
-// Only sufficiently reflex vertical-Face corners justify a Room reference graph.
-constexpr double CORNER_REFLEX_THRESHOLD_DEGREES = 200.0;
+// Room-only reference heuristics; State and Adjacency are unchanged.
+// Ignore numerical angle noise; accumulate genuine consecutive reflex turns.
+constexpr double ROOM_REFLEX_NOISE_DEGREES = 0.25;
+constexpr double ROOM_CUMULATIVE_TURN_DEGREES = 20.0;
+// Each cluster radius is 15% of the local XY corridor width.
+constexpr double ROOM_LOCAL_WIDTH_CLUSTER_FRACTION = 0.15;
 constexpr std::size_t MAX_ROOM_WALL_SEGMENTS = 2048;
 constexpr std::size_t MAX_ROOM_REFERENCE_POINTS = 4096;
 // Additional debug records (red merged + black final) do not consume the
@@ -690,6 +691,27 @@ bool near_xy(const Vec3& a, const Vec3& b, double epsilon)
     return distance_xy_squared(a, b) <= epsilon * epsilon;
 }
 
+// Local XY width is twice the nearest vertical-wall clearance at State Z.
+// Floors and ceilings must not reduce the merger radius.
+double local_cluster_radius(const std::vector<WallSegment>& walls, const Vec3& p)
+{
+    double nearest = std::numeric_limits<double>::infinity();
+    for (const WallSegment& wall : walls)
+    {
+        const Vec3 edge = subtract(wall.b, wall.a);
+        const double edge_sq = edge.x * edge.x + edge.y * edge.y;
+        if (edge_sq <= EPSILON * EPSILON) continue;
+        const Vec3 offset = subtract(p, wall.a);
+        const double projection = (offset.x * edge.x + offset.y * edge.y) / edge_sq;
+        const double t = std::max(0.0, std::min(1.0, projection));
+        nearest = std::min(nearest, distance_xy_squared(
+            p, add(wall.a, multiply(edge, t))
+        ));
+    }
+    return std::isfinite(nearest) ?
+        2.0 * ROOM_LOCAL_WIDTH_CLUSTER_FRACTION * std::sqrt(nearest) : 0.0;
+}
+
 std::vector<WallSegment> wall_segments_at_z(
     const CellData& cell, double z, double tolerance
 )
@@ -890,48 +912,139 @@ std::vector<ReferencePoint> find_reference_points(
         add_ray(wall.b, wall.a);
     }
 
-    // Only reflex interior corners between vertical Face slices trigger Room
-    // reference generation. Convex polygons and shallow concavities (<=200deg)
-    // are represented by their State alone. The classification is evaluated at
-    // the actual State Z, with the existing BVH used to identify the interior.
-    struct EligibleCorner
+    // Classify corners at the horizontal State slice. Convex corners are
+    // barriers for accumulating curvature; collinear seams are passable.
+    const std::size_t vertex_count = vertices.size();
+    std::vector<double> reflex_turn(vertex_count, 0.0);
+    std::vector<Vec3> inward(vertex_count, Vec3{0.0, 0.0, 0.0});
+    std::vector<bool> blocked(vertex_count, true);
+    for (std::size_t i = 0; i < vertex_count; ++i)
     {
-        Vec3 vertex;
-        Vec3 inward;
-    };
-    std::vector<EligibleCorner> eligible_corners;
-    for (const CornerVertex& vertex : vertices)
-    {
-        if (vertex.rays.size() != 2) continue;
-        const Vec3& first = vertex.rays[0];
-        const Vec3& second = vertex.rays[1];
-        const double cosine = std::max(-1.0, std::min(1.0, dot(first, second)));
-        const double smaller_angle = std::acos(cosine) * 180.0 / 3.14159265358979323846;
-        const Vec3 sum = add(first, second);
-        if (length_squared(sum) <= EPSILON) continue;
-
-        const double interior_reflex_angle = 360.0 - smaller_angle;
-        if (interior_reflex_angle <= CORNER_REFLEX_THRESHOLD_DEGREES)
+        const CornerVertex& corner = vertices[i];
+        if (corner.rays.size() != 2) continue;
+        const Vec3 bisector_sum = add(corner.rays[0], corner.rays[1]);
+        if (length_squared(bisector_sum) <= EPSILON)
+        {
+            blocked[i] = false; // Straight seam.
             continue;
-
-        const Vec3 bisector = normalize(sum);
+        }
+        const double cosine = std::max(-1.0, std::min(1.0,
+            dot(corner.rays[0], corner.rays[1])));
+        const double small_angle =
+            std::acos(cosine) * 180.0 / 3.14159265358979323846;
+        const Vec3 bisector = normalize(bisector_sum);
         const double probe = std::max(tolerance * 8.0, short_span * 0.01);
-        const bool narrow_inside =
-            bvh_inside(bvh, add(vertex.point, multiply(bisector, probe)), tolerance);
+        const bool small_inside =
+            bvh_inside(bvh, add(corner.point, multiply(bisector, probe)), tolerance);
         const bool reflex_inside =
-            bvh_inside(bvh, subtract(vertex.point, multiply(bisector, probe)), tolerance);
-        if (!reflex_inside || narrow_inside) continue;
-
-        eligible_corners.push_back({vertex.point, multiply(bisector, -1.0)});
+            bvh_inside(bvh, subtract(corner.point, multiply(bisector, probe)), tolerance);
+        if (small_inside == reflex_inside) continue; // Ambiguous junction.
+        if (small_inside) continue; // Convex corner breaks the run.
+        blocked[i] = false;
+        const double turn = 180.0 - small_angle;
+        if (turn > ROOM_REFLEX_NOISE_DEGREES)
+        {
+            reflex_turn[i] = turn;
+            inward[i] = multiply(bisector, -1.0);
+        }
     }
 
-    // No eligible concave corner: State is the sole navigation node.
-    // Do not generate Face, Corner, Merge, or Final reference points.
-    if (eligible_corners.empty()) return {};
+    // Follow actual wall connectivity (never group unrelated nearby walls).
+    std::vector<std::vector<std::size_t>> neighbors(vertex_count);
+    const auto index_of = [&](const Vec3& point) {
+        for (std::size_t i = 0; i < vertex_count; ++i)
+            if (near_xy(vertices[i].point, point, geometry_epsilon)) return i;
+        return vertex_count;
+    };
+    for (const WallSegment& wall : walls)
+    {
+        const std::size_t a = index_of(wall.a);
+        const std::size_t b = index_of(wall.b);
+        if (a == b || a == vertex_count || b == vertex_count) continue;
+        if (std::find(neighbors[a].begin(), neighbors[a].end(), b) == neighbors[a].end())
+            neighbors[a].push_back(b);
+        if (std::find(neighbors[b].begin(), neighbors[b].end(), a) == neighbors[b].end())
+            neighbors[b].push_back(a);
+    }
+
+    // Each uninterrupted reflex arc emits a corner when cumulative turning
+    // reaches 20 degrees. Sub-threshold remnants do not create extra nodes.
+    // Non-manifold components conservatively keep only individually strong corners.
+    std::vector<std::size_t> selected;
+    std::vector<bool> visited(vertex_count, false);
+    std::vector<bool> ordered(vertex_count, false);
+    for (std::size_t seed = 0; seed < vertex_count; ++seed)
+    {
+        if (blocked[seed] || visited[seed]) continue;
+        std::vector<std::size_t> component;
+        std::vector<std::size_t> stack{seed};
+        visited[seed] = true;
+        while (!stack.empty())
+        {
+            const std::size_t v = stack.back();
+            stack.pop_back();
+            component.push_back(v);
+            for (const std::size_t neighbor : neighbors[v])
+            {
+                if (blocked[neighbor] || visited[neighbor]) continue;
+                visited[neighbor] = true;
+                stack.push_back(neighbor);
+            }
+        }
+        std::size_t start_vertex = component.front();
+        bool found_endpoint = false;
+        bool simple = true;
+        for (const std::size_t v : component)
+        {
+            std::size_t degree = 0;
+            for (const std::size_t neighbor : neighbors[v])
+                if (!blocked[neighbor]) ++degree;
+            if (degree > 2) simple = false;
+            if (degree <= 1 && !found_endpoint)
+            {
+                start_vertex = v;
+                found_endpoint = true;
+            }
+        }
+        if (!simple)
+        {
+            for (const std::size_t v : component)
+                if (reflex_turn[v] >= ROOM_CUMULATIVE_TURN_DEGREES)
+                    selected.push_back(v);
+            continue;
+        }
+        const std::size_t none = vertex_count;
+        std::size_t previous = none;
+        std::size_t current = start_vertex;
+        double accumulated = 0.0;
+        for (std::size_t n = 0; n < component.size(); ++n)
+        {
+            if (current == none || ordered[current]) break;
+            ordered[current] = true;
+            accumulated += reflex_turn[current];
+            if (accumulated + 1.0e-9 >= ROOM_CUMULATIVE_TURN_DEGREES)
+            {
+                if (reflex_turn[current] > 0.0) selected.push_back(current);
+                accumulated = 0.0;
+            }
+            std::size_t next = none;
+            for (const std::size_t neighbor : neighbors[current])
+            {
+                if (neighbor != previous && !blocked[neighbor] && !ordered[neighbor])
+                {
+                    next = neighbor;
+                    break;
+                }
+            }
+            previous = current;
+            current = next;
+        }
+    }
+    if (selected.empty()) return {}; // State alone for convex/shallow shapes.
 
     std::vector<ReferencePoint> points;
     points.reserve(std::min<std::size_t>(
-        eligible_corners.size() * 3, MAX_ROOM_REFERENCE_POINTS
+        selected.size() * 3, MAX_ROOM_REFERENCE_POINTS
     ));
 
     const auto add_candidate = [&](const Vec3& candidate, ReferencePointKind kind) {
@@ -951,21 +1064,15 @@ std::vector<ReferencePoint> find_reference_points(
         points.push_back({candidate, kind});
     };
 
-    // Purple only: a qualifying reflex corner produces exactly one
-    // reference candidate at half the inward angle-bisector ray distance.
-    // No vertical Face midpoint (green) candidates are generated.
-    // The interior angle must be strictly greater than 200 degrees.
-    for (const EligibleCorner& corner : eligible_corners)
+    // Purple candidate at the true corner bisector's half-wall distance.
+    for (const std::size_t i : selected)
     {
+        const Vec3& vertex = vertices[i].point;
         const double probe = std::max(tolerance * 8.0, short_span * 0.01);
-        const double distance =
-            opposite_wall_distance(walls, corner.vertex, corner.inward, tolerance);
+        const double distance = opposite_wall_distance(walls, vertex, inward[i], tolerance);
         if (!std::isfinite(distance) || distance <= tolerance * 2.0) continue;
-        const Vec3 candidate =
-            add(corner.vertex, multiply(corner.inward, distance * 0.5));
-        if (clear_path(bvh,
-                       add(corner.vertex, multiply(corner.inward, probe)),
-                       candidate, tolerance))
+        const Vec3 candidate = add(vertex, multiply(inward[i], 0.5 * distance));
+        if (clear_path(bvh, add(vertex, multiply(inward[i], probe)), candidate, tolerance))
             add_candidate(candidate, ReferencePointKind::Corner);
     }
 
@@ -977,19 +1084,23 @@ std::vector<ReferencePoint> find_reference_points(
     // Non-State clusters retain the existing arithmetic-mean representative.
     const std::size_t original_count = points.size();
     std::vector<bool> merged_sources(original_count, false);
-    const double radius = short_span * ROOM_REFERENCE_CLUSTER_RADIUS_FRACTION;
-    if (radius > tolerance * 4.0 && original_count > 0)
+    if (original_count > 0)
     {
         std::vector<std::size_t> state_cluster;
         std::vector<std::vector<std::size_t>> clusters;
-        const double radius_squared = radius * radius;
+        const double state_radius = local_cluster_radius(walls, state_point);
+        std::vector<double> point_radii(original_count);
+        for (std::size_t i = 0; i < original_count; ++i)
+            point_radii[i] = local_cluster_radius(walls, points[i].point);
 
         const auto mutually_compatible = [&](std::size_t index,
                                               const std::vector<std::size_t>& members) {
             for (const std::size_t member : members)
             {
-                if (distance_xy_squared(points[index].point, points[member].point) >
-                        radius_squared ||
+                const double pair_radius = std::min(point_radii[index], point_radii[member]);
+                if (pair_radius <= tolerance * 4.0 ||
+                    distance_xy_squared(points[index].point, points[member].point) >
+                        pair_radius * pair_radius ||
                     !clear_path(bvh, points[index].point, points[member].point, tolerance))
                     return false;
             }
@@ -999,7 +1110,10 @@ std::vector<ReferencePoint> find_reference_points(
         for (std::size_t i = 0; i < original_count; ++i)
         {
             // A State + one candidate is already a valid merge set.
-            if (distance_xy_squared(points[i].point, state_point) <= radius_squared &&
+            const double state_pair_radius = std::min(state_radius, point_radii[i]);
+            if (state_pair_radius > tolerance * 4.0 &&
+                distance_xy_squared(points[i].point, state_point) <=
+                    state_pair_radius * state_pair_radius &&
                 clear_path(bvh, points[i].point, state_point, tolerance) &&
                 mutually_compatible(i, state_cluster))
             {
