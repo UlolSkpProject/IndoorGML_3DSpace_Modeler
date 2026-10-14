@@ -26,6 +26,9 @@ constexpr std::size_t MAX_SEARCH_NODES = 200000;
 // Ignore numerical angle noise and emit at a cumulative -30 degree turn.
 constexpr double ROOM_REFLEX_NOISE_DEGREES = 0.25;
 constexpr double ROOM_CUMULATIVE_TURN_DEGREES = 30.0;
+// Maximum vertical-to-horizontal normal ratio for a face to contribute
+// to the State-height Room wall slice (about 5.71 degrees from vertical).
+constexpr double ROOM_WALL_SLICE_MAX_NORMAL_Z_XY_RATIO = 0.1;
 // Fraction of the inward corner ray to the first opposite vertical wall.
 // 0.55 places the purple Corner candidate 55% of the way from the corner.
 constexpr double ROOM_REFERENCE_INWARD_DISTANCE_FRACTION = 0.55;
@@ -738,7 +741,7 @@ std::vector<WallSegment> wall_segments_at_z(
     {
         const double horizontal_normal = std::hypot(face.normal.x, face.normal.y);
         if (horizontal_normal <= EPSILON ||
-            std::abs(face.normal.z) > horizontal_normal * 1.0e-6 ||
+            std::abs(face.normal.z) > horizontal_normal * ROOM_WALL_SLICE_MAX_NORMAL_Z_XY_RATIO ||
             face.outer_points.size() < 3)
             continue;
 
