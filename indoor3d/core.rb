@@ -172,6 +172,7 @@ module ULOL
     require_relative 'application/adjacency_service/geometry_query'
     require_relative 'application/adjacency_service/sync'
     require_relative 'application/adjacency_service/reference_graph_simplifier'
+    require_relative 'application/adjacency_service/reference_graph_loop_collapser'
     require_relative 'application/adjacency_service/reference_graph_debug_mode'
     require_relative 'application/indoor_model/runtime_support'
     require_relative 'application/indoor_model/scene_groups'

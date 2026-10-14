@@ -164,6 +164,23 @@ void AdjacencySession::state_worker_loop()
                         static_cast<std::uint64_t>(edge.second)
                     );
                 }
+                state_result.graph_loop_candidates.reserve(
+                    result.debug_graph.loop_candidates.size()
+                );
+                for (const ReferenceLoopCollapseCandidate& candidate :
+                     result.debug_graph.loop_candidates)
+                {
+                    StatePointResult::LoopCandidate record;
+                    for (std::size_t index = 0; index < 3; ++index)
+                        record.triangle[index] =
+                            static_cast<std::uint64_t>(candidate.triangle[index]);
+                    record.representative = candidate.representative.point;
+                    record.radius = candidate.representative.radius;
+                    record.visible_neighbors.reserve(candidate.visible_neighbors.size());
+                    for (std::size_t index : candidate.visible_neighbors)
+                        record.visible_neighbors.push_back(static_cast<std::uint64_t>(index));
+                    state_result.graph_loop_candidates.push_back(std::move(record));
+                }
                 local_results.push_back(std::move(state_result));
                 if (metrics.volume_centroid_succeeded)
                     state_volume_centroid_success_count_.fetch_add(1, std::memory_order_relaxed);

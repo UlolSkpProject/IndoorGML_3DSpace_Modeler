@@ -264,29 +264,41 @@ module ULOL
 
           # Runtime-only debug graphs; only active, valid CellSpaces render.
           def debug_reference_graphs
-            after = ReferenceGraphDebugMode.after?
+            selected_mode = ReferenceGraphDebugMode.mode
             source = @debug_reference_graph_by_cell_id || {}
             Array(@feature_registry&.cell_spaces).filter_map do |cell_space|
               next unless cell_space&.valid?
 
               cell_id = cell_space.id
-              after ? (simplified_debug_reference_graph_for(cell_id) || source[cell_id]) : source[cell_id]
+              case selected_mode
+              when :collapsed
+                collapsed_debug_reference_graph_for(cell_id) ||
+                  simplified_debug_reference_graph_for(cell_id) || source[cell_id]
+              when :after
+                simplified_debug_reference_graph_for(cell_id) || source[cell_id]
+              else
+                source[cell_id]
+              end
             end
           end
 
           def debug_reference_points_by_kind
-            after = ReferenceGraphDebugMode.after?
+            selected_mode = ReferenceGraphDebugMode.mode
             originals = @debug_reference_points_by_cell_id || {}
             by_kind = Hash.new { |hash, key| hash[key] = [] }
             Array(@feature_registry&.cell_spaces).each do |cell_space|
               next unless cell_space&.valid?
 
               cell_id = cell_space.id
-              simplified = simplified_debug_reference_graph_for(cell_id) if after
-              if simplified
+              displayed = case selected_mode
+                          when :after then simplified_debug_reference_graph_for(cell_id)
+                          when :collapsed then collapsed_debug_reference_graph_for(cell_id) ||
+                                                 simplified_debug_reference_graph_for(cell_id)
+                          end
+              if displayed
                 # After mode shows only retained black Final points. Their
                 # native purple/red source diagnostics remain in originals.
-                Array(simplified[:nodes]).drop(1).each do |node|
+                Array(displayed[:nodes]).drop(1).each do |node|
                   by_kind[4] << node[:point]
                 end
               else
@@ -514,6 +526,7 @@ module ULOL
             reference_statuses = Hash(state_result[:reference_statuses])
             graph_nodes = Hash(state_result[:graph_nodes])
             graph_edges = Hash(state_result[:graph_edges])
+            graph_loop_candidates = Hash(state_result[:graph_loop_candidates])
             session_entries.each_with_index do |entry, index|
               cell_space = pending_by_id[entry[:cell_space].id]
               next unless cell_space
@@ -533,7 +546,8 @@ module ULOL
                 cell_space, reference_points[index], kinds: reference_kinds[index]
               )
               store_debug_reference_graph(
-                cell_space, graph_nodes[index], graph_edges[index]
+                cell_space, graph_nodes[index], graph_edges[index],
+                graph_loop_candidates[index]
               )
               state_point_applier.call(cell_space, coordinates)
             end
@@ -594,7 +608,7 @@ module ULOL
             points
           end
 
-          def store_debug_reference_graph(cell_space, node_data, edge_data)
+          def store_debug_reference_graph(cell_space, node_data, edge_data, collapse_data = nil)
             return false unless cell_space&.valid?
 
             nodes = Array(node_data).filter_map do |record|
@@ -617,21 +631,44 @@ module ULOL
 
               [first, second].freeze
             end
+            verified = Array(collapse_data).filter_map do |candidate|
+              raw = Hash(candidate)
+              triangle = Array(raw[:triangle])
+              visible = Array(raw[:visible_neighbors])
+              position = Array(raw[:point])
+              radius = raw[:radius].to_f
+              next unless triangle.size == 3 && triangle.uniq.size == 3
+              next unless (triangle + visible).all? { |index| index.is_a?(Integer) &&
+                                                             index >= 0 && index < nodes.length }
+              next unless position.size == 3 && position.all? { |value| value.to_f.finite? }
+              next unless radius.finite? && radius >= 0.0
+
+              {
+                triangle: triangle.freeze,
+                point: Geom::Point3d.new(*position.map(&:to_f)),
+                radius: radius,
+                visible_neighbors: visible.freeze
+              }.freeze
+            end.freeze
+
             @debug_reference_graph_by_cell_id ||= {}
             original = {
               nodes: nodes.freeze,
-              edges: edges.freeze
+              edges: edges.freeze,
+              loop_candidates: verified
             }.freeze
             @debug_reference_graph_by_cell_id[cell_space.id] = original
 
             # Invalidate the lazy reduced cache only when Native supplies
             # new geometry. Before mode remains at its prior processing cost.
             @debug_reference_graph_simplified_by_cell_id&.delete(cell_space.id)
+            @debug_reference_graph_collapsed_by_cell_id&.delete(cell_space.id)
             true
           rescue StandardError
             # Debug rendering must never block the State/CellSpace lifecycle.
             @debug_reference_graph_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_simplified_by_cell_id&.delete(cell_space.id)
+            @debug_reference_graph_collapsed_by_cell_id&.delete(cell_space.id)
             false
           end
 
@@ -656,12 +693,33 @@ module ULOL
             nil
           end
 
+          def collapsed_debug_reference_graph_for(cell_id)
+            cache = (@debug_reference_graph_collapsed_by_cell_id ||= {})
+            return cache[cell_id] if cache.key?(cell_id)
+
+            source = @debug_reference_graph_by_cell_id&.[](cell_id)
+            after = simplified_debug_reference_graph_for(cell_id)
+            return nil unless source && after
+
+            cache[cell_id] = ReferenceGraphLoopCollapser.collapse(
+              after, source[:loop_candidates]
+            )
+          rescue StandardError => error
+            cache[cell_id] = nil if cache
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Reference loop collapse skipped cell=#{cell_id}: " \
+              "#{error.class}: #{error.message}"
+            ) if defined?(IndoorCore::Logger)
+            nil
+          end
+
           def clear_debug_reference_points(cell_space)
             return false unless cell_space
 
             @debug_reference_points_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_simplified_by_cell_id&.delete(cell_space.id)
+            @debug_reference_graph_collapsed_by_cell_id&.delete(cell_space.id)
             true
           end
 

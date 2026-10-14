@@ -20,7 +20,7 @@ constexpr std::uint64_t INPUT_VERSION_V1 = 1;
 constexpr std::uint64_t INPUT_VERSION_V2 = 2;
 constexpr std::uint64_t INPUT_VERSION_V3 = 3;
 constexpr std::uint64_t RESULT_VERSION = 1;
-constexpr std::uint64_t STATE_RESULT_VERSION = 5;
+constexpr std::uint64_t STATE_RESULT_VERSION = 6;
 constexpr std::size_t INPUT_HEADER_SIZE = 32;
 constexpr std::size_t CELL_FIXED_SIZE_V1 = 80;
 constexpr std::size_t CELL_FIXED_SIZE_V2 = 96;
@@ -528,6 +528,36 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
                 throw std::invalid_argument("invalid debug graph edge indices");
             writer.append_u64(first);
             writer.append_u64(second);
+        }
+
+        // V6: geometry-validated representatives for original 3-cycles.
+        // The Ruby After graph may then contract only still-surviving cycles.
+        writer.append_u64(checked_u64(result.graph_loop_candidates.size(), "loop candidate count"));
+        for (const StatePointResult::LoopCandidate& candidate : result.graph_loop_candidates)
+        {
+            for (std::uint64_t index : candidate.triangle)
+            {
+                if (index >= result.graph_node_points.size())
+                    throw std::invalid_argument("loop triangle index outside graph");
+                writer.append_u64(index);
+            }
+            require_finite(candidate.representative.x, "loop point x");
+            require_finite(candidate.representative.y, "loop point y");
+            require_finite(candidate.representative.z, "loop point z");
+            require_finite(candidate.radius, "loop radius");
+            if (candidate.radius < 0.0)
+                throw std::invalid_argument("loop radius negative");
+            writer.append_double(candidate.representative.x);
+            writer.append_double(candidate.representative.y);
+            writer.append_double(candidate.representative.z);
+            writer.append_double(candidate.radius);
+            writer.append_u64(checked_u64(candidate.visible_neighbors.size(), "loop visible count"));
+            for (const std::uint64_t index : candidate.visible_neighbors)
+            {
+                if (index >= result.graph_node_points.size())
+                    throw std::invalid_argument("loop visible index outside graph");
+                writer.append_u64(index);
+            }
         }
     }
     return writer.take();

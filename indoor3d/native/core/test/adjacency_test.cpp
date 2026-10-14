@@ -1,6 +1,7 @@
 #include "adjacency_checker.h"
 #include "cell_space_interior_point_locator.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdlib>
@@ -663,6 +664,51 @@ void test_room_visibility_graph_circle_overlap_and_blocked_los()
                 "overlapping circle centers must not connect across a Room wall");
 }
 
+void test_triangle_loop_candidates_are_validated_in_native()
+{
+    CellData room = unit_box_cell();
+    room.category = CellSpaceCategory::Room;
+    const Vec3 state{0.5, 0.5, 0.5};
+    const std::vector<ReferencePoint> points{
+        {{0.3, 0.3, 0.5}, ReferencePointKind::Final},
+        {{0.7, 0.3, 0.5}, ReferencePointKind::Final},
+        {{0.5, 0.7, 0.5}, ReferencePointKind::Final}
+    };
+    const ReferenceGraphDebug graph =
+        build_room_reference_visibility_graph(room, state, points, 0.001);
+    require(graph.nodes.size() == 4, "Native loop fixture lost Final nodes");
+    bool found = false;
+    for (const ReferenceLoopCollapseCandidate& candidate : graph.loop_candidates)
+    {
+        if (candidate.triangle != std::array<std::size_t, 3>{1, 2, 3})
+            continue;
+        require(std::abs(candidate.representative.point.x - 0.5) < 1.0e-9,
+                "triangle centroid X incorrect");
+        require(std::abs(candidate.representative.point.y - (1.3 / 3.0)) < 1.0e-9,
+                "triangle centroid Y incorrect");
+        require(candidate.representative.radius > 0.0,
+                "validated centroid must have positive clearance");
+        require(std::find(candidate.visible_neighbors.begin(),
+                          candidate.visible_neighbors.end(), 0) !=
+                    candidate.visible_neighbors.end(),
+                "candidate center must verify LOS to external State");
+        found = true;
+    }
+    require(found, "valid triangle loop must yield one Native representative");
+
+    // A U-shaped Room must never validate the wall-crossing segment
+    // between these two Final nodes, hence cannot offer such a triangle.
+    CellData u = u_prism_cell();
+    const std::vector<ReferencePoint> other{
+        {{0.5, 2.5, 0.5}, ReferencePointKind::Final},
+        {{2.5, 2.5, 0.5}, ReferencePointKind::Final}
+    };
+    const ReferenceGraphDebug separated =
+        build_room_reference_visibility_graph(u, {1.5, 0.5, 0.5}, other, 0.001);
+    require(separated.loop_candidates.empty(),
+            "blocked Room may not produce a wall-crossing loop representative");
+}
+
 void test_non_room_reference_points_are_empty()
 {
     const std::array<CellSpaceCategory,4> categories{{
@@ -704,5 +750,6 @@ int main()
     test_state_anchored_room_reference_cluster();
     test_non_room_reference_points_are_empty();
     test_room_visibility_graph_circle_overlap_and_blocked_los();
+    test_triangle_loop_candidates_are_validated_in_native();
     return 0;
 }

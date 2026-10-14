@@ -1418,6 +1418,93 @@ ReferenceGraphDebug build_room_reference_visibility_graph(
             graph.edges.push_back({i, j});
         }
     }
+    // Failure to prevalidate optional collapse candidates must not erase the
+    // already successful State, Reference Points, circles, or LOS edges.
+    try
+    {
+    // Prevalidate NEW points while the original cell geometry/BVH is still
+    // available. Ruby cannot safely invent visibility edges after this Native
+    // geometry session is closed. This does not collapse the original graph.
+    constexpr std::size_t MAX_LOOP_GRAPH_NODES = 192;
+    constexpr std::size_t MAX_LOOP_CANDIDATES = 768;
+    const std::size_t count = graph.nodes.size();
+    if (count <= MAX_LOOP_GRAPH_NODES)
+    {
+        std::vector<std::vector<bool>> linked(
+            count, std::vector<bool>(count, false));
+        for (const ReferenceGraphEdge& edge : graph.edges)
+        {
+            linked[edge.first][edge.second] = true;
+            linked[edge.second][edge.first] = true;
+        }
+        const auto may_connect = [&](const Vec3& point, double radius,
+                                     std::size_t other) {
+            const ReferenceGraphNode& target = graph.nodes[other];
+            const double sum = radius + target.radius;
+            if (sum <= tolerance ||
+                distance_xy_squared(point, target.point) > sum * sum)
+                return false;
+            if (crosses_wall_slice(walls, point, target.point, tolerance))
+                return false;
+            return clear_path(bvh, point, target.point, tolerance);
+        };
+
+        // Exclude triangles containing State: Ruby handles those by retaining
+        // State itself and validating its existing, immutable edges.
+        for (std::size_t i = 1; i < count; ++i)
+        {
+            for (std::size_t j = i + 1; j < count; ++j)
+            {
+                if (!linked[i][j]) continue;
+                for (std::size_t k = j + 1; k < count; ++k)
+                {
+                    if (!linked[i][k] || !linked[j][k]) continue;
+                    const Vec3& a = graph.nodes[i].point;
+                    const Vec3& b = graph.nodes[j].point;
+                    const Vec3& c = graph.nodes[k].point;
+                    const double twice_area =
+                        std::abs(cross_xy(subtract(b, a), subtract(c, a)));
+                    if (twice_area <= tolerance * tolerance * 16.0) continue;
+                    const Vec3 center{
+                        (a.x + b.x + c.x) / 3.0,
+                        (a.y + b.y + c.y) / 3.0,
+                        state_point.z
+                    };
+                    const double wall_distance = nearest_wall_clearance(walls, center);
+                    if (!std::isfinite(wall_distance) ||
+                        wall_distance <= tolerance * 2.0 ||
+                        !bvh_inside(bvh, center, tolerance) ||
+                        bvh.nearest_distance(center) <= tolerance)
+                        continue;
+                    const double radius = wall_distance - tolerance;
+
+                    ReferenceLoopCollapseCandidate candidate;
+                    candidate.triangle = {i, j, k};
+                    candidate.representative = {center, radius};
+                    // All original loop vertices must see the replacement;
+                    // otherwise never transmit an invalid candidate.
+                    if (!may_connect(center, radius, i) ||
+                        !may_connect(center, radius, j) ||
+                        !may_connect(center, radius, k))
+                        continue;
+                    for (std::size_t neighbor = 0; neighbor < count; ++neighbor)
+                    {
+                        if (neighbor == i || neighbor == j || neighbor == k) continue;
+                        if (may_connect(center, radius, neighbor))
+                            candidate.visible_neighbors.push_back(neighbor);
+                    }
+                    graph.loop_candidates.push_back(std::move(candidate));
+                    if (graph.loop_candidates.size() >= MAX_LOOP_CANDIDATES)
+                        return graph;
+                }
+            }
+        }
+    }
+    }
+    catch (...)
+    {
+        graph.loop_candidates.clear();
+    }
     return graph;
 }
 

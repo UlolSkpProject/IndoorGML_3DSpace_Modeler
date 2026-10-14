@@ -81,6 +81,32 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_equal [[0, 1]], decoded[:graph_edges][0]
   end
 
+  def test_v6_state_result_decodes_native_validated_triangle_candidates
+    v6 = "IGMLSTA\0".b + [6, 1, 0].pack('Q<3')
+    v6 << [0].pack('Q<') << [0.5, 0.5, 0.5].pack('E3')
+    v6 << [1, 0].pack('Q<2')
+    v6 << [4].pack('Q<')
+    [
+      [0.5, 0.5, 0.5, 0.49],
+      [0.3, 0.3, 0.5, 0.29],
+      [0.7, 0.3, 0.5, 0.29],
+      [0.5, 0.7, 0.5, 0.29]
+    ].each { |node| v6 << node.pack('E4') }
+    v6 << [3, 1, 2, 1, 3, 2, 3].pack('Q<7')
+    v6 << [1, 1, 2, 3].pack('Q<4')
+    v6 << [0.5, 1.3 / 3.0, 0.5, 0.4].pack('E4')
+    v6 << [1, 0].pack('Q<2')
+
+    decoded = Bridge.decode_state_result(v6)
+    assert_equal 4, decoded[:graph_nodes][0].size
+    assert_equal 3, decoded[:graph_edges][0].size
+    assert_equal 1, decoded[:graph_loop_candidates][0].size
+    candidate = decoded[:graph_loop_candidates][0].first
+    assert_equal [1, 2, 3], candidate[:triangle]
+    assert_equal [0], candidate[:visible_neighbors]
+    assert_in_delta(0.5, candidate[:point][0], 1.0e-9)
+  end
+
   def test_result_decoding_restores_snapshot_face_references
     snapshots = sample_snapshots
     candidate =

@@ -6,6 +6,7 @@ module ULOL
       # SketchUp Ruby Console:
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.before!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.after!
+      # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.collapsed!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.mode
       #
       # Controls only the runtime debug overlay. Both graph snapshots remain
@@ -21,6 +22,10 @@ module ULOL
           mode == :after
         end
 
+        def collapsed?
+          mode == :collapsed
+        end
+
         def before!
           set_mode(:before)
         end
@@ -29,8 +34,12 @@ module ULOL
           set_mode(:after)
         end
 
+        def collapsed!
+          set_mode(:collapsed)
+        end
+
         def set_mode(value)
-          raise ArgumentError, 'expected :before or :after' unless %i[before after].include?(value)
+          raise ArgumentError, 'expected :before, :after or :collapsed' unless %i[before after collapsed].include?(value)
 
           @mode = value
           if defined?(Sketchup) && Sketchup.respond_to?(:active_model)

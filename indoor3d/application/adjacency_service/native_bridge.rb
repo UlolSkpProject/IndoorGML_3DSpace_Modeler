@@ -10,7 +10,8 @@ module ULOL
         PROTOCOL_VERSION = 1
         GEOMETRY_PROTOCOL_VERSION = 3
         REFERENCE_POINTS_RESULT_VERSION = 2
-        STATE_RESULT_VERSION = 5
+        STATE_RESULT_VERSION = 6
+        GRAPH_RESULT_VERSION = 5
         PREVIOUS_STATE_RESULT_VERSION = 4
         LEGACY_STATE_RESULT_VERSION = 3
         NORMAL_TOLERANCE = 0.000001
@@ -428,7 +429,7 @@ module ULOL
           version = reader.read_u64
           unless [PROTOCOL_VERSION, REFERENCE_POINTS_RESULT_VERSION,
                   LEGACY_STATE_RESULT_VERSION, PREVIOUS_STATE_RESULT_VERSION,
-                  STATE_RESULT_VERSION].include?(version)
+                  GRAPH_RESULT_VERSION, STATE_RESULT_VERSION].include?(version)
             raise ProtocolError, "unsupported native State result version #{version}"
           end
 
@@ -442,6 +443,7 @@ module ULOL
           reference_statuses = {}
           graph_nodes = {}
           graph_edges = {}
+          graph_loop_candidates = {}
           previous_index = nil
           result_count.times do
             cell_index = checked_count(reader.read_u64, 'State cell index')
@@ -487,7 +489,7 @@ module ULOL
 
             nodes = []
             edges = []
-            if version >= STATE_RESULT_VERSION
+            if version >= GRAPH_RESULT_VERSION
               node_count = checked_count(reader.read_u64, 'debug graph node count')
               node_count.times do
                 center = [
@@ -510,8 +512,42 @@ module ULOL
                 edges << [first, second].freeze
               end
             end
+            candidates = []
+            if version >= STATE_RESULT_VERSION
+              count = checked_count(reader.read_u64, 'loop candidate count')
+              count.times do
+                triangle = 3.times.map do
+                  checked_count(reader.read_u64, 'loop triangle vertex')
+                end.freeze
+                if triangle.uniq.length != 3 || triangle.any? { |index| index >= nodes.length }
+                  raise ProtocolError, 'invalid loop triangle'
+                end
+                point = [
+                  finite_f64(reader.read_f64, 'loop center x'),
+                  finite_f64(reader.read_f64, 'loop center y'),
+                  finite_f64(reader.read_f64, 'loop center z')
+                ].freeze
+                radius = finite_f64(reader.read_f64, 'loop center radius')
+                raise ProtocolError, 'negative loop center radius' if radius.negative?
+
+                visible_count = checked_count(reader.read_u64, 'loop visible count')
+                visible = visible_count.times.map do
+                  checked_count(reader.read_u64, 'loop visible node')
+                end.freeze
+                if visible.any? { |index| index >= nodes.length }
+                  raise ProtocolError, 'loop visible node outside graph'
+                end
+                candidates << {
+                  triangle: triangle,
+                  point: point,
+                  radius: radius,
+                  visible_neighbors: visible
+                }.freeze
+              end
+            end
             graph_nodes[cell_index] = nodes.freeze
             graph_edges[cell_index] = edges.freeze
+            graph_loop_candidates[cell_index] = candidates.freeze
           end
 
           raise ProtocolError, 'native State result has trailing bytes' unless reader.finished?
@@ -521,7 +557,8 @@ module ULOL
             reference_kinds: reference_kinds.freeze,
             reference_statuses: reference_statuses.freeze,
             graph_nodes: graph_nodes.freeze,
-            graph_edges: graph_edges.freeze
+            graph_edges: graph_edges.freeze,
+            graph_loop_candidates: graph_loop_candidates.freeze
           }.freeze
         end
 

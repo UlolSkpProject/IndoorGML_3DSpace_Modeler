@@ -2,6 +2,7 @@
 
 #include "adjacency_data.h"
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -49,11 +50,21 @@ struct ReferenceGraphEdge
     std::size_t second = 0;
 };
 
+struct ReferenceLoopCollapseCandidate
+{
+    // Vertex indices refer to the ORIGINAL, non-destructive V5 graph.
+    std::array<std::size_t, 3> triangle{};
+    ReferenceGraphNode representative;
+    // Geometry-validated candidates for new edges to original nodes.
+    std::vector<std::size_t> visible_neighbors;
+};
+
 struct ReferenceGraphDebug
 {
     // Node zero is always State; all other nodes are Final references.
     std::vector<ReferenceGraphNode> nodes;
     std::vector<ReferenceGraphEdge> edges;
+    std::vector<ReferenceLoopCollapseCandidate> loop_candidates;
 };
 
 struct CellSpaceInteriorPointResult
