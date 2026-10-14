@@ -3,13 +3,17 @@
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
-      # Per-Room, runtime-only visibility graph over the final OPTIMIZED
-      # State (node 0) and surviving Reference Points. Every graph edge is
-      # independently validated by Native geometry LOS, irrespective of
-      # inscribed-circle overlap or the edges of preceding debug stages.
+      # Construct a runtime-only graph by connecting disconnected components
+      # of the OPTIMIZED Room graph, preserving every existing node and edge.
       #
-      # The Native session is available only during State generation.
-      # Build once there; never perform LOS checks in a SketchUp overlay.
+      # Two-tier Kruskal:
+      #  1. Native LOS-clear candidate edges, ascending Euclidean distance
+      #  2. Native LOS-blocked candidates, ascending Euclidean distance
+      #
+      # All original OPTIMIZED edges remain untouched. New edges are explicitly
+      # tagged as :clear or :blocked; blocked edges may cross Room geometry and
+      # MUST NOT be treated as navigable/exportable IndoorGML connections.
+      # This is a diagnostic graph only.
       module RoomInternalVisibilityGraph
         MAX_NODES = 192
         MAX_PAIRS_PER_BATCH = 2048
@@ -22,67 +26,168 @@ module ULOL
             raise ArgumentError,
                   "Room internal graph requires 1..#{MAX_NODES} nodes; got #{nodes.length}"
           end
-          origins = Array(optimized.fetch(:original_indices))
-          unless origins.size == nodes.size && origins.first == 0
-            raise ArgumentError, 'Room visibility graph must have State at node 0'
+
+          originals = Array(optimized.fetch(:original_indices))
+          unless originals.length == nodes.length && originals.first == 0
+            raise ArgumentError, 'Room internal graph must have State at node 0'
           end
-          unless los_batch.respond_to?(:call)
-            raise ArgumentError, 'Native LOS batch callback required'
+          raise ArgumentError, 'Native LOS callback required' unless los_batch.respond_to?(:call)
+
+          points = nodes.map do |node|
+            point = node.fetch(:point)
+            unless [point.x, point.y, point.z].all?(&:finite?)
+              raise ArgumentError, 'Room internal graph has non-finite node position'
+            end
+            point
           end
 
-          # All nodes and original indices are immutable snapshots. State
-          # always remains node zero; no new or shifted points are created.
-          edges = []
-          weights = []
-          pending = []
+          original_edges = Array(optimized.fetch(:edges))
+          union = UnionFind.new(nodes.length)
+          existing = {}
+          original_edges.each do |edge|
+            unless edge.is_a?(Array) && edge.size == 2 &&
+                   edge.all? { |index| index.is_a?(Integer) && index >= 0 && index < nodes.length } &&
+                   edge[0] < edge[1] && !existing[edge]
+              raise ArgumentError, 'OPTIMIZED graph has an invalid or duplicate edge'
+            end
+            existing[edge] = true
+            union.join(edge[0], edge[1])
+          end
 
-          flush = lambda do
-            return if pending.empty?
+          component_count_before = union.components
+          original_weights = original_edges.map do |a, b|
+            distance(points[a], points[b])
+          end
+          if union.components == 1
+            return snapshot(nodes, original_edges, original_weights, originals,
+                            [], component_count_before, union.components, 0)
+          end
 
-            pairs = pending.map { |_a, _b, first, last| [first, last] }
-            results = Array(los_batch.call(pairs))
-            unless results.length == pending.length &&
-                   results.all? { |value| value == true || value == false }
+          # Only across ORIGINAL distinct components. Geometry is queried once
+          # per candidate in ascending distance, with bounded native batches.
+          candidates = []
+          nodes.size.times do |a|
+            ((a + 1)...nodes.size).each do |b|
+              next if union.same?(a, b)
+
+              candidates << [distance(points[a], points[b]), a, b]
+            end
+          end
+          candidates.sort_by! { |dist, a, b| [dist, a, b] }
+
+          clean_additions = []
+          blocked_candidates = []
+          checked_pairs = 0
+
+          candidates.each_slice(MAX_PAIRS_PER_BATCH) do |batch|
+            checked = los_batch.call(batch.map { |_dist, a, b| [points[a], points[b]] })
+            unless checked.is_a?(Array) && checked.length == batch.length &&
+                   checked.all? { |result| result == true || result == false }
               raise ArgumentError, 'Native LOS batch returned invalid results'
             end
+            checked_pairs += batch.length
 
-            pending.each_with_index do |(a, b, first, last), index|
-              next unless results[index]
+            batch.each_with_index do |(dist, a, b), index|
+              if checked[index]
+                next unless union.join(a, b)
 
-              edges << [a, b].freeze
-              weights << Math.sqrt(
-                (first.x - last.x)**2 +
-                (first.y - last.y)**2 +
-                (first.z - last.z)**2
-              )
+                clean_additions << addition(a, b, dist, :clear)
+              else
+                blocked_candidates << [dist, a, b]
+              end
             end
-            pending.clear
+
+            # The clean tier already spans every initial component.
+            break if union.components == 1
           end
 
-          nodes.each_with_index do |node, first_index|
-            first = node.fetch(:point)
-            unless [first.x, first.y, first.z].all?(&:finite?)
-              raise ArgumentError, 'Room visibility graph has non-finite node position'
-            end
-            ((first_index + 1)...nodes.length).each do |second_index|
-              last = nodes[second_index].fetch(:point)
-              pending << [first_index, second_index, first, last]
-              flush.call if pending.size == MAX_PAIRS_PER_BATCH
+          blocked_additions = []
+          if union.components > 1
+            # These candidates have already been proven NOT LOS-clear.
+            # Their use is explicitly second priority, never a hidden
+            # fallback caused by a failed or unavailable Native API.
+            blocked_candidates.each do |dist, a, b|
+              next unless union.join(a, b)
+
+              blocked_additions << addition(a, b, dist, :blocked)
+              break if union.components == 1
             end
           end
-          flush.call
 
-          # Edge weights use the same distance units as SketchUp's native
-          # geometry coordinates. Each weight corresponds to edges[index].
+          additions = clean_additions + blocked_additions
+          final_edges = (original_edges.map(&:dup) + additions.map { |r| r[:edge] }).map(&:freeze).freeze
+          final_weights = (original_weights + additions.map { |r| r[:length] }).freeze
+          snapshot(
+            nodes, final_edges, final_weights, originals, additions,
+            component_count_before, union.components, checked_pairs
+          )
+        end
+
+        def distance(a, b)
+          Math.sqrt(
+            (a.x - b.x)**2 + (a.y - b.y)**2 + (a.z - b.z)**2
+          )
+        end
+
+        def addition(a, b, dist, classification)
+          {
+            edge: [a, b].freeze,
+            length: dist,
+            classification: classification,
+            los_clear: classification == :clear
+          }.freeze
+        end
+
+        def snapshot(nodes, edges, weights, originals, additions,
+                     initial_count, final_count, checked)
+          clean = additions.count { |r| r[:classification] == :clear }
+          blocked = additions.length - clean
           {
             nodes: nodes.freeze,
             edges: edges.freeze,
             edge_weights: weights.freeze,
-            original_indices: origins.freeze,
-            source_stage: :optimized,
-            checked_pairs: nodes.size * (nodes.size - 1) / 2,
-            visible_pairs: edges.length
+            original_indices: originals.freeze,
+            original_edge_count: edges.length - additions.length,
+            added_edges: additions.freeze,
+            clear_added_count: clean,
+            blocked_added_count: blocked,
+            component_count_before: initial_count,
+            component_count_after: final_count,
+            checked_pairs: checked,
+            source_stage: :optimized
           }.freeze
+        end
+
+        # Union-Find with path compression and union-by-size.
+        class UnionFind
+          attr_reader :components
+
+          def initialize(count)
+            @parent = Array.new(count) { |index| index }
+            @size = Array.new(count, 1)
+            @components = count
+          end
+
+          def find(index)
+            @parent[index] = find(@parent[index]) unless @parent[index] == index
+            @parent[index]
+          end
+
+          def same?(a, b)
+            find(a) == find(b)
+          end
+
+          def join(a, b)
+            first = find(a)
+            second = find(b)
+            return false if first == second
+
+            first, second = second, first if @size[first] < @size[second]
+            @parent[second] = first
+            @size[first] += @size[second]
+            @components -= 1
+            true
+          end
         end
       end
     end

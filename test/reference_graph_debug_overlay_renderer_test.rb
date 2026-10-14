@@ -22,12 +22,13 @@ class ReferenceGraphDebugOverlayRendererTest < Minitest::Test
 
   class FakeView
     attr_accessor :drawing_color, :line_width, :line_stipple
-    attr_reader :camera, :draw_calls, :screen_calls
+    attr_reader :camera, :draw_calls, :screen_calls, :colors_used
 
     def initialize(z)
       @camera = Camera.new(Direction.new(z))
       @draw_calls = []
       @screen_calls = []
+      @colors_used = []
     end
 
     def screen_coords(point)
@@ -36,10 +37,12 @@ class ReferenceGraphDebugOverlayRendererTest < Minitest::Test
     end
 
     def draw(primitive, points)
+      @colors_used << drawing_color
       @draw_calls << [:draw, primitive, points]
     end
 
     def draw2d(primitive, points)
+      @colors_used << drawing_color
       @draw_calls << [:draw2d, primitive, points]
     end
   end
@@ -106,6 +109,42 @@ class ReferenceGraphDebugOverlayRendererTest < Minitest::Test
     ensure
       mode.before!
     end
+  end
+
+  def test_internal_mode_draws_original_clear_and_blocked_edges_distinctly
+    nodes = [
+      { point: Point.new(0, 0, 0.5) },
+      { point: Point.new(1, 0, 0.5) },
+      { point: Point.new(3, 0, 0.5) },
+      { point: Point.new(5, 0, 0.5) }
+    ]
+    graph = {
+      nodes: nodes,
+      edges: [[0, 1], [1, 2], [2, 3]],
+      original_edge_count: 1,
+      added_edges: [
+        { edge: [1, 2], classification: :clear },
+        { edge: [2, 3], classification: :blocked }
+      ]
+    }
+    model = Struct.new(:debug_reference_graphs).new([graph])
+    transform = Object.new
+    def transform.overlay_render_points(points)
+      points
+    end
+    renderer = Renderer.new(indoor_model: model, transform_context: transform)
+    view = FakeView.new(-0.8)
+
+    renderer.draw_edges(view)
+
+    assert_equal 3, view.draw_calls.size
+    assert_equal [
+      Renderer::EDGE_COLOR,
+      Renderer::CLEAR_ADDED_EDGE_COLOR,
+      Renderer::BLOCKED_ADDED_EDGE_COLOR
+    ], view.colors_used
+    assert_equal [[:draw, GL_LINES], [:draw, GL_LINES], [:draw, GL_LINES]],
+                 view.draw_calls.map { |call| call.first(2) }
   end
 
 end

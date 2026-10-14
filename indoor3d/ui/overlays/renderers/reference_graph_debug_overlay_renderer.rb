@@ -8,6 +8,8 @@ module ULOL
       class ReferenceGraphDebugOverlayRenderer
         CIRCLE_OUTLINE_COLOR = Sketchup::Color.new(255, 255, 255, 110)
         EDGE_COLOR = Sketchup::Color.new(0, 0, 0)
+        CLEAR_ADDED_EDGE_COLOR = Sketchup::Color.new(0, 125, 170)
+        BLOCKED_ADDED_EDGE_COLOR = Sketchup::Color.new(210, 55, 40)
         CIRCLE_SEGMENTS = 48
 
         def initialize(indoor_model:, transform_context:)
@@ -42,34 +44,49 @@ module ULOL
         end
 
         def draw_edges(view)
-          view.drawing_color = EDGE_COLOR
           view.line_width = 1
           view.line_stipple = '' if view.respond_to?(:line_stipple=)
+
           each_graph do |graph|
             nodes = graph[:nodes]
-            segments = graph[:edges].filter_map do |first, second|
-              next unless nodes[first] && nodes[second]
-
-              [nodes[first][:point], nodes[second][:point]]
-            end
-            next if segments.empty?
-
-            model_points = render_points(segments.flatten(1))
-            if top_down_view?(view)
-              # Model-space lines can be depth-occluded by Room faces in the
-              # Top view, even though the visibility edges are valid. Draw
-              # only those views in screen space; retain the proven 3D
-              # rendering path for oblique camera views.
-              screen_points = model_points.map { |point| view.screen_coords(point) }
-              view.draw2d(GL_LINES, screen_points)
-            else
-              view.draw(GL_LINES, model_points)
-            end
+            # Original OPTIMIZED edges remain black. Only edges added
+            # by the internal Kruskal stage get a diagnostic color.
+            base_count = graph.fetch(:original_edge_count, graph[:edges].length)
+            draw_edge_group(view, nodes, graph[:edges].first(base_count), EDGE_COLOR)
+            additions = Array(graph[:added_edges])
+            draw_edge_group(
+              view, nodes,
+              additions.select { |record| record[:classification] == :clear }.map { |record| record[:edge] },
+              CLEAR_ADDED_EDGE_COLOR
+            )
+            draw_edge_group(
+              view, nodes,
+              additions.select { |record| record[:classification] == :blocked }.map { |record| record[:edge] },
+              BLOCKED_ADDED_EDGE_COLOR
+            )
           end
         rescue StandardError => error
           log_debug_error(:edges, error)
         ensure
           view.line_width = 1 if view.respond_to?(:line_width=)
+        end
+
+        def draw_edge_group(view, nodes, edges, color)
+          segments = Array(edges).filter_map do |first, second|
+            next unless nodes[first] && nodes[second]
+
+            [nodes[first][:point], nodes[second][:point]]
+          end
+          return if segments.empty?
+
+          view.drawing_color = color
+          model_points = render_points(segments.flatten(1))
+          if top_down_view?(view)
+            screen_points = model_points.map { |point| view.screen_coords(point) }
+            view.draw2d(GL_LINES, screen_points)
+          else
+            view.draw(GL_LINES, model_points)
+          end
         end
 
         def extent_points
