@@ -1482,6 +1482,9 @@ ReferenceGraphDebug build_room_reference_visibility_graph(
         constexpr std::size_t MAX_CYCLE_SEARCH_STEPS = 1000000;
         constexpr std::size_t MAX_TRIANGLE_EVALUATIONS = 4096;
         constexpr std::size_t MAX_LONG_EVALUATIONS = 4096;
+        constexpr std::size_t MAX_STATE_LOOP_CANDIDATES = 256;
+        constexpr std::size_t MAX_STATE_LOOP_EVALUATIONS = 4096;
+        constexpr std::size_t MAX_STATE_CYCLE_SEARCH_STEPS = 50000;
         const std::size_t count = graph.nodes.size();
         if (count <= MAX_LOOP_GRAPH_NODES)
         {
@@ -1551,14 +1554,99 @@ ReferenceGraphDebug build_room_reference_visibility_graph(
                 return inside;
             };
 
+            // State-containing cycles need their own Hole verification.
+            // Separate budgets preserve preexisting non-State candidates.
             std::size_t triangle_count = 0;
             std::size_t long_count = 0;
+            std::size_t state_loop_count = 0;
             std::size_t triangle_evaluations = 0;
             std::size_t long_evaluations = 0;
+            std::size_t state_loop_evaluations = 0;
+
+            // Reject a ring if ANY positive-length part of a wall slice lies
+            // strictly inside it, even when the centroid and its radial LOS
+            // happen to avoid the hole. Segment/edge intersections partition
+            // each wall into intervals, so tiny holes and short intrusions
+            // cannot be missed by sparse interior sampling.
+            const auto loop_encloses_wall = [&](const std::vector<std::size_t>& cycle) {
+                double min_x = std::numeric_limits<double>::infinity();
+                double min_y = std::numeric_limits<double>::infinity();
+                double max_x = -std::numeric_limits<double>::infinity();
+                double max_y = -std::numeric_limits<double>::infinity();
+                for (std::size_t node : cycle)
+                {
+                    const Vec3& p = graph.nodes[node].point;
+                    min_x = std::min(min_x, p.x);
+                    min_y = std::min(min_y, p.y);
+                    max_x = std::max(max_x, p.x);
+                    max_y = std::max(max_y, p.y);
+                }
+
+                for (const WallSegment& wall : walls)
+                {
+                    // Most geometry lies outside a small loop. Exclude those
+                    // walls before polygon tests or intersection sorting.
+                    if (std::max(wall.a.x, wall.b.x) <= min_x ||
+                        std::min(wall.a.x, wall.b.x) >= max_x ||
+                        std::max(wall.a.y, wall.b.y) <= min_y ||
+                        std::min(wall.a.y, wall.b.y) >= max_y)
+                        continue;
+
+                    const Vec3 direction = subtract(wall.b, wall.a);
+                    const double wall_length = std::hypot(direction.x, direction.y);
+                    if (wall_length <= tolerance) continue;
+
+                    // A fully enclosed hole wall is the common case.
+                    if (inside_loop(wall.a, cycle) || inside_loop(wall.b, cycle))
+                        return true;
+
+                    std::vector<double> cuts{0.0, 1.0};
+                    for (std::size_t i = 0; i < cycle.size(); ++i)
+                    {
+                        const Vec3& a = graph.nodes[cycle[i]].point;
+                        const Vec3& b = graph.nodes[cycle[(i + 1) % cycle.size()]].point;
+                        const Vec3 edge = subtract(b, a);
+                        const double denominator = cross_xy(direction, edge);
+                        const double edge_length = std::hypot(edge.x, edge.y);
+                        if (edge_length <= tolerance ||
+                            std::abs(denominator) <= 1.0e-12 * wall_length * edge_length)
+                            continue; // Parallel/collinear: interval midpoints still tested.
+
+                        const Vec3 delta = subtract(a, wall.a);
+                        const double t = cross_xy(delta, edge) / denominator;
+                        const double u = cross_xy(delta, direction) / denominator;
+                        if (t >= 0.0 && t <= 1.0 && u >= 0.0 && u <= 1.0)
+                            cuts.push_back(t);
+                    }
+                    std::sort(cuts.begin(), cuts.end());
+                    cuts.erase(std::unique(cuts.begin(), cuts.end(),
+                        [&](double a, double b) {
+                            return std::abs(a - b) * wall_length <= tolerance;
+                        }), cuts.end());
+
+                    for (std::size_t i = 1; i < cuts.size(); ++i)
+                    {
+                        if ((cuts[i] - cuts[i - 1]) * wall_length <= tolerance * 2.0)
+                            continue;
+                        const double t = (cuts[i - 1] + cuts[i]) * 0.5;
+                        const Vec3 sample = add(wall.a, multiply(direction, t));
+                        if (inside_loop(sample, cycle))
+                            return true;
+                    }
+                }
+                return false;
+            };
             const auto evaluate_cycle = [&](const std::vector<std::size_t>& cycle) {
                 const std::size_t n = cycle.size();
                 if (n < 3 || n > MAX_LOOP_VERTICES) return;
-                if (n == 3)
+                const bool has_state = std::find(cycle.begin(), cycle.end(), 0) != cycle.end();
+                if (has_state)
+                {
+                    if (state_loop_count >= MAX_STATE_LOOP_CANDIDATES ||
+                        ++state_loop_evaluations > MAX_STATE_LOOP_EVALUATIONS)
+                        return;
+                }
+                else if (n == 3)
                 {
                     if (triangle_count >= MAX_TRIANGLE_CANDIDATES ||
                         ++triangle_evaluations > MAX_TRIANGLE_EVALUATIONS)
@@ -1601,6 +1689,25 @@ ReferenceGraphDebug build_room_reference_visibility_graph(
                         const Vec3& d = graph.nodes[cycle[(j + 1) % n]].point;
                         if (intersects(a, b, c, d)) return;
                     }
+                }
+
+                // A representative can have valid LOS to all vertices while
+                // a hole remains enclosed elsewhere in a concave cycle.
+                // Geometry topology takes priority over point visibility.
+                if (loop_encloses_wall(cycle)) return;
+
+                if (has_state)
+                {
+                    // State is already a native-validated point and Ruby only
+                    // removes the other vertices if all external State edges
+                    // survive. This record certifies the loop is hole-free;
+                    // it does NOT authorize any invented replacement edges.
+                    ReferenceLoopCollapseCandidate candidate;
+                    candidate.vertices = cycle;
+                    candidate.representative = graph.nodes[0];
+                    graph.loop_candidates.push_back(std::move(candidate));
+                    ++state_loop_count;
+                    return;
                 }
 
                 std::vector<Vec3> centers;
@@ -1672,7 +1779,9 @@ ReferenceGraphDebug build_room_reference_visibility_graph(
             std::vector<std::size_t> path;
             std::function<void(std::size_t, std::size_t)> visit;
             visit = [&](std::size_t start, std::size_t current) {
-                if (++search_steps > MAX_CYCLE_SEARCH_STEPS) return;
+                const std::size_t limit =
+                    start == 0 ? MAX_STATE_CYCLE_SEARCH_STEPS : MAX_CYCLE_SEARCH_STEPS;
+                if (++search_steps > limit) return;
                 for (std::size_t next = start + 1; next < count; ++next)
                 {
                     if (!linked[current][next] || used[next]) continue;
@@ -1714,6 +1823,15 @@ ReferenceGraphDebug build_room_reference_visibility_graph(
                 used[start] = false;
                 if (search_steps > MAX_CYCLE_SEARCH_STEPS) break;
             }
+
+            // State loops previously bypassed Native candidate validation.
+            // Examine them separately to avoid changing the existing
+            // non-State loop enumeration order and evaluation budgets.
+            search_steps = 0;
+            used[0] = true;
+            path = {0};
+            visit(0, 0);
+            used[0] = false;
         }
     }
     catch (...)

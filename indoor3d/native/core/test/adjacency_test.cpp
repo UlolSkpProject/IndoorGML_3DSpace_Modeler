@@ -129,6 +129,53 @@ CellData u_prism_cell()
     return cell;
 }
 
+// Proper closed shell: 10x10 Room with an open-through square hole.
+// The floor and ceiling are tiled around the hole; both outer and inner
+// vertical walls participate in the State-Z wall slice.
+CellData ring_prism_cell()
+{
+    CellData cell;
+    cell.index = 0;
+    cell.flags = CELL_FLAG_NEEDS_STATE;
+    cell.category = CellSpaceCategory::Room;
+    cell.bounds = box(0,0,0,10,10,1);
+
+    const std::array<std::array<double,4>,4> rectangles{{
+        {{0,0,10,4.9}},
+        {{0,5.1,10,10}},
+        {{0,4.9,4.9,5.1}},
+        {{5.1,4.9,10,5.1}}
+    }};
+    for (const auto& r : rectangles)
+    {
+        const Vec3 a{r[0],r[1],0}, b{r[2],r[1],0};
+        const Vec3 c{r[2],r[3],0}, d{r[0],r[3],0};
+        add_rect_face(cell,{0,0,-1},a,d,c,b);
+        add_rect_face(cell,{0,0, 1},
+            {a.x,a.y,1},{b.x,b.y,1},{c.x,c.y,1},{d.x,d.y,1});
+    }
+
+    const std::array<Vec3,4> outer{{
+        {0,0,0},{10,0,0},{10,10,0},{0,10,0}
+    }};
+    // Clockwise inner boundary; normals point toward the empty center.
+    const std::array<Vec3,4> inner{{
+        {4.9,4.9,0},{4.9,5.1,0},{5.1,5.1,0},{5.1,4.9,0}
+    }};
+    for (const auto* ring : {&outer, &inner})
+    {
+        for (std::size_t i = 0; i < ring->size(); ++i)
+        {
+            const Vec3 a = (*ring)[i];
+            const Vec3 b = (*ring)[(i + 1) % ring->size()];
+            const Vec3 edge{b.x - a.x,b.y - a.y,0};
+            add_rect_face(cell,{edge.y,-edge.x,0},
+                a,b,{b.x,b.y,1},{a.x,a.y,1});
+        }
+    }
+    return cell;
+}
+
 // Rectangular prism with a centered inward notch on its upper boundary.
 // Notch depths 0.25 and 0.5 produce reflex interior angles ~194deg and
 // ~208deg, exercising the exact 200deg eligibility boundary.
@@ -894,6 +941,71 @@ void test_four_cycle_native_centroid_and_los_candidate()
     require(found, "Native must prevalidate an induced 4-cycle");
 }
 
+void test_room_loop_cannot_collapse_over_enclosed_hole()
+{
+    const CellData ring = ring_prism_cell();
+    const std::vector<ReferencePoint> points{
+        {{3,3,0.5}, ReferencePointKind::Final},
+        {{7,3,0.5}, ReferencePointKind::Final},
+        {{7,7,0.5}, ReferencePointKind::Final},
+        {{3,7,0.5}, ReferencePointKind::Final}
+    };
+    const ReferenceGraphDebug graph =
+        build_room_reference_visibility_graph(ring, {1,1,0.5}, points, 0.001);
+    require(graph.nodes.size() == 5, "Ring Room graph lost a vertex");
+    const auto linked = [&](std::size_t a, std::size_t b) {
+        return std::any_of(graph.edges.begin(), graph.edges.end(),
+            [&](const ReferenceGraphEdge& edge) {
+                return edge.first == a && edge.second == b;
+            });
+    };
+    require(linked(1,2) && linked(2,3) &&
+            linked(3,4) && linked(1,4),
+            "Ring Room must have a valid four-edge perimeter");
+    require(!linked(1,3) && !linked(2,4),
+            "Ring Room diagonals may not cross the hole");
+    for (const auto& candidate : graph.loop_candidates)
+        require(candidate.vertices != std::vector<std::size_t>{1,2,3,4},
+                "Native must not collapse a cycle enclosing a Room hole");
+
+    // The State-containing version is subject to the SAME topology rule.
+    const std::vector<ReferencePoint> other{
+        {{7,3,0.5}, ReferencePointKind::Final},
+        {{7,7,0.5}, ReferencePointKind::Final},
+        {{3,7,0.5}, ReferencePointKind::Final}
+    };
+    const ReferenceGraphDebug state_graph =
+        build_room_reference_visibility_graph(ring, {3,3,0.5}, other, 0.001);
+    require(state_graph.nodes.size() == 4,
+            "State-containing Ring Room graph lost a vertex");
+    for (const auto& candidate : state_graph.loop_candidates)
+        require(candidate.vertices != std::vector<std::size_t>{0,1,2,3},
+                "State cycles may not bypass the enclosed-hole protection");
+}
+
+void test_state_loop_receives_hole_free_native_certificate()
+{
+    CellData room = unit_box_cell();
+    room.category = CellSpaceCategory::Room;
+    const std::vector<ReferencePoint> points{
+        {{0.3,0.2,0.5}, ReferencePointKind::Final},
+        {{0.2,0.3,0.5}, ReferencePointKind::Final}
+    };
+    const ReferenceGraphDebug graph =
+        build_room_reference_visibility_graph(room, {0.2,0.2,0.5}, points, 0.001);
+
+    bool certified = false;
+    for (const auto& candidate : graph.loop_candidates)
+    {
+        if (candidate.vertices != std::vector<std::size_t>{0,1,2})
+            continue;
+        require(std::abs(candidate.representative.point.x - 0.2) < 1.0e-9,
+                "State cycle must keep its original State representative");
+        certified = true;
+    }
+    require(certified, "Hole-free State cycle must remain collapsible");
+}
+
 void test_room_reference_shortcut_los_rejects_wall_crossing()
 {
     CellData room = u_prism_cell();
@@ -969,5 +1081,7 @@ int main()
     test_triangle_loop_new_edge_can_cross_non_overlapping_circles();
     test_triangle_loop_new_edges_still_reject_wall_crossings();
     test_four_cycle_native_centroid_and_los_candidate();
+    test_room_loop_cannot_collapse_over_enclosed_hole();
+    test_state_loop_receives_hole_free_native_certificate();
     return 0;
 }

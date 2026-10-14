@@ -79,7 +79,14 @@ class ReferenceGraphLoopCollapserTest < Minitest::Test
       [n(0, 0), n(1, 0), n(0.5, 0.4), n(0, 1)],
       [[0, 1], [0, 2], [1, 2], [0, 3], [1, 3]]
     )
-    result = Collapse.collapse(source, [])
+    # A State cycle must now receive an explicit hole-free verification
+    # from Native; it must never bypass the geometry topology guard.
+    without_native = Collapse.collapse(source, [])
+    assert_equal 0, without_native[:collapse_count]
+    assert_equal source[:edges], without_native[:edges]
+
+    checked = verified([0, 1, 2], source[:nodes][0][:point], [])
+    result = Collapse.collapse(source, [checked])
 
     assert_equal 1, result[:collapse_count]
     assert_equal [0, 3], result[:original_indices]
@@ -257,6 +264,34 @@ class ReferenceGraphLoopCollapserTest < Minitest::Test
 
     assert_equal 1, result[:collapse_count]
     assert_equal [0, nil], result[:original_indices]
+  end
+
+  def test_state_loop_without_hole_free_native_certificate_is_never_collapsed
+    source = graph(
+      [n(0, 0), n(2, 0), n(1, 2), n(4, 0)],
+      [[0, 1], [0, 2], [1, 2], [0, 3], [1, 3]]
+    )
+    result = Collapse.collapse(source, [])
+
+    assert_equal 0, result[:collapse_count]
+    assert_equal 2, result[:loop_count]
+    assert_equal source[:edges], result[:edges]
+    assert_equal source[:nodes], result[:nodes]
+  end
+
+  def test_native_hole_rejection_does_not_invent_loop_representative
+    source = graph(
+      [n(5, 5), n(0, 0), n(4, 0), n(4, 4), n(0, 4)],
+      [[1, 2], [2, 3], [3, 4], [1, 4]]
+    )
+    # No Native candidate is present when a wall slice lies inside the
+    # 4-cycle. The original disconnected graph must remain unchanged.
+    result = Collapse.collapse(source, [])
+
+    assert_equal 0, result[:collapse_count]
+    assert_equal 1, result[:loop_count]
+    assert_equal source[:nodes], result[:nodes]
+    assert_equal source[:edges], result[:edges]
   end
 
 end

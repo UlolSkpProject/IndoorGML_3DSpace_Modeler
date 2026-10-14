@@ -52,8 +52,11 @@ module ULOL
             next if original_ids.any?(&:nil?)
 
             state_loop = original_ids.include?(0)
-            candidate = state_loop ? nil : candidates[original_ids.sort]
-            next unless state_loop || candidate
+            # Native prevalidates hole-free topology for ALL loops,
+            # including State-containing cycles. Never allow the State
+            # shortcut to bypass the enclosed-Hole guard.
+            candidate = candidates[original_ids.sort]
+            next unless candidate
 
             boundary = external_neighbors(vertices, edges)
             next if boundary.any? { |index| origins[index].nil? }
