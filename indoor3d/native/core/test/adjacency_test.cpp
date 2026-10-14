@@ -1,6 +1,7 @@
 #include "adjacency_checker.h"
 #include "cell_space_interior_point_locator.h"
 
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
@@ -123,6 +124,55 @@ CellData u_prism_cell()
         const Vec3 edge{b.x-a.x,b.y-a.y,0};
         const Vec3 normal{edge.y,-edge.x,0};
         add_rect_face(cell,normal,a,b,b_top,a_top);
+    }
+    return cell;
+}
+
+// Rectangular prism with a centered inward notch on its upper boundary.
+// Notch depths 0.25 and 0.5 produce reflex interior angles ~194deg and
+// ~208deg, exercising the exact 200deg eligibility boundary.
+CellData shallow_reflex_prism_cell(double notch_depth)
+{
+    CellData cell;
+    cell.index = 0;
+    cell.flags = CELL_FLAG_NEEDS_STATE;
+    cell.category = CellSpaceCategory::Room;
+    cell.bounds = box(0, 0, 0, 4, 4, 1);
+
+    const std::array<Vec3, 5> polygon{{
+        {0, 0, 0},
+        {4, 0, 0},
+        {4, 4, 0},
+        {2, 4 - notch_depth, 0},
+        {0, 4, 0}
+    }};
+    const std::array<std::array<std::size_t, 3>, 3> triangles{{
+        {{0, 1, 3}},
+        {{1, 2, 3}},
+        {{0, 3, 4}}
+    }};
+    for (const auto& indices : triangles)
+    {
+        const Vec3 a = polygon[indices[0]];
+        const Vec3 b = polygon[indices[1]];
+        const Vec3 c = polygon[indices[2]];
+        const Vec3 a_top{a.x, a.y, 1};
+        const Vec3 b_top{b.x, b.y, 1};
+        const Vec3 c_top{c.x, c.y, 1};
+        cell.faces.push_back(face({0, 0, -1}, {triangle(a, c, b)}));
+        cell.faces.push_back(face({0, 0, 1}, {triangle(a_top, b_top, c_top)}));
+    }
+    for (std::size_t i = 0; i < polygon.size(); ++i)
+    {
+        const Vec3 a = polygon[i];
+        const Vec3 b = polygon[(i + 1) % polygon.size()];
+        const Vec3 a_top{a.x, a.y, 1};
+        const Vec3 b_top{b.x, b.y, 1};
+        const Vec3 edge{b.x - a.x, b.y - a.y, 0};
+        add_rect_face(
+            cell, {edge.y, -edge.x, 0},
+            a, b, b_top, a_top
+        );
     }
     return cell;
 }
@@ -351,6 +401,52 @@ void test_state_anchored_room_reference_cluster()
             "State cluster must not create a duplicate black Final reference");
 }
 
+void test_convex_room_uses_state_only()
+{
+    CellData cell = unit_box_cell();
+    cell.category = CellSpaceCategory::Room;
+    cell.flags |= CELL_FLAG_HAS_FIXED_Z;
+    cell.fixed_z = 0.25;
+
+    const CellSpaceInteriorPointResult result =
+        locate_cell_space_interior_points(cell, 0.001);
+    require(result.state_point.has_value(), "convex Room State missing");
+    require(result.reference_status == ReferencePointStatus::Succeeded,
+            "convex Room reference evaluation must succeed");
+    require(result.reference_points.empty(),
+            "convex Room must use State alone (no reference or merged points)");
+
+    // A noncentral State must not change convex eligibility.
+    const std::vector<ReferencePoint> offcenter =
+        find_reference_points(cell, {0.35, 0.42, 0.25}, 0.001);
+    require(offcenter.empty(), "convex Room incorrectly generated references");
+}
+
+void test_room_reflex_threshold_200_degrees()
+{
+    const Vec3 state{2.0, 1.5, 0.5};
+    const CellData shallow = shallow_reflex_prism_cell(0.25);
+    const CellData deep = shallow_reflex_prism_cell(0.5);
+
+    const std::vector<ReferencePoint> shallow_points =
+        find_reference_points(shallow, state, 0.001);
+    require(shallow_points.empty(),
+            "reflex angle below 200deg must leave State as the only point");
+
+    const std::vector<ReferencePoint> deep_points =
+        find_reference_points(deep, state, 0.001);
+    require(!deep_points.empty(),
+            "reflex angle between 200deg and 225deg must generate references");
+    bool found_eligible_corner = false;
+    for (const ReferencePoint& point : deep_points)
+    {
+        if (point.kind == ReferencePointKind::Corner)
+            found_eligible_corner = true;
+    }
+    require(found_eligible_corner,
+            "200deg reflex threshold must produce a Corner reference candidate");
+}
+
 void test_non_room_reference_points_are_empty()
 {
     const std::array<CellSpaceCategory,4> categories{{
@@ -383,6 +479,8 @@ int main()
     test_state_concave_u_uses_bvh_fallback();
     test_state_fixed_z();
     test_room_reference_points_share_state_height();
+    test_convex_room_uses_state_only();
+    test_room_reflex_threshold_200_degrees();
     test_concave_room_reference_points();
     test_state_anchored_room_reference_cluster();
     test_non_room_reference_points_are_empty();

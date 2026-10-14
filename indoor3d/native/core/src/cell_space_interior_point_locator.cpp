@@ -23,8 +23,8 @@ constexpr std::size_t MAX_SEARCH_NODES = 200000;
 // Experimental Room-only reference points. This does not affect State or Adjacency.
 // Merged reference radius is intentionally configurable until a final scale is chosen.
 constexpr double ROOM_REFERENCE_CLUSTER_RADIUS_FRACTION = 0.18;
-constexpr double CORNER_CONVEX_THRESHOLD_DEGREES = 145.0;
-constexpr double CORNER_REFLEX_THRESHOLD_DEGREES = 225.0;
+// Only sufficiently reflex vertical-Face corners justify a Room reference graph.
+constexpr double CORNER_REFLEX_THRESHOLD_DEGREES = 200.0;
 constexpr std::size_t MAX_ROOM_WALL_SEGMENTS = 2048;
 constexpr std::size_t MAX_ROOM_REFERENCE_POINTS = 4096;
 // Additional debug records (red merged + black final) do not consume the
@@ -856,6 +856,79 @@ std::vector<ReferencePoint> find_reference_points(
         wall_segments_at_z(cell, state_point.z, tolerance);
     if (walls.empty()) return {};
 
+    // Collect shared endpoints of vertical slices. Only degree-two vertices
+    // define an unambiguous corner; seam vertices and junctions are excluded.
+    std::vector<CornerVertex> vertices;
+    const auto add_ray = [&](const Vec3& point, const Vec3& toward) {
+        const Vec3 direction = subtract(toward, point);
+        const double edge_length = std::hypot(direction.x, direction.y);
+        if (edge_length <= tolerance) return;
+        CornerVertex* vertex = nullptr;
+        for (CornerVertex& candidate : vertices)
+        {
+            if (near_xy(candidate.point, point, geometry_epsilon))
+            {
+                vertex = &candidate;
+                break;
+            }
+        }
+        if (!vertex)
+        {
+            vertices.push_back({point, {}});
+            vertex = &vertices.back();
+        }
+        const Vec3 unit{direction.x / edge_length, direction.y / edge_length, 0.0};
+        for (const Vec3& existing : vertex->rays)
+        {
+            if (dot(existing, unit) > 1.0 - 1.0e-8) return;
+        }
+        vertex->rays.push_back(unit);
+    };
+    for (const WallSegment& wall : walls)
+    {
+        add_ray(wall.a, wall.b);
+        add_ray(wall.b, wall.a);
+    }
+
+    // Only reflex interior corners between vertical Face slices trigger Room
+    // reference generation. Convex polygons and shallow concavities (<200deg)
+    // are represented by their State alone. The classification is evaluated at
+    // the actual State Z, with the existing BVH used to identify the interior.
+    struct EligibleCorner
+    {
+        Vec3 vertex;
+        Vec3 inward;
+    };
+    std::vector<EligibleCorner> eligible_corners;
+    for (const CornerVertex& vertex : vertices)
+    {
+        if (vertex.rays.size() != 2) continue;
+        const Vec3& first = vertex.rays[0];
+        const Vec3& second = vertex.rays[1];
+        const double cosine = std::max(-1.0, std::min(1.0, dot(first, second)));
+        const double smaller_angle = std::acos(cosine) * 180.0 / 3.14159265358979323846;
+        const Vec3 sum = add(first, second);
+        if (length_squared(sum) <= EPSILON) continue;
+
+        const double interior_reflex_angle = 360.0 - smaller_angle;
+        if (interior_reflex_angle < CORNER_REFLEX_THRESHOLD_DEGREES)
+            continue;
+
+        const Vec3 bisector = normalize(sum);
+        const double probe = std::max(tolerance * 8.0, short_span * 0.01);
+        const bool narrow_inside =
+            bvh_inside(bvh, add(vertex.point, multiply(bisector, probe)), tolerance);
+        const bool reflex_inside =
+            bvh_inside(bvh, subtract(vertex.point, multiply(bisector, probe)), tolerance);
+        if (!reflex_inside || narrow_inside) continue;
+
+        eligible_corners.push_back({vertex.point, multiply(bisector, -1.0)});
+    }
+
+    // No eligible concave corner: State is the sole navigation node.
+    // Do not generate Face, Corner, Merge, or Final reference points.
+    if (eligible_corners.empty()) return {};
+
     std::vector<ReferencePoint> points;
     points.reserve(std::min<std::size_t>(walls.size() * 2, MAX_ROOM_REFERENCE_POINTS));
 
@@ -901,69 +974,18 @@ std::vector<ReferencePoint> find_reference_points(
             add_candidate(candidate, ReferencePointKind::Face);
     }
 
-    // Collect shared endpoints of vertical slices. Only degree-two vertices
-    // define an unambiguous corner; seam vertices and junctions are excluded.
-    std::vector<CornerVertex> vertices;
-    const auto add_ray = [&](const Vec3& point, const Vec3& toward) {
-        const Vec3 direction = subtract(toward, point);
-        const double edge_length = std::hypot(direction.x, direction.y);
-        if (edge_length <= tolerance) return;
-        CornerVertex* vertex = nullptr;
-        for (CornerVertex& candidate : vertices)
-        {
-            if (near_xy(candidate.point, point, geometry_epsilon))
-            {
-                vertex = &candidate;
-                break;
-            }
-        }
-        if (!vertex)
-        {
-            vertices.push_back({point, {}});
-            vertex = &vertices.back();
-        }
-        const Vec3 unit{direction.x / edge_length, direction.y / edge_length, 0.0};
-        for (const Vec3& existing : vertex->rays)
-        {
-            if (dot(existing, unit) > 1.0 - 1.0e-8) return;
-        }
-        vertex->rays.push_back(unit);
-    };
-    for (const WallSegment& wall : walls)
+    // Purple: 200deg-or-greater reflex corners only.
+    for (const EligibleCorner& corner : eligible_corners)
     {
-        add_ray(wall.a, wall.b);
-        add_ray(wall.b, wall.a);
-    }
-
-    // Purple: small (<145deg) or reflex (>=225deg) interior corners.
-    for (const CornerVertex& vertex : vertices)
-    {
-        if (vertex.rays.size() != 2) continue;
-        const Vec3& first = vertex.rays[0];
-        const Vec3& second = vertex.rays[1];
-        const double cosine = std::max(-1.0, std::min(1.0, dot(first, second)));
-        const double smaller_angle = std::acos(cosine) * 180.0 / 3.14159265358979323846;
-        const Vec3 sum = add(first, second);
-        if (length_squared(sum) <= EPSILON) continue;
-        const Vec3 bisector = normalize(sum);
         const double probe = std::max(tolerance * 8.0, short_span * 0.01);
-        const bool narrow_inside =
-            bvh_inside(bvh, add(vertex.point, multiply(bisector, probe)), tolerance);
-        const bool reflex_inside =
-            bvh_inside(bvh, subtract(vertex.point, multiply(bisector, probe)), tolerance);
-        if (narrow_inside == reflex_inside) continue;
-        const double interior_angle = narrow_inside ?
-            smaller_angle : 360.0 - smaller_angle;
-        if (!(interior_angle < CORNER_CONVEX_THRESHOLD_DEGREES ||
-              interior_angle >= CORNER_REFLEX_THRESHOLD_DEGREES))
-            continue;
-        const Vec3 inward = narrow_inside ? bisector : multiply(bisector, -1.0);
         const double distance =
-            opposite_wall_distance(walls, vertex.point, inward, tolerance);
+            opposite_wall_distance(walls, corner.vertex, corner.inward, tolerance);
         if (!std::isfinite(distance) || distance <= tolerance * 2.0) continue;
         const Vec3 candidate =
-            add(vertex.point, multiply(inward, distance * 0.5));
-        if (clear_path(bvh, add(vertex.point, multiply(inward, probe)), candidate, tolerance))
+            add(corner.vertex, multiply(corner.inward, distance * 0.5));
+        if (clear_path(bvh,
+                       add(corner.vertex, multiply(corner.inward, probe)),
+                       candidate, tolerance))
             add_candidate(candidate, ReferencePointKind::Corner);
     }
 
