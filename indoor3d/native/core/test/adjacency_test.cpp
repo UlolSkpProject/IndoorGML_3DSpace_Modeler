@@ -206,6 +206,44 @@ CellData gradual_reflex_arc()
     return cell;
 }
 
+// Wide star-shaped polygon with a gently concave upper wall consisting of
+// many small reflex turns. Tests that the simplifier retains valid candidates
+// without eliminating an entire navigable curve.
+CellData smooth_concave_wall_room()
+{
+    CellData cell;
+    cell.index = 0;
+    cell.category = CellSpaceCategory::Room;
+    cell.flags = CELL_FLAG_NEEDS_STATE;
+    cell.bounds = box(0, 0, 0, 40, 40, 1);
+    std::vector<Vec3> outline{{0,0,0},{40,0,0}};
+    for (int x = 40; x >= 0; --x)
+    {
+        const double distance = static_cast<double>(x - 20);
+        outline.push_back({static_cast<double>(x),
+                           20.0 + 0.05 * distance * distance, 0.0});
+    }
+    const Vec3 floor_center{20,1,0};
+    const Vec3 ceiling_center{20,1,1};
+    for (std::size_t i = 0; i < outline.size(); ++i)
+    {
+        const Vec3 first = outline[i];
+        const Vec3 second = outline[(i+1) % outline.size()];
+        const Vec3 first_top{first.x, first.y, 1};
+        const Vec3 second_top{second.x, second.y, 1};
+        cell.faces.push_back(face(
+            {0,0,-1}, {triangle(floor_center, second, first)}
+        ));
+        cell.faces.push_back(face(
+            {0,0,1}, {triangle(ceiling_center, first_top, second_top)}
+        ));
+        const Vec3 side{second.x-first.x,second.y-first.y,0};
+        add_rect_face(cell,{side.y,-side.x,0},
+                      first,second,second_top,first_top);
+    }
+    return cell;
+}
+
 void test_z_sweep_matches_bruteforce()
 {
     std::vector<CellData> cells(5);
@@ -466,32 +504,36 @@ void test_convex_room_uses_state_only()
     require(offcenter.empty(), "convex Room incorrectly generated references");
 }
 
-void test_room_reflex_threshold_200_degrees()
+void test_room_reflex_threshold_15_degree_turn()
 {
     const Vec3 state{2.0, 1.5, 0.5};
+    // Inner angles: ~194.25deg (14.25deg turn), ~197.06deg
+    // (17.06deg turn), and ~208.07deg (28.07deg turn).
     const CellData shallow = shallow_reflex_prism_cell(0.25);
+    const CellData medium = shallow_reflex_prism_cell(0.30);
     const CellData deep = shallow_reflex_prism_cell(0.5);
 
-    const std::vector<ReferencePoint> shallow_points =
-        find_reference_points(shallow, state, 0.001);
-    require(shallow_points.empty(),
-            "reflex angle below 200deg must leave State as the only point");
+    require(find_reference_points(shallow, state, 0.001).empty(),
+            "a single reflex turn below 15deg must not generate a reference");
 
+    const std::vector<ReferencePoint> medium_points =
+        find_reference_points(medium, state, 0.001);
     const std::vector<ReferencePoint> deep_points =
         find_reference_points(deep, state, 0.001);
-    require(!deep_points.empty(),
-            "reflex angle between 200deg and 225deg must generate references");
-    bool found_eligible_corner = false;
-    for (const ReferencePoint& point : deep_points)
+
+    for (const auto* points : {&medium_points, &deep_points})
     {
-        if (point.kind == ReferencePointKind::Corner)
-            found_eligible_corner = true;
+        bool found_corner = false;
+        for (const ReferencePoint& point : *points)
+        {
+            require(point.kind != ReferencePointKind::Face,
+                    "green Face candidates must remain disabled");
+            if (point.kind == ReferencePointKind::Corner)
+                found_corner = true;
+        }
+        require(found_corner,
+                "a single reflex turn above 15deg must generate a purple reference");
     }
-    require(found_eligible_corner,
-            "200deg reflex threshold must produce a Corner reference candidate");
-    for (const ReferencePoint& reference : deep_points)
-        require(reference.kind != ReferencePointKind::Face,
-                "only purple Corner candidate generation is allowed");
 }
 
 void test_cumulative_reflex_turn_on_curved_wall()
@@ -542,6 +584,34 @@ void test_local_width_limits_cluster_radius()
     require(!merged_with_state, "local-radius test incorrectly absorbed Corner into State");
 }
 
+void test_smooth_concave_wall_retains_safe_navigation_candidates()
+{
+    const CellData room = smooth_concave_wall_room();
+    const Vec3 state{20,6,0.5};
+    const std::vector<ReferencePoint> points =
+        find_reference_points(room,state,0.001);
+
+    std::size_t corner_count = 0;
+    for (const ReferencePoint& item : points)
+    {
+        const Vec3& point = item.point;
+        // All debug and final points must remain inside the footprint.
+        const double dx = point.x - 20.0;
+        require(point.x > 0.0 && point.x < 40.0 &&
+                point.y > 0.0 && point.y < 20.0 + 0.05 * dx * dx,
+                "smooth Room reference escaped its interior after simplification");
+        require(item.kind != ReferencePointKind::Face,
+                "simplification reintroduced green Face candidates");
+        if (item.kind == ReferencePointKind::Corner) ++corner_count;
+    }
+    require(corner_count >= 2,
+            "smooth concave wall lost the navigation candidates along its curve");
+    // A 126deg gradual turn needs roughly eight 15deg seeds. The simplifier
+    // must not generate further nodes or duplicate source candidates.
+    require(corner_count <= 8,
+            "smooth concave wall produced excessive purple candidates");
+}
+
 void test_non_room_reference_points_are_empty()
 {
     const std::array<CellSpaceCategory,4> categories{{
@@ -575,8 +645,9 @@ int main()
     test_state_fixed_z();
     test_room_reference_points_share_state_height();
     test_convex_room_uses_state_only();
-    test_room_reflex_threshold_200_degrees();
+    test_room_reflex_threshold_15_degree_turn();
     test_cumulative_reflex_turn_on_curved_wall();
+    test_smooth_concave_wall_retains_safe_navigation_candidates();
     test_local_width_limits_cluster_radius();
     test_concave_room_reference_points();
     test_state_anchored_room_reference_cluster();

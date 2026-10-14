@@ -23,7 +23,11 @@ constexpr std::size_t MAX_SEARCH_NODES = 200000;
 // Room-only reference heuristics; State and Adjacency are unchanged.
 // Ignore numerical angle noise; accumulate genuine consecutive reflex turns.
 constexpr double ROOM_REFLEX_NOISE_DEGREES = 0.25;
-constexpr double ROOM_CUMULATIVE_TURN_DEGREES = 20.0;
+constexpr double ROOM_CUMULATIVE_TURN_DEGREES = 15.0;
+// Only remove a middle candidate when a direct shortcut deviates by at most
+// 15% of the smallest local corridor width and retains wall clearance.
+constexpr double ROOM_SHORTCUT_MAX_DEVIATION_WIDTH_FRACTION = 0.15;
+constexpr double ROOM_SHORTCUT_MIN_CLEARANCE_FRACTION = 0.35;
 // Each cluster radius is 15% of the local XY corridor width.
 constexpr double ROOM_LOCAL_WIDTH_CLUSTER_FRACTION = 0.15;
 constexpr std::size_t MAX_ROOM_WALL_SEGMENTS = 2048;
@@ -693,7 +697,7 @@ bool near_xy(const Vec3& a, const Vec3& b, double epsilon)
 
 // Local XY width is twice the nearest vertical-wall clearance at State Z.
 // Floors and ceilings must not reduce the merger radius.
-double local_cluster_radius(const std::vector<WallSegment>& walls, const Vec3& p)
+double nearest_wall_clearance(const std::vector<WallSegment>& walls, const Vec3& p)
 {
     double nearest = std::numeric_limits<double>::infinity();
     for (const WallSegment& wall : walls)
@@ -708,8 +712,13 @@ double local_cluster_radius(const std::vector<WallSegment>& walls, const Vec3& p
             p, add(wall.a, multiply(edge, t))
         ));
     }
-    return std::isfinite(nearest) ?
-        2.0 * ROOM_LOCAL_WIDTH_CLUSTER_FRACTION * std::sqrt(nearest) : 0.0;
+    return std::isfinite(nearest) ? std::sqrt(nearest) : 0.0;
+}
+
+double local_cluster_radius(const std::vector<WallSegment>& walls, const Vec3& p)
+{
+    return 2.0 * ROOM_LOCAL_WIDTH_CLUSTER_FRACTION *
+           nearest_wall_clearance(walls, p);
 }
 
 std::vector<WallSegment> wall_segments_at_z(
@@ -845,6 +854,100 @@ bool clear_path(
     return true;
 }
 
+// Protect the actual 2D Room boundary when deciding whether a candidate
+// lies on a redundant detour. A handful of 3D BVH samples alone can miss
+// a thin wall between the samples.
+bool crosses_wall_slice(
+    const std::vector<WallSegment>& walls,
+    const Vec3& first,
+    const Vec3& last,
+    double tolerance
+)
+{
+    const Vec3 chord = subtract(last, first);
+    const double length_sq = distance_xy_squared(first, last);
+    if (length_sq <= tolerance * tolerance) return true;
+    for (const WallSegment& wall : walls)
+    {
+        const Vec3 edge = subtract(wall.b, wall.a);
+        const Vec3 delta = subtract(wall.a, first);
+        const double denom = cross_xy(chord, edge);
+        if (std::abs(denom) > EPSILON)
+        {
+            const double t = cross_xy(delta, edge) / denom;
+            const double u = cross_xy(delta, chord) / denom;
+            const double t_eps = tolerance / std::sqrt(length_sq);
+            const double edge_len = std::hypot(edge.x, edge.y);
+            const double u_eps = edge_len > EPSILON ? tolerance / edge_len : 0.0;
+            if (t >= -t_eps && t <= 1.0 + t_eps &&
+                u >= -u_eps && u <= 1.0 + u_eps)
+                return true;
+        }
+        else if (std::abs(cross_xy(delta, chord)) <=
+                 tolerance * std::sqrt(length_sq))
+        {
+            // Collinear or almost collinear overlap is unsafe.
+            const double a = dot(subtract(wall.a, first), chord) / length_sq;
+            const double b = dot(subtract(wall.b, first), chord) / length_sq;
+            if (std::max(a, b) >= 0.0 && std::min(a, b) <= 1.0)
+                return true;
+        }
+    }
+    return false;
+}
+
+// The candidate to remove must be approximately on a navigable chord,
+// and the chord must stay inside the Room without cutting a wall or
+// unacceptably reducing corridor clearance.
+bool redundant_corner_candidate(
+    const TriangleBvh& bvh,
+    const std::vector<WallSegment>& walls,
+    const Vec3& previous,
+    const Vec3& middle,
+    const Vec3& next,
+    double tolerance
+)
+{
+    const Vec3 chord = subtract(next, previous);
+    const double chord_sq = distance_xy_squared(previous, next);
+    if (chord_sq <= tolerance * tolerance) return false;
+
+    const Vec3 offset = subtract(middle, previous);
+    const double projection =
+        (offset.x * chord.x + offset.y * chord.y) / chord_sq;
+    if (projection <= 0.0 || projection >= 1.0) return false;
+
+    const Vec3 foot = add(previous, multiply(chord, projection));
+    const double deviation = std::sqrt(distance_xy_squared(middle, foot));
+    const double min_clearance = std::min({
+        nearest_wall_clearance(walls, previous),
+        nearest_wall_clearance(walls, middle),
+        nearest_wall_clearance(walls, next)
+    });
+    if (min_clearance <= tolerance * 2.0 ||
+        deviation > std::max(
+            tolerance,
+            2.0 * ROOM_SHORTCUT_MAX_DEVIATION_WIDTH_FRACTION * min_clearance
+        ))
+        return false;
+
+    if (crosses_wall_slice(walls, previous, next, tolerance)) return false;
+
+    const double min_allowed_clearance = std::max(
+        tolerance * 2.0,
+        ROOM_SHORTCUT_MIN_CLEARANCE_FRACTION * min_clearance
+    );
+    for (std::size_t step = 1; step < 8; ++step)
+    {
+        const Vec3 point = add(previous, multiply(chord, step / 8.0));
+        if (!bvh_inside(bvh, point, tolerance) ||
+            bvh.nearest_distance(point) <= tolerance ||
+            nearest_wall_clearance(walls, point) < min_allowed_clearance)
+            return false;
+    }
+    return true;
+}
+
 struct CornerVertex
 {
     Vec3 point;
@@ -967,10 +1070,11 @@ std::vector<ReferencePoint> find_reference_points(
             neighbors[b].push_back(a);
     }
 
-    // Each uninterrupted reflex arc emits a corner when cumulative turning
-    // reaches 20 degrees. Sub-threshold remnants do not create extra nodes.
-    // Non-manifold components conservatively keep only individually strong corners.
+    // Each uninterrupted reflex arc emits a corner at 15 degrees of
+    // cumulative turning. Keep chain membership and order for safe pruning.
+    // Non-manifold components retain their individually strong candidates.
     std::vector<std::size_t> selected;
+    std::vector<std::vector<std::size_t>> selected_chains;
     std::vector<bool> visited(vertex_count, false);
     std::vector<bool> ordered(vertex_count, false);
     for (std::size_t seed = 0; seed < vertex_count; ++seed)
@@ -1009,10 +1113,14 @@ std::vector<ReferencePoint> find_reference_points(
         if (!simple)
         {
             for (const std::size_t v : component)
-                if (reflex_turn[v] >= ROOM_CUMULATIVE_TURN_DEGREES)
-                    selected.push_back(v);
+            {
+                if (reflex_turn[v] < ROOM_CUMULATIVE_TURN_DEGREES) continue;
+                selected.push_back(v);
+                selected_chains.push_back({v}); // Do not simplify junctions.
+            }
             continue;
         }
+        std::vector<std::size_t> chain_candidates;
         const std::size_t none = vertex_count;
         std::size_t previous = none;
         std::size_t current = start_vertex;
@@ -1024,7 +1132,11 @@ std::vector<ReferencePoint> find_reference_points(
             accumulated += reflex_turn[current];
             if (accumulated + 1.0e-9 >= ROOM_CUMULATIVE_TURN_DEGREES)
             {
-                if (reflex_turn[current] > 0.0) selected.push_back(current);
+                if (reflex_turn[current] > 0.0)
+                {
+                    selected.push_back(current);
+                    chain_candidates.push_back(current);
+                }
                 accumulated = 0.0;
             }
             std::size_t next = none;
@@ -1038,6 +1150,17 @@ std::vector<ReferencePoint> find_reference_points(
             }
             previous = current;
             current = next;
+        }
+        if (found_endpoint)
+        {
+            if (!chain_candidates.empty())
+                selected_chains.push_back(std::move(chain_candidates));
+        }
+        else
+        {
+            // A closed ring has no safe beginning/end for open-path pruning.
+            for (const std::size_t v : chain_candidates)
+                selected_chains.push_back({v});
         }
     }
     if (selected.empty()) return {}; // State alone for convex/shallow shapes.
@@ -1064,17 +1187,59 @@ std::vector<ReferencePoint> find_reference_points(
         points.push_back({candidate, kind});
     };
 
-    // Purple candidate at the true corner bisector's half-wall distance.
+    // First construct the purple candidates without discarding any geometry
+    // information. A chain only contains reflex corners on the same actual
+    // vertical-wall boundary. The RGB debug renderer will see the survivors.
+    std::vector<std::optional<Vec3>> candidates(vertex_count);
     for (const std::size_t i : selected)
     {
         const Vec3& vertex = vertices[i].point;
         const double probe = std::max(tolerance * 8.0, short_span * 0.01);
-        const double distance = opposite_wall_distance(walls, vertex, inward[i], tolerance);
+        const double distance =
+            opposite_wall_distance(walls, vertex, inward[i], tolerance);
         if (!std::isfinite(distance) || distance <= tolerance * 2.0) continue;
         const Vec3 candidate = add(vertex, multiply(inward[i], 0.5 * distance));
-        if (clear_path(bvh, add(vertex, multiply(inward[i], probe)), candidate, tolerance))
-            add_candidate(candidate, ReferencePointKind::Corner);
+        if (safe_reference(bvh, candidate, state_point, tolerance) &&
+            clear_path(bvh, add(vertex, multiply(inward[i], probe)), candidate, tolerance))
+            candidates[i] = candidate;
     }
+
+    // Remove an intermediate candidate ONLY when the two surrounding
+    // surviving candidates have a safe direct chord inside this Room.
+    // Keep endpoints, disconnected contours and non-manifold junctions.
+    for (const std::vector<std::size_t>& chain : selected_chains)
+    {
+        std::vector<std::size_t> remaining;
+        for (const std::size_t vertex : chain)
+            if (candidates[vertex]) remaining.push_back(vertex);
+
+        std::size_t index = 1;
+        while (index + 1 < remaining.size())
+        {
+            const std::size_t previous = remaining[index - 1];
+            const std::size_t middle = remaining[index];
+            const std::size_t next = remaining[index + 1];
+            if (redundant_corner_candidate(
+                    bvh, walls,
+                    *candidates[previous], *candidates[middle], *candidates[next],
+                    tolerance))
+            {
+                candidates[middle] = std::nullopt;
+                remaining.erase(remaining.begin() + static_cast<std::ptrdiff_t>(index));
+                if (index > 1) --index;
+            }
+            else
+            {
+                ++index;
+            }
+        }
+    }
+
+    // The rest of the pipeline (State-anchored cluster, centroid, final
+    // points) is unchanged; only the source candidate set was simplified.
+    for (const std::size_t vertex : selected)
+        if (candidates[vertex])
+            add_candidate(*candidates[vertex], ReferencePointKind::Corner);
 
     // Cluster only purple corner candidates; the State is a fixed-position
     // special Reference Point and takes priority over ordinary clusters.
