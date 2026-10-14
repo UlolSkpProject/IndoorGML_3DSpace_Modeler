@@ -105,4 +105,86 @@ class ReferenceGraphLoopCollapserTest < Minitest::Test
     end
     assert_includes output, 'COLLAPSED'
   end
+  def test_deferred_batch_collapses_two_disjoint_triangles_simultaneously
+    source = graph(
+      [n(10, 10), n(0, 0), n(2, 0), n(1, 2),
+       n(5, 0), n(7, 0), n(6, 2)],
+      [[1, 2], [1, 3], [2, 3],
+       [4, 5], [4, 6], [5, 6]]
+    )
+    candidates = [
+      verified([1, 2, 3], Point.new(1, 0.67, 0.5), []),
+      verified([4, 5, 6], Point.new(6, 0.67, 0.5), [])
+    ]
+
+    result = Collapse.collapse(source, candidates)
+
+    assert_equal 2, result[:collapse_count]
+    assert_equal 2, result[:triangle_count]
+    assert_equal 2, result[:eligible_count]
+    assert_equal [0, nil, nil], result[:original_indices]
+    assert_empty result[:edges]
+    assert_equal 3, result[:nodes].length
+    assert_equal 7, source[:nodes].length
+    assert_equal 6, source[:edges].length
+  end
+
+  def test_shared_vertex_loops_cannot_be_collapsed_in_same_batch
+    source = graph(
+      [n(10, 10), n(0, 0), n(2, 0), n(1, 1), n(3, 1)],
+      [[1, 2], [1, 3], [2, 3], [2, 4], [3, 4]]
+    )
+    candidates = [
+      verified([1, 2, 3], Point.new(1, 0.33, 0.5), [4]),
+      verified([2, 3, 4], Point.new(2, 0.67, 0.5), [1])
+    ]
+
+    result = Collapse.collapse(source, candidates)
+
+    assert_equal 1, result[:collapse_count]
+    assert_equal 2, result[:eligible_count]
+    assert_equal [0, 4, nil], result[:original_indices]
+    assert_equal [[1, 2]], result[:edges]
+    assert_equal 5, source[:nodes].length
+    assert_equal 5, source[:edges].length
+  end
+
+  def test_disjoint_loops_with_cross_edge_require_unverified_center_to_center_los
+    source = graph(
+      [n(10, 10), n(0, 0), n(2, 0), n(1, 2),
+       n(5, 0), n(7, 0), n(6, 2)],
+      [[1, 2], [1, 3], [2, 3],
+       [4, 5], [4, 6], [5, 6], [3, 4]]
+    )
+    candidates = [
+      verified([1, 2, 3], Point.new(1, 0.67, 0.5), [4]),
+      verified([4, 5, 6], Point.new(6, 0.67, 0.5), [3])
+    ]
+
+    result = Collapse.collapse(source, candidates)
+
+    assert_equal 2, result[:eligible_count]
+    assert_equal 1, result[:collapse_count]
+    assert_equal [0, 4, 5, 6, nil], result[:original_indices]
+    assert_equal [[1, 2], [1, 3], [1, 4], [2, 3]], result[:edges]
+  end
+
+  def test_batch_result_does_not_depend_on_native_candidate_order
+    source = graph(
+      [n(10, 10), n(0, 0), n(2, 0), n(1, 2),
+       n(5, 0), n(7, 0), n(6, 2)],
+      [[1, 2], [1, 3], [2, 3], [4, 5], [4, 6], [5, 6]]
+    )
+    candidates = [
+      verified([1, 2, 3], Point.new(1, 0.67, 0.5), []),
+      verified([4, 5, 6], Point.new(6, 0.67, 0.5), [])
+    ]
+
+    first = Collapse.collapse(source, candidates)
+    second = Collapse.collapse(source, candidates.reverse)
+
+    assert_equal first, second
+    assert_equal 2, first[:collapse_count]
+  end
+
 end
