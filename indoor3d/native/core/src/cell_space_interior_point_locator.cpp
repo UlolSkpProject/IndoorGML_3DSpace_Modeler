@@ -26,6 +26,9 @@ constexpr std::size_t MAX_SEARCH_NODES = 200000;
 // Ignore numerical angle noise and emit at a cumulative -15 degree turn.
 constexpr double ROOM_REFLEX_NOISE_DEGREES = 0.25;
 constexpr double ROOM_CUMULATIVE_TURN_DEGREES = 15.0;
+// Fraction of the inward corner ray to the first opposite vertical wall.
+// 0.30 places the purple Corner candidate 30% of the way from the corner.
+constexpr double ROOM_REFERENCE_INWARD_DISTANCE_FRACTION = 0.30;
 // Only remove a middle candidate when a direct shortcut deviates by at most
 // 15% of the smallest local corridor width and retains wall clearance.
 constexpr double ROOM_SHORTCUT_MAX_DEVIATION_WIDTH_FRACTION = 0.15;
@@ -1200,7 +1203,9 @@ std::vector<ReferencePoint> find_reference_points(
         const double distance =
             opposite_wall_distance(walls, vertex, inward[i], tolerance);
         if (!std::isfinite(distance) || distance <= tolerance * 2.0) continue;
-        const Vec3 candidate = add(vertex, multiply(inward[i], 0.5 * distance));
+        const Vec3 candidate = add(
+            vertex, multiply(inward[i], ROOM_REFERENCE_INWARD_DISTANCE_FRACTION * distance)
+        );
         if (safe_reference(bvh, candidate, state_point, tolerance) &&
             clear_path(bvh, add(vertex, multiply(inward[i], probe)), candidate, tolerance))
             candidates[i] = candidate;

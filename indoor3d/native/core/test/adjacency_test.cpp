@@ -570,6 +570,28 @@ void test_room_reflex_threshold_15_degree_turn()
     }
 }
 
+void test_room_reference_corner_uses_30_percent_wall_distance()
+{
+    // Symmetric notch vertex (2, 3.5) has an inward bisector straight
+    // toward Y=0. The opposite-wall distance is 3.5, so the Corner
+    // candidate must lie at Y=3.5 - (0.30 * 3.5) = 2.45.
+    const CellData room = shallow_reflex_prism_cell(0.5);
+    const std::vector<ReferencePoint> refs =
+        find_reference_points(room, {2.0, 0.5, 0.5}, 0.001);
+    bool matched = false;
+    for (const ReferencePoint& ref : refs)
+    {
+        if (ref.kind != ReferencePointKind::Corner) continue;
+        require(std::abs(ref.point.z - 0.5) < 1.0e-9,
+                "Room reference must retain State Z");
+        if (std::abs(ref.point.x - 2.0) < 1.0e-6 &&
+            std::abs(ref.point.y - 2.45) < 1.0e-6)
+            matched = true;
+    }
+    require(matched,
+            "Room reflex Corner reference must use 30% inward wall distance");
+}
+
 void test_cumulative_reflex_turn_on_curved_wall()
 {
     const CellData cell = gradual_reflex_arc();
@@ -905,6 +927,7 @@ int main()
     test_convex_room_uses_state_only();
     test_signed_corner_turn_accumulation();
     test_room_reflex_threshold_15_degree_turn();
+    test_room_reference_corner_uses_30_percent_wall_distance();
     test_cumulative_reflex_turn_on_curved_wall();
     test_smooth_concave_wall_retains_safe_navigation_candidates();
     test_local_width_limits_cluster_radius();
