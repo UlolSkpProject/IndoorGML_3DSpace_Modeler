@@ -271,6 +271,8 @@ module ULOL
 
               cell_id = cell_space.id
               case selected_mode
+              when :internal
+                room_internal_graph_for(cell_id)
               when :optimized
                 optimized_debug_reference_graph_for(cell_id) ||
                   collapsed_debug_reference_graph_for(cell_id) ||
@@ -286,6 +288,11 @@ module ULOL
             end
           end
 
+          # Immutable per-CellSpace graph; Native LOS edges + distance weights.
+          def room_internal_graph_for(cell_id)
+            @room_internal_graph_by_cell_id&.[](cell_id.to_s)
+          end
+
           def debug_reference_points_by_kind
             selected_mode = ReferenceGraphDebugMode.mode
             originals = @debug_reference_points_by_cell_id || {}
@@ -294,6 +301,10 @@ module ULOL
               next unless cell_space&.valid?
 
               cell_id = cell_space.id
+              # An unavailable Native LOS graph must never masquerade as an
+              # internal graph by falling back to old candidate diagnostics.
+              next if selected_mode == :internal && !room_internal_graph_for(cell_id)
+
               displayed = case selected_mode
                           when :after then simplified_debug_reference_graph_for(cell_id)
                           when :collapsed then collapsed_debug_reference_graph_for(cell_id) ||
@@ -301,6 +312,7 @@ module ULOL
                           when :optimized then optimized_debug_reference_graph_for(cell_id) ||
                                                  collapsed_debug_reference_graph_for(cell_id) ||
                                                  simplified_debug_reference_graph_for(cell_id)
+                          when :internal then room_internal_graph_for(cell_id)
                           end
               if displayed
                 # After mode shows only retained black Final points. Their
@@ -559,6 +571,7 @@ module ULOL
               # Native has this CellSpace geometry only until session close.
               # Precalculate LOS-based shortcuts now, never during draw(view).
               preload_native_shortcuts_for(cell_space, index)
+              preload_room_internal_graph_for(cell_space, index)
               state_point_applier.call(cell_space, coordinates)
             end
 
@@ -678,6 +691,7 @@ module ULOL
             @debug_reference_graph_simplified_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_collapsed_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_optimized_by_cell_id&.delete(cell_space.id)
+            @room_internal_graph_by_cell_id&.delete(cell_space.id)
             true
           rescue StandardError
             # Debug rendering must never block the State/CellSpace lifecycle.
@@ -685,6 +699,7 @@ module ULOL
             @debug_reference_graph_simplified_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_collapsed_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_optimized_by_cell_id&.delete(cell_space.id)
+            @room_internal_graph_by_cell_id&.delete(cell_space.id)
             false
           end
 
@@ -760,6 +775,37 @@ module ULOL
             nil
           end
 
+          # Build after OPTIMIZED, while Native still holds Room geometry.
+          # All-pairs LOS is batched. A failure is isolated from CellSpace
+          # creation, State placement and the original debug graph.
+          def preload_room_internal_graph_for(cell_space, session_index)
+            return unless cell_space&.valid?
+            return unless cell_space.category_code.to_s.casecmp('Room').zero?
+            return unless NativeAdjacencyBridge.shared_session_active?
+            return unless NativeAdjacencyBridge.room_los_supported?
+
+            optimized = @debug_reference_graph_optimized_by_cell_id&.[](cell_space.id)
+            return unless optimized
+
+            tolerance = Utils::Geometry::ADJACENCY_TOLERANCE
+            los_batch = lambda do |pairs|
+              NativeAdjacencyBridge.validate_room_los_batch_from_open_session(
+                session_index, pairs, tolerance: tolerance
+              )
+            end
+            graph = RoomInternalVisibilityGraph.build(
+              optimized, los_batch: los_batch
+            )
+            (@room_internal_graph_by_cell_id ||= {})[cell_space.id] = graph
+          rescue StandardError => error
+            @room_internal_graph_by_cell_id&.delete(cell_space.id)
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Room internal visibility graph skipped cell=#{cell_space.id}: " \
+              "#{error.class}: #{error.message}"
+            ) if defined?(IndoorCore::Logger)
+            nil
+          end
+
           # Lazy stage after Collapse, never mutates the previous snapshots.
           def optimized_debug_reference_graph_for(cell_id)
             cache = (@debug_reference_graph_optimized_by_cell_id ||= {})
@@ -786,6 +832,7 @@ module ULOL
             @debug_reference_graph_simplified_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_collapsed_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_optimized_by_cell_id&.delete(cell_space.id)
+            @room_internal_graph_by_cell_id&.delete(cell_space.id)
             true
           end
 

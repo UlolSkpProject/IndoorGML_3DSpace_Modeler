@@ -208,6 +208,39 @@ module ULOL
           native.validate_room_los(Integer(cell_index), payload, Float(tolerance)) == [true]
         end
 
+        # Batched LOS against the active per-CellSpace Native geometry.
+        # This is only valid while the shared geometry session is open.
+        def validate_room_los_batch_from_open_session(cell_index, pairs, tolerance:)
+          raise ProtocolError, 'Native geometry session is not active' unless shared_session_active?
+          raise ProtocolError, 'Native Room LOS API unavailable' unless room_los_supported?
+
+          segments = Array(pairs)
+          if segments.size > 2048
+            raise ProtocolError, 'Room LOS batch must contain at most 2048 segments'
+          end
+
+          doubles = segments.flat_map do |pair|
+            endpoints = Array(pair)
+            raise ProtocolError, 'Room LOS segment must contain two endpoints' unless endpoints.size == 2
+
+            endpoints.flat_map do |point|
+              coords = point.respond_to?(:to_a) ? Array(point.to_a) : []
+              unless coords.size == 3 && coords.all? { |value| value.is_a?(Numeric) && value.finite? }
+                raise ProtocolError, 'Room LOS segment has invalid 3D coordinates'
+              end
+              coords
+            end
+          end
+
+          result = native.validate_room_los(Integer(cell_index), doubles.pack('E*'), Float(tolerance))
+          unless result.is_a?(Array) &&
+                 result.size == segments.size &&
+                 result.all? { |value| value == true || value == false }
+            raise ProtocolError, 'Native Room LOS batch result is invalid'
+          end
+          result
+        end
+
         def compute_state_from_open_session
           raise ProtocolError, 'native geometry session is not active' unless shared_session_active?
 

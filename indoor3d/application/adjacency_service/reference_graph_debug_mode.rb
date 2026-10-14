@@ -8,6 +8,7 @@ module ULOL
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.after!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.collapsed!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.optimized!
+      # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.internal!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.mode
       #
       # Controls only the runtime debug overlay. Both graph snapshots remain
@@ -31,6 +32,10 @@ module ULOL
           mode == :optimized
         end
 
+        def internal?
+          mode == :internal
+        end
+
         def before!
           set_mode(:before)
         end
@@ -47,8 +52,12 @@ module ULOL
           set_mode(:optimized)
         end
 
+        def internal!
+          set_mode(:internal)
+        end
+
         def set_mode(value)
-          raise ArgumentError, 'expected :before, :after, :collapsed or :optimized' unless %i[before after collapsed optimized].include?(value)
+          raise ArgumentError, 'expected :before, :after, :collapsed, :optimized or :internal' unless %i[before after collapsed optimized internal].include?(value)
 
           @mode = value
           if defined?(Sketchup) && Sketchup.respond_to?(:active_model)
