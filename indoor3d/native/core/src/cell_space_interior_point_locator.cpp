@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <numeric>
 #include <optional>
@@ -1418,89 +1419,250 @@ ReferenceGraphDebug build_room_reference_visibility_graph(
             graph.edges.push_back({i, j});
         }
     }
-    // Failure to prevalidate optional collapse candidates must not erase the
-    // already successful State, Reference Points, circles, or LOS edges.
+    // Optional prevalidation is isolated from successful State, references,
+    // disks and original visibility edges.
     try
     {
-    // Prevalidate NEW points while the original cell geometry/BVH is still
-    // available. Ruby cannot safely invent visibility edges after this Native
-    // geometry session is closed. This does not collapse the original graph.
-    constexpr std::size_t MAX_LOOP_GRAPH_NODES = 192;
-    constexpr std::size_t MAX_LOOP_CANDIDATES = 768;
-    const std::size_t count = graph.nodes.size();
-    if (count <= MAX_LOOP_GRAPH_NODES)
-    {
-        std::vector<std::vector<bool>> linked(
-            count, std::vector<bool>(count, false));
-        for (const ReferenceGraphEdge& edge : graph.edges)
+        constexpr std::size_t MAX_LOOP_GRAPH_NODES = 192;
+        constexpr std::size_t MAX_LOOP_VERTICES = 32;
+        constexpr std::size_t MAX_TRIANGLE_CANDIDATES = 256;
+        constexpr std::size_t MAX_LONG_LOOP_CANDIDATES = 512;
+        constexpr std::size_t MAX_CYCLE_SEARCH_STEPS = 1000000;
+        constexpr std::size_t MAX_TRIANGLE_EVALUATIONS = 4096;
+        constexpr std::size_t MAX_LONG_EVALUATIONS = 4096;
+        const std::size_t count = graph.nodes.size();
+        if (count <= MAX_LOOP_GRAPH_NODES)
         {
-            linked[edge.first][edge.second] = true;
-            linked[edge.second][edge.first] = true;
-        }
-        // NEW collapse-only edges are determined by actual geometry LOS,
-        // not overlap of the inscribed circles. The original visibility
-        // graph above still requires both circle overlap and LOS.
-        // Avoid treating coincident centers as a navigable edge.
-        const auto may_connect = [&](const Vec3& point, std::size_t other) {
-            const Vec3& target = graph.nodes[other].point;
-            if (distance_xy_squared(point, target) <= tolerance * tolerance)
-                return false;
-            if (crosses_wall_slice(walls, point, target, tolerance))
-                return false;
-            return clear_path(bvh, point, target, tolerance);
-        };
-
-        // Exclude triangles containing State: Ruby handles those by retaining
-        // State itself and validating its existing, immutable edges.
-        for (std::size_t i = 1; i < count; ++i)
-        {
-            for (std::size_t j = i + 1; j < count; ++j)
+            std::vector<std::vector<bool>> linked(
+                count, std::vector<bool>(count, false));
+            for (const ReferenceGraphEdge& edge : graph.edges)
             {
-                if (!linked[i][j]) continue;
-                for (std::size_t k = j + 1; k < count; ++k)
+                linked[edge.first][edge.second] = true;
+                linked[edge.second][edge.first] = true;
+            }
+
+            // New collapse edges need actual Native LOS, NOT overlap of the
+            // inscribed disks. The original graph above is left unchanged.
+            const auto may_connect = [&](const Vec3& point, std::size_t other) {
+                const Vec3& target = graph.nodes[other].point;
+                if (distance_xy_squared(point, target) <= tolerance * tolerance)
+                    return false;
+                if (crosses_wall_slice(walls, point, target, tolerance))
+                    return false;
+                return clear_path(bvh, point, target, tolerance);
+            };
+
+            const auto orientation = [](const Vec3& a, const Vec3& b, const Vec3& c) {
+                return (b.x - a.x) * (c.y - a.y) -
+                       (b.y - a.y) * (c.x - a.x);
+            };
+            const auto intersects = [&](const Vec3& a, const Vec3& b,
+                                        const Vec3& c, const Vec3& d) {
+                const double ab_c = orientation(a, b, c);
+                const double ab_d = orientation(a, b, d);
+                const double cd_a = orientation(c, d, a);
+                const double cd_b = orientation(c, d, b);
+                if ((ab_c > tolerance && ab_d > tolerance) ||
+                    (ab_c < -tolerance && ab_d < -tolerance) ||
+                    (cd_a > tolerance && cd_b > tolerance) ||
+                    (cd_a < -tolerance && cd_b < -tolerance))
+                    return false;
+                return std::max(std::min(a.x, b.x), std::min(c.x, d.x)) <=
+                           std::min(std::max(a.x, b.x), std::max(c.x, d.x)) + tolerance &&
+                       std::max(std::min(a.y, b.y), std::min(c.y, d.y)) <=
+                           std::min(std::max(a.y, b.y), std::max(c.y, d.y)) + tolerance;
+            };
+
+            // Strict polygon containment: center must not lie on a loop edge.
+            const auto inside_loop = [&](const Vec3& point,
+                                         const std::vector<std::size_t>& cycle) {
+                bool inside = false;
+                for (std::size_t i = 0; i < cycle.size(); ++i)
                 {
-                    if (!linked[i][k] || !linked[j][k]) continue;
-                    const Vec3& a = graph.nodes[i].point;
-                    const Vec3& b = graph.nodes[j].point;
-                    const Vec3& c = graph.nodes[k].point;
-                    const double twice_area =
-                        std::abs(cross_xy(subtract(b, a), subtract(c, a)));
-                    if (twice_area <= tolerance * tolerance * 16.0) continue;
-                    const Vec3 center{
-                        (a.x + b.x + c.x) / 3.0,
-                        (a.y + b.y + c.y) / 3.0,
-                        state_point.z
-                    };
-                    const double wall_distance = nearest_wall_clearance(walls, center);
-                    if (!std::isfinite(wall_distance) ||
-                        wall_distance <= tolerance * 2.0 ||
+                    const Vec3& a = graph.nodes[cycle[i]].point;
+                    const Vec3& b = graph.nodes[cycle[(i + 1) % cycle.size()]].point;
+                    const double length_ab = std::hypot(b.x - a.x, b.y - a.y);
+                    if (length_ab <= tolerance) return false;
+                    if (std::abs(orientation(a, b, point)) <= tolerance * length_ab &&
+                        point.x >= std::min(a.x, b.x) - tolerance &&
+                        point.x <= std::max(a.x, b.x) + tolerance &&
+                        point.y >= std::min(a.y, b.y) - tolerance &&
+                        point.y <= std::max(a.y, b.y) + tolerance)
+                        return false;
+                    if ((a.y > point.y) != (b.y > point.y))
+                    {
+                        const double x = a.x + (point.y - a.y) *
+                            (b.x - a.x) / (b.y - a.y);
+                        if (point.x < x) inside = !inside;
+                    }
+                }
+                return inside;
+            };
+
+            std::size_t triangle_count = 0;
+            std::size_t long_count = 0;
+            std::size_t triangle_evaluations = 0;
+            std::size_t long_evaluations = 0;
+            const auto evaluate_cycle = [&](const std::vector<std::size_t>& cycle) {
+                const std::size_t n = cycle.size();
+                if (n < 3 || n > MAX_LOOP_VERTICES) return;
+                if (n == 3)
+                {
+                    if (triangle_count >= MAX_TRIANGLE_CANDIDATES ||
+                        ++triangle_evaluations > MAX_TRIANGLE_EVALUATIONS)
+                        return;
+                }
+                else
+                {
+                    if (long_count >= MAX_LONG_LOOP_CANDIDATES ||
+                        ++long_evaluations > MAX_LONG_EVALUATIONS)
+                        return;
+                }
+
+                double twice_area = 0.0;
+                double center_x = 0.0;
+                double center_y = 0.0;
+                for (std::size_t i = 0; i < n; ++i)
+                {
+                    const Vec3& a = graph.nodes[cycle[i]].point;
+                    const Vec3& b = graph.nodes[cycle[(i + 1) % n]].point;
+                    const double cross = a.x * b.y - b.x * a.y;
+                    twice_area += cross;
+                    center_x += (a.x + b.x) * cross;
+                    center_y += (a.y + b.y) * cross;
+                    if (distance_xy_squared(a, b) <= tolerance * tolerance)
+                        return;
+                }
+                if (std::abs(twice_area) <= tolerance * tolerance * 16.0)
+                    return;
+
+                // Reject self-intersecting cycles. Visibility of individual
+                // perimeter edges does not imply a valid interior polygon.
+                for (std::size_t i = 0; i < n; ++i)
+                {
+                    const Vec3& a = graph.nodes[cycle[i]].point;
+                    const Vec3& b = graph.nodes[cycle[(i + 1) % n]].point;
+                    for (std::size_t j = i + 2; j < n; ++j)
+                    {
+                        if (i == 0 && j == n - 1) continue;
+                        const Vec3& c = graph.nodes[cycle[j]].point;
+                        const Vec3& d = graph.nodes[cycle[(j + 1) % n]].point;
+                        if (intersects(a, b, c, d)) return;
+                    }
+                }
+
+                std::vector<Vec3> centers;
+                centers.push_back({
+                    center_x / (3.0 * twice_area),
+                    center_y / (3.0 * twice_area), state_point.z
+                });
+                // Concave polygons can have an area centroid outside their
+                // interior. Try simple local triangle centroids as fallback;
+                // every candidate must separately pass strict geometry/LOS.
+                if (n > 3)
+                {
+                    for (std::size_t i = 0; i < n; ++i)
+                    {
+                        const Vec3& a = graph.nodes[cycle[i]].point;
+                        const Vec3& b = graph.nodes[cycle[(i + 1) % n]].point;
+                        const Vec3& c = graph.nodes[cycle[(i + 2) % n]].point;
+                        centers.push_back({
+                            (a.x + b.x + c.x) / 3.0,
+                            (a.y + b.y + c.y) / 3.0, state_point.z
+                        });
+                    }
+                }
+
+                for (const Vec3& center : centers)
+                {
+                    if (!inside_loop(center, cycle)) continue;
+                    const double clearance = nearest_wall_clearance(walls, center);
+                    if (!std::isfinite(clearance) ||
+                        clearance <= tolerance * 2.0 ||
                         !bvh_inside(bvh, center, tolerance) ||
                         bvh.nearest_distance(center) <= tolerance)
                         continue;
-                    const double radius = wall_distance - tolerance;
+                    bool visible = true;
+                    for (std::size_t index : cycle)
+                    {
+                        if (!may_connect(center, index))
+                        {
+                            visible = false;
+                            break;
+                        }
+                    }
+                    if (!visible) continue;
 
                     ReferenceLoopCollapseCandidate candidate;
-                    candidate.triangle = {i, j, k};
-                    candidate.representative = {center, radius};
-                    // All original loop vertices must see the replacement;
-                    // otherwise never transmit an invalid candidate.
-                    if (!may_connect(center, i) ||
-                        !may_connect(center, j) ||
-                        !may_connect(center, k))
-                        continue;
-                    for (std::size_t neighbor = 0; neighbor < count; ++neighbor)
+                    candidate.vertices = cycle;
+                    candidate.representative = {center, clearance - tolerance};
+                    std::vector<bool> belongs(count, false);
+                    for (std::size_t index : cycle) belongs[index] = true;
+                    for (std::size_t other = 0; other < count; ++other)
                     {
-                        if (neighbor == i || neighbor == j || neighbor == k) continue;
-                        if (may_connect(center, neighbor))
-                            candidate.visible_neighbors.push_back(neighbor);
+                        if (!belongs[other] && may_connect(center, other))
+                            candidate.visible_neighbors.push_back(other);
                     }
                     graph.loop_candidates.push_back(std::move(candidate));
-                    if (graph.loop_candidates.size() >= MAX_LOOP_CANDIDATES)
-                        return graph;
+                    if (n == 3) ++triangle_count;
+                    else ++long_count;
+                    return;
                 }
+            };
+
+            // Enumerate chordless (induced) simple cycles of ANY length
+            // from 3 to 32. Restrict start to the lowest vertex ID and the
+            // second vertex to below the last to avoid reversed duplicates.
+            // State is excluded: Ruby can retain State as a representative
+            // without inventing a new center.
+            std::size_t search_steps = 0;
+            std::vector<bool> used(count, false);
+            std::vector<std::size_t> path;
+            std::function<void(std::size_t, std::size_t)> visit;
+            visit = [&](std::size_t start, std::size_t current) {
+                if (++search_steps > MAX_CYCLE_SEARCH_STEPS) return;
+                for (std::size_t next = start + 1; next < count; ++next)
+                {
+                    if (!linked[current][next] || used[next]) continue;
+                    bool chord = false;
+                    for (std::size_t k = 1; k + 1 < path.size(); ++k)
+                    {
+                        if (linked[next][path[k]])
+                        {
+                            chord = true;
+                            break;
+                        }
+                    }
+                    if (chord) continue;
+
+                    if (path.size() >= 2 && linked[start][next])
+                    {
+                        if (path[1] < next)
+                        {
+                            path.push_back(next);
+                            evaluate_cycle(path);
+                            path.pop_back();
+                        }
+                        continue; // extending here would give a start chord
+                    }
+                    if (path.size() >= MAX_LOOP_VERTICES) continue;
+                    used[next] = true;
+                    path.push_back(next);
+                    visit(start, next);
+                    path.pop_back();
+                    used[next] = false;
+                    if (search_steps > MAX_CYCLE_SEARCH_STEPS) return;
+                }
+            };
+            for (std::size_t start = 1; start < count; ++start)
+            {
+                used[start] = true;
+                path = {start};
+                visit(start, start);
+                used[start] = false;
+                if (search_steps > MAX_CYCLE_SEARCH_STEPS) break;
             }
         }
-    }
     }
     catch (...)
     {

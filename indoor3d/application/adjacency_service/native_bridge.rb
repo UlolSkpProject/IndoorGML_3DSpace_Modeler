@@ -10,7 +10,8 @@ module ULOL
         PROTOCOL_VERSION = 1
         GEOMETRY_PROTOCOL_VERSION = 3
         REFERENCE_POINTS_RESULT_VERSION = 2
-        STATE_RESULT_VERSION = 6
+        STATE_RESULT_VERSION = 7
+        TRIANGLE_RESULT_VERSION = 6
         GRAPH_RESULT_VERSION = 5
         PREVIOUS_STATE_RESULT_VERSION = 4
         LEGACY_STATE_RESULT_VERSION = 3
@@ -429,7 +430,8 @@ module ULOL
           version = reader.read_u64
           unless [PROTOCOL_VERSION, REFERENCE_POINTS_RESULT_VERSION,
                   LEGACY_STATE_RESULT_VERSION, PREVIOUS_STATE_RESULT_VERSION,
-                  GRAPH_RESULT_VERSION, STATE_RESULT_VERSION].include?(version)
+                  GRAPH_RESULT_VERSION, TRIANGLE_RESULT_VERSION,
+                  STATE_RESULT_VERSION].include?(version)
             raise ProtocolError, "unsupported native State result version #{version}"
           end
 
@@ -513,14 +515,20 @@ module ULOL
               end
             end
             candidates = []
-            if version >= STATE_RESULT_VERSION
+            if version >= TRIANGLE_RESULT_VERSION
               count = checked_count(reader.read_u64, 'loop candidate count')
               count.times do
-                triangle = 3.times.map do
-                  checked_count(reader.read_u64, 'loop triangle vertex')
+                length = version >= STATE_RESULT_VERSION ?
+                  checked_count(reader.read_u64, 'loop vertex count') : 3
+                unless length.between?(3, 32)
+                  raise ProtocolError, 'invalid loop vertex count'
+                end
+                vertices = length.times.map do
+                  checked_count(reader.read_u64, 'loop vertex')
                 end.freeze
-                if triangle.uniq.length != 3 || triangle.any? { |index| index >= nodes.length }
-                  raise ProtocolError, 'invalid loop triangle'
+                if vertices.uniq.length != length ||
+                   vertices.any? { |index| index >= nodes.length }
+                  raise ProtocolError, 'invalid loop vertex indices'
                 end
                 point = [
                   finite_f64(reader.read_f64, 'loop center x'),
@@ -538,7 +546,9 @@ module ULOL
                   raise ProtocolError, 'loop visible node outside graph'
                 end
                 candidates << {
-                  triangle: triangle,
+                  # :triangle remains for older Ruby diagnostic callers.
+                  triangle: vertices,
+                  vertices: vertices,
                   point: point,
                   radius: radius,
                   visible_neighbors: visible

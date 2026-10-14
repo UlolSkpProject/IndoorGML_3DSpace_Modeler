@@ -107,6 +107,29 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_in_delta(0.5, candidate[:point][0], 1.0e-9)
   end
 
+  def test_v7_state_result_decodes_four_cycle_and_retains_v6_compatibility
+    v7 = "IGMLSTA\0".b + [7, 1, 0].pack('Q<3')
+    v7 << [0].pack('Q<') << [0.2, 0.2, 0.5].pack('E3')
+    v7 << [1, 0].pack('Q<2')
+    v7 << [5].pack('Q<')
+    [
+      [0.2, 0.2, 0.5, 0.2],
+      [0.27, 0.27, 0.5, 0.269],
+      [0.73, 0.27, 0.5, 0.269],
+      [0.73, 0.73, 0.5, 0.269],
+      [0.27, 0.73, 0.5, 0.269]
+    ].each { |node| v7 << node.pack('E4') }
+    v7 << [4, 1, 2, 2, 3, 3, 4, 1, 4].pack('Q<9')
+    v7 << [1, 4, 1, 2, 3, 4].pack('Q<6')
+    v7 << [0.5, 0.5, 0.5, 0.499].pack('E4')
+    v7 << [1, 0].pack('Q<2')
+
+    result = Bridge.decode_state_result(v7)
+    assert_equal [[1, 2, 3, 4]], result[:graph_loop_candidates][0].map { |r| r[:vertices] }
+    assert_equal [1, 2, 3, 4], result[:graph_loop_candidates][0][0][:triangle]
+    assert_equal [0], result[:graph_loop_candidates][0][0][:visible_neighbors]
+  end
+
   def test_result_decoding_restores_snapshot_face_references
     snapshots = sample_snapshots
     candidate =

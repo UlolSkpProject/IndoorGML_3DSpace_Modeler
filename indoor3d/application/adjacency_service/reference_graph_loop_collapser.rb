@@ -3,11 +3,11 @@
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
-      # Deferred, non-destructive contraction of triangular cycles in the
-      # AFTER graph. All triangles are detected and evaluated against the SAME
+      # Deferred, non-destructive contraction of simple minimal 3+ cycles in
+      # the AFTER graph. All loops are detected and evaluated against the SAME
       # original After snapshot; only then is a single batch graph constructed.
       #
-      # Native V6 prevalidates centroid positions and LOS to original nodes.
+      # Native V7 prevalidates representative positions and LOS to original nodes.
       # A replacement never gains an invented LOS edge. Overlapping cycles,
       # or cycles joined by an edge between nodes both being removed, are
       # conflicting and cannot be contracted in the same batch.
@@ -17,6 +17,11 @@ module ULOL
       module ReferenceGraphLoopCollapser
         MAX_GRAPH_NODES = 192
         MAX_COLLAPSES = 256
+        MAX_LOOP_VERTICES = 32
+        MAX_SEARCH_STEPS = 150000
+        MAX_TRIANGLE_LOOPS = 256
+        MAX_LONG_LOOPS = 512
+        GEOMETRY_EPSILON = 1.0e-8
 
         module_function
 
@@ -29,45 +34,46 @@ module ULOL
                                            nodes.length != origins.length ||
                                            origins.first != 0
 
-          triangles = cycle_triangles(nodes, edges)
-          return unchanged(after_graph, triangles.length) if triangles.empty?
+          loops = cycle_loops(nodes, edges)
+          return unchanged(after_graph, 0, 0) if loops.empty?
 
           candidates = Array(verified_candidates).each_with_object({}) do |record, lookup|
-            triple = Array(record[:triangle]).sort
-            lookup[triple] = record if triple.length == 3 && triple.uniq.length == 3
+            vertices = Array(record[:vertices] || record[:triangle]).sort
+            lookup[vertices] = record if vertices.length.between?(3, MAX_LOOP_VERTICES) &&
+                                         vertices.uniq.length == vertices.length
           end
 
           # Freeze the detection snapshot logically: both eligibility and
           # conflict resolution use the original AFTER nodes and edges only.
-          # Smaller triangles have priority, with deterministic index ties.
-          triangles.sort_by! { |triple| [triangle_area(nodes, triple), triple] }
-          eligible = triangles.filter_map do |triple|
-            original_ids = triple.map { |index| origins[index] }
+          # Smaller loops have priority, with deterministic index ties.
+          loops.sort_by! { |vertices| [loop_area(nodes, vertices).abs, vertices.length, vertices] }
+          eligible = loops.filter_map do |vertices|
+            original_ids = vertices.map { |index| origins[index] }
             next if original_ids.any?(&:nil?)
 
             state_loop = original_ids.include?(0)
             candidate = state_loop ? nil : candidates[original_ids.sort]
             next unless state_loop || candidate
 
-            boundary = external_neighbors(triple, edges)
+            boundary = external_neighbors(vertices, edges)
             next if boundary.any? { |index| origins[index].nil? }
 
             if state_loop
               # Native's existing State edges must already reach ALL external
               # neighbors. State itself is retained, not regenerated.
               next unless boundary.all? { |index| edge_exists?(edges, 0, index) }
-              removed = triple.reject(&:zero?)
+              removed = vertices.reject(&:zero?)
             else
               # Every external replacement edge was validated by Native LOS,
               # without a circle-overlap requirement.
               next unless candidate[:point] && candidate[:radius].to_f.positive?
               visible = Array(candidate[:visible_neighbors])
               next unless boundary.all? { |index| visible.include?(origins[index]) }
-              removed = triple
+              removed = vertices
             end
 
             {
-              triangle: triple.freeze,
+              vertices: vertices.freeze,
               removed: removed.freeze,
               boundary: boundary.freeze,
               state_loop: state_loop,
@@ -86,9 +92,9 @@ module ULOL
           eligible.each do |option|
             break if selected.length >= MAX_COLLAPSES
 
-            # A node cannot belong to two contracts; even shared State
-            # triangles are deferred to later experiments, not merged twice.
-            next if option[:triangle].any? { |index| reserved_vertices[index] }
+            # One node cannot belong to two contracts; even loops sharing
+            # State are excluded from the same batch.
+            next if option[:vertices].any? { |index| reserved_vertices[index] }
 
             # Although their triangles are disjoint, two candidates can have
             # edges between vertices that BOTH disappear. Keeping both would
@@ -101,10 +107,10 @@ module ULOL
             next if has_cross_edges
 
             selected << option
-            option[:triangle].each { |index| reserved_vertices[index] = true }
+            option[:vertices].each { |index| reserved_vertices[index] = true }
           end
 
-          return unchanged(after_graph, triangles.length, eligible.length) if selected.empty?
+          return unchanged(after_graph, loops.length, eligible.length) if selected.empty?
 
           # Apply all selected contractions simultaneously. The original graph
           # is never updated between candidates.
@@ -142,16 +148,18 @@ module ULOL
             edges: new_edges.uniq.sort.map(&:freeze).freeze,
             original_indices: new_origins.freeze,
             collapse_count: selected.length,
-            triangle_count: triangles.length,
+            loop_count: loops.length,
+            triangle_count: loops.count { |cycle| cycle.length == 3 },
             eligible_count: eligible.length,
             merged_into: Array(after_graph[:merged_into])
           }.freeze
         end
 
-        def unchanged(after_graph, triangles = 0, eligible = 0)
+        def unchanged(after_graph, loops = 0, eligible = 0)
           after_graph.merge(
             collapse_count: 0,
-            triangle_count: triangles,
+            loop_count: loops,
+            triangle_count: loops,
             eligible_count: eligible
           ).freeze
         end
@@ -160,34 +168,151 @@ module ULOL
           edges.any? { |a, b| (a == first && b == second) || (a == second && b == first) }
         end
 
-        def cycle_triangles(nodes, edges)
-          adj = Array.new(nodes.size) { {} }
+        # Enumerate chordless cycles, not just 3-cycles. Only accept simple,
+        # positive-area polygons without other surviving nodes in the interior.
+        # The search is capped to keep debug redraw/cache generation bounded.
+        def cycle_loops(nodes, edges)
+          adj = Array.new(nodes.length) { {} }
           edges.each do |a, b|
             next unless a.is_a?(Integer) && b.is_a?(Integer)
-            next if a < 0 || b < 0 || a >= nodes.size || b >= nodes.size || a == b
+            next if a.negative? || b.negative? || a >= nodes.length || b >= nodes.length || a == b
 
             adj[a][b] = true
             adj[b][a] = true
           end
-          result = []
-          nodes.length.times do |a|
-            adj[a].each_key do |b|
-              next unless b > a
-              adj[b].each_key do |c|
-                result << [a, b, c] if c > b && adj[a].key?(c)
+          neighbors = adj.map { |map| map.keys.sort }
+          found = []
+          triangle_count = 0
+          long_count = 0
+          explored = 0
+
+          nodes.length.times do |start|
+            used = Array.new(nodes.length, false)
+            used[start] = true
+            path = [start]
+
+            visit = lambda do |current|
+              explored += 1
+              next if explored > MAX_SEARCH_STEPS
+
+              neighbors[current].each do |nxt|
+                next if nxt <= start || used[nxt]
+                next if path[1...-1].any? { |prev| adj[nxt].key?(prev) }
+
+                if path.length >= 2 && adj[start].key?(nxt)
+                  if path[1] < nxt
+                    candidate = path + [nxt]
+                    if candidate.length == 3
+                      if triangle_count < MAX_TRIANGLE_LOOPS &&
+                         simple_minimal_loop?(candidate, nodes)
+                        found << candidate.freeze
+                        triangle_count += 1
+                      end
+                    elsif long_count < MAX_LONG_LOOPS &&
+                          simple_minimal_loop?(candidate, nodes)
+                      found << candidate.freeze
+                      long_count += 1
+                    end
+                  end
+                  next
+                end
+                next if path.length >= MAX_LOOP_VERTICES
+
+                used[nxt] = true
+                path << nxt
+                visit.call(nxt)
+                path.pop
+                used[nxt] = false
+                break if explored > MAX_SEARCH_STEPS
               end
             end
+
+            visit.call(start)
+            break if explored > MAX_SEARCH_STEPS
           end
-          result
+          found
         end
 
-        def triangle_area(nodes, indices)
-          a, b, c = indices.map { |index| nodes[index][:point] }
-          ((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)).abs * 0.5
+        # Keep historical direct callers working without restricting the
+        # actual collapse routine to triangles.
+        def cycle_triangles(nodes, edges)
+          cycle_loops(nodes, edges).select { |loop| loop.length == 3 }
         end
 
-        def external_neighbors(triple, edges)
-          members = triple.to_h { |index| [index, true] }
+        def loop_area(nodes, vertices)
+          vertices.each_with_index.sum do |vertex, index|
+            a = nodes[vertex][:point]
+            b = nodes[vertices[(index + 1) % vertices.length]][:point]
+            a.x * b.y - b.x * a.y
+          end * 0.5
+        end
+
+        def orient_xy(a, b, c)
+          (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+        end
+
+        def segments_touch?(a, b, c, d)
+          u = orient_xy(a, b, c)
+          v = orient_xy(a, b, d)
+          w = orient_xy(c, d, a)
+          x = orient_xy(c, d, b)
+          return false if (u > GEOMETRY_EPSILON && v > GEOMETRY_EPSILON) ||
+                          (u < -GEOMETRY_EPSILON && v < -GEOMETRY_EPSILON) ||
+                          (w > GEOMETRY_EPSILON && x > GEOMETRY_EPSILON) ||
+                          (w < -GEOMETRY_EPSILON && x < -GEOMETRY_EPSILON)
+
+          [a.x, b.x].min <= [c.x, d.x].max + GEOMETRY_EPSILON &&
+            [c.x, d.x].min <= [a.x, b.x].max + GEOMETRY_EPSILON &&
+            [a.y, b.y].min <= [c.y, d.y].max + GEOMETRY_EPSILON &&
+            [c.y, d.y].min <= [a.y, b.y].max + GEOMETRY_EPSILON
+        end
+
+        def inside_polygon?(point, polygon)
+          inside = false
+          polygon.each_with_index do |a, index|
+            b = polygon[(index + 1) % polygon.length]
+            ab = Math.hypot(b.x - a.x, b.y - a.y)
+            return false if ab <= GEOMETRY_EPSILON
+            if orient_xy(a, b, point).abs <= GEOMETRY_EPSILON * ab &&
+               point.x.between?([a.x, b.x].min - GEOMETRY_EPSILON,
+                                [a.x, b.x].max + GEOMETRY_EPSILON) &&
+               point.y.between?([a.y, b.y].min - GEOMETRY_EPSILON,
+                                [a.y, b.y].max + GEOMETRY_EPSILON)
+              return false
+            end
+            if (a.y > point.y) != (b.y > point.y)
+              at_x = a.x + (point.y - a.y) * (b.x - a.x) / (b.y - a.y)
+              inside = !inside if point.x < at_x
+            end
+          end
+          inside
+        end
+
+        def simple_minimal_loop?(cycle, nodes)
+          return false if loop_area(nodes, cycle).abs <= GEOMETRY_EPSILON
+
+          polygon = cycle.map { |index| nodes[index][:point] }
+          return false if polygon.any?(&:nil?)
+          count = polygon.length
+          count.times do |i|
+            a, b = polygon[i], polygon[(i + 1) % count]
+            return false if Math.hypot(a.x - b.x, a.y - b.y) <= GEOMETRY_EPSILON
+            ((i + 2)...count).each do |j|
+              next if i.zero? && j == count - 1
+              return false if segments_touch?(a, b, polygon[j], polygon[(j + 1) % count])
+            end
+          end
+
+          chosen = cycle.to_h { |index| [index, true] }
+          nodes.each_with_index do |node, index|
+            next if chosen[index]
+            return false if inside_polygon?(node[:point], polygon)
+          end
+          true
+        end
+
+        def external_neighbors(vertices, edges)
+          members = vertices.to_h { |index| [index, true] }
           edges.flat_map do |a, b|
             if members[a] && !members[b]
               [b]

@@ -52,8 +52,8 @@ struct ReferenceGraphEdge
 
 struct ReferenceLoopCollapseCandidate
 {
-    // Vertex indices refer to the ORIGINAL, non-destructive V5 graph.
-    std::array<std::size_t, 3> triangle{};
+    // Ordered vertex indices of a simple induced 3+ cycle in the ORIGINAL graph.
+    std::vector<std::size_t> vertices;
     ReferenceGraphNode representative;
     // Geometry-validated candidates for new edges to original nodes.
     std::vector<std::size_t> visible_neighbors;

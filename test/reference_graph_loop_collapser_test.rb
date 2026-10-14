@@ -95,6 +95,57 @@ class ReferenceGraphLoopCollapserTest < Minitest::Test
     assert_equal 0, Collapse.collapse(source, [])[:collapse_count]
   end
 
+  def test_deferred_collapse_of_four_cycle
+    source = graph(
+      [n(10, 10), n(0, 0), n(2, 0), n(2, 2), n(0, 2)],
+      [[1, 2], [2, 3], [3, 4], [1, 4]]
+    )
+    candidate = { vertices: [1, 2, 3, 4],
+                  point: Point.new(1, 1, 0.5),
+                  radius: 1.0,
+                  visible_neighbors: [] }
+    result = Collapse.collapse(source, [candidate])
+
+    assert_equal 1, result[:collapse_count]
+    assert_equal 1, result[:loop_count]
+    assert_equal [0, nil], result[:original_indices]
+    assert_empty result[:edges]
+    assert_equal 5, source[:nodes].size
+  end
+
+  def test_five_cycle_preserves_all_external_neighbors
+    source = graph(
+      [n(10, 10), n(0, 0), n(2, 0), n(3, 1), n(1.5, 3), n(-0.5, 1), n(4, 1)],
+      [[1, 2], [2, 3], [3, 4], [4, 5], [1, 5], [3, 6]]
+    )
+    candidate = { vertices: [1, 2, 3, 4, 5],
+                  point: Point.new(1.2, 1.2, 0.5),
+                  radius: 1.0,
+                  visible_neighbors: [6] }
+    result = Collapse.collapse(source, [candidate])
+
+    assert_equal 1, result[:collapse_count]
+    assert_equal [0, 6, nil], result[:original_indices]
+    assert_equal [[1, 2]], result[:edges]
+    assert_equal 7, source[:nodes].size
+  end
+
+  def test_chorded_four_cycle_is_not_minimal
+    source = graph(
+      [n(10, 10), n(0, 0), n(2, 0), n(2, 2), n(0, 2)],
+      [[1, 2], [2, 3], [3, 4], [1, 4], [1, 3]]
+    )
+    candidate = { vertices: [1, 2, 3, 4],
+                  point: Point.new(1, 1, 0.5),
+                  radius: 1.0,
+                  visible_neighbors: [] }
+    result = Collapse.collapse(source, [candidate])
+
+    assert_equal 0, result[:collapse_count]
+    assert_equal [0, 1, 2, 3, 4], result[:original_indices]
+    assert_equal 2, result[:loop_count] # two smaller triangles
+  end
+
   def test_console_has_three_modes
     output, = capture_io do
       assert_equal :before, Mode.before!

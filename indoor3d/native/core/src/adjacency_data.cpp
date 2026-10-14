@@ -20,7 +20,7 @@ constexpr std::uint64_t INPUT_VERSION_V1 = 1;
 constexpr std::uint64_t INPUT_VERSION_V2 = 2;
 constexpr std::uint64_t INPUT_VERSION_V3 = 3;
 constexpr std::uint64_t RESULT_VERSION = 1;
-constexpr std::uint64_t STATE_RESULT_VERSION = 6;
+constexpr std::uint64_t STATE_RESULT_VERSION = 7;
 constexpr std::size_t INPUT_HEADER_SIZE = 32;
 constexpr std::size_t CELL_FIXED_SIZE_V1 = 80;
 constexpr std::size_t CELL_FIXED_SIZE_V2 = 96;
@@ -530,15 +530,18 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
             writer.append_u64(second);
         }
 
-        // V6: geometry-validated representatives for original 3-cycles.
-        // The Ruby After graph may then contract only still-surviving cycles.
+        // V7: each geometry-validated simple loop has a VARIABLE number
+        // of ordered vertices (3+), preserving the older V6 body fields.
         writer.append_u64(checked_u64(result.graph_loop_candidates.size(), "loop candidate count"));
         for (const StatePointResult::LoopCandidate& candidate : result.graph_loop_candidates)
         {
-            for (std::uint64_t index : candidate.triangle)
+            if (candidate.vertices.size() < 3 || candidate.vertices.size() > 32)
+                throw std::invalid_argument("invalid loop vertex count");
+            writer.append_u64(checked_u64(candidate.vertices.size(), "loop vertex count"));
+            for (std::uint64_t index : candidate.vertices)
             {
                 if (index >= result.graph_node_points.size())
-                    throw std::invalid_argument("loop triangle index outside graph");
+                    throw std::invalid_argument("loop vertex index outside graph");
                 writer.append_u64(index);
             }
             require_finite(candidate.representative.x, "loop point x");

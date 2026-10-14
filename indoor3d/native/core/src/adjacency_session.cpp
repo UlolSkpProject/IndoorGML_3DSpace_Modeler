@@ -171,9 +171,9 @@ void AdjacencySession::state_worker_loop()
                      result.debug_graph.loop_candidates)
                 {
                     StatePointResult::LoopCandidate record;
-                    for (std::size_t index = 0; index < 3; ++index)
-                        record.triangle[index] =
-                            static_cast<std::uint64_t>(candidate.triangle[index]);
+                    record.vertices.reserve(candidate.vertices.size());
+                    for (std::size_t index : candidate.vertices)
+                        record.vertices.push_back(static_cast<std::uint64_t>(index));
                     record.representative = candidate.representative.point;
                     record.radius = candidate.representative.radius;
                     record.visible_neighbors.reserve(candidate.visible_neighbors.size());

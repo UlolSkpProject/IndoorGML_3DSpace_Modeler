@@ -633,18 +633,20 @@ module ULOL
             end
             verified = Array(collapse_data).filter_map do |candidate|
               raw = Hash(candidate)
-              triangle = Array(raw[:triangle])
+              vertices = Array(raw[:vertices] || raw[:triangle])
               visible = Array(raw[:visible_neighbors])
               position = Array(raw[:point])
               radius = raw[:radius].to_f
-              next unless triangle.size == 3 && triangle.uniq.size == 3
-              next unless (triangle + visible).all? { |index| index.is_a?(Integer) &&
+              next unless vertices.size.between?(3, 32) &&
+                          vertices.uniq.size == vertices.size
+              next unless (vertices + visible).all? { |index| index.is_a?(Integer) &&
                                                              index >= 0 && index < nodes.length }
               next unless position.size == 3 && position.all? { |value| value.to_f.finite? }
               next unless radius.finite? && radius >= 0.0
 
               {
-                triangle: triangle.freeze,
+                triangle: vertices.freeze,
+                vertices: vertices.freeze,
                 point: Geom::Point3d.new(*position.map(&:to_f)),
                 radius: radius,
                 visible_neighbors: visible.freeze
