@@ -845,100 +845,98 @@ bool safe_reference(
            bvh.nearest_distance(point) > tolerance;
 }
 
-// Project an already-selected Room reference XY onto the upward clearance
-// above its LOCAL downward-facing floor, including gently sloped ramps.
-// Native geometry coordinates are SketchUp inches; 1000 mm = 1000 / 25.4 in.
-// This does not discover additional corners: see the TODO at the call site.
+// Room references are sampled at FLOOR + 1000 mm BEFORE corner detection.
+// SketchUp/native geometry lengths are in inches.
 constexpr double ROOM_REFERENCE_FLOOR_OFFSET = 1000.0 / 25.4;
+constexpr std::size_t MAX_ROOM_LOCAL_FLOOR_SLICES = 32;
 
-std::optional<Vec3> reference_above_local_floor(
-    const CellData& cell,
-    const TriangleBvh& bvh,
-    const Vec3& original,
-    const Vec3& state_point,
-    double tolerance
+struct RoomFloorSlice
+{
+    double z = 0.0;
+    std::vector<const Triangle*> floor_triangles;
+};
+
+std::vector<RoomFloorSlice> room_local_floor_slices(
+    const CellData& cell, double tolerance
 )
 {
-    std::optional<Vec3> best;
-    double closest_change = std::numeric_limits<double>::infinity();
-    constexpr double barycentric_epsilon = 1.0e-9;
-
+    std::vector<RoomFloorSlice> slices;
+    const double flat_epsilon = std::max(tolerance * 0.01, 1.0e-8);
     for (const FaceData& face : cell.faces)
     {
-        // The solid's navigable floor faces outward/down (-Z). Accept
-        // ramps up to 60 degrees from horizontal, but not vertical walls
-        // or ceiling faces. Exact candidate height comes from the triangles.
-        if (face.normal.z >= -0.5) continue;
-
-        for (const Triangle& triangle : face.triangles)
+        // Down-facing, truly horizontal Room floors. The curved/sloped
+        // multi-height candidate discovery is a separate follow-up TODO.
+        if (face.normal.z > -0.98 || face.outer_points.size() < 3)
+            continue;
+        double minimum = std::numeric_limits<double>::infinity();
+        double maximum = -std::numeric_limits<double>::infinity();
+        for (const Vec3& point : face.outer_points)
         {
-            const Vec3& a = triangle.points[0];
-            const Vec3& b = triangle.points[1];
-            const Vec3& c = triangle.points[2];
-            const double bx = b.x - a.x;
-            const double by = b.y - a.y;
-            const double cx = c.x - a.x;
-            const double cy = c.y - a.y;
-            const double determinant = bx * cy - by * cx;
-            if (std::abs(determinant) <= EPSILON) continue;
-
-            const double px = original.x - a.x;
-            const double py = original.y - a.y;
-            const double u = (px * cy - py * cx) / determinant;
-            const double v = (bx * py - by * px) / determinant;
-            if (u < -barycentric_epsilon || v < -barycentric_epsilon ||
-                u + v > 1.0 + barycentric_epsilon)
-                continue;
-
-            const double floor_z =
-                a.z + u * (b.z - a.z) + v * (c.z - a.z);
-            const Vec3 elevated{
-                original.x, original.y, floor_z + ROOM_REFERENCE_FLOOR_OFFSET
-            };
-            if (!std::isfinite(elevated.z) ||
-                !safe_reference(bvh, elevated, state_point, tolerance))
-                continue;
-
-            // Stacked floors may project onto the same XY. Prefer the
-            // navigable level nearest to the original reference height.
-            const double change = std::abs(elevated.z - original.z);
-            if (!best || change < closest_change)
-            {
-                best = elevated;
-                closest_change = change;
-            }
+            minimum = std::min(minimum, point.z);
+            maximum = std::max(maximum, point.z);
         }
-    }
-    return best;
-}
-
-void relocate_room_references_to_local_floor(
-    const CellData& cell,
-    const Vec3& state_point,
-    std::vector<ReferencePoint>& references,
-    double tolerance
-)
-{
-    if (references.empty()) return;
-    const std::vector<const Triangle*> triangles = triangle_pointers(cell);
-    if (triangles.empty()) return;
-    TriangleBvh bvh(triangles);
-    if (bvh.empty()) return;
-
-    for (ReferencePoint& reference : references)
-    {
-        // The State is immutable, including its red Merged debug marker.
-        if (length_squared(subtract(reference.point, state_point)) <=
-            tolerance * tolerance)
+        if (!std::isfinite(minimum) || !std::isfinite(maximum) ||
+            maximum - minimum > flat_epsilon)
             continue;
 
-        const std::optional<Vec3> elevated = reference_above_local_floor(
-            cell, bvh, reference.point, state_point, tolerance
-        );
-        // A missed floor/invalid height cannot invalidate an existing
-        // reference: retain its original position instead.
-        if (elevated) reference.point = *elevated;
+        const double z = (minimum + maximum) * 0.5 +
+                         ROOM_REFERENCE_FLOOR_OFFSET;
+        if (z <= cell.bounds.minimum.z + tolerance ||
+            z >= cell.bounds.maximum.z - tolerance)
+            continue;
+
+        RoomFloorSlice* matching = nullptr;
+        for (RoomFloorSlice& existing : slices)
+        {
+            if (std::abs(existing.z - z) <= flat_epsilon)
+            {
+                matching = &existing;
+                break;
+            }
+        }
+        if (!matching)
+        {
+            if (slices.size() >= MAX_ROOM_LOCAL_FLOOR_SLICES)
+                continue; // Preserve the legacy graph on extreme inputs.
+            slices.push_back({z, {}});
+            matching = &slices.back();
+        }
+        for (const Triangle& triangle : face.triangles)
+            matching->floor_triangles.push_back(&triangle);
     }
+    std::sort(slices.begin(), slices.end(), [](const RoomFloorSlice& a,
+                                               const RoomFloorSlice& b) {
+        return a.z < b.z;
+    });
+    return slices;
+}
+
+bool inside_floor_xy(
+    const std::vector<const Triangle*>& floor_triangles,
+    const Vec3& candidate
+)
+{
+    constexpr double bary_epsilon = 1.0e-9;
+    for (const Triangle* triangle : floor_triangles)
+    {
+        const Vec3& a = triangle->points[0];
+        const Vec3& b = triangle->points[1];
+        const Vec3& c = triangle->points[2];
+        const double bx = b.x - a.x;
+        const double by = b.y - a.y;
+        const double cx = c.x - a.x;
+        const double cy = c.y - a.y;
+        const double det = bx * cy - by * cx;
+        if (std::abs(det) <= EPSILON) continue;
+        const double px = candidate.x - a.x;
+        const double py = candidate.y - a.y;
+        const double u = (px * cy - py * cx) / det;
+        const double v = (bx * py - by * px) / det;
+        if (u >= -bary_epsilon && v >= -bary_epsilon &&
+            u + v <= 1.0 + bary_epsilon)
+            return true;
+    }
+    return false;
 }
 
 bool clear_path(
@@ -1059,10 +1057,13 @@ struct CornerVertex
 };
 } // namespace
 
-std::vector<ReferencePoint> find_reference_points(
+std::vector<ReferencePoint> find_reference_points_at_height(
     const CellData& cell,
     const Vec3& state_point,
-    double tolerance
+    const TriangleBvh& bvh,
+    double slice_z,
+    double tolerance,
+    const std::vector<const Triangle*>* floor_triangles
 )
 {
     if (!(tolerance > 0.0) || !std::isfinite(tolerance))
@@ -1076,13 +1077,10 @@ std::vector<ReferencePoint> find_reference_points(
     const double long_span = std::max(width, height);
     const double geometry_epsilon = std::max(tolerance * 0.05, long_span * 1.0e-9);
 
-    const std::vector<const Triangle*> triangles = triangle_pointers(cell);
-    if (triangles.empty()) return {};
-    TriangleBvh bvh(triangles);
-    if (bvh.empty()) return {};
+    if (bvh.empty() || !std::isfinite(slice_z)) return {};
 
     const std::vector<WallSegment> walls =
-        wall_segments_at_z(cell, state_point.z, tolerance);
+        wall_segments_at_z(cell, slice_z, tolerance);
     if (walls.empty()) return {};
 
     // Collect shared endpoints of vertical slices. Only degree-two vertices
@@ -1119,7 +1117,7 @@ std::vector<ReferencePoint> find_reference_points(
         add_ray(wall.b, wall.a);
     }
 
-    // Classify each degree-two corner at State Z into a signed exterior
+    // Classify each degree-two corner at the LOCAL floor+1000mm slice into a signed exterior
     // turn in [-180, +180]. Convex vertices remain traversable so they
     // can offset prior reflex turning instead of splitting the chain.
     const std::size_t vertex_count = vertices.size();
@@ -1279,6 +1277,7 @@ std::vector<ReferencePoint> find_reference_points(
             MAX_ROOM_REFERENCE_POINTS : MAX_ROOM_REFERENCE_DEBUG_POINTS;
         if (points.size() >= limit) return;
         if (!safe_reference(bvh, candidate, state_point, tolerance)) return;
+        if (floor_triangles && !inside_floor_xy(*floor_triangles, candidate)) return;
         const double duplicate_distance =
             std::max(tolerance * 2.0, long_span * 1.0e-7);
         for (const ReferencePoint& existing : points)
@@ -1305,7 +1304,8 @@ std::vector<ReferencePoint> find_reference_points(
         const Vec3 candidate = add(
             vertex, multiply(inward[i], ROOM_REFERENCE_INWARD_DISTANCE_FRACTION * distance)
         );
-        if (safe_reference(bvh, candidate, state_point, tolerance) &&
+        if ((!floor_triangles || inside_floor_xy(*floor_triangles, candidate)) &&
+            safe_reference(bvh, candidate, state_point, tolerance) &&
             clear_path(bvh, add(vertex, multiply(inward[i], probe)), candidate, tolerance))
             candidates[i] = candidate;
     }
@@ -1359,7 +1359,9 @@ std::vector<ReferencePoint> find_reference_points(
     {
         std::vector<std::size_t> state_cluster;
         std::vector<std::vector<std::size_t>> clusters;
-        const double state_radius = local_cluster_radius(walls, state_point);
+        // State is fixed and only participates in a same-Z slice cluster.
+        const double state_radius = std::abs(slice_z - state_point.z) <= tolerance ?
+            local_cluster_radius(walls, state_point) : 0.0;
         std::vector<double> point_radii(original_count);
         for (std::size_t i = 0; i < original_count; ++i)
             point_radii[i] = local_cluster_radius(walls, points[i].point);
@@ -1419,7 +1421,7 @@ std::vector<ReferencePoint> find_reference_points(
             if (cluster.size() < 2) continue;
 
             // Ordinary (non-State) clusters continue to use their mean.
-            Vec3 centroid{0.0, 0.0, state_point.z};
+            Vec3 centroid{0.0, 0.0, slice_z};
             for (const std::size_t member : cluster)
             {
                 centroid.x += points[member].point.x;
@@ -1429,6 +1431,8 @@ std::vector<ReferencePoint> find_reference_points(
             centroid.y /= static_cast<double>(cluster.size());
 
             bool valid = safe_reference(bvh, centroid, state_point, tolerance);
+            if (valid && floor_triangles)
+                valid = inside_floor_xy(*floor_triangles, centroid);
             for (const std::size_t member : cluster)
             {
                 if (valid && !clear_path(bvh, points[member].point, centroid, tolerance))
@@ -1451,7 +1455,8 @@ std::vector<ReferencePoint> find_reference_points(
         const bool unmerged_source = i < original_count && !merged_sources[i];
         const bool non_state_center =
             points[i].kind == ReferencePointKind::Merged &&
-            !near_xy(points[i].point, state_point, tolerance);
+            length_squared(subtract(points[i].point, state_point)) >
+                tolerance * tolerance;
         if (!unmerged_source && !non_state_center) continue;
 
         // Copy before push_back: vector reallocation may invalidate points[i].
@@ -1459,6 +1464,21 @@ std::vector<ReferencePoint> find_reference_points(
         add_candidate(final_position, ReferencePointKind::Final);
     }
     return points;
+}
+
+// Preserve the former single-State-Z detection for the existing graph.
+std::vector<ReferencePoint> find_reference_points(
+    const CellData& cell,
+    const Vec3& state_point,
+    double tolerance
+)
+{
+    const std::vector<const Triangle*> triangles = triangle_pointers(cell);
+    if (triangles.empty()) return {};
+    TriangleBvh bvh(triangles);
+    return find_reference_points_at_height(
+        cell, state_point, bvh, state_point.z, tolerance, nullptr
+    );
 }
 
 // Build a diagnostic visibility graph from State and *final* reference nodes.
@@ -1975,24 +1995,65 @@ CellSpaceInteriorPointResult locate_cell_space_interior_points(
             {
                 result.debug_graph = {};
             }
-            // Keep the existing State-Z reference graph and LOS snapshots
-            // unchanged until 3D graph semantics are designed/tested.
-            // Only the returned reference-point coordinates are re-elevated
-            // onto the local floor + 1000 mm, with validated fallback.
-            // TODO(reference-candidates): Generalize corner discovery beyond
-            // the single State-Z wall slice (local floors, ramps and holes).
-            // TODO(reference-graph-3d): Adapt disk/LOS/loop/shortcut validation
-            // before using mixed-Z references as navigation graph nodes.
+            // Detect NEW corners from wall slices at each local horizontal
+            // floor's Z + 1000 mm. No post-hoc relocation of old candidates.
+            // The old State-Z graph remains untouched for regression safety;
+            // these extra references are debug markers, NOT graph vertices.
+            // TODO(reference-candidates): Expand floor-aware corner discovery
+            // to continuous ramp/curved floors and verify coverage of holes.
+            // TODO(reference-graph-3d): Integrate mixed-Z references only after
+            // 3D LOS, inscribed-radius, cycle/Hole, shortcut and navigability
+            // rules are revalidated together.
             try
             {
-                relocate_room_references_to_local_floor(
-                    cell, *result.state_point, result.reference_points, tolerance
-                );
+                const std::vector<RoomFloorSlice> slices =
+                    room_local_floor_slices(cell, tolerance);
+                if (!slices.empty())
+                {
+                    const std::vector<const Triangle*> triangles =
+                        triangle_pointers(cell);
+                    TriangleBvh bvh(triangles);
+                    const double duplicate_distance = std::max(
+                        tolerance * 2.0,
+                        (cell.bounds.maximum.x - cell.bounds.minimum.x) * 1.0e-7
+                    );
+                    for (const RoomFloorSlice& slice : slices)
+                    {
+                        // Original points at the same slice are already
+                        // available in the regression-preserved output.
+                        if (std::abs(slice.z - result.state_point->z) <= tolerance)
+                            continue;
+
+                        const std::vector<ReferencePoint> local =
+                            find_reference_points_at_height(
+                                cell, *result.state_point, bvh, slice.z,
+                                tolerance, &slice.floor_triangles
+                            );
+                        for (const ReferencePoint& candidate : local)
+                        {
+                            if (result.reference_points.size() >=
+                                MAX_ROOM_REFERENCE_DEBUG_POINTS)
+                                break;
+                            const bool duplicate = std::any_of(
+                                result.reference_points.begin(),
+                                result.reference_points.end(),
+                                [&](const ReferencePoint& existing) {
+                                    return existing.kind == candidate.kind &&
+                                        length_squared(subtract(
+                                            existing.point, candidate.point
+                                        )) <= duplicate_distance * duplicate_distance;
+                                }
+                            );
+                            if (!duplicate)
+                                result.reference_points.push_back(candidate);
+                        }
+                    }
+                }
             }
             catch (...)
             {
-                // Re-elevation is optional; State and the existing graph
-                // must remain available even if floor probing fails.
+                // Additional floor-slice discovery is strictly auxiliary.
+                // Never invalidate existing State, references or debug graph.
             }
             break;
         case CellSpaceCategory::Stair:
