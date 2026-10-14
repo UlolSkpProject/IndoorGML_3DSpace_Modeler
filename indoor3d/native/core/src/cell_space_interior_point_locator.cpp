@@ -1065,7 +1065,9 @@ std::vector<ReferencePoint> find_reference_points(
             !near_xy(points[i].point, state_point, tolerance);
         if (!unmerged_source && !non_state_center) continue;
 
-        add_candidate(points[i].point, ReferencePointKind::Final);
+        // Copy before push_back: vector reallocation may invalidate points[i].
+        const Vec3 final_position = points[i].point;
+        add_candidate(final_position, ReferencePointKind::Final);
     }
     return points;
 }
