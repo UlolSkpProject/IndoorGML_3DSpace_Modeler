@@ -288,6 +288,12 @@ void test_concave_room_reference_points()
             "final Room count exceeds original candidates");
     for (const Vec3& merged : merge_centers)
     {
+        // A State-anchored cluster is represented by the existing State
+        // rather than by an extra black Final reference point.
+        const double sdx = merged.x - result.state_point->x;
+        const double sdy = merged.y - result.state_point->y;
+        if (sdx * sdx + sdy * sdy < 1.0e-10) continue;
+
         bool found = false;
         for (const Vec3& final_point : final_points)
         {
@@ -297,6 +303,52 @@ void test_concave_room_reference_points()
         }
         require(found, "accepted red cluster center is missing its black final point");
     }
+}
+
+void test_state_anchored_room_reference_cluster()
+{
+    CellData cell = u_prism_cell();
+    cell.category = CellSpaceCategory::Room;
+
+    // The left vertical corridor is 1.0 unit wide. Its Face midpoint
+    // reference is (0.5, 1.5, 0.5), which can merge with this nearby State.
+    const Vec3 state{0.55, 1.5, 0.5};
+    const std::vector<ReferencePoint> references =
+        find_reference_points(cell, state, 0.001);
+
+    bool found_state_merge_marker = false;
+    bool found_absorbed_source = false;
+    bool found_absorbed_source_as_final = false;
+    bool found_duplicate_state_final = false;
+    for (const ReferencePoint& reference : references)
+    {
+        const Vec3& point = reference.point;
+        const bool at_state =
+            std::abs(point.x - state.x) < 1.0e-9 &&
+            std::abs(point.y - state.y) < 1.0e-9 &&
+            std::abs(point.z - state.z) < 1.0e-9;
+        const bool at_wall_midpoint =
+            std::abs(point.x - 0.5) < 1.0e-9 &&
+            std::abs(point.y - 1.5) < 1.0e-9;
+
+        if (reference.kind == ReferencePointKind::Merged && at_state)
+            found_state_merge_marker = true;
+        if ((reference.kind == ReferencePointKind::Face ||
+             reference.kind == ReferencePointKind::Corner) && at_wall_midpoint)
+            found_absorbed_source = true;
+        if (reference.kind == ReferencePointKind::Final)
+        {
+            if (at_state) found_duplicate_state_final = true;
+            if (at_wall_midpoint) found_absorbed_source_as_final = true;
+        }
+    }
+
+    require(found_absorbed_source, "State merge fixture source is missing");
+    require(found_state_merge_marker, "State cluster must use exact State position");
+    require(!found_absorbed_source_as_final,
+            "State-merged source must be excluded from final references");
+    require(!found_duplicate_state_final,
+            "State cluster must not create a duplicate black Final reference");
 }
 
 void test_non_room_reference_points_are_empty()
@@ -332,6 +384,7 @@ int main()
     test_state_fixed_z();
     test_room_reference_points_share_state_height();
     test_concave_room_reference_points();
+    test_state_anchored_room_reference_cluster();
     test_non_room_reference_points_are_empty();
     return 0;
 }

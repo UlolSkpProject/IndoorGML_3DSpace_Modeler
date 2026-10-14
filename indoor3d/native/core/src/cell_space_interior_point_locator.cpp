@@ -967,43 +967,69 @@ std::vector<ReferencePoint> find_reference_points(
             add_candidate(candidate, ReferencePointKind::Corner);
     }
 
-    // Red: representative for a close, mutually visible group of green/purple
-    // candidates. Keep originals rendered so all three point types can be
-    // inspected independently. Complete-link avoids chain-merging across rooms.
+    // The State is a special, fixed-position Reference Point during clustering.
+    // Process it first so nearby, mutually visible candidates are absorbed
+    // into the State instead of being assigned to ordinary clusters.
+    // Non-State clusters retain the existing arithmetic-mean representative.
     const std::size_t original_count = points.size();
     std::vector<bool> merged_sources(original_count, false);
     const double radius = short_span * ROOM_REFERENCE_CLUSTER_RADIUS_FRACTION;
-    if (radius > tolerance * 4.0 && original_count >= 2)
+    if (radius > tolerance * 4.0 && original_count > 0)
     {
+        std::vector<std::size_t> state_cluster;
         std::vector<std::vector<std::size_t>> clusters;
+        const double radius_squared = radius * radius;
+
+        const auto mutually_compatible = [&](std::size_t index,
+                                              const std::vector<std::size_t>& members) {
+            for (const std::size_t member : members)
+            {
+                if (distance_xy_squared(points[index].point, points[member].point) >
+                        radius_squared ||
+                    !clear_path(bvh, points[index].point, points[member].point, tolerance))
+                    return false;
+            }
+            return true;
+        };
+
         for (std::size_t i = 0; i < original_count; ++i)
         {
+            // A State + one candidate is already a valid merge set.
+            if (distance_xy_squared(points[i].point, state_point) <= radius_squared &&
+                clear_path(bvh, points[i].point, state_point, tolerance) &&
+                mutually_compatible(i, state_cluster))
+            {
+                state_cluster.push_back(i);
+                continue;
+            }
+
             bool appended = false;
             for (std::vector<std::size_t>& cluster : clusters)
             {
-                bool compatible = true;
-                for (const std::size_t member : cluster)
-                {
-                    if (distance_xy_squared(points[i].point, points[member].point) >
-                            radius * radius ||
-                        !clear_path(bvh, points[i].point, points[member].point, tolerance))
-                    {
-                        compatible = false;
-                        break;
-                    }
-                }
-                if (compatible)
-                {
-                    cluster.push_back(i);
-                    appended = true;
-                    break;
-                }
+                if (!mutually_compatible(i, cluster)) continue;
+
+                cluster.push_back(i);
+                appended = true;
+                break;
             }
             if (!appended) clusters.push_back({i});
         }
+
+        if (!state_cluster.empty())
+        {
+            // Red debugging marker at the exact State coordinates.
+            // The existing State remains the ONLY final navigation node at
+            // this position; no additional black Final point is emitted.
+            points.push_back({state_point, ReferencePointKind::Merged});
+            for (const std::size_t member : state_cluster)
+                merged_sources[member] = true;
+        }
+
         for (const std::vector<std::size_t>& cluster : clusters)
         {
             if (cluster.size() < 2) continue;
+
+            // Ordinary (non-State) clusters continue to use their mean.
             Vec3 centroid{0.0, 0.0, state_point.z};
             for (const std::size_t member : cluster)
             {
@@ -1012,35 +1038,34 @@ std::vector<ReferencePoint> find_reference_points(
             }
             centroid.x /= static_cast<double>(cluster.size());
             centroid.y /= static_cast<double>(cluster.size());
+
             bool valid = safe_reference(bvh, centroid, state_point, tolerance);
             for (const std::size_t member : cluster)
             {
                 if (valid && !clear_path(bvh, points[member].point, centroid, tolerance))
                     valid = false;
             }
-            if (valid)
-            {
-                add_candidate(centroid, ReferencePointKind::Merged);
-                // Source candidates belonging to a successful cluster must
-                // NOT also become final points.
-                for (const std::size_t member : cluster)
-                    merged_sources[member] = true;
-            }
+            if (!valid) continue;
+
+            add_candidate(centroid, ReferencePointKind::Merged);
+            for (const std::size_t member : cluster)
+                merged_sources[member] = true;
         }
     }
 
-    // Black: exactly one final node for each accepted red cluster center,
-    // plus every green/purple candidate not absorbed by a cluster.
-    // Keep the diagnostic candidates intact for visual comparison.
+    // Final navigation nodes: each non-State red center plus every unmerged
+    // green/purple candidate. The State already represents its own cluster.
+    // All diagnostic markers remain visible.
     const std::size_t diagnostic_count = points.size();
     for (std::size_t i = 0; i < diagnostic_count; ++i)
     {
         const bool unmerged_source = i < original_count && !merged_sources[i];
-        const bool merged_center = points[i].kind == ReferencePointKind::Merged;
-        if (!unmerged_source && !merged_center) continue;
+        const bool non_state_center =
+            points[i].kind == ReferencePointKind::Merged &&
+            !near_xy(points[i].point, state_point, tolerance);
+        if (!unmerged_source && !non_state_center) continue;
 
-        const Vec3 candidate = points[i].point;
-        add_candidate(candidate, ReferencePointKind::Final);
+        add_candidate(points[i].point, ReferencePointKind::Final);
     }
     return points;
 }
