@@ -845,6 +845,102 @@ bool safe_reference(
            bvh.nearest_distance(point) > tolerance;
 }
 
+// Project an already-selected Room reference XY onto the upward clearance
+// above its LOCAL downward-facing floor, including gently sloped ramps.
+// Native geometry coordinates are SketchUp inches; 1000 mm = 1000 / 25.4 in.
+// This does not discover additional corners: see the TODO at the call site.
+constexpr double ROOM_REFERENCE_FLOOR_OFFSET = 1000.0 / 25.4;
+
+std::optional<Vec3> reference_above_local_floor(
+    const CellData& cell,
+    const TriangleBvh& bvh,
+    const Vec3& original,
+    const Vec3& state_point,
+    double tolerance
+)
+{
+    std::optional<Vec3> best;
+    double closest_change = std::numeric_limits<double>::infinity();
+    constexpr double barycentric_epsilon = 1.0e-9;
+
+    for (const FaceData& face : cell.faces)
+    {
+        // The solid's navigable floor faces outward/down (-Z). Accept
+        // ramps up to 60 degrees from horizontal, but not vertical walls
+        // or ceiling faces. Exact candidate height comes from the triangles.
+        if (face.normal.z >= -0.5) continue;
+
+        for (const Triangle& triangle : face.triangles)
+        {
+            const Vec3& a = triangle.points[0];
+            const Vec3& b = triangle.points[1];
+            const Vec3& c = triangle.points[2];
+            const double bx = b.x - a.x;
+            const double by = b.y - a.y;
+            const double cx = c.x - a.x;
+            const double cy = c.y - a.y;
+            const double determinant = bx * cy - by * cx;
+            if (std::abs(determinant) <= EPSILON) continue;
+
+            const double px = original.x - a.x;
+            const double py = original.y - a.y;
+            const double u = (px * cy - py * cx) / determinant;
+            const double v = (bx * py - by * px) / determinant;
+            if (u < -barycentric_epsilon || v < -barycentric_epsilon ||
+                u + v > 1.0 + barycentric_epsilon)
+                continue;
+
+            const double floor_z =
+                a.z + u * (b.z - a.z) + v * (c.z - a.z);
+            const Vec3 elevated{
+                original.x, original.y, floor_z + ROOM_REFERENCE_FLOOR_OFFSET
+            };
+            if (!std::isfinite(elevated.z) ||
+                !safe_reference(bvh, elevated, state_point, tolerance))
+                continue;
+
+            // Stacked floors may project onto the same XY. Prefer the
+            // navigable level nearest to the original reference height.
+            const double change = std::abs(elevated.z - original.z);
+            if (!best || change < closest_change)
+            {
+                best = elevated;
+                closest_change = change;
+            }
+        }
+    }
+    return best;
+}
+
+void relocate_room_references_to_local_floor(
+    const CellData& cell,
+    const Vec3& state_point,
+    std::vector<ReferencePoint>& references,
+    double tolerance
+)
+{
+    if (references.empty()) return;
+    const std::vector<const Triangle*> triangles = triangle_pointers(cell);
+    if (triangles.empty()) return;
+    TriangleBvh bvh(triangles);
+    if (bvh.empty()) return;
+
+    for (ReferencePoint& reference : references)
+    {
+        // The State is immutable, including its red Merged debug marker.
+        if (length_squared(subtract(reference.point, state_point)) <=
+            tolerance * tolerance)
+            continue;
+
+        const std::optional<Vec3> elevated = reference_above_local_floor(
+            cell, bvh, reference.point, state_point, tolerance
+        );
+        // A missed floor/invalid height cannot invalidate an existing
+        // reference: retain its original position instead.
+        if (elevated) reference.point = *elevated;
+    }
+}
+
 bool clear_path(
     const TriangleBvh& bvh,
     const Vec3& first,
@@ -1878,6 +1974,25 @@ CellSpaceInteriorPointResult locate_cell_space_interior_points(
             catch (...)
             {
                 result.debug_graph = {};
+            }
+            // Keep the existing State-Z reference graph and LOS snapshots
+            // unchanged until 3D graph semantics are designed/tested.
+            // Only the returned reference-point coordinates are re-elevated
+            // onto the local floor + 1000 mm, with validated fallback.
+            // TODO(reference-candidates): Generalize corner discovery beyond
+            // the single State-Z wall slice (local floors, ramps and holes).
+            // TODO(reference-graph-3d): Adapt disk/LOS/loop/shortcut validation
+            // before using mixed-Z references as navigation graph nodes.
+            try
+            {
+                relocate_room_references_to_local_floor(
+                    cell, *result.state_point, result.reference_points, tolerance
+                );
+            }
+            catch (...)
+            {
+                // Re-elevation is optional; State and the existing graph
+                // must remain available even if floor probing fails.
             }
             break;
         case CellSpaceCategory::Stair:
