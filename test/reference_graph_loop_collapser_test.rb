@@ -55,7 +55,7 @@ class ReferenceGraphLoopCollapserTest < Minitest::Test
     assert_equal 2, result[:edges].length
   end
 
-  def test_native_verified_center_still_rejected_if_global_detour_exceeds_25_percent
+  def test_native_verified_center_can_collapse_despite_large_detour
     source = graph(
       [n(10, 10), n(0, 0), n(3, 0), n(0, 3),
        n(2.99, 0.0), n(3.01, 0.0)],
@@ -64,8 +64,14 @@ class ReferenceGraphLoopCollapserTest < Minitest::Test
     center = verified([1, 2, 3], Point.new(1.0, 1.0, 0.5), [4, 5])
     result = Collapse.collapse(source, [center])
 
-    assert_equal 0, result[:collapse_count]
-    assert_equal 6, result[:nodes].size
+    # The detour exceeds the former 25% limit, but the candidate is
+    # validated and its external links are preserved.
+    assert_equal 1, result[:collapse_count]
+    assert_equal 4, result[:nodes].size
+    assert_equal [0, 4, 5, nil], result[:original_indices]
+    assert_equal [[1, 3], [2, 3]], result[:edges]
+    assert_equal 6, source[:nodes].size
+    assert_equal 5, source[:edges].size
   end
 
   def test_state_in_triangle_is_preserved_as_representative

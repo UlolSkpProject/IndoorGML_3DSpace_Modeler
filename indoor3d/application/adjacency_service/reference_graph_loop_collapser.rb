@@ -14,10 +14,8 @@ module ULOL
       # involving new synthetic centers are deliberately left alone because
       # they do not have an independently Native-validated replacement.
       module ReferenceGraphLoopCollapser
-        MAX_GLOBAL_PATH_FACTOR = 1.25
         MAX_GRAPH_NODES = 192
         MAX_COLLAPSES = 256
-        EPSILON = 1.0e-9
 
         module_function
 
@@ -35,14 +33,6 @@ module ULOL
             triple = Array(record[:triangle]).sort
             out[triple] = record if triple.size == 3 && triple.uniq.size == 3
           end
-
-          baseline = {}
-          origins.each_with_index do |id, index|
-            baseline[id] = shortest_distances(nodes, edges, index) unless id.nil?
-          end
-          # Baseline distances are indexed by original AFTER node positions.
-          origin_to_initial_index = {}
-          origins.each_with_index { |id, i| origin_to_initial_index[id] = i unless id.nil? }
 
           iterations = 0
           while iterations < MAX_COLLAPSES
@@ -78,15 +68,10 @@ module ULOL
               proposal = contraction(nodes, edges, origins, triple, boundary,
                                      candidate, representative_index)
               next unless proposal
-              new_nodes, new_edges, new_origins = proposal
-
-              # Check path lengths against the immutable AFTER baseline,
-              # not the previous collapse, preventing cumulative drift.
-              next unless global_paths_preserved?(
-                new_nodes, new_edges, new_origins, baseline, origin_to_initial_index
-              )
-
-              nodes, edges, origins = new_nodes, new_edges, new_origins
+              # Native-validated LOS to every surviving external neighbor
+              # is the only path-related acceptance condition. Do not impose
+              # any shortest-path length / detour increase threshold.
+              nodes, edges, origins = proposal
               iterations += 1
               changed = true
               break
@@ -194,62 +179,7 @@ module ULOL
           [new_nodes, new_edges, new_origins]
         end
 
-        def global_paths_preserved?(nodes, edges, origins, baseline, initial_positions)
-          origins.each_with_index do |original, start_index|
-            next if original.nil?
 
-            current = shortest_distances(nodes, edges, start_index)
-            before = baseline[original]
-            return false unless before
-            origins.each_with_index do |other, destination|
-              next if other.nil? || other == original
-
-              initial_index = initial_positions[other]
-              old_length = before[initial_index]
-              new_length = current[destination]
-              if old_length.finite?
-                return false unless new_length.finite?
-                return false if new_length > old_length * MAX_GLOBAL_PATH_FACTOR + EPSILON
-              end
-            end
-          end
-          true
-        end
-
-        def shortest_distances(nodes, edges, start_index)
-          neighbors = Array.new(nodes.size) { [] }
-          edges.each do |first, second|
-            length = distance(nodes[first][:point], nodes[second][:point])
-            neighbors[first] << [second, length]
-            neighbors[second] << [first, length]
-          end
-
-          result = Array.new(nodes.size, Float::INFINITY)
-          visited = Array.new(nodes.size, false)
-          result[start_index] = 0.0
-          nodes.size.times do
-            current = nil
-            nodes.size.times do |i|
-              if !visited[i] && (current.nil? || result[i] < result[current])
-                current = i
-              end
-            end
-            break unless current && result[current].finite?
-
-            visited[current] = true
-            neighbors[current].each do |target, weight|
-              next if visited[target]
-
-              via = result[current] + weight
-              result[target] = via if via < result[target]
-            end
-          end
-          result
-        end
-
-        def distance(a, b)
-          Math.hypot(a.x - b.x, a.y - b.y)
-        end
       end
     end
   end
