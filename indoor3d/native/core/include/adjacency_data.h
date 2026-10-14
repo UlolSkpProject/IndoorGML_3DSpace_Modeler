@@ -14,6 +14,7 @@ struct StatePointResult
     Vec3 point;
     std::uint64_t reference_status = 0;
     std::vector<Vec3> reference_points;
+    std::vector<std::uint64_t> reference_kinds;
 };
 
 std::vector<CellData> parse_input_batch(const std::uint8_t* data, std::size_t size);

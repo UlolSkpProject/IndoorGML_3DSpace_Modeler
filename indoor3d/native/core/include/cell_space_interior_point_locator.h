@@ -23,10 +23,23 @@ enum class ReferencePointStatus : std::uint64_t
     Failed = 2
 };
 
+enum class ReferencePointKind : std::uint64_t
+{
+    Face = 1,
+    Corner = 2,
+    Merged = 3
+};
+
+struct ReferencePoint
+{
+    Vec3 point;
+    ReferencePointKind kind = ReferencePointKind::Face;
+};
+
 struct CellSpaceInteriorPointResult
 {
     std::optional<Vec3> state_point;
-    std::vector<Vec3> reference_points;
+    std::vector<ReferencePoint> reference_points;
     StateSearchMetrics state_metrics;
     ReferencePointStatus reference_status = ReferencePointStatus::NotAttempted;
 };
@@ -37,7 +50,7 @@ std::optional<Vec3> find_state_point(
     StateSearchMetrics* metrics = nullptr
 );
 
-std::vector<Vec3> find_reference_points(
+std::vector<ReferencePoint> find_reference_points(
     const CellData& cell,
     const Vec3& state_point,
     double tolerance

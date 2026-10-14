@@ -20,8 +20,12 @@ using namespace IndoorGMLAdjacencyNative;
 constexpr double EPSILON = 1.0e-12;
 constexpr std::size_t BVH_LEAF_TRIANGLES = 6;
 constexpr std::size_t MAX_SEARCH_NODES = 200000;
-constexpr double ROOM_REFERENCE_GRID_DIVISIONS = 4.0;
-constexpr double ROOM_REFERENCE_MAX_AXIS_DIVISIONS = 128.0;
+// Experimental Room-only reference points. This does not affect State or Adjacency.
+// Merged reference radius is intentionally configurable until a final scale is chosen.
+constexpr double ROOM_REFERENCE_CLUSTER_RADIUS_FRACTION = 0.18;
+constexpr double CORNER_CONVEX_THRESHOLD_DEGREES = 145.0;
+constexpr double CORNER_REFLEX_THRESHOLD_DEGREES = 225.0;
+constexpr std::size_t MAX_ROOM_WALL_SEGMENTS = 2048;
 constexpr std::size_t MAX_ROOM_REFERENCE_POINTS = 4096;
 
 double elapsed_seconds(std::chrono::steady_clock::time_point started_at)
@@ -657,7 +661,172 @@ std::optional<Vec3> find_state_point(
     return result;
 }
 
-std::vector<Vec3> find_reference_points(
+namespace
+{
+struct WallSegment
+{
+    Vec3 a;
+    Vec3 b;
+};
+
+double cross_xy(const Vec3& a, const Vec3& b)
+{
+    return a.x * b.y - a.y * b.x;
+}
+
+double distance_xy_squared(const Vec3& a, const Vec3& b)
+{
+    const double dx = a.x - b.x;
+    const double dy = a.y - b.y;
+    return dx * dx + dy * dy;
+}
+
+bool near_xy(const Vec3& a, const Vec3& b, double epsilon)
+{
+    return distance_xy_squared(a, b) <= epsilon * epsilon;
+}
+
+std::vector<WallSegment> wall_segments_at_z(
+    const CellData& cell, double z, double tolerance
+)
+{
+    std::vector<WallSegment> segments;
+    const double z_epsilon = std::max(tolerance * 0.01, 1.0e-9);
+    const double xy_epsilon = std::max(tolerance * 0.01, 1.0e-9);
+
+    for (const FaceData& face : cell.faces)
+    {
+        const double horizontal_normal = std::hypot(face.normal.x, face.normal.y);
+        if (horizontal_normal <= EPSILON ||
+            std::abs(face.normal.z) > horizontal_normal * 1.0e-6 ||
+            face.outer_points.size() < 3)
+            continue;
+
+        const Vec3 tangent = normalize(Vec3{-face.normal.y, face.normal.x, 0.0});
+        std::vector<Vec3> intersections;
+        const std::vector<Vec3>& ring = face.outer_points;
+        for (std::size_t i = 0; i < ring.size(); ++i)
+        {
+            const Vec3& first = ring[i];
+            const Vec3& second = ring[(i + 1) % ring.size()];
+            const double z1 = first.z - z;
+            const double z2 = second.z - z;
+            if (std::abs(z1) <= z_epsilon && std::abs(z2) <= z_epsilon)
+            {
+                if (!near_xy(first, second, xy_epsilon))
+                    intersections.push_back(first), intersections.push_back(second);
+                continue;
+            }
+            // Half-open intersection prevents counting vertices twice.
+            if ((z1 <= 0.0 && z2 > 0.0) || (z2 <= 0.0 && z1 > 0.0))
+            {
+                const double t = (z - first.z) / (second.z - first.z);
+                intersections.push_back({
+                    first.x + t * (second.x - first.x),
+                    first.y + t * (second.y - first.y),
+                    z
+                });
+            }
+        }
+
+        std::sort(intersections.begin(), intersections.end(),
+            [&](const Vec3& lhs, const Vec3& rhs) {
+                return dot(lhs, tangent) < dot(rhs, tangent);
+            });
+        intersections.erase(std::unique(intersections.begin(), intersections.end(),
+            [&](const Vec3& lhs, const Vec3& rhs) {
+                return near_xy(lhs, rhs, xy_epsilon);
+            }), intersections.end());
+
+        // SketchUp polygon rings yield even intersections. An odd number can
+        // occur with a triangulated input ring: recover its extremal slice.
+        if (intersections.size() % 2 != 0 && intersections.size() >= 2)
+        {
+            intersections = {intersections.front(), intersections.back()};
+        }
+        for (std::size_t i = 1; i < intersections.size(); i += 2)
+        {
+            WallSegment segment{intersections[i - 1], intersections[i]};
+            segment.a.z = z;
+            segment.b.z = z;
+            if (near_xy(segment.a, segment.b, xy_epsilon)) continue;
+            const bool duplicate = std::any_of(segments.begin(), segments.end(),
+                [&](const WallSegment& other) {
+                    return (near_xy(other.a, segment.a, xy_epsilon) &&
+                            near_xy(other.b, segment.b, xy_epsilon)) ||
+                           (near_xy(other.a, segment.b, xy_epsilon) &&
+                            near_xy(other.b, segment.a, xy_epsilon));
+                });
+            if (!duplicate) segments.push_back(segment);
+            if (segments.size() >= MAX_ROOM_WALL_SEGMENTS) return segments;
+        }
+    }
+    return segments;
+}
+
+// First strictly-positive intersection of the directed ray with a wall slice.
+// This uses the wall cross-section rather than ray/triangle intersections,
+// avoiding duplicate hits along SketchUp triangulation edges.
+double opposite_wall_distance(
+    const std::vector<WallSegment>& walls,
+    const Vec3& origin,
+    const Vec3& direction,
+    double tolerance
+)
+{
+    double best = std::numeric_limits<double>::infinity();
+    for (const WallSegment& wall : walls)
+    {
+        const Vec3 edge = subtract(wall.b, wall.a);
+        const double denominator = cross_xy(direction, edge);
+        if (std::abs(denominator) <= EPSILON) continue;
+        const Vec3 delta = subtract(wall.a, origin);
+        const double t = cross_xy(delta, edge) / denominator;
+        const double u = cross_xy(delta, direction) / denominator;
+        if (t <= tolerance * 4.0 || u < -1.0e-9 || u > 1.0 + 1.0e-9)
+            continue;
+        best = std::min(best, t);
+    }
+    return best;
+}
+
+bool safe_reference(
+    const TriangleBvh& bvh,
+    const Vec3& point,
+    const Vec3& state_point,
+    double tolerance
+)
+{
+    return length_squared(subtract(point, state_point)) > tolerance * tolerance &&
+           bvh_inside(bvh, point, tolerance) &&
+           bvh.nearest_distance(point) > tolerance;
+}
+
+bool clear_path(
+    const TriangleBvh& bvh,
+    const Vec3& first,
+    const Vec3& second,
+    double tolerance
+)
+{
+    for (const double t : {0.25, 0.5, 0.75})
+    {
+        const Vec3 candidate = add(first, multiply(subtract(second, first), t));
+        if (!bvh_inside(bvh, candidate, tolerance) ||
+            bvh.nearest_distance(candidate) <= tolerance)
+            return false;
+    }
+    return true;
+}
+
+struct CornerVertex
+{
+    Vec3 point;
+    std::vector<Vec3> rays;
+};
+} // namespace
+
+std::vector<ReferencePoint> find_reference_points(
     const CellData& cell,
     const Vec3& state_point,
     double tolerance
@@ -666,67 +835,181 @@ std::vector<Vec3> find_reference_points(
     if (!(tolerance > 0.0) || !std::isfinite(tolerance))
         return {};
 
-    const double span_x = cell.bounds.maximum.x - cell.bounds.minimum.x;
-    const double span_y = cell.bounds.maximum.y - cell.bounds.minimum.y;
-    if (!(span_x > tolerance) || !(span_y > tolerance))
+    const double width = cell.bounds.maximum.x - cell.bounds.minimum.x;
+    const double height = cell.bounds.maximum.y - cell.bounds.minimum.y;
+    if (width <= tolerance || height <= tolerance)
         return {};
-
-    const double short_span = std::min(span_x, span_y);
-    const double long_span = std::max(span_x, span_y);
-    const double spacing = std::max(
-        short_span / ROOM_REFERENCE_GRID_DIVISIONS,
-        long_span / ROOM_REFERENCE_MAX_AXIS_DIVISIONS
-    );
-    if (!(spacing > tolerance) || !std::isfinite(spacing))
-        return {};
+    const double short_span = std::min(width, height);
+    const double long_span = std::max(width, height);
+    const double geometry_epsilon = std::max(tolerance * 0.05, long_span * 1.0e-9);
 
     const std::vector<const Triangle*> triangles = triangle_pointers(cell);
     if (triangles.empty()) return {};
-
     TriangleBvh bvh(triangles);
     if (bvh.empty()) return {};
 
-    const std::int64_t min_x_index = static_cast<std::int64_t>(
-        std::ceil((cell.bounds.minimum.x - state_point.x) / spacing)
-    );
-    const std::int64_t max_x_index = static_cast<std::int64_t>(
-        std::floor((cell.bounds.maximum.x - state_point.x) / spacing)
-    );
-    const std::int64_t min_y_index = static_cast<std::int64_t>(
-        std::ceil((cell.bounds.minimum.y - state_point.y) / spacing)
-    );
-    const std::int64_t max_y_index = static_cast<std::int64_t>(
-        std::floor((cell.bounds.maximum.y - state_point.y) / spacing)
-    );
+    const std::vector<WallSegment> walls =
+        wall_segments_at_z(cell, state_point.z, tolerance);
+    if (walls.empty()) return {};
 
-    std::vector<Vec3> points;
-    points.reserve(std::min<std::size_t>(
-        MAX_ROOM_REFERENCE_POINTS,
-        static_cast<std::size_t>(ROOM_REFERENCE_MAX_AXIS_DIVISIONS *
-                                 ROOM_REFERENCE_GRID_DIVISIONS)
-    ));
+    std::vector<ReferencePoint> points;
+    points.reserve(std::min<std::size_t>(walls.size() * 2, MAX_ROOM_REFERENCE_POINTS));
 
-    const double duplicate_distance_squared = tolerance * tolerance;
-    for (std::int64_t ix = min_x_index; ix <= max_x_index; ++ix)
-    {
-        for (std::int64_t iy = min_y_index; iy <= max_y_index; ++iy)
+    const auto add_candidate = [&](const Vec3& candidate, ReferencePointKind kind) {
+        if (points.size() >= MAX_ROOM_REFERENCE_POINTS) return;
+        if (!safe_reference(bvh, candidate, state_point, tolerance)) return;
+        const double duplicate_distance =
+            std::max(tolerance * 2.0, long_span * 1.0e-7);
+        for (const ReferencePoint& existing : points)
         {
-            const Vec3 candidate{
-                state_point.x + static_cast<double>(ix) * spacing,
-                state_point.y + static_cast<double>(iy) * spacing,
-                state_point.z
-            };
+            if (existing.kind == kind &&
+                near_xy(existing.point, candidate, duplicate_distance))
+                return;
+        }
+        points.push_back({candidate, kind});
+    };
 
-            if (length_squared(subtract(candidate, state_point)) <= duplicate_distance_squared)
-                continue;
-            if (!bvh_inside(bvh, candidate, tolerance))
-                continue;
-            if (bvh.nearest_distance(candidate) <= tolerance)
-                continue;
+    // Green: midpoint of each vertical Face slice -> half the inward ray
+    // distance to the next wall at State's exact Z.
+    for (const WallSegment& wall : walls)
+    {
+        const Vec3 origin = multiply(add(wall.a, wall.b), 0.5);
+        const Vec3 edge = subtract(wall.b, wall.a);
+        const double edge_length = std::hypot(edge.x, edge.y);
+        if (edge_length <= tolerance) continue;
+        const Vec3 left{-edge.y / edge_length, edge.x / edge_length, 0.0};
+        const double probe = std::max(
+            tolerance * 8.0,
+            std::min(edge_length * 0.01, short_span * 0.02)
+        );
+        const bool left_inside = bvh_inside(bvh, add(origin, multiply(left, probe)), tolerance);
+        const bool right_inside = bvh_inside(bvh, subtract(origin, multiply(left, probe)), tolerance);
+        if (left_inside == right_inside) continue;
+        const Vec3 inward = left_inside ? left : multiply(left, -1.0);
+        const double distance = opposite_wall_distance(walls, origin, inward, tolerance);
+        if (!std::isfinite(distance) || distance <= tolerance * 2.0) continue;
+        const Vec3 candidate = add(origin, multiply(inward, distance * 0.5));
+        if (clear_path(bvh, add(origin, multiply(inward, probe)), candidate, tolerance))
+            add_candidate(candidate, ReferencePointKind::Face);
+    }
 
-            points.push_back(candidate);
-            if (points.size() >= MAX_ROOM_REFERENCE_POINTS)
-                return points;
+    // Collect shared endpoints of vertical slices. Only degree-two vertices
+    // define an unambiguous corner; seam vertices and junctions are excluded.
+    std::vector<CornerVertex> vertices;
+    const auto add_ray = [&](const Vec3& point, const Vec3& toward) {
+        const Vec3 direction = subtract(toward, point);
+        const double edge_length = std::hypot(direction.x, direction.y);
+        if (edge_length <= tolerance) return;
+        CornerVertex* vertex = nullptr;
+        for (CornerVertex& candidate : vertices)
+        {
+            if (near_xy(candidate.point, point, geometry_epsilon))
+            {
+                vertex = &candidate;
+                break;
+            }
+        }
+        if (!vertex)
+        {
+            vertices.push_back({point, {}});
+            vertex = &vertices.back();
+        }
+        const Vec3 unit{direction.x / edge_length, direction.y / edge_length, 0.0};
+        for (const Vec3& existing : vertex->rays)
+        {
+            if (dot(existing, unit) > 1.0 - 1.0e-8) return;
+        }
+        vertex->rays.push_back(unit);
+    };
+    for (const WallSegment& wall : walls)
+    {
+        add_ray(wall.a, wall.b);
+        add_ray(wall.b, wall.a);
+    }
+
+    // Purple: small (<145deg) or reflex (>=225deg) interior corners.
+    for (const CornerVertex& vertex : vertices)
+    {
+        if (vertex.rays.size() != 2) continue;
+        const Vec3& first = vertex.rays[0];
+        const Vec3& second = vertex.rays[1];
+        const double cosine = std::max(-1.0, std::min(1.0, dot(first, second)));
+        const double smaller_angle = std::acos(cosine) * 180.0 / 3.14159265358979323846;
+        const Vec3 sum = add(first, second);
+        if (length_squared(sum) <= EPSILON) continue;
+        const Vec3 bisector = normalize(sum);
+        const double probe = std::max(tolerance * 8.0, short_span * 0.01);
+        const bool narrow_inside =
+            bvh_inside(bvh, add(vertex.point, multiply(bisector, probe)), tolerance);
+        const bool reflex_inside =
+            bvh_inside(bvh, subtract(vertex.point, multiply(bisector, probe)), tolerance);
+        if (narrow_inside == reflex_inside) continue;
+        const double interior_angle = narrow_inside ?
+            smaller_angle : 360.0 - smaller_angle;
+        if (!(interior_angle < CORNER_CONVEX_THRESHOLD_DEGREES ||
+              interior_angle >= CORNER_REFLEX_THRESHOLD_DEGREES))
+            continue;
+        const Vec3 inward = narrow_inside ? bisector : multiply(bisector, -1.0);
+        const double distance =
+            opposite_wall_distance(walls, vertex.point, inward, tolerance);
+        if (!std::isfinite(distance) || distance <= tolerance * 2.0) continue;
+        const Vec3 candidate =
+            add(vertex.point, multiply(inward, distance * 0.5));
+        if (clear_path(bvh, add(vertex.point, multiply(inward, probe)), candidate, tolerance))
+            add_candidate(candidate, ReferencePointKind::Corner);
+    }
+
+    // Red: representative for a close, mutually visible group of green/purple
+    // candidates. Keep originals rendered so all three point types can be
+    // inspected independently. Complete-link avoids chain-merging across rooms.
+    const std::size_t original_count = points.size();
+    const double radius = short_span * ROOM_REFERENCE_CLUSTER_RADIUS_FRACTION;
+    if (radius > tolerance * 4.0 && original_count >= 2)
+    {
+        std::vector<std::vector<std::size_t>> clusters;
+        for (std::size_t i = 0; i < original_count; ++i)
+        {
+            bool appended = false;
+            for (std::vector<std::size_t>& cluster : clusters)
+            {
+                bool compatible = true;
+                for (const std::size_t member : cluster)
+                {
+                    if (distance_xy_squared(points[i].point, points[member].point) >
+                            radius * radius ||
+                        !clear_path(bvh, points[i].point, points[member].point, tolerance))
+                    {
+                        compatible = false;
+                        break;
+                    }
+                }
+                if (compatible)
+                {
+                    cluster.push_back(i);
+                    appended = true;
+                    break;
+                }
+            }
+            if (!appended) clusters.push_back({i});
+        }
+        for (const std::vector<std::size_t>& cluster : clusters)
+        {
+            if (cluster.size() < 2) continue;
+            Vec3 centroid{0.0, 0.0, state_point.z};
+            for (const std::size_t member : cluster)
+            {
+                centroid.x += points[member].point.x;
+                centroid.y += points[member].point.y;
+            }
+            centroid.x /= static_cast<double>(cluster.size());
+            centroid.y /= static_cast<double>(cluster.size());
+            bool valid = safe_reference(bvh, centroid, state_point, tolerance);
+            for (const std::size_t member : cluster)
+            {
+                if (valid && !clear_path(bvh, points[member].point, centroid, tolerance))
+                    valid = false;
+            }
+            if (valid) add_candidate(centroid, ReferencePointKind::Merged);
         }
     }
     return points;

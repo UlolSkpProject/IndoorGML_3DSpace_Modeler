@@ -259,11 +259,24 @@ module ULOL
           end
 
           def debug_reference_points
+            debug_reference_points_by_kind.values.flatten
+          end
+
+          def debug_reference_points_by_kind
             store = @debug_reference_points_by_cell_id || {}
-            valid_ids = Array(@feature_registry&.cell_spaces).filter_map do |cell_space|
-              cell_space.id if cell_space&.valid?
+            by_kind = Hash.new { |hash, key| hash[key] = [] }
+            Array(@feature_registry&.cell_spaces).each do |cell_space|
+              next unless cell_space&.valid?
+
+              Array(store[cell_space.id]).each do |entry|
+                if entry.is_a?(Hash)
+                  by_kind[entry[:kind].to_i] << entry[:point]
+                else
+                  by_kind[0] << entry # Legacy in-memory data
+                end
+              end
             end
-            valid_ids.flat_map { |cell_id| Array(store[cell_id]) }
+            by_kind
           end
 
           private
@@ -474,6 +487,7 @@ module ULOL
 
             points = Hash(state_result[:points])
             reference_points = Hash(state_result[:reference_points])
+            reference_kinds = Hash(state_result[:reference_kinds])
             reference_statuses = Hash(state_result[:reference_statuses])
             session_entries.each_with_index do |entry, index|
               cell_space = pending_by_id[entry[:cell_space].id]
@@ -490,7 +504,9 @@ module ULOL
                 raise NativeAdjacencyBridge::ProtocolError,
                       "Native State result missing for #{cell_space.id}"
               end
-              store_debug_reference_points(cell_space, reference_points[index])
+              store_debug_reference_points(
+                cell_space, reference_points[index], kinds: reference_kinds[index]
+              )
               state_point_applier.call(cell_space, coordinates)
             end
 
@@ -532,14 +548,18 @@ module ULOL
             false
           end
 
-          def store_debug_reference_points(cell_space, coordinate_sets)
+          def store_debug_reference_points(cell_space, coordinate_sets, kinds: nil)
             return [] unless cell_space&.valid?
 
-            points = Array(coordinate_sets).filter_map do |coordinates|
+            point_kinds = Array(kinds)
+            points = Array(coordinate_sets).each_with_index.filter_map do |coordinates, index|
               values = Array(coordinates).map(&:to_f)
               next unless values.length == 3 && values.all?(&:finite?)
 
-              Geom::Point3d.new(values[0], values[1], values[2])
+              {
+                point: Geom::Point3d.new(values[0], values[1], values[2]),
+                kind: point_kinds.fetch(index, 0).to_i
+              }.freeze
             end
             @debug_reference_points_by_cell_id ||= {}
             @debug_reference_points_by_cell_id[cell_space.id] = points.freeze

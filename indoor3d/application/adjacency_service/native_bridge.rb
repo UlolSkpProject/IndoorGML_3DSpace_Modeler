@@ -10,7 +10,8 @@ module ULOL
         PROTOCOL_VERSION = 1
         GEOMETRY_PROTOCOL_VERSION = 3
         REFERENCE_POINTS_RESULT_VERSION = 2
-        STATE_RESULT_VERSION = 3
+        STATE_RESULT_VERSION = 4
+        LEGACY_STATE_RESULT_VERSION = 3
         NORMAL_TOLERANCE = 0.000001
         POLL_INTERVAL_SECONDS = 0.01
         INPUT_HEADER_SIZE = 32
@@ -424,7 +425,8 @@ module ULOL
           raise ProtocolError, 'native State result magic mismatch' unless magic == STATE_OUTPUT_MAGIC
 
           version = reader.read_u64
-          unless [PROTOCOL_VERSION, REFERENCE_POINTS_RESULT_VERSION, STATE_RESULT_VERSION].include?(version)
+          unless [PROTOCOL_VERSION, REFERENCE_POINTS_RESULT_VERSION,
+                  LEGACY_STATE_RESULT_VERSION, STATE_RESULT_VERSION].include?(version)
             raise ProtocolError, "unsupported native State result version #{version}"
           end
 
@@ -434,6 +436,7 @@ module ULOL
 
           points = {}
           reference_points = {}
+          reference_kinds = {}
           reference_statuses = {}
           previous_index = nil
           result_count.times do
@@ -455,9 +458,10 @@ module ULOL
 
             # TEMP DEBUG SUPPORT: V3 carries reference generation status for console diagnostics.
             reference_statuses[cell_index] =
-              version == STATE_RESULT_VERSION ? checked_count(reader.read_u64, 'reference status') : 0
+              version >= LEGACY_STATE_RESULT_VERSION ? checked_count(reader.read_u64, 'reference status') : 0
 
             references = []
+            kinds = []
             if version >= REFERENCE_POINTS_RESULT_VERSION
               reference_count = checked_count(reader.read_u64, 'reference point count')
               reference_count.times do
@@ -466,15 +470,23 @@ module ULOL
                   finite_f64(reader.read_f64, 'reference y'),
                   finite_f64(reader.read_f64, 'reference z')
                 ].freeze
+                kind = version >= STATE_RESULT_VERSION ?
+                  checked_count(reader.read_u64, 'reference kind') : 0
+                if version >= STATE_RESULT_VERSION && ![1, 2, 3].include?(kind)
+                  raise ProtocolError, "invalid reference point kind #{kind}"
+                end
+                kinds << kind
               end
             end
             reference_points[cell_index] = references.freeze
+            reference_kinds[cell_index] = kinds.freeze
           end
 
           raise ProtocolError, 'native State result has trailing bytes' unless reader.finished?
           {
             points: points.freeze,
             reference_points: reference_points.freeze,
+            reference_kinds: reference_kinds.freeze,
             reference_statuses: reference_statuses.freeze
           }.freeze
         end

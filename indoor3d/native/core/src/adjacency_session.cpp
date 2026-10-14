@@ -133,14 +133,21 @@ void AdjacencySession::state_worker_loop()
             const StateSearchMetrics& metrics = result.state_metrics;
             if (result.state_point)
             {
-                local_results.push_back(
-                    StatePointResult{
-                        cells_[cell_position].index,
-                        *result.state_point,
-                        static_cast<std::uint64_t>(result.reference_status),
-                        result.reference_points
-                    }
-                );
+                StatePointResult state_result;
+                state_result.cell_index = cells_[cell_position].index;
+                state_result.point = *result.state_point;
+                state_result.reference_status =
+                    static_cast<std::uint64_t>(result.reference_status);
+                state_result.reference_points.reserve(result.reference_points.size());
+                state_result.reference_kinds.reserve(result.reference_points.size());
+                for (const ReferencePoint& reference : result.reference_points)
+                {
+                    state_result.reference_points.push_back(reference.point);
+                    state_result.reference_kinds.push_back(
+                        static_cast<std::uint64_t>(reference.kind)
+                    );
+                }
+                local_results.push_back(std::move(state_result));
                 if (metrics.volume_centroid_succeeded)
                     state_volume_centroid_success_count_.fetch_add(1, std::memory_order_relaxed);
             }

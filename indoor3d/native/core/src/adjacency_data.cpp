@@ -20,7 +20,7 @@ constexpr std::uint64_t INPUT_VERSION_V1 = 1;
 constexpr std::uint64_t INPUT_VERSION_V2 = 2;
 constexpr std::uint64_t INPUT_VERSION_V3 = 3;
 constexpr std::uint64_t RESULT_VERSION = 1;
-constexpr std::uint64_t STATE_RESULT_VERSION = 3;
+constexpr std::uint64_t STATE_RESULT_VERSION = 4;
 constexpr std::size_t INPUT_HEADER_SIZE = 32;
 constexpr std::size_t CELL_FIXED_SIZE_V1 = 80;
 constexpr std::size_t CELL_FIXED_SIZE_V2 = 96;
@@ -481,15 +481,22 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
         writer.append_double(result.point.z);
         // TEMP DEBUG SUPPORT: remove reference_status when temporary diagnostics are removed.
         writer.append_u64(result.reference_status);
+        if (result.reference_points.size() != result.reference_kinds.size())
+            throw std::invalid_argument("reference point/kind count mismatch");
         writer.append_u64(checked_u64(result.reference_points.size(), "reference point count"));
-        for (const Vec3& point : result.reference_points)
+        for (std::size_t i = 0; i < result.reference_points.size(); ++i)
         {
+            const Vec3& point = result.reference_points[i];
+            const std::uint64_t kind = result.reference_kinds[i];
+            if (kind < 1 || kind > 3)
+                throw std::invalid_argument("reference point kind is invalid");
             require_finite(point.x, "reference point x");
             require_finite(point.y, "reference point y");
             require_finite(point.z, "reference point z");
             writer.append_double(point.x);
             writer.append_double(point.y);
             writer.append_double(point.z);
+            writer.append_u64(kind);
         }
     }
     return writer.take();

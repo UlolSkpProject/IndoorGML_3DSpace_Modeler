@@ -3,11 +3,15 @@
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
-      # Temporary visualization for Native CellSpace reference points.
+      # Temporary visualization of Room reference candidates and cluster centers.
       class ReferencePointDebugOverlayRenderer
-        REFERENCE_POINT_COLOR = Sketchup::Color.new(255, 140, 0)
+        POINT_COLORS = {
+          0 => Sketchup::Color.new(255, 140, 0),  # Legacy V3: unclassified
+          1 => Sketchup::Color.new(40, 220, 100), # Face midpoint: green
+          2 => Sketchup::Color.new(175, 95, 240), # Corner bisector: purple
+          3 => Sketchup::Color.new(235, 60, 60)   # Cluster centroid: red
+        }.freeze
         REFERENCE_POINT_SIZE_PIXELS = 8
-        # Deliberately different from StateOverlayRenderer::STATE_POINT_STYLE (7).
         REFERENCE_POINT_STYLE = 2
 
         def initialize(indoor_model:, transform_context:)
@@ -16,19 +20,20 @@ module ULOL
         end
 
         def draw(view)
-          points = render_points
-          return if points.empty?
+          render_points_by_kind.each do |kind, points|
+            next if points.empty?
 
-          view.draw_points(
-            points,
-            REFERENCE_POINT_SIZE_PIXELS,
-            REFERENCE_POINT_STYLE,
-            REFERENCE_POINT_COLOR
-          )
+            view.draw_points(
+              points,
+              REFERENCE_POINT_SIZE_PIXELS,
+              REFERENCE_POINT_STYLE,
+              POINT_COLORS.fetch(kind, POINT_COLORS[0])
+            )
+          end
         end
 
         def extent_points
-          points = render_points
+          points = render_points_by_kind.values.flatten
           return [] if points.empty?
 
           xs = points.map(&:x)
@@ -42,17 +47,19 @@ module ULOL
 
         private
 
-        def render_points
-          root_local_points = Array(@indoor_model.debug_reference_points)
-          return [] if root_local_points.empty?
-
-          if @transform_context.respond_to?(:overlay_render_points)
-            @transform_context.overlay_render_points(root_local_points)
-          else
-            root_local_points.map { |point| @transform_context.overlay_render_point(point) }
+        def render_points_by_kind
+          grouped = @indoor_model.debug_reference_points_by_kind
+          grouped.each_with_object({}) do |(kind, root_local_points), result|
+            points = Array(root_local_points)
+            result[kind] =
+              if @transform_context.respond_to?(:overlay_render_points)
+                @transform_context.overlay_render_points(points)
+              else
+                points.map { |point| @transform_context.overlay_render_point(point) }
+              end
           end
         rescue StandardError
-          []
+          {}
         end
       end
     end

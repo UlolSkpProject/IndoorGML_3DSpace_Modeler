@@ -218,18 +218,52 @@ void test_room_reference_points_share_state_height()
     const CellSpaceInteriorPointResult result =
         locate_cell_space_interior_points(cell, 0.001);
     require(result.state_point.has_value(), "Room State point was not found");
-    require(!result.reference_points.empty(), "Room reference points were not generated");
+    // A square's half-ray candidates can coincide with State, and must then
+    // be omitted instead of emitting duplicate reference points.
     require(
         result.reference_status == ReferencePointStatus::Succeeded,
         "Room reference generation status was not successful"
     );
-    for (const Vec3& point : result.reference_points)
+    for (const ReferencePoint& reference : result.reference_points)
     {
+        const Vec3& point = reference.point;
         require(
             std::abs(point.z - result.state_point->z) < 1.0e-9,
             "Room reference point does not share State height"
         );
+        require(
+            reference.kind == ReferencePointKind::Face ||
+            reference.kind == ReferencePointKind::Corner ||
+            reference.kind == ReferencePointKind::Merged,
+            "Room reference point kind is invalid"
+        );
     }
+}
+
+void test_concave_room_reference_points()
+{
+    CellData cell = u_prism_cell();
+    cell.category = CellSpaceCategory::Room;
+    const CellSpaceInteriorPointResult result =
+        locate_cell_space_interior_points(cell, 0.001);
+    require(result.state_point.has_value(), "concave Room State point missing");
+    require(!result.reference_points.empty(), "concave Room references missing");
+
+    std::size_t face_count = 0;
+    std::size_t corner_count = 0;
+    for (const ReferencePoint& reference : result.reference_points)
+    {
+        const Vec3& p = reference.point;
+        const bool inside =
+            (p.x > 0.0 && p.x < 1.0 && p.y > 0.0 && p.y < 3.0) ||
+            (p.x > 2.0 && p.x < 3.0 && p.y > 0.0 && p.y < 3.0) ||
+            (p.x > 0.0 && p.x < 3.0 && p.y > 0.0 && p.y < 1.0);
+        require(inside, "concave Room reference fell outside footprint");
+        if (reference.kind == ReferencePointKind::Face) ++face_count;
+        if (reference.kind == ReferencePointKind::Corner) ++corner_count;
+    }
+    require(face_count > 0, "concave Room Face references missing");
+    require(corner_count > 0, "concave Room Corner references missing");
 }
 
 void test_non_room_reference_points_are_empty()
@@ -264,6 +298,7 @@ int main()
     test_state_concave_u_uses_bvh_fallback();
     test_state_fixed_z();
     test_room_reference_points_share_state_height();
+    test_concave_room_reference_points();
     test_non_room_reference_points_are_empty();
     return 0;
 }
