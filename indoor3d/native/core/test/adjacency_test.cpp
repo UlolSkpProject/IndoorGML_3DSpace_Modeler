@@ -268,12 +268,13 @@ void test_room_reference_points_share_state_height()
     const CellSpaceInteriorPointResult result =
         locate_cell_space_interior_points(cell, 0.001);
     require(result.state_point.has_value(), "Room State point was not found");
-    // A square's half-ray candidates can coincide with State, and must then
-    // be omitted instead of emitting duplicate reference points.
+    // A convex Room requires no Reference Points: its State is sufficient.
     require(
         result.reference_status == ReferencePointStatus::Succeeded,
         "Room reference generation status was not successful"
     );
+    require(result.reference_points.empty(),
+            "convex Room must contain only its State");
     for (const ReferencePoint& reference : result.reference_points)
     {
         const Vec3& point = reference.point;
@@ -300,9 +301,8 @@ void test_concave_room_reference_points()
     require(result.state_point.has_value(), "concave Room State point missing");
     require(!result.reference_points.empty(), "concave Room references missing");
 
-    std::size_t face_count = 0;
     std::size_t corner_count = 0;
-     std::size_t final_count = 0;
+    std::size_t final_count = 0;
     std::vector<Vec3> raw_candidates;
     std::vector<Vec3> merge_centers;
     std::vector<Vec3> final_points;
@@ -314,12 +314,12 @@ void test_concave_room_reference_points()
             (p.x > 2.0 && p.x < 3.0 && p.y > 0.0 && p.y < 3.0) ||
             (p.x > 0.0 && p.x < 3.0 && p.y > 0.0 && p.y < 1.0);
         require(inside, "concave Room reference fell outside footprint");
-        if (reference.kind == ReferencePointKind::Face ||
-            reference.kind == ReferencePointKind::Corner)
+        require(reference.kind != ReferencePointKind::Face,
+                "green Face references must never be generated");
+        if (reference.kind == ReferencePointKind::Corner)
         {
             raw_candidates.push_back(p);
-            if (reference.kind == ReferencePointKind::Face) ++face_count;
-            else ++corner_count;
+            ++corner_count;
         }
         if (reference.kind == ReferencePointKind::Merged)
         {
@@ -331,8 +331,7 @@ void test_concave_room_reference_points()
             final_points.push_back(p);
         }
     }
-    require(face_count > 0, "concave Room Face references missing");
-    require(corner_count > 0, "concave Room Corner references missing");
+    require(corner_count > 0, "concave Room must produce reflex Corner candidates");
     require(final_count > 0, "concave Room final references missing");
     require(final_count <= raw_candidates.size(),
             "final Room count exceeds original candidates");
@@ -357,18 +356,34 @@ void test_concave_room_reference_points()
 
 void test_state_anchored_room_reference_cluster()
 {
-    CellData cell = u_prism_cell();
-    cell.category = CellSpaceCategory::Room;
+    CellData cell = shallow_reflex_prism_cell(0.5);
 
-    // The left vertical corridor is 1.0 unit wide. Its Face midpoint
-    // reference is (0.5, 1.5, 0.5), which can merge with this nearby State.
-    const Vec3 state{0.55, 1.5, 0.5};
+    // Compute a purple Corner position using the same solid with a State far
+    // from the reflex corner. The candidate's position depends on geometry,
+    // not on State XY (only its Z).
+    const Vec3 distant_state{2.0, 0.5, 0.5};
+    const std::vector<ReferencePoint> initial =
+        find_reference_points(cell, distant_state, 0.001);
+
+    std::optional<Vec3> corner;
+    for (const ReferencePoint& reference : initial)
+    {
+        require(reference.kind != ReferencePointKind::Face,
+                "State fixture unexpectedly generated green Face points");
+        if (reference.kind == ReferencePointKind::Corner)
+            corner = reference.point;
+    }
+    require(corner.has_value(), "State merge fixture Corner is missing");
+
+    // Bring the State near the candidate. The resulting cluster must retain
+    // the exact State position and suppress a duplicate final black point.
+    const Vec3 state{corner->x + 0.05, corner->y, corner->z};
     const std::vector<ReferencePoint> references =
         find_reference_points(cell, state, 0.001);
 
     bool found_state_merge_marker = false;
-    bool found_absorbed_source = false;
-    bool found_absorbed_source_as_final = false;
+    bool found_absorbed_corner = false;
+    bool found_absorbed_as_final = false;
     bool found_duplicate_state_final = false;
     for (const ReferencePoint& reference : references)
     {
@@ -377,28 +392,28 @@ void test_state_anchored_room_reference_cluster()
             std::abs(point.x - state.x) < 1.0e-9 &&
             std::abs(point.y - state.y) < 1.0e-9 &&
             std::abs(point.z - state.z) < 1.0e-9;
-        const bool at_wall_midpoint =
-            std::abs(point.x - 0.5) < 1.0e-9 &&
-            std::abs(point.y - 1.5) < 1.0e-9;
-
+        const bool at_corner =
+            std::abs(point.x - corner->x) < 1.0e-9 &&
+            std::abs(point.y - corner->y) < 1.0e-9;
+        require(reference.kind != ReferencePointKind::Face,
+                "green Face candidate must not be emitted");
         if (reference.kind == ReferencePointKind::Merged && at_state)
             found_state_merge_marker = true;
-        if ((reference.kind == ReferencePointKind::Face ||
-             reference.kind == ReferencePointKind::Corner) && at_wall_midpoint)
-            found_absorbed_source = true;
+        if (reference.kind == ReferencePointKind::Corner && at_corner)
+            found_absorbed_corner = true;
         if (reference.kind == ReferencePointKind::Final)
         {
             if (at_state) found_duplicate_state_final = true;
-            if (at_wall_midpoint) found_absorbed_source_as_final = true;
+            if (at_corner) found_absorbed_as_final = true;
         }
     }
 
-    require(found_absorbed_source, "State merge fixture source is missing");
-    require(found_state_merge_marker, "State cluster must use exact State position");
-    require(!found_absorbed_source_as_final,
-            "State-merged source must be excluded from final references");
+    require(found_absorbed_corner, "State merge must retain purple Corner diagnostic");
+    require(found_state_merge_marker, "State cluster must preserve exact State coordinates");
+    require(!found_absorbed_as_final,
+            "State-merged Corner must be absent from final references");
     require(!found_duplicate_state_final,
-            "State cluster must not create a duplicate black Final reference");
+            "State cluster must not create duplicate black Final reference");
 }
 
 void test_convex_room_uses_state_only()
@@ -445,6 +460,9 @@ void test_room_reflex_threshold_200_degrees()
     }
     require(found_eligible_corner,
             "200deg reflex threshold must produce a Corner reference candidate");
+    for (const ReferencePoint& reference : deep_points)
+        require(reference.kind != ReferencePointKind::Face,
+                "only purple Corner candidate generation is allowed");
 }
 
 void test_non_room_reference_points_are_empty()

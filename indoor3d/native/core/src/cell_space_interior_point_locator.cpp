@@ -891,7 +891,7 @@ std::vector<ReferencePoint> find_reference_points(
     }
 
     // Only reflex interior corners between vertical Face slices trigger Room
-    // reference generation. Convex polygons and shallow concavities (<200deg)
+    // reference generation. Convex polygons and shallow concavities (<=200deg)
     // are represented by their State alone. The classification is evaluated at
     // the actual State Z, with the existing BVH used to identify the interior.
     struct EligibleCorner
@@ -911,7 +911,7 @@ std::vector<ReferencePoint> find_reference_points(
         if (length_squared(sum) <= EPSILON) continue;
 
         const double interior_reflex_angle = 360.0 - smaller_angle;
-        if (interior_reflex_angle < CORNER_REFLEX_THRESHOLD_DEGREES)
+        if (interior_reflex_angle <= CORNER_REFLEX_THRESHOLD_DEGREES)
             continue;
 
         const Vec3 bisector = normalize(sum);
@@ -930,11 +930,12 @@ std::vector<ReferencePoint> find_reference_points(
     if (eligible_corners.empty()) return {};
 
     std::vector<ReferencePoint> points;
-    points.reserve(std::min<std::size_t>(walls.size() * 2, MAX_ROOM_REFERENCE_POINTS));
+    points.reserve(std::min<std::size_t>(
+        eligible_corners.size() * 3, MAX_ROOM_REFERENCE_POINTS
+    ));
 
     const auto add_candidate = [&](const Vec3& candidate, ReferencePointKind kind) {
-        const bool source_candidate =
-            kind == ReferencePointKind::Face || kind == ReferencePointKind::Corner;
+        const bool source_candidate = kind == ReferencePointKind::Corner;
         const std::size_t limit = source_candidate ?
             MAX_ROOM_REFERENCE_POINTS : MAX_ROOM_REFERENCE_DEBUG_POINTS;
         if (points.size() >= limit) return;
@@ -950,31 +951,10 @@ std::vector<ReferencePoint> find_reference_points(
         points.push_back({candidate, kind});
     };
 
-    // Green: midpoint of each vertical Face slice -> half the inward ray
-    // distance to the next wall at State's exact Z.
-    for (const WallSegment& wall : walls)
-    {
-        const Vec3 origin = multiply(add(wall.a, wall.b), 0.5);
-        const Vec3 edge = subtract(wall.b, wall.a);
-        const double edge_length = std::hypot(edge.x, edge.y);
-        if (edge_length <= tolerance) continue;
-        const Vec3 left{-edge.y / edge_length, edge.x / edge_length, 0.0};
-        const double probe = std::max(
-            tolerance * 8.0,
-            std::min(edge_length * 0.01, short_span * 0.02)
-        );
-        const bool left_inside = bvh_inside(bvh, add(origin, multiply(left, probe)), tolerance);
-        const bool right_inside = bvh_inside(bvh, subtract(origin, multiply(left, probe)), tolerance);
-        if (left_inside == right_inside) continue;
-        const Vec3 inward = left_inside ? left : multiply(left, -1.0);
-        const double distance = opposite_wall_distance(walls, origin, inward, tolerance);
-        if (!std::isfinite(distance) || distance <= tolerance * 2.0) continue;
-        const Vec3 candidate = add(origin, multiply(inward, distance * 0.5));
-        if (clear_path(bvh, add(origin, multiply(inward, probe)), candidate, tolerance))
-            add_candidate(candidate, ReferencePointKind::Face);
-    }
-
-    // Purple: 200deg-or-greater reflex corners only.
+    // Purple only: a qualifying reflex corner produces exactly one
+    // reference candidate at half the inward angle-bisector ray distance.
+    // No vertical Face midpoint (green) candidates are generated.
+    // The interior angle must be strictly greater than 200 degrees.
     for (const EligibleCorner& corner : eligible_corners)
     {
         const double probe = std::max(tolerance * 8.0, short_span * 0.01);
@@ -989,6 +969,8 @@ std::vector<ReferencePoint> find_reference_points(
             add_candidate(candidate, ReferencePointKind::Corner);
     }
 
+    // Cluster only purple corner candidates; the State is a fixed-position
+    // special Reference Point and takes priority over ordinary clusters.
     // The State is a special, fixed-position Reference Point during clustering.
     // Process it first so nearby, mutually visible candidates are absorbed
     // into the State instead of being assigned to ordinary clusters.
@@ -1076,7 +1058,7 @@ std::vector<ReferencePoint> find_reference_points(
     }
 
     // Final navigation nodes: each non-State red center plus every unmerged
-    // green/purple candidate. The State already represents its own cluster.
+    // purple corner candidate. The State already represents its own cluster.
     // All diagnostic markers remain visible.
     const std::size_t diagnostic_count = points.size();
     for (std::size_t i = 0; i < diagnostic_count; ++i)
