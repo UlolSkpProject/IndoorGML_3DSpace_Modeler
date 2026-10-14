@@ -6,7 +6,6 @@ module ULOL
       # Runtime-only visualization of overlapping XY circles and their
       # unobstructed lines of sight within each Room CellSpace.
       class ReferenceGraphDebugOverlayRenderer
-        CIRCLE_COLOR = Sketchup::Color.new(255, 255, 255, 64)
         CIRCLE_OUTLINE_COLOR = Sketchup::Color.new(255, 255, 255, 110)
         EDGE_COLOR = Sketchup::Color.new(0, 0, 0)
         CIRCLE_SEGMENTS = 48
@@ -26,16 +25,8 @@ module ULOL
               next if circle.empty?
 
               rendered = render_points(circle)
-              # Triangulate the fan explicitly: GL_TRIANGLES is supported
-              # consistently by SketchUp's View#draw implementation.
-              center = render_point(node[:point])
-              triangles = []
-              rendered.each_with_index do |point, index|
-                triangles.push(center, point, rendered[(index + 1) % rendered.length])
-              end
-
-              view.drawing_color = CIRCLE_COLOR
-              view.draw(GL_TRIANGLES, triangles)
+              # Outline only: avoid creating and rendering a triangle fan for
+              # every node on each overlay draw.
               view.drawing_color = CIRCLE_OUTLINE_COLOR
               view.line_width = 1
               view.line_stipple = '' if view.respond_to?(:line_stipple=)
