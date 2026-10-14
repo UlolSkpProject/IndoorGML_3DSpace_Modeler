@@ -488,7 +488,7 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
         {
             const Vec3& point = result.reference_points[i];
             const std::uint64_t kind = result.reference_kinds[i];
-            if (kind < 1 || kind > 3)
+            if (kind < 1 || kind > 4)
                 throw std::invalid_argument("reference point kind is invalid");
             require_finite(point.x, "reference point x");
             require_finite(point.y, "reference point y");

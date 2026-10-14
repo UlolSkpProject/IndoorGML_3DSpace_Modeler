@@ -27,6 +27,10 @@ constexpr double CORNER_CONVEX_THRESHOLD_DEGREES = 145.0;
 constexpr double CORNER_REFLEX_THRESHOLD_DEGREES = 225.0;
 constexpr std::size_t MAX_ROOM_WALL_SEGMENTS = 2048;
 constexpr std::size_t MAX_ROOM_REFERENCE_POINTS = 4096;
+// Additional debug records (red merged + black final) do not consume the
+// original Face/Corner sampling cap.
+constexpr std::size_t MAX_ROOM_REFERENCE_DEBUG_POINTS =
+    MAX_ROOM_REFERENCE_POINTS * 3;
 
 double elapsed_seconds(std::chrono::steady_clock::time_point started_at)
 {
@@ -856,7 +860,11 @@ std::vector<ReferencePoint> find_reference_points(
     points.reserve(std::min<std::size_t>(walls.size() * 2, MAX_ROOM_REFERENCE_POINTS));
 
     const auto add_candidate = [&](const Vec3& candidate, ReferencePointKind kind) {
-        if (points.size() >= MAX_ROOM_REFERENCE_POINTS) return;
+        const bool source_candidate =
+            kind == ReferencePointKind::Face || kind == ReferencePointKind::Corner;
+        const std::size_t limit = source_candidate ?
+            MAX_ROOM_REFERENCE_POINTS : MAX_ROOM_REFERENCE_DEBUG_POINTS;
+        if (points.size() >= limit) return;
         if (!safe_reference(bvh, candidate, state_point, tolerance)) return;
         const double duplicate_distance =
             std::max(tolerance * 2.0, long_span * 1.0e-7);
@@ -963,6 +971,7 @@ std::vector<ReferencePoint> find_reference_points(
     // candidates. Keep originals rendered so all three point types can be
     // inspected independently. Complete-link avoids chain-merging across rooms.
     const std::size_t original_count = points.size();
+    std::vector<bool> merged_sources(original_count, false);
     const double radius = short_span * ROOM_REFERENCE_CLUSTER_RADIUS_FRACTION;
     if (radius > tolerance * 4.0 && original_count >= 2)
     {
@@ -1009,8 +1018,29 @@ std::vector<ReferencePoint> find_reference_points(
                 if (valid && !clear_path(bvh, points[member].point, centroid, tolerance))
                     valid = false;
             }
-            if (valid) add_candidate(centroid, ReferencePointKind::Merged);
+            if (valid)
+            {
+                add_candidate(centroid, ReferencePointKind::Merged);
+                // Source candidates belonging to a successful cluster must
+                // NOT also become final points.
+                for (const std::size_t member : cluster)
+                    merged_sources[member] = true;
+            }
         }
+    }
+
+    // Black: exactly one final node for each accepted red cluster center,
+    // plus every green/purple candidate not absorbed by a cluster.
+    // Keep the diagnostic candidates intact for visual comparison.
+    const std::size_t diagnostic_count = points.size();
+    for (std::size_t i = 0; i < diagnostic_count; ++i)
+    {
+        const bool unmerged_source = i < original_count && !merged_sources[i];
+        const bool merged_center = points[i].kind == ReferencePointKind::Merged;
+        if (!unmerged_source && !merged_center) continue;
+
+        const Vec3 candidate = points[i].point;
+        add_candidate(candidate, ReferencePointKind::Final);
     }
     return points;
 }

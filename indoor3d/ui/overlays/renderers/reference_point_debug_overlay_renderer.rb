@@ -3,16 +3,21 @@
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
-      # Temporary visualization of Room reference candidates and cluster centers.
+      # Temporary visualization of Room candidates, cluster representatives,
+      # and final Reference Points.
       class ReferencePointDebugOverlayRenderer
         POINT_COLORS = {
           0 => Sketchup::Color.new(255, 140, 0),  # Legacy V3: unclassified
           1 => Sketchup::Color.new(40, 220, 100), # Face midpoint: green
           2 => Sketchup::Color.new(175, 95, 240), # Corner bisector: purple
-          3 => Sketchup::Color.new(235, 60, 60)   # Cluster centroid: red
+          3 => Sketchup::Color.new(235, 60, 60),  # Cluster centroid: red
+          4 => Sketchup::Color.new(0, 0, 0)       # Final reference: black
         }.freeze
         REFERENCE_POINT_SIZE_PIXELS = 8
         REFERENCE_POINT_STYLE = 2
+        FINAL_REFERENCE_POINT_KIND = 4
+        # The requested SketchUp draw_points style (STATE_POINT_STYLE = 5).
+        FINAL_REFERENCE_POINT_STYLE = 5
 
         def initialize(indoor_model:, transform_context:)
           @indoor_model = indoor_model
@@ -20,8 +25,11 @@ module ULOL
         end
 
         def draw(view)
-          render_points_by_kind.each do |kind, points|
-            next if points.empty?
+          grouped = render_points_by_kind
+
+          # Diagnostic candidates first; final points on top.
+          grouped.each do |kind, points|
+            next if kind == FINAL_REFERENCE_POINT_KIND || points.empty?
 
             view.draw_points(
               points,
@@ -30,6 +38,16 @@ module ULOL
               POINT_COLORS.fetch(kind, POINT_COLORS[0])
             )
           end
+
+          final_points = Array(grouped[FINAL_REFERENCE_POINT_KIND])
+          return if final_points.empty?
+
+          view.draw_points(
+            final_points,
+            REFERENCE_POINT_SIZE_PIXELS,
+            FINAL_REFERENCE_POINT_STYLE,
+            POINT_COLORS.fetch(FINAL_REFERENCE_POINT_KIND)
+          )
         end
 
         def extent_points

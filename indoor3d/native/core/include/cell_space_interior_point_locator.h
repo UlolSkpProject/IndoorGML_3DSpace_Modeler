@@ -27,7 +27,8 @@ enum class ReferencePointKind : std::uint64_t
 {
     Face = 1,
     Corner = 2,
-    Merged = 3
+    Merged = 3,
+    Final = 4
 };
 
 struct ReferencePoint

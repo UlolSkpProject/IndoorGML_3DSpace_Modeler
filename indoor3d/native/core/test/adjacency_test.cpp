@@ -234,7 +234,8 @@ void test_room_reference_points_share_state_height()
         require(
             reference.kind == ReferencePointKind::Face ||
             reference.kind == ReferencePointKind::Corner ||
-            reference.kind == ReferencePointKind::Merged,
+            reference.kind == ReferencePointKind::Merged ||
+            reference.kind == ReferencePointKind::Final,
             "Room reference point kind is invalid"
         );
     }
@@ -251,6 +252,10 @@ void test_concave_room_reference_points()
 
     std::size_t face_count = 0;
     std::size_t corner_count = 0;
+     std::size_t final_count = 0;
+    std::vector<Vec3> raw_candidates;
+    std::vector<Vec3> merge_centers;
+    std::vector<Vec3> final_points;
     for (const ReferencePoint& reference : result.reference_points)
     {
         const Vec3& p = reference.point;
@@ -259,11 +264,39 @@ void test_concave_room_reference_points()
             (p.x > 2.0 && p.x < 3.0 && p.y > 0.0 && p.y < 3.0) ||
             (p.x > 0.0 && p.x < 3.0 && p.y > 0.0 && p.y < 1.0);
         require(inside, "concave Room reference fell outside footprint");
-        if (reference.kind == ReferencePointKind::Face) ++face_count;
-        if (reference.kind == ReferencePointKind::Corner) ++corner_count;
+        if (reference.kind == ReferencePointKind::Face ||
+            reference.kind == ReferencePointKind::Corner)
+        {
+            raw_candidates.push_back(p);
+            if (reference.kind == ReferencePointKind::Face) ++face_count;
+            else ++corner_count;
+        }
+        if (reference.kind == ReferencePointKind::Merged)
+        {
+             merge_centers.push_back(p);
+        }
+        if (reference.kind == ReferencePointKind::Final)
+        {
+            ++final_count;
+            final_points.push_back(p);
+        }
     }
     require(face_count > 0, "concave Room Face references missing");
     require(corner_count > 0, "concave Room Corner references missing");
+    require(final_count > 0, "concave Room final references missing");
+    require(final_count <= raw_candidates.size(),
+            "final Room count exceeds original candidates");
+    for (const Vec3& merged : merge_centers)
+    {
+        bool found = false;
+        for (const Vec3& final_point : final_points)
+        {
+            const double dx = merged.x - final_point.x;
+            const double dy = merged.y - final_point.y;
+            if (dx * dx + dy * dy < 1.0e-10) found = true;
+        }
+        require(found, "accepted red cluster center is missing its black final point");
+    }
 }
 
 void test_non_room_reference_points_are_empty()

@@ -472,7 +472,7 @@ module ULOL
                 ].freeze
                 kind = version >= STATE_RESULT_VERSION ?
                   checked_count(reader.read_u64, 'reference kind') : 0
-                if version >= STATE_RESULT_VERSION && ![1, 2, 3].include?(kind)
+                if version >= STATE_RESULT_VERSION && ![1, 2, 3, 4].include?(kind)
                   raise ProtocolError, "invalid reference point kind #{kind}"
                 end
                 kinds << kind
