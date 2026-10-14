@@ -178,8 +178,8 @@ CellData shallow_reflex_prism_cell(double notch_depth)
     return cell;
 }
 
-// A concave arc with two successive ~11-degree reflex turns.
-// Each corner alone would be ignored by the old 200-degree cutoff.
+// A concave arc with several small reflex turns accumulating beyond 30 degrees.
+// Each local corner alone remains below the production emission threshold.
 CellData gradual_reflex_arc()
 {
     CellData cell;
@@ -188,8 +188,8 @@ CellData gradual_reflex_arc()
     cell.flags = CELL_FLAG_NEEDS_STATE;
     cell.bounds = box(0,0,0,6,6,1);
     const std::vector<Vec3> ring{
-        {0,0,0},{6,0,0},{6,6,0},{5,5.5,0},
-        {4,5.2,0},{3,5.1,0},{2,5,0},{0,5,0}
+        {0,0,0},{6,0,0},{6,6,0},{5,5.2,0},
+        {4,4.8,0},{3,4.65,0},{2,4.60,0},{0,4.60,0}
     };
     const Vec3 center{3,2,0};
     for (std::size_t i = 0; i < ring.size(); ++i)
@@ -424,7 +424,7 @@ void test_concave_room_reference_points()
 
 void test_state_anchored_room_reference_cluster()
 {
-    CellData cell = shallow_reflex_prism_cell(0.5);
+    CellData cell = shallow_reflex_prism_cell(0.7);
 
     // Compute a purple Corner position using the same solid with a State far
     // from the reflex corner. The candidate's position depends on geometry,
@@ -536,46 +536,48 @@ void test_signed_corner_turn_accumulation()
     require(!cancellation.advance(-9.0),
             "old reflex deficit must not survive a convex net positive turn");
     require(cancellation.advance(-6.0), "new -15 degree run must emit");
+
+    // The production 30-degree threshold still offsets convex turns.
+    RoomSignedTurnAccumulator production(30.0);
+    require(!production.advance(-20.0), "20-degree reflex must wait");
+    require(!production.advance(+6.0), "convex offset must not emit");
+    require(!production.advance(-15.0), "net 29-degree reflex must wait");
+    require(production.advance(-1.0), "net 30-degree reflex must emit");
 }
 
-void test_room_reflex_threshold_15_degree_turn()
+void test_room_reflex_threshold_30_degree_turn()
 {
     const Vec3 state{2.0, 1.5, 0.5};
-    // Inner angles: ~194.25deg (14.25deg turn), ~197.06deg
-    // (17.06deg turn), and ~208.07deg (28.07deg turn).
+    // Depths 0.25, 0.5 and 0.7 produce approximately 14.25,
+    // 28.07 and 38.58 degrees of reflex turn.
     const CellData shallow = shallow_reflex_prism_cell(0.25);
-    const CellData medium = shallow_reflex_prism_cell(0.30);
-    const CellData deep = shallow_reflex_prism_cell(0.5);
+    const CellData medium = shallow_reflex_prism_cell(0.5);
+    const CellData deep = shallow_reflex_prism_cell(0.7);
 
     require(find_reference_points(shallow, state, 0.001).empty(),
-            "a single reflex turn below 15deg must not generate a reference");
+            "a 14-degree reflex turn must not generate a reference");
+    require(find_reference_points(medium, state, 0.001).empty(),
+            "a 28-degree reflex turn must not generate a reference");
 
-    const std::vector<ReferencePoint> medium_points =
-        find_reference_points(medium, state, 0.001);
     const std::vector<ReferencePoint> deep_points =
         find_reference_points(deep, state, 0.001);
-
-    for (const auto* points : {&medium_points, &deep_points})
+    bool found_corner = false;
+    for (const ReferencePoint& point : deep_points)
     {
-        bool found_corner = false;
-        for (const ReferencePoint& point : *points)
-        {
-            require(point.kind != ReferencePointKind::Face,
-                    "green Face candidates must remain disabled");
-            if (point.kind == ReferencePointKind::Corner)
-                found_corner = true;
-        }
-        require(found_corner,
-                "a single reflex turn above 15deg must generate a purple reference");
+        require(point.kind != ReferencePointKind::Face,
+                "green Face candidates must remain disabled");
+        if (point.kind == ReferencePointKind::Corner) found_corner = true;
     }
+    require(found_corner,
+            "a 38-degree reflex turn must generate a purple reference");
 }
 
-void test_room_reference_corner_uses_30_percent_wall_distance()
+void test_room_reference_corner_uses_55_percent_wall_distance()
 {
-    // Symmetric notch vertex (2, 3.5) has an inward bisector straight
-    // toward Y=0. The opposite-wall distance is 3.5, so the Corner
-    // candidate must lie at Y=3.5 - (0.30 * 3.5) = 2.45.
-    const CellData room = shallow_reflex_prism_cell(0.5);
+    // Symmetric notch vertex (2, 3.3) has an inward bisector toward Y=0.
+    // The opposite-wall distance is 3.3, so the Corner candidate must
+    // lie at Y=3.3 - (0.55 * 3.3) = 1.485.
+    const CellData room = shallow_reflex_prism_cell(0.7);
     const std::vector<ReferencePoint> refs =
         find_reference_points(room, {2.0, 0.5, 0.5}, 0.001);
     bool matched = false;
@@ -585,11 +587,11 @@ void test_room_reference_corner_uses_30_percent_wall_distance()
         require(std::abs(ref.point.z - 0.5) < 1.0e-9,
                 "Room reference must retain State Z");
         if (std::abs(ref.point.x - 2.0) < 1.0e-6 &&
-            std::abs(ref.point.y - 2.45) < 1.0e-6)
+            std::abs(ref.point.y - 1.485) < 1.0e-6)
             matched = true;
     }
     require(matched,
-            "Room reflex Corner reference must use 30% inward wall distance");
+            "Room reflex Corner reference must use 55% inward wall distance");
 }
 
 void test_cumulative_reflex_turn_on_curved_wall()
@@ -610,7 +612,7 @@ void test_cumulative_reflex_turn_on_curved_wall()
 
 void test_local_width_limits_cluster_radius()
 {
-    const CellData cell = shallow_reflex_prism_cell(0.5);
+    const CellData cell = shallow_reflex_prism_cell(0.7);
     const std::vector<ReferencePoint> initial =
         find_reference_points(cell, {2,0.5,0.5}, 0.001);
     std::optional<Vec3> corner;
@@ -662,8 +664,8 @@ void test_smooth_concave_wall_retains_safe_navigation_candidates()
     }
     require(corner_count >= 2,
             "smooth concave wall lost the navigation candidates along its curve");
-    // A 126deg gradual turn needs roughly eight 15deg seeds. The simplifier
-    // must not generate further nodes or duplicate source candidates.
+    // A gradual turn needs fewer 30-degree seeds. The simplifier must
+    // not generate further nodes or duplicate source candidates.
     require(corner_count <= 8,
             "smooth concave wall produced excessive purple candidates");
 }
@@ -926,8 +928,8 @@ int main()
     test_room_reference_points_share_state_height();
     test_convex_room_uses_state_only();
     test_signed_corner_turn_accumulation();
-    test_room_reflex_threshold_15_degree_turn();
-    test_room_reference_corner_uses_30_percent_wall_distance();
+    test_room_reflex_threshold_30_degree_turn();
+    test_room_reference_corner_uses_55_percent_wall_distance();
     test_cumulative_reflex_turn_on_curved_wall();
     test_smooth_concave_wall_retains_safe_navigation_candidates();
     test_local_width_limits_cluster_radius();

@@ -271,6 +271,10 @@ module ULOL
 
               cell_id = cell_space.id
               case selected_mode
+              when :optimized
+                optimized_debug_reference_graph_for(cell_id) ||
+                  collapsed_debug_reference_graph_for(cell_id) ||
+                  simplified_debug_reference_graph_for(cell_id) || source[cell_id]
               when :collapsed
                 collapsed_debug_reference_graph_for(cell_id) ||
                   simplified_debug_reference_graph_for(cell_id) || source[cell_id]
@@ -293,6 +297,9 @@ module ULOL
               displayed = case selected_mode
                           when :after then simplified_debug_reference_graph_for(cell_id)
                           when :collapsed then collapsed_debug_reference_graph_for(cell_id) ||
+                                                 simplified_debug_reference_graph_for(cell_id)
+                          when :optimized then optimized_debug_reference_graph_for(cell_id) ||
+                                                 collapsed_debug_reference_graph_for(cell_id) ||
                                                  simplified_debug_reference_graph_for(cell_id)
                           end
               if displayed
@@ -665,12 +672,14 @@ module ULOL
             # new geometry. Before mode remains at its prior processing cost.
             @debug_reference_graph_simplified_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_collapsed_by_cell_id&.delete(cell_space.id)
+            @debug_reference_graph_optimized_by_cell_id&.delete(cell_space.id)
             true
           rescue StandardError
             # Debug rendering must never block the State/CellSpace lifecycle.
             @debug_reference_graph_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_simplified_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_collapsed_by_cell_id&.delete(cell_space.id)
+            @debug_reference_graph_optimized_by_cell_id&.delete(cell_space.id)
             false
           end
 
@@ -715,6 +724,24 @@ module ULOL
             nil
           end
 
+          # Lazy stage after Collapse, never mutates the previous snapshots.
+          def optimized_debug_reference_graph_for(cell_id)
+            cache = (@debug_reference_graph_optimized_by_cell_id ||= {})
+            return cache[cell_id] if cache.key?(cell_id)
+
+            collapsed = collapsed_debug_reference_graph_for(cell_id)
+            return nil unless collapsed
+
+            cache[cell_id] = ReferenceGraphShortcutOptimizer.optimize(collapsed)
+          rescue StandardError => error
+            cache[cell_id] = nil if cache
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Reference shortcut optimization skipped cell=#{cell_id}: " \
+              "#{error.class}: #{error.message}"
+            ) if defined?(IndoorCore::Logger)
+            nil
+          end
+
           def clear_debug_reference_points(cell_space)
             return false unless cell_space
 
@@ -722,6 +749,7 @@ module ULOL
             @debug_reference_graph_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_simplified_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_collapsed_by_cell_id&.delete(cell_space.id)
+            @debug_reference_graph_optimized_by_cell_id&.delete(cell_space.id)
             true
           end
 

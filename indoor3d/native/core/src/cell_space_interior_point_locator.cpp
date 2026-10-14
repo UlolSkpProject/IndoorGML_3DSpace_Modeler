@@ -23,12 +23,12 @@ constexpr std::size_t BVH_LEAF_TRIANGLES = 6;
 constexpr std::size_t MAX_SEARCH_NODES = 200000;
 // Room-only reference heuristics; State and Adjacency are unchanged.
 // Signed local exterior turn: reflex < 0, convex > 0, straight = 0.
-// Ignore numerical angle noise and emit at a cumulative -15 degree turn.
+// Ignore numerical angle noise and emit at a cumulative -30 degree turn.
 constexpr double ROOM_REFLEX_NOISE_DEGREES = 0.25;
-constexpr double ROOM_CUMULATIVE_TURN_DEGREES = 15.0;
+constexpr double ROOM_CUMULATIVE_TURN_DEGREES = 30.0;
 // Fraction of the inward corner ray to the first opposite vertical wall.
-// 0.30 places the purple Corner candidate 30% of the way from the corner.
-constexpr double ROOM_REFERENCE_INWARD_DISTANCE_FRACTION = 0.30;
+// 0.55 places the purple Corner candidate 55% of the way from the corner.
+constexpr double ROOM_REFERENCE_INWARD_DISTANCE_FRACTION = 0.55;
 // Only remove a middle candidate when a direct shortcut deviates by at most
 // 15% of the smallest local corridor width and retains wall clearance.
 constexpr double ROOM_SHORTCUT_MAX_DEVIATION_WIDTH_FRACTION = 0.15;

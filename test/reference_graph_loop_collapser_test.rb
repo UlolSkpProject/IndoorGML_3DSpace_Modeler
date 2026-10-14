@@ -146,15 +146,18 @@ class ReferenceGraphLoopCollapserTest < Minitest::Test
     assert_equal 2, result[:loop_count] # two smaller triangles
   end
 
-  def test_console_has_three_modes
+  def test_console_has_four_modes
     output, = capture_io do
       assert_equal :before, Mode.before!
       assert_equal :after, Mode.after!
       assert_equal :collapsed, Mode.collapsed!
       assert Mode.collapsed?
+      assert_equal :optimized, Mode.optimized!
+      assert Mode.optimized?
       assert_equal :before, Mode.before!
     end
     assert_includes output, 'COLLAPSED'
+    assert_includes output, 'OPTIMIZED'
   end
   def test_deferred_batch_collapses_two_disjoint_triangles_simultaneously
     source = graph(
