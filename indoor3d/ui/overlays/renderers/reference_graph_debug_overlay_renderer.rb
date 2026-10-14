@@ -59,7 +59,19 @@ module ULOL
 
               [nodes[first][:point], nodes[second][:point]]
             end
-            view.draw(GL_LINES, render_points(segments.flatten(1))) unless segments.empty?
+            next if segments.empty?
+
+            model_points = render_points(segments.flatten(1))
+            if top_down_view?(view)
+              # Model-space lines can be depth-occluded by Room faces in the
+              # Top view, even though the visibility edges are valid. Draw
+              # only those views in screen space; retain the proven 3D
+              # rendering path for oblique camera views.
+              screen_points = model_points.map { |point| view.screen_coords(point) }
+              view.draw2d(GL_LINES, screen_points)
+            else
+              view.draw(GL_LINES, model_points)
+            end
           end
         rescue StandardError => error
           log_debug_error(:edges, error)
@@ -106,6 +118,16 @@ module ULOL
 
             yield graph
           end
+        end
+
+        # World Top view and near-Top views suffer depth occlusion when the
+        # graph's State-Z lines are behind the visible ceiling/floor.
+        # This is deliberately not enabled for other camera directions.
+        def top_down_view?(view)
+          direction = view.camera.direction
+          direction.z <= -0.98
+        rescue StandardError
+          false
         end
 
         def circle_in_root_local(center, radius)
