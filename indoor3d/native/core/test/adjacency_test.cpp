@@ -1,5 +1,5 @@
 #include "adjacency_checker.h"
-#include "state_locator.h"
+#include "cell_space_interior_point_locator.h"
 
 #include <cmath>
 #include <cstdlib>

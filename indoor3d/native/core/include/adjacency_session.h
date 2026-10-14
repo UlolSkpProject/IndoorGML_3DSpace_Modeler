@@ -2,7 +2,7 @@
 
 #include "adjacency_checker.h"
 #include "adjacency_data.h"
-#include "state_locator.h"
+#include "cell_space_interior_point_locator.h"
 
 #include <atomic>
 #include <chrono>

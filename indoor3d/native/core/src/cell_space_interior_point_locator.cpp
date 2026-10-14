@@ -1,4 +1,4 @@
-#include "state_locator.h"
+#include "cell_space_interior_point_locator.h"
 
 #include <algorithm>
 #include <array>
@@ -653,4 +653,34 @@ std::optional<Vec3> find_state_point(
     if (metrics) metrics->bvh_search_duration = elapsed_seconds(search_started);
     return result;
 }
+
+std::vector<Vec3> find_reference_points(
+    const CellData& cell,
+    const Vec3& state_point,
+    double tolerance
+)
+{
+    (void)cell;
+    (void)state_point;
+    (void)tolerance;
+    return {};
+}
+
+CellSpaceInteriorPointResult locate_cell_space_interior_points(
+    const CellData& cell,
+    double tolerance
+)
+{
+    CellSpaceInteriorPointResult result;
+    result.state_point = find_state_point(cell, tolerance, &result.state_metrics);
+    if (!result.state_point) return result;
+
+    result.reference_points = find_reference_points(
+        cell,
+        *result.state_point,
+        tolerance
+    );
+    return result;
+}
+
 } // namespace IndoorGMLAdjacencyNative

@@ -70,13 +70,13 @@ add_library(indoor_gml_native MODULE
     core/include/adjacency_data.h
     core/include/adjacency_checker.h
     core/include/adjacency_session.h
-    core/include/state_locator.h
+    core/include/cell_space_interior_point_locator.h
     core/src/native_entry.cpp
     core/src/native_api.cpp
     core/src/adjacency_data.cpp
     core/src/adjacency_checker.cpp
     core/src/adjacency_session.cpp
-    core/src/state_locator.cpp
+    core/src/cell_space_interior_point_locator.cpp
 )
 
 target_include_directories(indoor_gml_native PRIVATE
@@ -128,7 +128,7 @@ if(BUILD_TESTING)
         core/test/adjacency_test.cpp
         core/src/adjacency_data.cpp
         core/src/adjacency_checker.cpp
-        core/src/state_locator.cpp
+        core/src/cell_space_interior_point_locator.cpp
     )
 
     target_include_directories(indoor_gml_native_test PRIVATE
