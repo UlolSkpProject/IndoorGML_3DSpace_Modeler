@@ -22,7 +22,8 @@ constexpr double EPSILON = 1.0e-12;
 constexpr std::size_t BVH_LEAF_TRIANGLES = 6;
 constexpr std::size_t MAX_SEARCH_NODES = 200000;
 // Room-only reference heuristics; State and Adjacency are unchanged.
-// Ignore numerical angle noise; accumulate genuine consecutive reflex turns.
+// Signed local exterior turn: reflex < 0, convex > 0, straight = 0.
+// Ignore numerical angle noise and emit at a cumulative -15 degree turn.
 constexpr double ROOM_REFLEX_NOISE_DEGREES = 0.25;
 constexpr double ROOM_CUMULATIVE_TURN_DEGREES = 15.0;
 // Only remove a middle candidate when a direct shortcut deviates by at most
@@ -1016,10 +1017,11 @@ std::vector<ReferencePoint> find_reference_points(
         add_ray(wall.b, wall.a);
     }
 
-    // Classify corners at the horizontal State slice. Convex corners are
-    // barriers for accumulating curvature; collinear seams are passable.
+    // Classify each degree-two corner at State Z into a signed exterior
+    // turn in [-180, +180]. Convex vertices remain traversable so they
+    // can offset prior reflex turning instead of splitting the chain.
     const std::size_t vertex_count = vertices.size();
-    std::vector<double> reflex_turn(vertex_count, 0.0);
+    std::vector<double> signed_turn(vertex_count, 0.0);
     std::vector<Vec3> inward(vertex_count, Vec3{0.0, 0.0, 0.0});
     std::vector<bool> blocked(vertex_count, true);
     for (std::size_t i = 0; i < vertex_count; ++i)
@@ -1043,13 +1045,13 @@ std::vector<ReferencePoint> find_reference_points(
         const bool reflex_inside =
             bvh_inside(bvh, subtract(corner.point, multiply(bisector, probe)), tolerance);
         if (small_inside == reflex_inside) continue; // Ambiguous junction.
-        if (small_inside) continue; // Convex corner breaks the run.
-        blocked[i] = false;
-        const double turn = 180.0 - small_angle;
-        if (turn > ROOM_REFLEX_NOISE_DEGREES)
+        blocked[i] = false; // Both convex and reflex corners continue a chain.
+        const double magnitude = 180.0 - small_angle;
+        if (magnitude > ROOM_REFLEX_NOISE_DEGREES)
         {
-            reflex_turn[i] = turn;
-            inward[i] = multiply(bisector, -1.0);
+            signed_turn[i] = small_inside ? magnitude : -magnitude;
+            if (!small_inside)
+                inward[i] = multiply(bisector, -1.0);
         }
     }
 
@@ -1071,9 +1073,11 @@ std::vector<ReferencePoint> find_reference_points(
             neighbors[b].push_back(a);
     }
 
-    // Each uninterrupted reflex arc emits a corner at 15 degrees of
-    // cumulative turning. Keep chain membership and order for safe pruning.
-    // Non-manifold components retain their individually strong candidates.
+    // Accumulate signed curvature across actual connected wall segments.
+    // Positive convex bends offset negative reflex bends. Only a negative
+    // turn crossing -15 degrees emits a reference candidate. Keep the
+    // selected reflex chain in boundary order for safe pruning.
+    // Non-manifold components retain their individually strong reflex corners.
     std::vector<std::size_t> selected;
     std::vector<std::vector<std::size_t>> selected_chains;
     std::vector<bool> visited(vertex_count, false);
@@ -1115,7 +1119,7 @@ std::vector<ReferencePoint> find_reference_points(
         {
             for (const std::size_t v : component)
             {
-                if (reflex_turn[v] < ROOM_CUMULATIVE_TURN_DEGREES) continue;
+                if (signed_turn[v] > -ROOM_CUMULATIVE_TURN_DEGREES) continue;
                 selected.push_back(v);
                 selected_chains.push_back({v}); // Do not simplify junctions.
             }
@@ -1125,20 +1129,16 @@ std::vector<ReferencePoint> find_reference_points(
         const std::size_t none = vertex_count;
         std::size_t previous = none;
         std::size_t current = start_vertex;
-        double accumulated = 0.0;
+        RoomSignedTurnAccumulator accumulation(ROOM_CUMULATIVE_TURN_DEGREES);
         for (std::size_t n = 0; n < component.size(); ++n)
         {
             if (current == none || ordered[current]) break;
             ordered[current] = true;
-            accumulated += reflex_turn[current];
-            if (accumulated + 1.0e-9 >= ROOM_CUMULATIVE_TURN_DEGREES)
+            if (accumulation.advance(signed_turn[current]))
             {
-                if (reflex_turn[current] > 0.0)
-                {
-                    selected.push_back(current);
-                    chain_candidates.push_back(current);
-                }
-                accumulated = 0.0;
+                // Only reflex corners can trigger a negative threshold.
+                selected.push_back(current);
+                chain_candidates.push_back(current);
             }
             std::size_t next = none;
             for (const std::size_t neighbor : neighbors[current])
@@ -1189,8 +1189,9 @@ std::vector<ReferencePoint> find_reference_points(
     };
 
     // First construct the purple candidates without discarding any geometry
-    // information. A chain only contains reflex corners on the same actual
-    // vertical-wall boundary. The RGB debug renderer will see the survivors.
+    // information. A selected chain contains threshold-crossing reflex corners
+    // on the same actual vertical-wall boundary. Convex corners contribute
+    // to the signed run but never become purple candidate points.
     std::vector<std::optional<Vec3>> candidates(vertex_count);
     for (const std::size_t i : selected)
     {

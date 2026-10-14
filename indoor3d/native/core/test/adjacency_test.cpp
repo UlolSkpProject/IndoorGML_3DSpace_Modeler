@@ -505,6 +505,39 @@ void test_convex_room_uses_state_only()
     require(offcenter.empty(), "convex Room incorrectly generated references");
 }
 
+void test_signed_corner_turn_accumulation()
+{
+    // Reflex negative, convex positive, straight parallel walls zero.
+    RoomSignedTurnAccumulator run(15.0);
+    require(!run.advance(0.0) && run.accumulated_degrees() == 0.0,
+            "parallel faces must yield zero signed curvature");
+    require(!run.advance(-9.0), "first sub-threshold reflex must not emit");
+    require(!run.advance(+4.0), "convex offset must not immediately terminate the run");
+    require(std::abs(run.accumulated_degrees() + 5.0) < 1.0e-9,
+            "convex turn must offset the accumulated reflex magnitude");
+    require(!run.advance(-8.0), "net -13 degrees must not emit");
+    require(run.advance(-2.0), "net -15 degrees must emit a reflex point");
+    require(run.accumulated_degrees() == 0.0,
+            "accumulation must reset after a reference is emitted");
+
+    require(!run.advance(-12.0), "new reflex run must begin below threshold");
+    require(!run.advance(+12.0), "zero-net bend must not emit");
+    require(run.accumulated_degrees() == 0.0,
+            "accumulation must reset once the net bend is nonnegative");
+    require(!run.advance(+25.0), "standalone convex bend must never emit");
+    require(run.accumulated_degrees() == 0.0,
+            "standalone convex turns must not be carried into a reflex run");
+    require(!run.advance(-14.0), "negative net turn below threshold must wait");
+    require(run.advance(-1.0), "subsequent net -15 degrees must emit");
+
+    RoomSignedTurnAccumulator cancellation(15.0);
+    require(!cancellation.advance(-10.0), "short reflex run expected");
+    require(!cancellation.advance(+15.0), "convex overshoot must reset the run");
+    require(!cancellation.advance(-9.0),
+            "old reflex deficit must not survive a convex net positive turn");
+    require(cancellation.advance(-6.0), "new -15 degree run must emit");
+}
+
 void test_room_reflex_threshold_15_degree_turn()
 {
     const Vec3 state{2.0, 1.5, 0.5};
@@ -870,6 +903,7 @@ int main()
     test_state_fixed_z();
     test_room_reference_points_share_state_height();
     test_convex_room_uses_state_only();
+    test_signed_corner_turn_accumulation();
     test_room_reflex_threshold_15_degree_turn();
     test_cumulative_reflex_turn_on_curved_wall();
     test_smooth_concave_wall_retains_safe_navigation_candidates();

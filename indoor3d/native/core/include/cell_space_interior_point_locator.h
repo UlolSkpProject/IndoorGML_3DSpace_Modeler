@@ -38,6 +38,40 @@ struct ReferencePoint
     ReferencePointKind kind = ReferencePointKind::Face;
 };
 
+// Signed exterior-turn accumulation for Room wall chains.
+// Reflex: negative, convex: positive, straight/parallel: zero.
+// Preserve a negative run across positive offsets, reset only once the
+// signed sum reaches zero. Emit only on a negative turn at -threshold.
+class RoomSignedTurnAccumulator
+{
+public:
+    explicit RoomSignedTurnAccumulator(double threshold_degrees)
+        : threshold_degrees_(threshold_degrees) {}
+
+    bool advance(double signed_turn_degrees)
+    {
+        accumulated_degrees_ += signed_turn_degrees;
+        if (accumulated_degrees_ >= 0.0)
+        {
+            accumulated_degrees_ = 0.0;
+            return false;
+        }
+        if (signed_turn_degrees < 0.0 &&
+            accumulated_degrees_ <= -threshold_degrees_ + 1.0e-9)
+        {
+            accumulated_degrees_ = 0.0;
+            return true;
+        }
+        return false;
+    }
+
+    double accumulated_degrees() const { return accumulated_degrees_; }
+
+private:
+    double threshold_degrees_;
+    double accumulated_degrees_ = 0.0;
+};
+
 struct ReferenceGraphNode
 {
     Vec3 point;
