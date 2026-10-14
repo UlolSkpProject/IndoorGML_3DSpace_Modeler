@@ -66,7 +66,9 @@ module ULOL
             else
               # Every external replacement edge was validated by Native LOS,
               # without a circle-overlap requirement.
-              next unless candidate[:point] && candidate[:radius].to_f.positive?
+              # Native has already validated the representative against
+              # Room geometry and LOS. Circle radius is not a collapse gate.
+              next unless candidate[:point]
               visible = Array(candidate[:visible_neighbors])
               next unless boundary.all? { |index| visible.include?(origins[index]) }
               removed = vertices

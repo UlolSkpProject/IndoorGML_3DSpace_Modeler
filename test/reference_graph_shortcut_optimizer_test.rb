@@ -79,4 +79,26 @@ class ReferenceGraphShortcutOptimizerTest < Minitest::Test
                      [[0, 1], [1, 2]])
     assert_equal 0, Optimizer.optimize(original)[:shortcut_removed_count]
   end
+  def test_post_collapse_shortcut_is_independent_of_circle_radius
+    nodes = [node(9, 9, 0), node(0, 0, 0), node(1, 0, 0), node(2, 0, 0)]
+    result = Optimizer.optimize(graph(nodes, [[1, 2], [2, 3], [1, 3]]))
+
+    assert_equal 1, result[:shortcut_removed_count]
+    assert_equal [0, 1, 3], result[:original_indices]
+  end
+
+  def test_relative_chord_deviation_rejects_long_bend
+    original = graph([node(9, 9, 0), node(0, 0, 0), node(1, 0.3, 0), node(2, 0, 0)],
+                     [[1, 2], [2, 3], [1, 3]])
+    assert_equal 0, Optimizer.optimize(original)[:shortcut_removed_count]
+  end
+
+  def test_middle_point_beyond_shortcut_segment_is_not_eligible
+    first = node(0, 0)
+    outside = node(3, 0)
+    last = node(2, 0)
+
+    assert_nil Optimizer.shortcut_deviation(first, outside, last)
+  end
+
 end

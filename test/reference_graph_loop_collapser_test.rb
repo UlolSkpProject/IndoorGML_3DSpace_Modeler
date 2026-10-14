@@ -241,4 +241,16 @@ class ReferenceGraphLoopCollapserTest < Minitest::Test
     assert_equal 2, first[:collapse_count]
   end
 
+  def test_prevalidated_collapse_candidate_does_not_depend_on_circle_radius
+    source = graph(
+      [n(10, 10), n(0, 0), n(2, 0), n(1, 2)],
+      [[1, 2], [1, 3], [2, 3]]
+    )
+    candidate = verified([1, 2, 3], Point.new(1, 2.0 / 3, 0.5), []).merge(radius: 0.0)
+    result = Collapse.collapse(source, [candidate])
+
+    assert_equal 1, result[:collapse_count]
+    assert_equal [0, nil], result[:original_indices]
+  end
+
 end

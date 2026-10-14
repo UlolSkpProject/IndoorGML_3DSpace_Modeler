@@ -649,7 +649,9 @@ module ULOL
               next unless (vertices + visible).all? { |index| index.is_a?(Integer) &&
                                                              index >= 0 && index < nodes.length }
               next unless position.size == 3 && position.all? { |value| value.to_f.finite? }
-              next unless radius.finite? && radius >= 0.0
+              # Radius is retained for debug metadata, not for accepting
+              # a Native-validated Collapse candidate.
+              radius = 0.0 unless radius.finite? && radius >= 0.0
 
               {
                 triangle: vertices.freeze,

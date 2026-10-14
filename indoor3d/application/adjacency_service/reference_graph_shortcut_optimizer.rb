@@ -5,9 +5,12 @@ module ULOL
     module IndoorCore
       # Non-destructive post-Collapse shortcut of degree-two reference nodes.
       # A middle node is removed only if both neighbors already share a
-      # validated Native LOS edge. No edges or point positions are invented.
+      # validated Native LOS edge. Geometry is assessed by chord deviation
+      # and path detour; inscribed circles are ONLY used by BEFORE -> AFTER.
+      # No edges or point positions are invented.
       module ReferenceGraphShortcutOptimizer
-        MAX_DEVIATION_LOCAL_WIDTH_FRACTION = 0.15
+        MAX_DEVIATION_CHORD_FRACTION = 0.05
+        MAX_DETOUR_FACTOR = 1.05
         EPSILON = 1.0e-9
 
         module_function
@@ -92,13 +95,18 @@ module ULOL
           t = ((b.x - a.x) * dx + (b.y - a.y) * dy) / length_sq
           return nil unless t > EPSILON && t < 1.0 - EPSILON
 
-          local_width = 2.0 * [first, middle, last].map { |n| n[:radius].to_f }.min
-          return nil unless local_width.positive? && local_width.finite?
-
+          # Post-Collapse never derives a local width from an inscribed disk.
+          # The normalized chord deviation and path-length detour use only
+          # the three point positions, independent of node radius.
+          chord = Math.sqrt(length_sq)
           deviation = Math.hypot(b.x - a.x - t * dx, b.y - a.y - t * dy)
           return nil unless deviation.finite? &&
-                            deviation <= MAX_DEVIATION_LOCAL_WIDTH_FRACTION *
-                                         local_width + EPSILON
+                            deviation <= MAX_DEVIATION_CHORD_FRACTION * chord + EPSILON
+
+          detour = Math.hypot(b.x - a.x, b.y - a.y) +
+                   Math.hypot(c.x - b.x, c.y - b.y)
+          return nil unless detour.finite? &&
+                            detour <= MAX_DETOUR_FACTOR * chord + EPSILON
 
           deviation
         end

@@ -11,6 +11,7 @@ end
 
 GL_LINES = 1 unless defined?(GL_LINES)
 
+require_relative '../indoor3d/application/adjacency_service/reference_graph_debug_mode'
 require_relative '../indoor3d/ui/overlays/renderers/reference_graph_debug_overlay_renderer'
 
 class ReferenceGraphDebugOverlayRendererTest < Minitest::Test
@@ -92,4 +93,19 @@ class ReferenceGraphDebugOverlayRendererTest < Minitest::Test
                  points.map { |point| [point.x, point.y, point.z] }
     assert_empty view.screen_calls
   end
+  def test_collapsed_and_optimized_do_not_render_or_extent_circles
+    mode = ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode
+    begin
+      [:collapsed, :optimized].each do |value|
+        mode.set_mode(value)
+        view = FakeView.new(-1.0)
+        @renderer.draw_circles(view)
+        assert_empty view.draw_calls
+        assert_empty @renderer.extent_points
+      end
+    ensure
+      mode.before!
+    end
+  end
+
 end

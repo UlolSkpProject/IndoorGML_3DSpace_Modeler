@@ -16,6 +16,8 @@ module ULOL
         end
 
         def draw_circles(view)
+          return unless circle_diagnostics_enabled?
+
           each_graph do |graph|
             graph[:nodes].each do |node|
               radius = node[:radius].to_f
@@ -71,6 +73,8 @@ module ULOL
         end
 
         def extent_points
+          return [] unless circle_diagnostics_enabled?
+
           extents = []
           each_graph do |graph|
             graph[:nodes].each do |node|
@@ -102,6 +106,12 @@ module ULOL
         end
 
         private
+
+        def circle_diagnostics_enabled?
+          return true unless defined?(ReferenceGraphDebugMode)
+
+          %i[before after].include?(ReferenceGraphDebugMode.mode)
+        end
 
         def each_graph
           Array(@indoor_model.debug_reference_graphs).each do |graph|
