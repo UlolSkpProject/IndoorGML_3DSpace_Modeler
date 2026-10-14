@@ -741,24 +741,33 @@ CellSpaceInteriorPointResult locate_cell_space_interior_points(
     result.state_point = find_state_point(cell, tolerance, &result.state_metrics);
     if (!result.state_point) return result;
 
-    switch (cell.category)
+    try
     {
-    case CellSpaceCategory::Room:
-        result.reference_points = find_reference_points(
-            cell,
-            *result.state_point,
-            tolerance
-        );
-        break;
-    case CellSpaceCategory::Stair:
-        // TODO: Generate Stair reference points using the State-to-floor distance scale.
-        break;
-    case CellSpaceCategory::Elevator:
-    case CellSpaceCategory::Door:
-    case CellSpaceCategory::Window:
-    case CellSpaceCategory::Unknown:
-    default:
-        break;
+        switch (cell.category)
+        {
+        case CellSpaceCategory::Room:
+            result.reference_points = find_reference_points(
+                cell,
+                *result.state_point,
+                tolerance
+            );
+            break;
+        case CellSpaceCategory::Stair:
+            // TODO: Generate Stair reference points using the State-to-floor distance scale.
+            break;
+        case CellSpaceCategory::Elevator:
+        case CellSpaceCategory::Door:
+        case CellSpaceCategory::Window:
+        case CellSpaceCategory::Unknown:
+        default:
+            break;
+        }
+    }
+    catch (...)
+    {
+        // Reference-point generation is strictly auxiliary. A valid State point
+        // must remain usable even when reference-point generation fails.
+        result.reference_points.clear();
     }
 
     return result;
