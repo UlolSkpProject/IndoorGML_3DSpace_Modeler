@@ -626,12 +626,25 @@ void test_room_visibility_graph_circle_overlap_and_blocked_los()
         build_room_reference_visibility_graph(room, state, points, 0.001);
     require(graph.nodes.size() == 3,
             "graph must contain State and Final refs, not diagnostic candidates");
-    require(graph.edges.size() == 3,
-            "three mutually visible, overlapping circles should form three edges");
-    require(std::abs(graph.nodes[0].radius - 1.0) < 1.0e-9,
-            "State circle radius must be 1.0x local width (2x clearance)");
-    require(std::abs(graph.nodes[1].radius - 0.4) < 1.0e-9,
-            "Final circle radius must be 1.0x local width");
+    require(graph.edges.size() == 2,
+            "bounded circles should connect State to each Final, not each other");
+    require(std::abs(graph.nodes[0].radius - 0.499) < 1.0e-9,
+            "State disk radius must be nearest XY wall clearance minus tolerance");
+    require(std::abs(graph.nodes[1].radius - 0.199) < 1.0e-9,
+            "Final disk radius must not cross the nearest XY wall");
+    require(graph.edges[0].first == 0 && graph.edges[0].second == 1 &&
+            graph.edges[1].first == 0 && graph.edges[1].second == 2,
+            "bounded-circle overlap should produce only State-to-Final edges");
+    for (const ReferenceGraphNode& node : graph.nodes)
+    {
+        const double p[] = {
+            node.point.x, 1.0 - node.point.x,
+            node.point.y, 1.0 - node.point.y
+        };
+        for (double wall_distance : p)
+            require(node.radius <= wall_distance,
+                    "inscribed XY disk must not cross any Room wall");
+    }
     for (const ReferenceGraphEdge& edge : graph.edges)
         require(edge.first < edge.second && edge.second < graph.nodes.size(),
                 "graph edges must reference valid nodes");

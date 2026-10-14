@@ -1356,8 +1356,9 @@ std::vector<ReferencePoint> find_reference_points(
 }
 
 // Build a diagnostic visibility graph from State and *final* reference nodes.
-// Radius is one full local corridor width (2x nearest XY vertical wall
-// clearance); it does NOT modify the existing 0.15x clustering policy.
+// Each XY disk is bounded by its nearest vertical wall. The local width
+// approximation (2x nearest clearance) must be halved for an inscribed
+// circle; the existing 0.15x reference clustering policy stays unchanged.
 ReferenceGraphDebug build_room_reference_visibility_graph(
     const CellData& cell,
     const Vec3& state_point,
@@ -1378,8 +1379,13 @@ ReferenceGraphDebug build_room_reference_visibility_graph(
     if (bvh.empty()) return graph;
 
     const auto add_node = [&](const Vec3& point) {
-        const double radius = 2.0 * nearest_wall_clearance(walls, point);
-        if (!std::isfinite(radius) || radius < 0.0) return;
+        const double wall_clearance = nearest_wall_clearance(walls, point);
+        if (!std::isfinite(wall_clearance) || wall_clearance <= 0.0) return;
+
+        // XY inscribed circle: r = distance to the nearest wall, not
+        // 2x that distance. A small tolerance margin prevents a disk
+        // tangent to a wall from visibly crossing it due to FP error.
+        const double radius = std::max(0.0, wall_clearance - tolerance);
         graph.nodes.push_back({point, radius});
     };
     add_node(state_point);
