@@ -11,6 +11,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace IndoorGMLAdjacencyNative
@@ -73,6 +74,11 @@ public:
 
     std::size_t start_state_check();
     std::vector<std::uint8_t> get_state_result_bytes();
+    std::vector<bool> validate_room_los(
+        std::size_t cell_index,
+        const std::vector<std::pair<Vec3, Vec3>>& segments,
+        double tolerance
+    ) const;
 
     std::size_t start_adjacency_check(double length_tolerance, double normal_tolerance);
     std::vector<std::uint8_t> get_adjacency_result_bytes();

@@ -5,6 +5,7 @@
 VALUE adjacency_native_load_batch(VALUE self, VALUE buffer);
 VALUE adjacency_native_start_state_check(VALUE self);
 VALUE adjacency_native_get_state_result_bytes(VALUE self);
+VALUE adjacency_native_validate_room_los(VALUE self, VALUE cell_index, VALUE segment_bytes, VALUE tolerance);
 VALUE adjacency_native_start_adjacency_check(VALUE self, VALUE length_tolerance, VALUE normal_tolerance);
 VALUE adjacency_native_get_adjacency_result_bytes(VALUE self);
 

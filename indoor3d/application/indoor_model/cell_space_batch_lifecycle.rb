@@ -556,6 +556,9 @@ module ULOL
                 cell_space, graph_nodes[index], graph_edges[index],
                 graph_loop_candidates[index]
               )
+              # Native has this CellSpace geometry only until session close.
+              # Precalculate LOS-based shortcuts now, never during draw(view).
+              preload_native_shortcuts_for(cell_space, index)
               state_point_applier.call(cell_space, coordinates)
             end
 
@@ -721,6 +724,37 @@ module ULOL
             cache[cell_id] = nil if cache
             IndoorCore::Logger.puts(
               "[IndoorGML] Reference loop collapse skipped cell=#{cell_id}: " \
+              "#{error.class}: #{error.message}"
+            ) if defined?(IndoorCore::Logger)
+            nil
+          end
+
+          # Optional debug reduction: failure cannot fail a CellSpace or State.
+          def preload_native_shortcuts_for(cell_space, session_index)
+            return unless cell_space&.valid?
+            return unless cell_space.category_code.to_s.casecmp('Room').zero?
+            return unless NativeAdjacencyBridge.shared_session_active?
+            return unless NativeAdjacencyBridge.room_los_supported?
+
+            collapsed = collapsed_debug_reference_graph_for(cell_space.id)
+            return unless collapsed
+
+            # The session preserves local geometry while State results are
+            # assigned. All new A-C edges must pass Native Room LOS.
+            tolerance = Utils::Geometry::ADJACENCY_TOLERANCE
+            validate = lambda do |first, last|
+              NativeAdjacencyBridge.validate_room_los_from_open_session(
+                session_index, first, last, tolerance: tolerance
+              )
+            end
+            cache = (@debug_reference_graph_optimized_by_cell_id ||= {})
+            cache[cell_space.id] = ReferenceGraphShortcutOptimizer.optimize(
+              collapsed, los_validator: validate
+            )
+          rescue StandardError => error
+            @debug_reference_graph_optimized_by_cell_id&.delete(cell_space.id)
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Room shortcut LOS precompute skipped cell=#{cell_space.id}: " \
               "#{error.class}: #{error.message}"
             ) if defined?(IndoorCore::Logger)
             nil

@@ -1366,6 +1366,52 @@ std::vector<ReferencePoint> find_reference_points(
 // Each XY disk is bounded by its nearest vertical wall. The local width
 // approximation (2x nearest clearance) must be halved for an inscribed
 // circle; the existing 0.15x reference clustering policy stays unchanged.
+std::vector<bool> validate_room_reference_segments(
+    const CellData& cell,
+    const std::vector<std::pair<Vec3, Vec3>>& segments,
+    double tolerance
+)
+{
+    std::vector<bool> visible(segments.size(), false);
+    if (cell.category != CellSpaceCategory::Room ||
+        !std::isfinite(tolerance) || tolerance <= 0.0 ||
+        segments.empty())
+        return visible;
+
+    const std::vector<const Triangle*> triangles = triangle_pointers(cell);
+    if (triangles.empty()) return visible;
+    TriangleBvh bvh(triangles);
+    if (bvh.empty()) return visible;
+
+    // Compute the XY wall slice once for a whole batch of direct paths.
+    const double z = segments.front().first.z;
+    if (!std::isfinite(z)) return visible;
+    const std::vector<WallSegment> walls = wall_segments_at_z(cell, z, tolerance);
+    if (walls.empty()) return visible;
+
+    for (std::size_t index = 0; index < segments.size(); ++index)
+    {
+        const Vec3& a = segments[index].first;
+        const Vec3& b = segments[index].second;
+        if (!std::isfinite(a.x) || !std::isfinite(a.y) || !std::isfinite(a.z) ||
+            !std::isfinite(b.x) || !std::isfinite(b.y) || !std::isfinite(b.z) ||
+            std::abs(a.z - z) > tolerance ||
+            std::abs(b.z - z) > tolerance ||
+            distance_xy_squared(a, b) <= tolerance * tolerance)
+            continue;
+        if (!bvh_inside(bvh, a, tolerance) ||
+            !bvh_inside(bvh, b, tolerance) ||
+            bvh.nearest_distance(a) <= tolerance ||
+            bvh.nearest_distance(b) <= tolerance ||
+            crosses_wall_slice(walls, a, b, tolerance) ||
+            !clear_path(bvh, a, b, tolerance))
+            continue;
+
+        visible[index] = true;
+    }
+    return visible;
+}
+
 ReferenceGraphDebug build_room_reference_visibility_graph(
     const CellData& cell,
     const Vec3& state_point,

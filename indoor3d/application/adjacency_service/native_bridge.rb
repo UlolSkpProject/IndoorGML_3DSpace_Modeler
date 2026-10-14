@@ -180,6 +180,34 @@ module ULOL
           raise
         end
 
+        # Calls Native LOS using the currently loaded geometry, not the
+        # circle-overlap visibility graph. Only use during StateComplete.
+        def room_los_supported?
+          available? && native.respond_to?(:validate_room_los)
+        rescue StandardError
+          false
+        end
+
+        def validate_room_los_from_open_session(cell_index, first, last, tolerance:)
+          raise ProtocolError, 'Native geometry session is not active' unless shared_session_active?
+          raise ProtocolError, 'Native Room LOS API unavailable' unless room_los_supported?
+
+          points = [first, last].flat_map do |point|
+            raise ProtocolError, 'Room LOS requires a 3D point' unless point.respond_to?(:to_a)
+
+            coords = Array(point.to_a)
+            raise ProtocolError, 'Room LOS requires xyz coordinates' unless coords.length == 3
+            coords.each do |value|
+              unless value.is_a?(Numeric) && value.finite?
+                raise ProtocolError, 'Room LOS coordinate is not finite'
+              end
+            end
+            coords
+          end
+          payload = points.pack('E*')
+          native.validate_room_los(Integer(cell_index), payload, Float(tolerance)) == [true]
+        end
+
         def compute_state_from_open_session
           raise ProtocolError, 'native geometry session is not active' unless shared_session_active?
 

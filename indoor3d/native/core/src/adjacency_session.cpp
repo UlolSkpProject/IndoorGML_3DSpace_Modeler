@@ -216,6 +216,22 @@ void AdjacencySession::state_worker_loop()
     }
 }
 
+std::vector<bool> AdjacencySession::validate_room_los(
+    std::size_t cell_index,
+    const std::vector<std::pair<Vec3, Vec3>>& segments,
+    double tolerance
+) const
+{
+    const SessionState phase = state_.load(std::memory_order_acquire);
+    if (phase != SessionState::StateComplete)
+        throw std::runtime_error("Room LOS requires a completed State session");
+    if (cell_index >= cells_.size())
+        throw std::out_of_range("Room LOS CellSpace index is out of range");
+    if (segments.size() > 2048)
+        throw std::invalid_argument("Room LOS segment batch is too large");
+    return validate_room_reference_segments(cells_[cell_index], segments, tolerance);
+}
+
 std::vector<std::uint8_t> AdjacencySession::get_state_result_bytes()
 {
     if (state_.load(std::memory_order_acquire) == SessionState::StateRunning)

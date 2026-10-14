@@ -3,6 +3,11 @@
 #include "adjacency_session.h"
 
 #include <climits>
+#include <cmath>
+#include <cstring>
+#include <limits>
+#include <stdexcept>
+#include <utility>
 #include <cstdint>
 #include <exception>
 #include <vector>
@@ -86,6 +91,49 @@ VALUE adjacency_native_get_state_result_bytes(VALUE self)
     (void)self;
     return protect_native_call([]() {
         return bytes_to_ruby_string(session().get_state_result_bytes());
+    });
+}
+
+// Pairs are six little-endian float64 coordinates per segment:
+// a.x,a.y,a.z,b.x,b.y,b.z. This avoids per-vertex Ruby array churn.
+VALUE adjacency_native_validate_room_los(
+    VALUE self, VALUE cell_index, VALUE segment_bytes, VALUE tolerance
+)
+{
+    (void)self;
+    Check_Type(segment_bytes, T_STRING);
+    const std::uint64_t raw_index = NUM2ULL(cell_index);
+    const double epsilon = NUM2DBL(tolerance);
+    const std::size_t size = static_cast<std::size_t>(RSTRING_LEN(segment_bytes));
+    if (size % (6 * sizeof(double)) != 0 ||
+        size > 2048 * 6 * sizeof(double) ||
+        raw_index > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()))
+        rb_raise(rb_eArgError, "invalid Room LOS segment payload");
+
+    const auto* data = reinterpret_cast<const std::uint8_t*>(RSTRING_PTR(segment_bytes));
+    return protect_native_call([data, size, raw_index, epsilon]() {
+        std::vector<std::pair<Vec3, Vec3>> segments;
+        segments.reserve(size / (6 * sizeof(double)));
+        for (std::size_t offset = 0; offset < size; offset += 6 * sizeof(double))
+        {
+            double values[6];
+            std::memcpy(values, data + offset, sizeof(values));
+            for (double value : values)
+                if (!std::isfinite(value))
+                    throw std::invalid_argument("non-finite Room LOS coordinate");
+            segments.push_back({
+                {values[0], values[1], values[2]},
+                {values[3], values[4], values[5]}
+            });
+        }
+
+        const std::vector<bool> checked = session().validate_room_los(
+            static_cast<std::size_t>(raw_index), segments, epsilon
+        );
+        VALUE result = rb_ary_new_capa(static_cast<long>(checked.size()));
+        for (bool visible : checked)
+            rb_ary_push(result, visible ? Qtrue : Qfalse);
+        return result;
     });
 }
 

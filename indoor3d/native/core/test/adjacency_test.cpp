@@ -894,6 +894,33 @@ void test_four_cycle_native_centroid_and_los_candidate()
     require(found, "Native must prevalidate an induced 4-cycle");
 }
 
+void test_room_reference_shortcut_los_rejects_wall_crossing()
+{
+    CellData room = u_prism_cell();
+    room.category = CellSpaceCategory::Room;
+    const Vec3 left{0.5, 2.5, 0.5};
+    const Vec3 right{2.5, 2.5, 0.5};
+    const Vec3 left_low{0.5, 0.5, 0.5};
+    const Vec3 right_low{2.5, 0.5, 0.5};
+    const std::vector<std::pair<Vec3, Vec3>> segments{
+        {left, right},      // Cuts the empty center of the U footprint.
+        {left_low, right_low}, // Inside the bottom bridge of the U.
+        {left, left_low}    // Inside the left arm.
+    };
+    const auto result = validate_room_reference_segments(room, segments, 0.001);
+    require(result.size() == 3, "Room LOS response count mismatch");
+    require(!result[0], "Room LOS must reject a shortcut across the U notch");
+    require(result[1] && result[2], "Room LOS rejected valid in-Room shortcuts");
+
+    const CellData cube = unit_box_cell();
+    const auto clear = validate_room_reference_segments(
+        cube, {{{0.2, 0.2, 0.5}, {0.8, 0.8, 0.5}}}, 0.001
+    );
+    // Category Unknown in the generic fixture: LOS service is Room-only.
+    require(clear.size() == 1 && !clear[0],
+            "Room LOS must reject non-Room requests");
+}
+
 void test_non_room_reference_points_are_empty()
 {
     const std::array<CellSpaceCategory,4> categories{{
@@ -937,6 +964,7 @@ int main()
     test_state_anchored_room_reference_cluster();
     test_non_room_reference_points_are_empty();
     test_room_visibility_graph_circle_overlap_and_blocked_los();
+    test_room_reference_shortcut_los_rejects_wall_crossing();
     test_triangle_loop_candidates_are_validated_in_native();
     test_triangle_loop_new_edge_can_cross_non_overlapping_circles();
     test_triangle_loop_new_edges_still_reject_wall_crossings();

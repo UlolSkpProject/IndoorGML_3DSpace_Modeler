@@ -16,6 +16,7 @@ extern "C" INDOOR_GML_NATIVE_EXPORT void Init_indoor_gml_native()
 
     rb_define_singleton_method(native_module, "start_state_check", adjacency_native_start_state_check, 0);
     rb_define_singleton_method(native_module, "get_state_result_bytes", adjacency_native_get_state_result_bytes, 0);
+    rb_define_singleton_method(native_module, "validate_room_los", adjacency_native_validate_room_los, 3);
 
     rb_define_singleton_method(native_module, "start_adjacency_check", adjacency_native_start_adjacency_check, 2);
     rb_define_singleton_method(native_module, "get_adjacency_result_bytes", adjacency_native_get_adjacency_result_bytes, 0);

@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace IndoorGMLAdjacencyNative
@@ -127,6 +128,14 @@ ReferenceGraphDebug build_room_reference_visibility_graph(
     const CellData& cell,
     const Vec3& state_point,
     const std::vector<ReferencePoint>& reference_points,
+    double tolerance
+);
+
+// Room-only exact wall-slice and BVH LOS verification, independent of disks.
+// Reuses the same guards as Native's previously validated graph edges.
+std::vector<bool> validate_room_reference_segments(
+    const CellData& cell,
+    const std::vector<std::pair<Vec3, Vec3>>& segments,
     double tolerance
 );
 
