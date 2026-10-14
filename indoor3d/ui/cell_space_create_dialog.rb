@@ -559,6 +559,10 @@ module ULOL
                   };
 
                   document.getElementById('create').addEventListener('click', function () {
+                    if (!buildingType.value) {
+                      buildingType.focus();
+                      return;
+                    }
                     if (!window.sketchup || !window.sketchup.submit) return;
                     window.sketchup.submit(JSON.stringify({
                       building_type: buildingType.value,
