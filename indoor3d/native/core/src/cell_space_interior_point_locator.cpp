@@ -1437,16 +1437,17 @@ ReferenceGraphDebug build_room_reference_visibility_graph(
             linked[edge.first][edge.second] = true;
             linked[edge.second][edge.first] = true;
         }
-        const auto may_connect = [&](const Vec3& point, double radius,
-                                     std::size_t other) {
-            const ReferenceGraphNode& target = graph.nodes[other];
-            const double sum = radius + target.radius;
-            if (sum <= tolerance ||
-                distance_xy_squared(point, target.point) > sum * sum)
+        // NEW collapse-only edges are determined by actual geometry LOS,
+        // not overlap of the inscribed circles. The original visibility
+        // graph above still requires both circle overlap and LOS.
+        // Avoid treating coincident centers as a navigable edge.
+        const auto may_connect = [&](const Vec3& point, std::size_t other) {
+            const Vec3& target = graph.nodes[other].point;
+            if (distance_xy_squared(point, target) <= tolerance * tolerance)
                 return false;
-            if (crosses_wall_slice(walls, point, target.point, tolerance))
+            if (crosses_wall_slice(walls, point, target, tolerance))
                 return false;
-            return clear_path(bvh, point, target.point, tolerance);
+            return clear_path(bvh, point, target, tolerance);
         };
 
         // Exclude triangles containing State: Ruby handles those by retaining
@@ -1483,14 +1484,14 @@ ReferenceGraphDebug build_room_reference_visibility_graph(
                     candidate.representative = {center, radius};
                     // All original loop vertices must see the replacement;
                     // otherwise never transmit an invalid candidate.
-                    if (!may_connect(center, radius, i) ||
-                        !may_connect(center, radius, j) ||
-                        !may_connect(center, radius, k))
+                    if (!may_connect(center, i) ||
+                        !may_connect(center, j) ||
+                        !may_connect(center, k))
                         continue;
                     for (std::size_t neighbor = 0; neighbor < count; ++neighbor)
                     {
                         if (neighbor == i || neighbor == j || neighbor == k) continue;
-                        if (may_connect(center, radius, neighbor))
+                        if (may_connect(center, neighbor))
                             candidate.visible_neighbors.push_back(neighbor);
                     }
                     graph.loop_candidates.push_back(std::move(candidate));

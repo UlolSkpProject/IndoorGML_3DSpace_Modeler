@@ -68,9 +68,9 @@ module ULOL
                 # to every external neighbor. No new LOS edges are invented.
                 next unless boundary.all? { |index| edge_exists?(edges, 0, index) }
               else
-                # A new representative requires prevalidated Native LOS AND
-                # overlapping clearance disks with every surviving boundary
-                # vertex; all these facts were checked in C++.
+                # A new representative requires Native-validated LOS to
+                # every surviving boundary vertex. Circle overlap is used
+                # only by the original graph, not by new collapse edges.
                 visible = Array(candidate[:visible_neighbors])
                 next unless boundary.all? { |index| visible.include?(origins[index]) }
               end
