@@ -195,6 +195,7 @@ module ULOL
     require_relative 'ui/overlays/indoor_mode_screen_overlay'
     require_relative 'ui/overlays/builders/transition_curve_builder'
     require_relative 'ui/overlays/renderers/state_overlay_renderer'
+    require_relative 'ui/overlays/renderers/reference_point_debug_overlay_renderer'
     require_relative 'ui/overlays/renderers/transition_overlay_renderer'
     require_relative 'ui/overlays/dual_graph_space_overlay'
     require_relative 'ui/html_dialog_metrics'

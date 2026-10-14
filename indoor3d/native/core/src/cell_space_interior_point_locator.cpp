@@ -20,6 +20,9 @@ using namespace IndoorGMLAdjacencyNative;
 constexpr double EPSILON = 1.0e-12;
 constexpr std::size_t BVH_LEAF_TRIANGLES = 6;
 constexpr std::size_t MAX_SEARCH_NODES = 200000;
+constexpr double ROOM_REFERENCE_GRID_DIVISIONS = 4.0;
+constexpr double ROOM_REFERENCE_MAX_AXIS_DIVISIONS = 128.0;
+constexpr std::size_t MAX_ROOM_REFERENCE_POINTS = 4096;
 
 double elapsed_seconds(std::chrono::steady_clock::time_point started_at)
 {
@@ -660,10 +663,73 @@ std::vector<Vec3> find_reference_points(
     double tolerance
 )
 {
-    (void)cell;
-    (void)state_point;
-    (void)tolerance;
-    return {};
+    if (!(tolerance > 0.0) || !std::isfinite(tolerance))
+        return {};
+
+    const double span_x = cell.bounds.maximum.x - cell.bounds.minimum.x;
+    const double span_y = cell.bounds.maximum.y - cell.bounds.minimum.y;
+    if (!(span_x > tolerance) || !(span_y > tolerance))
+        return {};
+
+    const double short_span = std::min(span_x, span_y);
+    const double long_span = std::max(span_x, span_y);
+    const double spacing = std::max(
+        short_span / ROOM_REFERENCE_GRID_DIVISIONS,
+        long_span / ROOM_REFERENCE_MAX_AXIS_DIVISIONS
+    );
+    if (!(spacing > tolerance) || !std::isfinite(spacing))
+        return {};
+
+    const std::vector<const Triangle*> triangles = triangle_pointers(cell);
+    if (triangles.empty()) return {};
+
+    TriangleBvh bvh(triangles);
+    if (bvh.empty()) return {};
+
+    const std::int64_t min_x_index = static_cast<std::int64_t>(
+        std::ceil((cell.bounds.minimum.x - state_point.x) / spacing)
+    );
+    const std::int64_t max_x_index = static_cast<std::int64_t>(
+        std::floor((cell.bounds.maximum.x - state_point.x) / spacing)
+    );
+    const std::int64_t min_y_index = static_cast<std::int64_t>(
+        std::ceil((cell.bounds.minimum.y - state_point.y) / spacing)
+    );
+    const std::int64_t max_y_index = static_cast<std::int64_t>(
+        std::floor((cell.bounds.maximum.y - state_point.y) / spacing)
+    );
+
+    std::vector<Vec3> points;
+    points.reserve(std::min<std::size_t>(
+        MAX_ROOM_REFERENCE_POINTS,
+        static_cast<std::size_t>(ROOM_REFERENCE_MAX_AXIS_DIVISIONS *
+                                 ROOM_REFERENCE_GRID_DIVISIONS)
+    ));
+
+    const double duplicate_distance_squared = tolerance * tolerance;
+    for (std::int64_t ix = min_x_index; ix <= max_x_index; ++ix)
+    {
+        for (std::int64_t iy = min_y_index; iy <= max_y_index; ++iy)
+        {
+            const Vec3 candidate{
+                state_point.x + static_cast<double>(ix) * spacing,
+                state_point.y + static_cast<double>(iy) * spacing,
+                state_point.z
+            };
+
+            if (length_squared(subtract(candidate, state_point)) <= duplicate_distance_squared)
+                continue;
+            if (!bvh_inside(bvh, candidate, tolerance))
+                continue;
+            if (bvh.nearest_distance(candidate) <= tolerance)
+                continue;
+
+            points.push_back(candidate);
+            if (points.size() >= MAX_ROOM_REFERENCE_POINTS)
+                return points;
+        }
+    }
+    return points;
 }
 
 CellSpaceInteriorPointResult locate_cell_space_interior_points(
@@ -675,11 +741,26 @@ CellSpaceInteriorPointResult locate_cell_space_interior_points(
     result.state_point = find_state_point(cell, tolerance, &result.state_metrics);
     if (!result.state_point) return result;
 
-    result.reference_points = find_reference_points(
-        cell,
-        *result.state_point,
-        tolerance
-    );
+    switch (cell.category)
+    {
+    case CellSpaceCategory::Room:
+        result.reference_points = find_reference_points(
+            cell,
+            *result.state_point,
+            tolerance
+        );
+        break;
+    case CellSpaceCategory::Stair:
+        // TODO: Generate Stair reference points using the State-to-floor distance scale.
+        break;
+    case CellSpaceCategory::Elevator:
+    case CellSpaceCategory::Door:
+    case CellSpaceCategory::Window:
+    case CellSpaceCategory::Unknown:
+    default:
+        break;
+    }
+
     return result;
 }
 

@@ -8,12 +8,13 @@ module ULOL
         OUTPUT_MAGIC = "IGMLRES\0".b.freeze
         STATE_OUTPUT_MAGIC = "IGMLSTA\0".b.freeze
         PROTOCOL_VERSION = 1
-        GEOMETRY_PROTOCOL_VERSION = 2
+        GEOMETRY_PROTOCOL_VERSION = 3
+        STATE_RESULT_VERSION = 2
         NORMAL_TOLERANCE = 0.000001
         POLL_INTERVAL_SECONDS = 0.01
         INPUT_HEADER_SIZE = 32
         CELL_FIXED_SIZE = 80
-        GEOMETRY_CELL_FIXED_SIZE = 96
+        GEOMETRY_CELL_FIXED_SIZE = 104
         FACE_FIXED_SIZE = 56
         VEC3_SIZE = 24
         TRIANGLE_SIZE = 72
@@ -22,6 +23,13 @@ module ULOL
         CELL_FLAG_ADJACENCY_TARGET = 1 << 1
         CELL_FLAG_HAS_FIXED_Z = 1 << 2
         CELL_FLAG_ADJACENCY_DIRTY = 1 << 3
+
+        CELL_CATEGORY_UNKNOWN = 0
+        CELL_CATEGORY_ROOM = 1
+        CELL_CATEGORY_STAIR = 2
+        CELL_CATEGORY_ELEVATOR = 3
+        CELL_CATEGORY_DOOR = 4
+        CELL_CATEGORY_WINDOW = 5
 
         CORE_NATIVE_EXTENSION_PATH = File.expand_path(
           File.join(__dir__, '..', '..', 'native', 'core', 'indoor_gml_native.so')
@@ -181,14 +189,11 @@ module ULOL
           end
 
           output_bytes = native_module.get_state_result_bytes
-          points = decode_state_result(output_bytes)
+          decoded = decode_state_result(output_bytes)
           metrics = normalize_hash(native_module.get_metrics)
           metrics[:state_target_count] = target_count unless metrics.key?(:state_target_count)
           metrics[:state_output_bytes] = output_bytes.bytesize
-          {
-            points: points.freeze,
-            metrics: metrics.freeze
-          }
+          decoded.merge(metrics: metrics.freeze).freeze
         end
 
         def close_geometry_session
@@ -405,7 +410,7 @@ module ULOL
           append_pack(buffer, [GEOMETRY_PROTOCOL_VERSION, snapshots.length, 0], 'Q<Q<Q<')
 
           snapshots.each_with_index do |snapshot, cell_index|
-            append_cell_v2(buffer, snapshot, cell_index, Hash(state_options[cell_index]))
+            append_cell_v3(buffer, snapshot, cell_index, Hash(state_options[cell_index]))
           end
           buffer
         end
@@ -418,13 +423,16 @@ module ULOL
           raise ProtocolError, 'native State result magic mismatch' unless magic == STATE_OUTPUT_MAGIC
 
           version = reader.read_u64
-          raise ProtocolError, "unsupported native State result version #{version}" unless version == PROTOCOL_VERSION
+          unless version == PROTOCOL_VERSION || version == STATE_RESULT_VERSION
+            raise ProtocolError, "unsupported native State result version #{version}"
+          end
 
           result_count = checked_count(reader.read_u64, 'State result count')
           reserved = reader.read_u64
           raise ProtocolError, 'native State result reserved field is non-zero' unless reserved.zero?
 
           points = {}
+          reference_points = {}
           previous_index = nil
           result_count.times do
             cell_index = checked_count(reader.read_u64, 'State cell index')
@@ -442,10 +450,26 @@ module ULOL
               finite_f64(reader.read_f64, 'State z')
             ].freeze
             points[cell_index] = point
+
+            references = []
+            if version == STATE_RESULT_VERSION
+              reference_count = checked_count(reader.read_u64, 'reference point count')
+              reference_count.times do
+                references << [
+                  finite_f64(reader.read_f64, 'reference x'),
+                  finite_f64(reader.read_f64, 'reference y'),
+                  finite_f64(reader.read_f64, 'reference z')
+                ].freeze
+              end
+            end
+            reference_points[cell_index] = references.freeze
           end
 
           raise ProtocolError, 'native State result has trailing bytes' unless reader.finished?
-          points
+          {
+            points: points.freeze,
+            reference_points: reference_points.freeze
+          }.freeze
         end
 
         def decode_result(bytes, snapshots)
@@ -586,7 +610,7 @@ module ULOL
         end
         private_class_method :append_cell_v1
 
-        def append_cell_v2(buffer, snapshot, cell_index, option)
+        def append_cell_v3(buffer, snapshot, cell_index, option)
           minimum, maximum, faces = cell_geometry(snapshot, cell_index)
           flags = CELL_FLAG_ADJACENCY_TARGET
           flags |= CELL_FLAG_NEEDS_STATE if option[:needs_state] == true
@@ -598,6 +622,7 @@ module ULOL
             flags |= CELL_FLAG_HAS_FIXED_Z
           end
           fixed_z ||= 0.0
+          category = encode_cell_category(option[:category_code])
 
           record_size = GEOMETRY_CELL_FIXED_SIZE
           faces.each { |face| record_size += encoded_face_size(face) }
@@ -610,9 +635,22 @@ module ULOL
           append_vec3(buffer, minimum, 'cell bounds min')
           append_vec3(buffer, maximum, 'cell bounds max')
           append_pack(buffer, [fixed_z], 'E')
+          append_pack(buffer, [category], 'Q<')
           faces.each_with_index { |face, face_index| append_face(buffer, face, cell_index, face_index) }
         end
-        private_class_method :append_cell_v2
+        private_class_method :append_cell_v3
+
+        def encode_cell_category(category_code)
+          case category_code.to_s.downcase
+          when 'room' then CELL_CATEGORY_ROOM
+          when 'stair' then CELL_CATEGORY_STAIR
+          when 'elevator' then CELL_CATEGORY_ELEVATOR
+          when 'door' then CELL_CATEGORY_DOOR
+          when 'window' then CELL_CATEGORY_WINDOW
+          else CELL_CATEGORY_UNKNOWN
+          end
+        end
+        private_class_method :encode_cell_category
 
         def append_face(buffer, face, cell_index, face_index)
           face = Hash(face)

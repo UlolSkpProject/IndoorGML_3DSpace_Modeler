@@ -11,6 +11,10 @@ module ULOL
           @indoor_model = indoor_model
           @transition_curve_builder = TransitionCurveBuilder.new(indoor_model: @indoor_model, transform_context: self)
           @transition_renderer = TransitionOverlayRenderer.new(curve_builder: @transition_curve_builder)
+          @reference_point_debug_renderer = ReferencePointDebugOverlayRenderer.new(
+            indoor_model: @indoor_model,
+            transform_context: self
+          )
           @state_renderer = StateOverlayRenderer.new(indoor_model: @indoor_model, transform_context: self)
           super(OVERLAY_ID, OVERLAY_NAME, description: 'Shows IndoorGML state and transition geometry.')
         end
@@ -25,6 +29,7 @@ module ULOL
 
           state_radius_scale = DualOverlayPreferences.state_radius_scale
           @transition_renderer.draw(view) unless validation_focus_active?
+          @reference_point_debug_renderer.draw(view)
           @state_renderer.draw(view, state_radius_scale: state_radius_scale)
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Dual graph overlay draw failed: #{e.class}: #{e.message}"
@@ -81,6 +86,7 @@ module ULOL
             state_radius_scale: DualOverlayPreferences.state_radius_scale
           )
           extent_points.each { |point| bounds.add(point) }
+          @reference_point_debug_renderer.extent_points.each { |point| bounds.add(point) }
         end
 
         def validation_focus_active?

@@ -18,10 +18,13 @@ constexpr std::uint8_t OUTPUT_MAGIC[8] = {'I', 'G', 'M', 'L', 'R', 'E', 'S', '\0
 constexpr std::uint8_t STATE_OUTPUT_MAGIC[8] = {'I', 'G', 'M', 'L', 'S', 'T', 'A', '\0'};
 constexpr std::uint64_t INPUT_VERSION_V1 = 1;
 constexpr std::uint64_t INPUT_VERSION_V2 = 2;
+constexpr std::uint64_t INPUT_VERSION_V3 = 3;
 constexpr std::uint64_t RESULT_VERSION = 1;
+constexpr std::uint64_t STATE_RESULT_VERSION = 2;
 constexpr std::size_t INPUT_HEADER_SIZE = 32;
 constexpr std::size_t CELL_FIXED_SIZE_V1 = 80;
 constexpr std::size_t CELL_FIXED_SIZE_V2 = 96;
+constexpr std::size_t CELL_FIXED_SIZE_V3 = 104;
 constexpr std::size_t FACE_FIXED_SIZE = 56;
 constexpr std::size_t PAIR_FIXED_SIZE = 40;
 constexpr std::size_t CANDIDATE_SIZE = 56;
@@ -202,7 +205,8 @@ CellData parse_cell(
 {
     Reader reader(data, size);
     const std::size_t fixed_size =
-        version == INPUT_VERSION_V1 ? CELL_FIXED_SIZE_V1 : CELL_FIXED_SIZE_V2;
+        version == INPUT_VERSION_V1 ? CELL_FIXED_SIZE_V1 :
+        (version == INPUT_VERSION_V2 ? CELL_FIXED_SIZE_V2 : CELL_FIXED_SIZE_V3);
     const std::size_t record_size = checked_size(reader.read_u64(), "cell record size");
     if (record_size != size || record_size < fixed_size)
     {
@@ -261,10 +265,20 @@ CellData parse_cell(
         throw std::invalid_argument("cell bounds are inverted");
     }
 
-    if (version == INPUT_VERSION_V2)
+    if (version == INPUT_VERSION_V2 || version == INPUT_VERSION_V3)
     {
         cell.fixed_z = reader.read_double();
         require_finite(cell.fixed_z, "cell fixed z");
+    }
+
+    if (version == INPUT_VERSION_V3)
+    {
+        const std::uint64_t raw_category = reader.read_u64();
+        if (raw_category > static_cast<std::uint64_t>(CellSpaceCategory::Window))
+        {
+            throw std::invalid_argument("cell category is invalid");
+        }
+        cell.category = static_cast<CellSpaceCategory>(raw_category);
     }
 
     if (face_count > reader.remaining() / FACE_FIXED_SIZE)
@@ -325,7 +339,9 @@ std::vector<CellData> parse_input_batch(const std::uint8_t* data, std::size_t si
         throw std::invalid_argument("adjacency input magic mismatch");
     }
     const std::uint64_t version = reader.read_u64();
-    if (version != INPUT_VERSION_V1 && version != INPUT_VERSION_V2)
+    if (version != INPUT_VERSION_V1 &&
+        version != INPUT_VERSION_V2 &&
+        version != INPUT_VERSION_V3)
     {
         throw std::invalid_argument("unsupported adjacency input version");
     }
@@ -336,7 +352,8 @@ std::vector<CellData> parse_input_batch(const std::uint8_t* data, std::size_t si
     }
 
     const std::size_t minimum_cell_size =
-        version == INPUT_VERSION_V1 ? CELL_FIXED_SIZE_V1 : CELL_FIXED_SIZE_V2;
+        version == INPUT_VERSION_V1 ? CELL_FIXED_SIZE_V1 :
+        (version == INPUT_VERSION_V2 ? CELL_FIXED_SIZE_V2 : CELL_FIXED_SIZE_V3);
     if (cell_count > reader.remaining() / minimum_cell_size)
     {
         throw std::invalid_argument("cell count exceeds adjacency input");
@@ -449,7 +466,7 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
 
     Writer writer;
     writer.append_bytes(STATE_OUTPUT_MAGIC, sizeof(STATE_OUTPUT_MAGIC));
-    writer.append_u64(RESULT_VERSION);
+    writer.append_u64(STATE_RESULT_VERSION);
     writer.append_u64(checked_u64(results.size(), "state result count"));
     writer.append_u64(0);
 
@@ -462,6 +479,16 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
         writer.append_double(result.point.x);
         writer.append_double(result.point.y);
         writer.append_double(result.point.z);
+        writer.append_u64(checked_u64(result.reference_points.size(), "reference point count"));
+        for (const Vec3& point : result.reference_points)
+        {
+            require_finite(point.x, "reference point x");
+            require_finite(point.y, "reference point y");
+            require_finite(point.z, "reference point z");
+            writer.append_double(point.x);
+            writer.append_double(point.y);
+            writer.append_double(point.z);
+        }
     }
     return writer.take();
 }

@@ -37,6 +37,16 @@ struct FaceData
     std::vector<Triangle> triangles;
 };
 
+enum class CellSpaceCategory : std::uint64_t
+{
+    Unknown = 0,
+    Room = 1,
+    Stair = 2,
+    Elevator = 3,
+    Door = 4,
+    Window = 5
+};
+
 struct CellData
 {
     std::size_t index = 0;
@@ -44,6 +54,7 @@ struct CellData
     Aabb bounds;
     double fixed_z = 0.0;
     std::vector<FaceData> faces;
+    CellSpaceCategory category = CellSpaceCategory::Unknown;
 
     bool needs_state() const { return (flags & CELL_FLAG_NEEDS_STATE) != 0; }
     bool adjacency_target() const { return (flags & CELL_FLAG_ADJACENCY_TARGET) != 0; }

@@ -219,6 +219,7 @@ module ULOL
                         cell_type: entry[:cell_type],
                         category_code: entry[:category_code]
                       )
+                      clear_debug_reference_points(entry[:cell_space])
                       changed << entry[:cell_space]
                     end
                     finalize_cell_space_batch(changed)
@@ -255,6 +256,14 @@ module ULOL
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Selected CellSpace type update failed: #{e.class}: #{e.message}"
             false
+          end
+
+          def debug_reference_points
+            store = @debug_reference_points_by_cell_id || {}
+            valid_ids = Array(@feature_registry&.cell_spaces).filter_map do |cell_space|
+              cell_space.id if cell_space&.valid?
+            end
+            valid_ids.flat_map { |cell_id| Array(store[cell_id]) }
           end
 
           private
@@ -386,7 +395,10 @@ module ULOL
             state_options = session_entries.map do |entry|
               cell_space = entry[:cell_space]
               unless pending_by_id.key?(cell_space.id)
-                next({ needs_state: false })
+                next({
+                  needs_state: false,
+                  category_code: cell_space.category_code
+                })
               end
 
               fixed_offset = fixed_state_height_offset(cell_space)
@@ -398,7 +410,8 @@ module ULOL
 
               {
                 needs_state: true,
-                fixed_z: fixed_z
+                fixed_z: fixed_z,
+                category_code: cell_space.category_code
               }
             end
             state_progress = native_state_progress_sink
@@ -460,6 +473,7 @@ module ULOL
             end
 
             points = Hash(state_result[:points])
+            reference_points = Hash(state_result[:reference_points])
             session_entries.each_with_index do |entry, index|
               cell_space = pending_by_id[entry[:cell_space].id]
               next unless cell_space
@@ -469,6 +483,7 @@ module ULOL
                 raise NativeAdjacencyBridge::ProtocolError,
                       "Native State result missing for #{cell_space.id}"
               end
+              store_debug_reference_points(cell_space, reference_points[index])
               state_point_applier.call(cell_space, coordinates)
             end
 
@@ -478,6 +493,27 @@ module ULOL
                NativeAdjacencyBridge.shared_session_active?
               NativeAdjacencyBridge.close_geometry_session
             end
+          end
+
+          def store_debug_reference_points(cell_space, coordinate_sets)
+            return [] unless cell_space&.valid?
+
+            points = Array(coordinate_sets).filter_map do |coordinates|
+              values = Array(coordinates).map(&:to_f)
+              next unless values.length == 3 && values.all?(&:finite?)
+
+              Geom::Point3d.new(values[0], values[1], values[2])
+            end
+            @debug_reference_points_by_cell_id ||= {}
+            @debug_reference_points_by_cell_id[cell_space.id] = points.freeze
+            points
+          end
+
+          def clear_debug_reference_points(cell_space)
+            return false unless cell_space
+
+            @debug_reference_points_by_cell_id&.delete(cell_space.id)
+            true
           end
 
           def native_state_progress_sink

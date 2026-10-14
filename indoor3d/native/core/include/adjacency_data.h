@@ -12,6 +12,7 @@ struct StatePointResult
 {
     std::size_t cell_index = 0;
     Vec3 point;
+    std::vector<Vec3> reference_points;
 };
 
 std::vector<CellData> parse_input_batch(const std::uint8_t* data, std::size_t size);

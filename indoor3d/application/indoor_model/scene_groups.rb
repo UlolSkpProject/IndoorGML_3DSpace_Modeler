@@ -561,6 +561,7 @@ module ULOL
                     'CellSpace geometry snapshot is unavailable for Native State calculation'
             end
 
+            runtime_cell_space = find_cell_space_for_entity(cell_space_entity)
             fixed_z = native_state_fixed_parent_z_for_entity(
               cell_space_entity,
               fixed_z_offset_from_bottom
@@ -579,11 +580,19 @@ module ULOL
             NativeAdjacencyBridge.open_geometry_session(
               [snapshot],
               keys: [key],
-              state_options: [{ needs_state: true, fixed_z: fixed_z }]
+              state_options: [{
+                needs_state: true,
+                fixed_z: fixed_z,
+                category_code: runtime_cell_space&.category_code
+              }]
             )
             opened = true
             result = NativeAdjacencyBridge.compute_state_from_open_session
             coordinates = Hash(result[:points])[0]
+            store_debug_reference_points(
+              runtime_cell_space,
+              Hash(result[:reference_points])[0]
+            ) if runtime_cell_space
             unless coordinates
               raise NativeAdjacencyBridge::ProtocolError,
                     'Native State backend did not return an interior point'

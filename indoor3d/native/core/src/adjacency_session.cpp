@@ -134,7 +134,11 @@ void AdjacencySession::state_worker_loop()
             if (result.state_point)
             {
                 local_results.push_back(
-                    StatePointResult{cells_[cell_position].index, *result.state_point}
+                    StatePointResult{
+                        cells_[cell_position].index,
+                        *result.state_point,
+                        result.reference_points
+                    }
                 );
                 if (metrics.volume_centroid_succeeded)
                     state_volume_centroid_success_count_.fetch_add(1, std::memory_order_relaxed);

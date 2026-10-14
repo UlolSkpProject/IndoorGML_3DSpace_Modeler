@@ -207,6 +207,45 @@ void test_state_fixed_z()
     require(point.has_value(), "fixed-Z State point was not found");
     require(std::abs(point->z - 0.25) < 1.0e-9, "fixed-Z State point did not preserve fixed Z");
 }
+
+void test_room_reference_points_share_state_height()
+{
+    CellData cell = unit_box_cell();
+    cell.category = CellSpaceCategory::Room;
+    cell.flags |= CELL_FLAG_HAS_FIXED_Z;
+    cell.fixed_z = 0.25;
+
+    const CellSpaceInteriorPointResult result =
+        locate_cell_space_interior_points(cell, 0.001);
+    require(result.state_point.has_value(), "Room State point was not found");
+    require(!result.reference_points.empty(), "Room reference points were not generated");
+    for (const Vec3& point : result.reference_points)
+    {
+        require(
+            std::abs(point.z - result.state_point->z) < 1.0e-9,
+            "Room reference point does not share State height"
+        );
+    }
+}
+
+void test_non_room_reference_points_are_empty()
+{
+    const std::array<CellSpaceCategory,4> categories{{
+        CellSpaceCategory::Stair,
+        CellSpaceCategory::Elevator,
+        CellSpaceCategory::Door,
+        CellSpaceCategory::Window
+    }};
+    for (CellSpaceCategory category : categories)
+    {
+        CellData cell = unit_box_cell();
+        cell.category = category;
+        const CellSpaceInteriorPointResult result =
+            locate_cell_space_interior_points(cell, 0.001);
+        require(result.state_point.has_value(), "non-Room State point was not found");
+        require(result.reference_points.empty(), "non-Room reference points must be empty");
+    }
+}
 } // namespace
 
 int main()
@@ -216,5 +255,7 @@ int main()
     test_state_volume_centroid_on_box();
     test_state_concave_u_uses_bvh_fallback();
     test_state_fixed_z();
+    test_room_reference_points_share_state_height();
+    test_non_room_reference_points_are_empty();
     return 0;
 }
