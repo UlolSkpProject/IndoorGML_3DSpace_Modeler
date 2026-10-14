@@ -219,6 +219,10 @@ void test_room_reference_points_share_state_height()
         locate_cell_space_interior_points(cell, 0.001);
     require(result.state_point.has_value(), "Room State point was not found");
     require(!result.reference_points.empty(), "Room reference points were not generated");
+    require(
+        result.reference_status == ReferencePointStatus::Succeeded,
+        "Room reference generation status was not successful"
+    );
     for (const Vec3& point : result.reference_points)
     {
         require(
@@ -244,6 +248,10 @@ void test_non_room_reference_points_are_empty()
             locate_cell_space_interior_points(cell, 0.001);
         require(result.state_point.has_value(), "non-Room State point was not found");
         require(result.reference_points.empty(), "non-Room reference points must be empty");
+        require(
+            result.reference_status == ReferencePointStatus::NotAttempted,
+            "non-Room reference generation must remain unattempted"
+        );
     }
 }
 } // namespace

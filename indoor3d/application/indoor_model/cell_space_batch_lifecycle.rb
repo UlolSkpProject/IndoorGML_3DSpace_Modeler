@@ -474,11 +474,18 @@ module ULOL
 
             points = Hash(state_result[:points])
             reference_points = Hash(state_result[:reference_points])
+            reference_statuses = Hash(state_result[:reference_statuses])
             session_entries.each_with_index do |entry, index|
               cell_space = pending_by_id[entry[:cell_space].id]
               next unless cell_space
 
               coordinates = points[index]
+              log_temp_inner_point_result(
+                cell_space,
+                coordinates,
+                reference_statuses[index],
+                reference_points[index]
+              )
               unless coordinates
                 raise NativeAdjacencyBridge::ProtocolError,
                       "Native State result missing for #{cell_space.id}"
@@ -493,6 +500,36 @@ module ULOL
                NativeAdjacencyBridge.shared_session_active?
               NativeAdjacencyBridge.close_geometry_session
             end
+          end
+
+          # TEMP DEBUG [REMOVE]: diagnostic output for State/Reference generation.
+          # Remove this method and its two call sites once reference generation is stable.
+          def log_temp_inner_point_result(cell_space, state_coordinates, reference_status, reference_points)
+            return false unless cell_space
+
+            prefix = '[TEMP DEBUG][REMOVE][CellSpaceInteriorPoint]'
+            if state_coordinates.nil?
+              IndoorCore::Logger.puts(
+                "#{prefix} cell=#{cell_space.id} category=#{cell_space.category_code} "                 'State 실패'
+              )
+              return true
+            end
+
+            return true unless cell_space.category_code.to_s.casecmp('Room').zero?
+
+            case reference_status.to_i
+            when 1
+              IndoorCore::Logger.puts(
+                "#{prefix} cell=#{cell_space.id} category=Room "                 "State 성공 + Reference 성공 count=#{Array(reference_points).length}"
+              )
+            when 2
+              IndoorCore::Logger.puts(
+                "#{prefix} cell=#{cell_space.id} category=Room "                 'State 성공 + Reference 실패 → State만 유지'
+              )
+            end
+            true
+          rescue StandardError
+            false
           end
 
           def store_debug_reference_points(cell_space, coordinate_sets)

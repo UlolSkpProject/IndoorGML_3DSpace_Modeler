@@ -12,6 +12,7 @@ struct StatePointResult
 {
     std::size_t cell_index = 0;
     Vec3 point;
+    std::uint64_t reference_status = 0;
     std::vector<Vec3> reference_points;
 };
 

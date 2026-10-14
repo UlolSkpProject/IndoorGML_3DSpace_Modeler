@@ -20,7 +20,7 @@ constexpr std::uint64_t INPUT_VERSION_V1 = 1;
 constexpr std::uint64_t INPUT_VERSION_V2 = 2;
 constexpr std::uint64_t INPUT_VERSION_V3 = 3;
 constexpr std::uint64_t RESULT_VERSION = 1;
-constexpr std::uint64_t STATE_RESULT_VERSION = 2;
+constexpr std::uint64_t STATE_RESULT_VERSION = 3;
 constexpr std::size_t INPUT_HEADER_SIZE = 32;
 constexpr std::size_t CELL_FIXED_SIZE_V1 = 80;
 constexpr std::size_t CELL_FIXED_SIZE_V2 = 96;
@@ -479,6 +479,8 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
         writer.append_double(result.point.x);
         writer.append_double(result.point.y);
         writer.append_double(result.point.z);
+        // TEMP DEBUG SUPPORT: remove reference_status when temporary diagnostics are removed.
+        writer.append_u64(result.reference_status);
         writer.append_u64(checked_u64(result.reference_points.size(), "reference point count"));
         for (const Vec3& point : result.reference_points)
         {

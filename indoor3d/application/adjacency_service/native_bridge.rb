@@ -9,7 +9,8 @@ module ULOL
         STATE_OUTPUT_MAGIC = "IGMLSTA\0".b.freeze
         PROTOCOL_VERSION = 1
         GEOMETRY_PROTOCOL_VERSION = 3
-        STATE_RESULT_VERSION = 2
+        REFERENCE_POINTS_RESULT_VERSION = 2
+        STATE_RESULT_VERSION = 3
         NORMAL_TOLERANCE = 0.000001
         POLL_INTERVAL_SECONDS = 0.01
         INPUT_HEADER_SIZE = 32
@@ -423,7 +424,7 @@ module ULOL
           raise ProtocolError, 'native State result magic mismatch' unless magic == STATE_OUTPUT_MAGIC
 
           version = reader.read_u64
-          unless version == PROTOCOL_VERSION || version == STATE_RESULT_VERSION
+          unless [PROTOCOL_VERSION, REFERENCE_POINTS_RESULT_VERSION, STATE_RESULT_VERSION].include?(version)
             raise ProtocolError, "unsupported native State result version #{version}"
           end
 
@@ -433,6 +434,7 @@ module ULOL
 
           points = {}
           reference_points = {}
+          reference_statuses = {}
           previous_index = nil
           result_count.times do
             cell_index = checked_count(reader.read_u64, 'State cell index')
@@ -451,8 +453,12 @@ module ULOL
             ].freeze
             points[cell_index] = point
 
+            # TEMP DEBUG SUPPORT: V3 carries reference generation status for console diagnostics.
+            reference_statuses[cell_index] =
+              version == STATE_RESULT_VERSION ? checked_count(reader.read_u64, 'reference status') : 0
+
             references = []
-            if version == STATE_RESULT_VERSION
+            if version >= REFERENCE_POINTS_RESULT_VERSION
               reference_count = checked_count(reader.read_u64, 'reference point count')
               reference_count.times do
                 references << [
@@ -468,7 +474,8 @@ module ULOL
           raise ProtocolError, 'native State result has trailing bytes' unless reader.finished?
           {
             points: points.freeze,
-            reference_points: reference_points.freeze
+            reference_points: reference_points.freeze,
+            reference_statuses: reference_statuses.freeze
           }.freeze
         end
 

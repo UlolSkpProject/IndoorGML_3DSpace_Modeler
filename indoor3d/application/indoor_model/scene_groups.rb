@@ -589,10 +589,18 @@ module ULOL
             opened = true
             result = NativeAdjacencyBridge.compute_state_from_open_session
             coordinates = Hash(result[:points])[0]
-            store_debug_reference_points(
-              runtime_cell_space,
-              Hash(result[:reference_points])[0]
-            ) if runtime_cell_space
+            if runtime_cell_space
+              log_temp_inner_point_result(
+                runtime_cell_space,
+                coordinates,
+                Hash(result[:reference_statuses])[0],
+                Hash(result[:reference_points])[0]
+              )
+              store_debug_reference_points(
+                runtime_cell_space,
+                Hash(result[:reference_points])[0]
+              )
+            end
             unless coordinates
               raise NativeAdjacencyBridge::ProtocolError,
                     'Native State backend did not return an interior point'

@@ -137,6 +137,7 @@ void AdjacencySession::state_worker_loop()
                     StatePointResult{
                         cells_[cell_position].index,
                         *result.state_point,
+                        static_cast<std::uint64_t>(result.reference_status),
                         result.reference_points
                     }
                 );

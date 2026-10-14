@@ -746,11 +746,15 @@ CellSpaceInteriorPointResult locate_cell_space_interior_points(
         switch (cell.category)
         {
         case CellSpaceCategory::Room:
+            // TEMP DEBUG SUPPORT: status is serialized only so Ruby can distinguish
+            // a successful empty result from an exception. Remove with debug logging.
+            result.reference_status = ReferencePointStatus::Failed;
             result.reference_points = find_reference_points(
                 cell,
                 *result.state_point,
                 tolerance
             );
+            result.reference_status = ReferencePointStatus::Succeeded;
             break;
         case CellSpaceCategory::Stair:
             // TODO: Generate Stair reference points using the State-to-floor distance scale.

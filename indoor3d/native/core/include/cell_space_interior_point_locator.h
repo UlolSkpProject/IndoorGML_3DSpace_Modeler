@@ -2,6 +2,7 @@
 
 #include "adjacency_data.h"
 
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -15,11 +16,19 @@ struct StateSearchMetrics
     double bvh_search_duration = 0.0;
 };
 
+enum class ReferencePointStatus : std::uint64_t
+{
+    NotAttempted = 0,
+    Succeeded = 1,
+    Failed = 2
+};
+
 struct CellSpaceInteriorPointResult
 {
     std::optional<Vec3> state_point;
     std::vector<Vec3> reference_points;
     StateSearchMetrics state_metrics;
+    ReferencePointStatus reference_status = ReferencePointStatus::NotAttempted;
 };
 
 std::optional<Vec3> find_state_point(
