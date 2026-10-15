@@ -871,9 +871,11 @@ void test_room_loop_cannot_collapse_over_enclosed_hole()
                 return edge.first == a && edge.second == b;
             });
     };
-    require(linked(1,2) && linked(2,3) &&
-            linked(3,4) && linked(1,4),
-            "Ring Room must have a valid four-edge perimeter");
+    // The fixture is only one inch high. True 3D inscribed spheres
+    // are limited by its floor/ceiling and need not overlap across
+    // the wide ring even when the old XY disks did.
+    require(graph.loop_candidates.empty(),
+            "Ring Room Hole must never be collapsed without 3D certification");
     require(!linked(1,3) && !linked(2,4),
             "Ring Room diagonals may not cross the hole");
     for (const auto& candidate : graph.loop_candidates)
