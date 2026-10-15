@@ -2,6 +2,7 @@
 #include "adjacency_data.h"
 #include "floor_polygon_preparation.h"
 
+#include <array>
 #include <cstddef>
 #include <limits>
 #include <vector>
@@ -23,6 +24,10 @@ public:
     // infinity when no such Face exists; a missing wall must not reject State.
     double nearest_wall_distance(Vec3 point) const;
     bool visible(Vec3 first,Vec3 last,double tolerance) const;
+    // Face-domain intersection for a planar virtual membrane. No sampling
+    // may replace the actual Face/Outer/Inner Loop boundary test.
+    bool membrane_clear(const std::vector<std::array<Vec3,3>>& patches,
+                        double tolerance) const;
 private:
     struct Surface {
         FloorPartition::NormalizedFace face;

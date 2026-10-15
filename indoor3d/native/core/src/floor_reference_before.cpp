@@ -1,6 +1,7 @@
 #include "cell_space_interior_point_locator.h"
 #include "floor_face_solid.h"
 #include "floor_polygon_reference.h"
+#include "floor_reference_loops.h"
 
 #include <algorithm>
 #include <cmath>
@@ -167,8 +168,9 @@ CellSpaceInteriorPointResult locate_reference_before(
             if (solid.visible(nodes[i].point,nodes[j].point,tolerance))
                 result.debug_graph.edges.push_back({i,j});
         }
-    // No AFTER/COLLAPSED/INTERNAL certificates or loop candidate
-    // generation: this is BEFORE only, for both Room and Stair.
+    // Certificate generation is optional and fail-closed. The BEFORE
+    // State, Final points and Native visibility edges are immutable.
+    certify_before_reference_loops(solid,result.debug_graph,tolerance);
     return result;
 }
 } // namespace IndoorGMLAdjacencyNative

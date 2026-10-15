@@ -10,7 +10,7 @@ module ULOL
         PROTOCOL_VERSION = 1
         GEOMETRY_PROTOCOL_VERSION = 5
         REFERENCE_POINTS_RESULT_VERSION = 2
-        STATE_RESULT_VERSION = 9
+        STATE_RESULT_VERSION = 10
         TRIANGLE_RESULT_VERSION = 6
         GRAPH_RESULT_VERSION = 5
         PREVIOUS_STATE_RESULT_VERSION = 4
@@ -513,7 +513,7 @@ module ULOL
           buffer
         end
 
-        # V9: { exit_code: Integer, state_point:, graph:, diagnostics: }.
+        # V10: { exit_code: Integer, state_point:, graph:, diagnostics: }.
         # EXIT_CODE 0 is the only success; partial Face failures stay in
         # diagnostics even when a valid State exists.
         def decode_state_result(bytes)

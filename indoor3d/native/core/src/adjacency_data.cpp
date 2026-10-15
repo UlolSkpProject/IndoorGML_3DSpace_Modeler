@@ -22,7 +22,7 @@ constexpr std::uint64_t INPUT_VERSION_V3 = 3;
 constexpr std::uint64_t INPUT_VERSION_V4 = 4;
 constexpr std::uint64_t INPUT_VERSION_V5 = 5;
 constexpr std::uint64_t RESULT_VERSION = 1;
-constexpr std::uint64_t STATE_RESULT_VERSION = 9;
+constexpr std::uint64_t STATE_RESULT_VERSION = 10;
 constexpr std::size_t INPUT_HEADER_SIZE = 32;
 constexpr std::size_t CELL_FIXED_SIZE_V1 = 80;
 constexpr std::size_t CELL_FIXED_SIZE_V2 = 96;
@@ -514,7 +514,7 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
 
     for (const StatePointResult& result : results)
     {
-        // V9 per-cell envelope: index, integer ExitCode, optional State,
+        // V10 per-cell envelope: index, integer ExitCode, optional State,
         // graph flag, nine aggregate diagnostics, optional Graph payload.
         // A native execution exception is deliberately NOT an ExitCode.
         const bool success = result.exit_code == StateExitCode::Success;
@@ -549,7 +549,7 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
         writer.append_u64(diag.rejected_outside);
         writer.append_u64(diag.rejected_clearance);
         writer.append_u64(diag.accepted_references);
-        if (!has_graph) continue; // V9: graph=nil is a valid result.
+        if (!has_graph) continue; // V10: graph=nil is a valid result.
         if (result.reference_points.size() != result.reference_kinds.size())
             throw std::invalid_argument("reference point/kind count mismatch");
         writer.append_u64(checked_u64(result.reference_points.size(), "reference point count"));
