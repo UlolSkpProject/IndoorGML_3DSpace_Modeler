@@ -194,6 +194,17 @@ void AdjacencySession::state_worker_loop()
                         record.visible_neighbors.push_back(static_cast<std::uint64_t>(index));
                     state_result.graph_loop_candidates.push_back(std::move(record));
                 }
+                state_result.graph_floor_partitions.reserve(
+                    result.debug_graph.floor_partitions.size()
+                );
+                for (const ReferenceFloorPartition& partition :
+                     result.debug_graph.floor_partitions)
+                {
+                    StatePointResult::FloorPartition record;
+                    record.outer = partition.outer;
+                    record.holes = partition.holes;
+                    state_result.graph_floor_partitions.push_back(std::move(record));
+                }
                 if (metrics.volume_centroid_succeeded)
                     state_volume_centroid_success_count_.fetch_add(1, std::memory_order_relaxed);
             }

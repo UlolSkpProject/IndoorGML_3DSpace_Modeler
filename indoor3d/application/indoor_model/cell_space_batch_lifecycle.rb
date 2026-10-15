@@ -290,6 +290,17 @@ module ULOL
             end
           end
 
+          # Native's exact completed Floor partition boundaries. These are
+          # independent of the selected graph-reduction stage.
+          def debug_floor_partitions
+            source = @debug_reference_graph_by_cell_id || {}
+            Array(@feature_registry&.cell_spaces).flat_map do |cell_space|
+              next [] unless cell_space&.valid?
+
+              Array(source.dig(cell_space.id, :floor_partitions))
+            end
+          end
+
           # Snapshot after Kruskal, before the extra Shortcut pass.
           def room_internal_connected_graph_for(cell_id)
             @room_internal_connected_by_cell_id&.[](cell_id.to_s)
@@ -591,7 +602,8 @@ module ULOL
                   cell_space, graph[:debug_points], kinds: graph[:debug_kinds]
                 )
                 stored = store_debug_reference_graph(
-                  cell_space, graph[:nodes], graph[:edges], graph[:loop_candidates]
+                  cell_space, graph[:nodes], graph[:edges], graph[:loop_candidates],
+                  graph[:floor_partitions]
                 )
                 # BEFORE stays immutable. While the Native geometry session is
                 # open, precompute AFTER with batched, validated replacement LOS.
@@ -628,7 +640,9 @@ module ULOL
             points
           end
 
-          def store_debug_reference_graph(cell_space, node_data, edge_data, collapse_data = nil)
+          def store_debug_reference_graph(
+            cell_space, node_data, edge_data, collapse_data = nil, partition_data = nil
+          )
             return false unless cell_space&.valid?
 
             nodes = Array(node_data).filter_map do |record|
@@ -675,11 +689,30 @@ module ULOL
               }.freeze
             end.freeze
 
+            convert_ring = lambda do |ring|
+              points = Array(ring).filter_map do |coordinates|
+                values = Array(coordinates).map(&:to_f)
+                next unless values.length == 3 && values.all?(&:finite?)
+
+                Geom::Point3d.new(*values)
+              end
+              points.length >= 3 ? points.freeze : nil
+            end
+            partitions = Array(partition_data).filter_map do |record|
+              raw = Hash(record)
+              outer = convert_ring.call(raw[:outer])
+              next unless outer
+
+              holes = Array(raw[:holes]).filter_map { |ring| convert_ring.call(ring) }
+              { outer: outer, holes: holes.freeze }.freeze
+            end.freeze
+
             @debug_reference_graph_by_cell_id ||= {}
             original = {
               nodes: nodes.freeze,
               edges: edges.freeze,
-              loop_candidates: verified
+              loop_candidates: verified,
+              floor_partitions: partitions
             }.freeze
             @debug_reference_graph_by_cell_id[cell_space.id] = original
 

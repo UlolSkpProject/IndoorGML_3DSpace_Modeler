@@ -10,7 +10,7 @@ module ULOL
         PROTOCOL_VERSION = 1
         GEOMETRY_PROTOCOL_VERSION = 5
         REFERENCE_POINTS_RESULT_VERSION = 2
-        STATE_RESULT_VERSION = 10
+        STATE_RESULT_VERSION = 11
         TRIANGLE_RESULT_VERSION = 6
         GRAPH_RESULT_VERSION = 5
         PREVIOUS_STATE_RESULT_VERSION = 4
@@ -513,7 +513,7 @@ module ULOL
           buffer
         end
 
-        # V10: { exit_code: Integer, state_point:, graph:, diagnostics: }.
+        # V11: { exit_code: Integer, state_point:, graph:, diagnostics: }.
         # EXIT_CODE 0 is the only success; partial Face failures stay in
         # diagnostics even when a valid State exists.
         def decode_state_result(bytes)
@@ -619,9 +619,46 @@ module ULOL
                 { vertices: vertices, triangle: vertices, point: point,
                   radius: radius, visible_neighbors: visible }.freeze
               end.freeze
+
+              partition_count = checked_count(reader.read_u64, 'Floor partition count')
+              raise ProtocolError, 'too many Floor partitions' if partition_count > 4096
+              floor_partitions = partition_count.times.map do
+                outer_count = checked_count(
+                  reader.read_u64, 'Floor partition outer point count'
+                )
+                unless outer_count >= 3 && outer_count <= reader.remaining / VEC3_SIZE
+                  raise ProtocolError, 'invalid Floor partition outer ring'
+                end
+                outer = outer_count.times.map do
+                  [
+                    finite_f64(reader.read_f64, 'Floor partition x'),
+                    finite_f64(reader.read_f64, 'Floor partition y'),
+                    finite_f64(reader.read_f64, 'Floor partition z')
+                  ].freeze
+                end.freeze
+                hole_count = checked_count(reader.read_u64, 'Floor partition hole count')
+                raise ProtocolError, 'too many Floor partition holes' if hole_count > 4096
+                holes = hole_count.times.map do
+                  point_count = checked_count(
+                    reader.read_u64, 'Floor partition hole point count'
+                  )
+                  unless point_count >= 3 && point_count <= reader.remaining / VEC3_SIZE
+                    raise ProtocolError, 'invalid Floor partition hole ring'
+                  end
+                  point_count.times.map do
+                    [
+                      finite_f64(reader.read_f64, 'Floor partition hole x'),
+                      finite_f64(reader.read_f64, 'Floor partition hole y'),
+                      finite_f64(reader.read_f64, 'Floor partition hole z')
+                    ].freeze
+                  end.freeze
+                end.freeze
+                { outer: outer, holes: holes }.freeze
+              end.freeze
               graph = {
                 nodes: nodes, edges: edges,
                 loop_candidates: loop_candidates,
+                floor_partitions: floor_partitions,
                 debug_points: debug_points.freeze,
                 debug_kinds: debug_kinds.freeze
               }.freeze

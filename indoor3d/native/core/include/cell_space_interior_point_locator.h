@@ -95,12 +95,21 @@ struct ReferenceLoopCollapseCandidate
     std::vector<std::size_t> visible_neighbors;
 };
 
+struct ReferenceFloorPartition
+{
+    // Exact completed PartitionLeaf boundaries, lifted back into the
+    // SketchUp parent coordinate system. Rings are not explicitly closed.
+    std::vector<Vec3> outer;
+    std::vector<std::vector<Vec3>> holes;
+};
+
 struct ReferenceGraphDebug
 {
     // Node zero is always State; all other nodes are Final references.
     std::vector<ReferenceGraphNode> nodes;
     std::vector<ReferenceGraphEdge> edges;
     std::vector<ReferenceLoopCollapseCandidate> loop_candidates;
+    std::vector<ReferenceFloorPartition> floor_partitions;
 };
 
 struct CellSpaceInteriorPointResult

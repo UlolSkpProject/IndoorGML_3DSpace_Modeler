@@ -1233,7 +1233,7 @@ void test_protocol_v5_decodes_authoritative_plane_and_derives_normal()
             "Native partition must use authoritative SketchUp D coefficient");
 }
 
-void test_result_v10_encodes_exit_codes_and_partial_failure_diagnostics()
+void test_result_v11_encodes_floor_partitions_and_partial_failure_diagnostics()
 {
     StatePointResult success;
     success.cell_index=0;
@@ -1247,6 +1247,9 @@ void test_result_v10_encodes_exit_codes_and_partial_failure_diagnostics()
     success.reference_kinds.push_back(4);
     success.graph_node_points.push_back({1,2,3});
     success.graph_node_radii.push_back(0.5);
+    StatePointResult::FloorPartition partition;
+    partition.outer={{0,0,0},{4,0,0},{4,3,0}};
+    success.graph_floor_partitions.push_back(partition);
 
     StatePointResult no_state;
     no_state.cell_index=1;
@@ -1254,25 +1257,28 @@ void test_result_v10_encodes_exit_codes_and_partial_failure_diagnostics()
     no_state.diagnostics.reference_candidates=2;
     no_state.diagnostics.rejected_outside=2;
     const auto bytes=serialize_state_result_batch({success,no_state});
-    require(read_u64_le(bytes,8)==10 && read_u64_le(bytes,16)==2,
-            "Result protocol must use V10 and one record per State target");
+    require(read_u64_le(bytes,8)==11 && read_u64_le(bytes,16)==2,
+            "Result protocol must use V11 and one record per State target");
     require(read_u64_le(bytes,32)==0 && read_u64_le(bytes,40)==0 &&
             read_u64_le(bytes,72)==1,
-            "V10 success has exit code 0, State point and graph");
+            "V11 success has exit code 0, State point and graph");
     require(read_u64_le(bytes,80)==10 &&
             read_u64_le(bytes,104)==1 &&
             read_u64_le(bytes,128)==2 &&
             read_u64_le(bytes,144)==9,
-            "V10 diagnostics must retain partial failures with success");
+            "V11 diagnostics must retain partial failures with success");
     // Body with 1 reference (40 bytes) and 1 node (32 bytes)
-    // plus 3 count fields (3x8 bytes) => 96 bytes.
-    const std::size_t second=152+96;
+    // plus edge/loop counts (16 bytes), then one triangular Floor
+    // partition (96 bytes including partition/ring/hole counts).
+    require(read_u64_le(bytes,248)==1 && read_u64_le(bytes,256)==3,
+            "V11 must append exact completed Floor partition rings");
+    const std::size_t second=152+192;
     require(read_u64_le(bytes,second)==1 &&
             read_u64_le(bytes,second+8)==60 &&
             read_u64_le(bytes,second+16)==0 &&
             read_u64_le(bytes,second+24+4*8)==2 &&
             bytes.size()==second+24+9*8,
-            "V10 failure must serialize explicit ExitCode and nil State/Graph");
+            "V11 failure must serialize explicit ExitCode and nil State/Graph");
 
     StatePointResult state_only;
     state_only.cell_index=0;
@@ -1302,7 +1308,7 @@ int main()
 {
     test_protocol_v4_preserves_holes_and_triangles();
     test_protocol_v5_decodes_authoritative_plane_and_derives_normal();
-    test_result_v10_encodes_exit_codes_and_partial_failure_diagnostics();
+    test_result_v11_encodes_floor_partitions_and_partial_failure_diagnostics();
     test_z_sweep_matches_bruteforce();
     test_shared_face_analysis();
     test_state_volume_centroid_on_box();

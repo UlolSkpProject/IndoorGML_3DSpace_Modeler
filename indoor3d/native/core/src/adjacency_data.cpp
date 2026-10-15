@@ -22,7 +22,7 @@ constexpr std::uint64_t INPUT_VERSION_V3 = 3;
 constexpr std::uint64_t INPUT_VERSION_V4 = 4;
 constexpr std::uint64_t INPUT_VERSION_V5 = 5;
 constexpr std::uint64_t RESULT_VERSION = 1;
-constexpr std::uint64_t STATE_RESULT_VERSION = 10;
+constexpr std::uint64_t STATE_RESULT_VERSION = 11;
 constexpr std::size_t INPUT_HEADER_SIZE = 32;
 constexpr std::size_t CELL_FIXED_SIZE_V1 = 80;
 constexpr std::size_t CELL_FIXED_SIZE_V2 = 96;
@@ -514,7 +514,7 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
 
     for (const StatePointResult& result : results)
     {
-        // V10 per-cell envelope: index, integer ExitCode, optional State,
+        // V11 per-cell envelope: index, integer ExitCode, optional State,
         // graph flag, nine aggregate diagnostics, optional Graph payload.
         // A native execution exception is deliberately NOT an ExitCode.
         const bool success = result.exit_code == StateExitCode::Success;
@@ -523,7 +523,8 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
         if (!success && (!result.reference_points.empty() ||
                          !result.graph_node_points.empty() ||
                          !result.graph_edge_indices.empty() ||
-                         !result.graph_loop_candidates.empty()))
+                         !result.graph_loop_candidates.empty() ||
+                         !result.graph_floor_partitions.empty()))
             throw std::invalid_argument("failed State must have no Graph data");
         writer.append_u64(checked_u64(result.cell_index, "state cell index"));
         writer.append_u64(static_cast<std::uint64_t>(result.exit_code));
@@ -537,7 +538,8 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
             writer.append_double(result.point->z);
         }
         const bool has_graph = result.point.has_value() &&
-            (!result.graph_node_points.empty() || !result.reference_points.empty());
+            (!result.graph_node_points.empty() || !result.reference_points.empty() ||
+             !result.graph_floor_partitions.empty());
         writer.append_u64(has_graph ? 1 : 0);
         const StateDiagnostics& diag = result.diagnostics;
         writer.append_u64(diag.floor_faces);
@@ -549,7 +551,7 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
         writer.append_u64(diag.rejected_outside);
         writer.append_u64(diag.rejected_clearance);
         writer.append_u64(diag.accepted_references);
-        if (!has_graph) continue; // V10: graph=nil is a valid result.
+        if (!has_graph) continue; // V11: graph=nil is a valid result.
         if (result.reference_points.size() != result.reference_kinds.size())
             throw std::invalid_argument("reference point/kind count mismatch");
         writer.append_u64(checked_u64(result.reference_points.size(), "reference point count"));
@@ -629,6 +631,44 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
                 if (index >= result.graph_node_points.size())
                     throw std::invalid_argument("loop visible index outside graph");
                 writer.append_u64(index);
+            }
+        }
+
+        writer.append_u64(checked_u64(
+            result.graph_floor_partitions.size(), "floor partition count"));
+        for (const StatePointResult::FloorPartition& partition :
+             result.graph_floor_partitions)
+        {
+            if (partition.outer.size() < 3)
+                throw std::invalid_argument("floor partition outer ring is invalid");
+            writer.append_u64(checked_u64(
+                partition.outer.size(), "floor partition outer point count"));
+            for (const Vec3& point : partition.outer)
+            {
+                require_finite(point.x, "floor partition x");
+                require_finite(point.y, "floor partition y");
+                require_finite(point.z, "floor partition z");
+                writer.append_double(point.x);
+                writer.append_double(point.y);
+                writer.append_double(point.z);
+            }
+            writer.append_u64(checked_u64(
+                partition.holes.size(), "floor partition hole count"));
+            for (const std::vector<Vec3>& hole : partition.holes)
+            {
+                if (hole.size() < 3)
+                    throw std::invalid_argument("floor partition hole ring is invalid");
+                writer.append_u64(checked_u64(
+                    hole.size(), "floor partition hole point count"));
+                for (const Vec3& point : hole)
+                {
+                    require_finite(point.x, "floor partition hole x");
+                    require_finite(point.y, "floor partition hole y");
+                    require_finite(point.z, "floor partition hole z");
+                    writer.append_double(point.x);
+                    writer.append_double(point.y);
+                    writer.append_double(point.z);
+                }
             }
         }
     }

@@ -88,6 +88,25 @@ CellSpaceInteriorPointResult locate_reference_before(
         StateExitCode::PartitionLimitReached : StateExitCode::PartitionFailed;
     if (leaves.empty()) return result;
 
+    result.debug_graph.floor_partitions.reserve(leaves.size());
+    for (const PartitionLeaf& leaf:leaves)
+    {
+        ReferenceFloorPartition partition;
+        partition.outer.reserve(leaf.polygon.outer.points.size());
+        for (const Vec2& point:leaf.polygon.outer.points)
+            partition.outer.push_back(leaf.polygon.frame.lift(point));
+        partition.holes.reserve(leaf.polygon.holes.size());
+        for (const NormalizedLoop& hole:leaf.polygon.holes)
+        {
+            std::vector<Vec3> ring;
+            ring.reserve(hole.points.size());
+            for (const Vec2& point:hole.points)
+                ring.push_back(leaf.polygon.frame.lift(point));
+            partition.holes.push_back(std::move(ring));
+        }
+        result.debug_graph.floor_partitions.push_back(std::move(partition));
+    }
+
     result.exit_code=StateExitCode::NoReferenceCandidates;
     const ReferenceSeeds seed_batch=generate_reference_seeds(
         leaves,tolerance,{1000.0/25.4,MAX_FINAL_REFERENCES});

@@ -34,6 +34,12 @@ struct StatePointResult
         std::vector<std::uint64_t> visible_neighbors;
     };
     std::vector<LoopCandidate> graph_loop_candidates;
+    struct FloorPartition
+    {
+        std::vector<Vec3> outer;
+        std::vector<std::vector<Vec3>> holes;
+    };
+    std::vector<FloorPartition> graph_floor_partitions;
 };
 
 std::vector<CellData> parse_input_batch(const std::uint8_t* data, std::size_t size);

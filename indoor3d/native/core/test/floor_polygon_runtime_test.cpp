@@ -107,6 +107,10 @@ void test_exit_code_failure_stage_distinctions()
             success.state_point.has_value() &&
             success.diagnostics.accepted_references>=1,
             "Existing successful Cell must remain exit code 0");
+    require(success.debug_graph.floor_partitions.size()==1 &&
+            success.debug_graph.floor_partitions.front().outer.size()==4 &&
+            success.debug_graph.floor_partitions.front().holes.empty(),
+            "BEFORE debug result must preserve the completed Floor partition");
 }
 
 void test_face_bvh_uses_plane_from_source()

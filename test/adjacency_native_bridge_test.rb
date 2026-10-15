@@ -95,8 +95,8 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_equal legacy_encode_input(snapshots), Bridge.encode_input(snapshots)
   end
 
-  def test_reference_v10_decodes_success_failure_optional_graph_and_diagnostics
-    bytes = "IGMLSTA\0".b + [10, 3, 0].pack('Q<3')
+  def test_reference_v11_decodes_success_failure_graph_partitions_and_diagnostics
+    bytes = "IGMLSTA\0".b + [11, 3, 0].pack('Q<3')
     # Cell 0: one bad Polygon and several rejected references do not
     # invalidate the Cell's successful State.
     bytes << [0, 0].pack('Q<2') << [1.0, 2.0, 3.0].pack('E3')
@@ -106,7 +106,11 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     bytes << [2].pack('Q<')
     bytes << [1.0, 2.0, 3.0, 1.0].pack('E4')
     bytes << [4.0, 5.0, 6.0, 0.5].pack('E4')
-    bytes << [1, 0, 1].pack('Q<3') << [0].pack('Q<')
+    bytes << [1, 0, 1].pack('Q<3') << [0].pack('Q<') # edge, no loops
+    bytes << [1, 3].pack('Q<2') # one partition, three outer points
+    bytes << [0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 4.0, 3.0, 0.0].pack('E9')
+    bytes << [1, 3].pack('Q<2') # one hole, three points
+    bytes << [1.0, 1.0, 0.0, 2.0, 1.0, 0.0, 1.0, 2.0, 0.0].pack('E9')
     # Cell 1: valid State, Graph omitted.
     bytes << [1, 0].pack('Q<2') << [7.0, 8.0, 9.0].pack('E3')
     bytes << [0].pack('Q<') << [1, 1, 1, 0, 1, 0, 0, 0, 1].pack('Q<9')
@@ -125,6 +129,11 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_equal [[0, 1]], decoded[0][:graph][:edges]
     assert_equal [[4.0, 5.0, 6.0]], decoded[0][:graph][:debug_points]
     assert_equal [4], decoded[0][:graph][:debug_kinds]
+    partition = decoded[0][:graph][:floor_partitions].first
+    assert_equal [[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [4.0, 3.0, 0.0]],
+                 partition[:outer]
+    assert_equal [[[1.0, 1.0, 0.0], [2.0, 1.0, 0.0], [1.0, 2.0, 0.0]]],
+                 partition[:holes]
     assert_nil decoded[1][:graph]
     assert_equal 0, decoded[1][:exit_code]
     assert_equal [7.0, 8.0, 9.0], decoded[1][:state_point]
@@ -133,23 +142,23 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_nil decoded[2][:graph]
   end
 
-  def test_reference_v10_rejects_failure_with_graph
-    bytes = "IGMLSTA\0".b + [10, 1, 0, 0, 60, 1].pack('Q<6')
+  def test_reference_v11_rejects_failure_with_graph
+    bytes = "IGMLSTA\0".b + [11, 1, 0, 0, 60, 1].pack('Q<6')
     assert_raises(Bridge::ProtocolError) { Bridge.decode_state_result(bytes) }
   end
 
-  def test_reference_v10_rejects_unknown_exit_code
-    bytes = "IGMLSTA\0".b + [10, 1, 0, 0, 999, 0].pack('Q<6')
+  def test_reference_v11_rejects_unknown_exit_code
+    bytes = "IGMLSTA\0".b + [11, 1, 0, 0, 999, 0].pack('Q<6')
     assert_raises(Bridge::ProtocolError) { Bridge.decode_state_result(bytes) }
   end
 
-  def test_reference_v10_rejects_old_native_protocol
-    bytes = "IGMLSTA\0".b + [9, 0, 0].pack('Q<3')
+  def test_reference_v11_rejects_old_native_protocol
+    bytes = "IGMLSTA\0".b + [10, 0, 0].pack('Q<3')
     assert_raises(Bridge::ProtocolError) { Bridge.decode_state_result(bytes) }
   end
 
-  def test_reference_v10_reads_native_verified_ordered_loop
-    bytes = "IGMLSTA\0".b + [10, 1, 0].pack('Q<3')
+  def test_reference_v11_reads_native_verified_ordered_loop
+    bytes = "IGMLSTA\0".b + [11, 1, 0].pack('Q<3')
     bytes << [0, 0].pack('Q<2') << [5.0, 5.0, 5.0].pack('E3')
     bytes << [1].pack('Q<') << Array.new(9, 0).pack('Q<9')
     bytes << [0].pack('Q<') # no debug references
@@ -161,6 +170,7 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     bytes << [1, 3, 1, 2, 3].pack('Q<5') # one ordered triangle
     bytes << [5, 4, 5, 1].pack('E4')
     bytes << [1, 0].pack('Q<2') # one visible outside neighbor (State)
+    bytes << [0].pack('Q<') # no Floor partitions
     graph = Bridge.decode_state_result(bytes).fetch(:results).fetch(0).fetch(:graph)
     assert_equal [1, 2, 3], graph.fetch(:loop_candidates).first.fetch(:vertices)
     assert_equal [0], graph.fetch(:loop_candidates).first.fetch(:visible_neighbors)
