@@ -10,7 +10,7 @@ module ULOL
         PROTOCOL_VERSION = 1
         GEOMETRY_PROTOCOL_VERSION = 4
         REFERENCE_POINTS_RESULT_VERSION = 2
-        STATE_RESULT_VERSION = 7
+        STATE_RESULT_VERSION = 8
         TRIANGLE_RESULT_VERSION = 6
         GRAPH_RESULT_VERSION = 5
         PREVIOUS_STATE_RESULT_VERSION = 4
@@ -108,8 +108,8 @@ module ULOL
 
           native_module = native
           [
-            :start_state_check,
-            :get_state_result_bytes,
+            :start_reference_check,
+            :get_reference_result_bytes,
             :start_adjacency_check,
             :get_adjacency_result_bytes
           ].all? { |name| native_module.respond_to?(name) }
@@ -241,11 +241,11 @@ module ULOL
           result
         end
 
-        def compute_state_from_open_session
+        def compute_reference_from_open_session
           raise ProtocolError, 'native geometry session is not active' unless shared_session_active?
 
           native_module = native
-          target_count = native_module.start_state_check.to_i
+          target_count = native_module.start_reference_check.to_i
           loop do
             progress = normalize_hash(native_module.get_progress)
             yield(:state_progress, progress) if block_given?
@@ -254,7 +254,7 @@ module ULOL
             sleep(POLL_INTERVAL_SECONDS)
           end
 
-          output_bytes = native_module.get_state_result_bytes
+          output_bytes = native_module.get_reference_result_bytes
           decoded = decode_state_result(output_bytes)
           metrics = normalize_hash(native_module.get_metrics)
           metrics[:state_target_count] = target_count unless metrics.key?(:state_target_count)
@@ -481,156 +481,122 @@ module ULOL
           buffer
         end
 
+        # V8: one record per requested CellSpace.
+        # { success:, state_point:, graph: } is the entire public result
+        # contract. Debug metadata lives INSIDE graph; Ruby never inspects
+        # native partition/reference creation statuses.
         def decode_state_result(bytes)
           reader = BinaryReader.new(bytes)
-          raise ProtocolError, 'native State result header is truncated' if reader.remaining < 32
-
-          magic = reader.read_bytes(8)
-          raise ProtocolError, 'native State result magic mismatch' unless magic == STATE_OUTPUT_MAGIC
-
+          raise ProtocolError, 'native Reference result header is truncated' if reader.remaining < 32
+          raise ProtocolError, 'native Reference result magic mismatch' unless reader.read_bytes(8) == STATE_OUTPUT_MAGIC
           version = reader.read_u64
-          unless [PROTOCOL_VERSION, REFERENCE_POINTS_RESULT_VERSION,
-                  LEGACY_STATE_RESULT_VERSION, PREVIOUS_STATE_RESULT_VERSION,
-                  GRAPH_RESULT_VERSION, TRIANGLE_RESULT_VERSION,
-                  STATE_RESULT_VERSION].include?(version)
-            raise ProtocolError, "unsupported native State result version #{version}"
+          unless version == STATE_RESULT_VERSION
+            raise ProtocolError, "unsupported Native Reference result version #{version}; rebuild indoor_gml_native.so"
           end
+          count = checked_count(reader.read_u64, 'Reference result count')
+          raise ProtocolError, 'native Reference result reserved field is non-zero' unless reader.read_u64.zero?
 
-          result_count = checked_count(reader.read_u64, 'State result count')
-          reserved = reader.read_u64
-          raise ProtocolError, 'native State result reserved field is non-zero' unless reserved.zero?
-
-          points = {}
-          reference_points = {}
-          reference_kinds = {}
-          reference_statuses = {}
-          graph_nodes = {}
-          graph_edges = {}
-          graph_loop_candidates = {}
+          results = {}
           previous_index = nil
-          result_count.times do
-            cell_index = checked_count(reader.read_u64, 'State cell index')
-            if @shared_session_keys && cell_index >= @shared_session_keys.length
-              raise ProtocolError, "State cell index #{cell_index} is out of range"
+          count.times do
+            index = checked_count(reader.read_u64, 'Reference cell index')
+            if @shared_session_keys && index >= @shared_session_keys.length
+              raise ProtocolError, 'Reference cell index out of range'
             end
-            if previous_index && cell_index <= previous_index
-              raise ProtocolError, 'native State result indices are not strictly increasing'
+            if previous_index && index <= previous_index
+              raise ProtocolError, 'Reference cell indices are not strictly increasing'
             end
-            previous_index = cell_index
+            previous_index = index
 
-            point = [
-              finite_f64(reader.read_f64, 'State x'),
-              finite_f64(reader.read_f64, 'State y'),
-              finite_f64(reader.read_f64, 'State z')
-            ].freeze
-            points[cell_index] = point
+            raw_success = reader.read_u64
+            raise ProtocolError, 'invalid Reference success flag' unless [0, 1].include?(raw_success)
+            success = raw_success == 1
+            coordinates = if success
+                            [
+                              finite_f64(reader.read_f64, 'State x'),
+                              finite_f64(reader.read_f64, 'State y'),
+                              finite_f64(reader.read_f64, 'State z')
+                            ].freeze
+                          end
+            graph_flag = reader.read_u64
+            raise ProtocolError, 'invalid Reference graph flag' unless [0, 1].include?(graph_flag)
+            raise ProtocolError, 'failed State cannot have a Graph' if !success && graph_flag == 1
 
-            # TEMP DEBUG SUPPORT: V3 carries reference generation status for console diagnostics.
-            reference_statuses[cell_index] =
-              version >= LEGACY_STATE_RESULT_VERSION ? checked_count(reader.read_u64, 'reference status') : 0
-
-            references = []
-            kinds = []
-            if version >= REFERENCE_POINTS_RESULT_VERSION
-              reference_count = checked_count(reader.read_u64, 'reference point count')
+            graph = nil
+            if graph_flag == 1
+              reference_count = checked_count(reader.read_u64, 'debug reference count')
+              debug_points = []
+              debug_kinds = []
               reference_count.times do
-                references << [
-                  finite_f64(reader.read_f64, 'reference x'),
-                  finite_f64(reader.read_f64, 'reference y'),
-                  finite_f64(reader.read_f64, 'reference z')
+                debug_points << [
+                  finite_f64(reader.read_f64, 'debug reference x'),
+                  finite_f64(reader.read_f64, 'debug reference y'),
+                  finite_f64(reader.read_f64, 'debug reference z')
                 ].freeze
-                kind = version >= PREVIOUS_STATE_RESULT_VERSION ?
-                  checked_count(reader.read_u64, 'reference kind') : 0
-                if version >= PREVIOUS_STATE_RESULT_VERSION && ![1, 2, 3, 4].include?(kind)
-                  raise ProtocolError, "invalid reference point kind #{kind}"
-                end
-                kinds << kind
+                kind = checked_count(reader.read_u64, 'debug reference kind')
+                raise ProtocolError, 'invalid debug reference kind' unless (1..4).cover?(kind)
+                debug_kinds << kind
               end
-            end
-            reference_points[cell_index] = references.freeze
-            reference_kinds[cell_index] = kinds.freeze
 
-            nodes = []
-            edges = []
-            if version >= GRAPH_RESULT_VERSION
-              node_count = checked_count(reader.read_u64, 'debug graph node count')
-              node_count.times do
-                center = [
-                  finite_f64(reader.read_f64, 'debug graph node x'),
-                  finite_f64(reader.read_f64, 'debug graph node y'),
-                  finite_f64(reader.read_f64, 'debug graph node z')
+              node_count = checked_count(reader.read_u64, 'Graph node count')
+              nodes = node_count.times.map do
+                point = [
+                  finite_f64(reader.read_f64, 'Graph node x'),
+                  finite_f64(reader.read_f64, 'Graph node y'),
+                  finite_f64(reader.read_f64, 'Graph node z')
                 ].freeze
-                radius = finite_f64(reader.read_f64, 'debug graph radius')
-                raise ProtocolError, 'negative debug graph radius' if radius.negative?
-
-                nodes << { point: center, radius: radius }.freeze
-              end
-              edge_count = checked_count(reader.read_u64, 'debug graph edge count')
-              edge_count.times do
-                first = checked_count(reader.read_u64, 'debug graph edge first')
-                second = checked_count(reader.read_u64, 'debug graph edge second')
+                radius = finite_f64(reader.read_f64, 'Graph radius')
+                raise ProtocolError, 'invalid Graph radius' if radius.negative?
+                { point: point, radius: radius }.freeze
+              end.freeze
+              edge_count = checked_count(reader.read_u64, 'Graph edge count')
+              edges = edge_count.times.map do
+                first = checked_count(reader.read_u64, 'Graph edge first')
+                second = checked_count(reader.read_u64, 'Graph edge second')
                 if first >= second || second >= node_count
-                  raise ProtocolError, 'debug graph edge indices are invalid'
+                  raise ProtocolError, 'invalid Graph edge indices'
                 end
-                edges << [first, second].freeze
-              end
-            end
-            candidates = []
-            if version >= TRIANGLE_RESULT_VERSION
-              count = checked_count(reader.read_u64, 'loop candidate count')
-              count.times do
-                length = version >= STATE_RESULT_VERSION ?
-                  checked_count(reader.read_u64, 'loop vertex count') : 3
-                unless length.between?(3, 32)
-                  raise ProtocolError, 'invalid loop vertex count'
-                end
+                [first, second].freeze
+              end.freeze
+
+              loop_count = checked_count(reader.read_u64, 'Graph loop count')
+              loop_candidates = loop_count.times.map do
+                length = checked_count(reader.read_u64, 'Graph loop vertex count')
+                raise ProtocolError, 'invalid Graph loop length' unless length.between?(3, 32)
                 vertices = length.times.map do
-                  checked_count(reader.read_u64, 'loop vertex')
+                  checked_count(reader.read_u64, 'Graph loop vertex')
                 end.freeze
-                if vertices.uniq.length != length ||
-                   vertices.any? { |index| index >= nodes.length }
-                  raise ProtocolError, 'invalid loop vertex indices'
+                if vertices.uniq.size != length || vertices.any? { |id| id >= node_count }
+                  raise ProtocolError, 'invalid Graph loop vertex'
                 end
                 point = [
-                  finite_f64(reader.read_f64, 'loop center x'),
-                  finite_f64(reader.read_f64, 'loop center y'),
-                  finite_f64(reader.read_f64, 'loop center z')
+                  finite_f64(reader.read_f64, 'Graph loop center x'),
+                  finite_f64(reader.read_f64, 'Graph loop center y'),
+                  finite_f64(reader.read_f64, 'Graph loop center z')
                 ].freeze
-                radius = finite_f64(reader.read_f64, 'loop center radius')
-                raise ProtocolError, 'negative loop center radius' if radius.negative?
-
-                visible_count = checked_count(reader.read_u64, 'loop visible count')
+                radius = finite_f64(reader.read_f64, 'Graph loop radius')
+                raise ProtocolError, 'invalid Graph loop radius' if radius.negative?
+                visible_count = checked_count(reader.read_u64, 'Graph loop visible count')
                 visible = visible_count.times.map do
-                  checked_count(reader.read_u64, 'loop visible node')
+                  checked_count(reader.read_u64, 'Graph loop visible neighbor')
                 end.freeze
-                if visible.any? { |index| index >= nodes.length }
-                  raise ProtocolError, 'loop visible node outside graph'
-                end
-                candidates << {
-                  # :triangle remains for older Ruby diagnostic callers.
-                  triangle: vertices,
-                  vertices: vertices,
-                  point: point,
-                  radius: radius,
-                  visible_neighbors: visible
-                }.freeze
-              end
+                raise ProtocolError, 'invalid Graph loop neighbor' if visible.any? { |id| id >= node_count }
+                { vertices: vertices, triangle: vertices, point: point,
+                  radius: radius, visible_neighbors: visible }.freeze
+              end.freeze
+              graph = {
+                nodes: nodes, edges: edges,
+                loop_candidates: loop_candidates,
+                debug_points: debug_points.freeze,
+                debug_kinds: debug_kinds.freeze
+              }.freeze
             end
-            graph_nodes[cell_index] = nodes.freeze
-            graph_edges[cell_index] = edges.freeze
-            graph_loop_candidates[cell_index] = candidates.freeze
+
+            results[index] = { success: success, state_point: coordinates, graph: graph }.freeze
           end
 
-          raise ProtocolError, 'native State result has trailing bytes' unless reader.finished?
-          {
-            points: points.freeze,
-            reference_points: reference_points.freeze,
-            reference_kinds: reference_kinds.freeze,
-            reference_statuses: reference_statuses.freeze,
-            graph_nodes: graph_nodes.freeze,
-            graph_edges: graph_edges.freeze,
-            graph_loop_candidates: graph_loop_candidates.freeze
-          }.freeze
+          raise ProtocolError, 'native Reference result has trailing bytes' unless reader.finished?
+          { results: results.freeze }.freeze
         end
 
         def decode_result(bytes, snapshots)
