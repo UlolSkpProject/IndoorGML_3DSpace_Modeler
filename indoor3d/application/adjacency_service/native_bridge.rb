@@ -828,7 +828,19 @@ module ULOL
           # Legacy V1 sends a 3-vector. Geometry V5 sends the full
           # SketchUp-authored plane; never recompute D from a vertex.
           plane = include_plane ? Array(face[:plane]) : nil
-          normal = include_plane ? nil : Array(face[:normal] || Array(face.fetch(:plane)).first(3))
+          normal = nil
+          unless include_plane
+            if face[:normal]
+              normal = Array(face[:normal])
+            else
+              coefficients = Array(face[:plane]).first(3).map(&:to_f)
+              magnitude = Math.sqrt(coefficients.sum { |value| value * value })
+              unless magnitude.finite? && magnitude > 1.0e-12
+                raise ProtocolError, "cell #{cell_index} face #{face_index} legacy normal is invalid"
+              end
+              normal = coefficients.map { |value| value / magnitude }
+            end
+          end
           points = Array(face[:points])
           triangles = Array(face[:triangles])
           holes = include_inner_loops ? Array(face[:inner_loops]) : []

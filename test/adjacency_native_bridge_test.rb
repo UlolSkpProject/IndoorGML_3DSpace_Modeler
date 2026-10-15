@@ -75,6 +75,18 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     end
   end
 
+  def test_legacy_v1_normal_is_derived_and_normalized_from_plane_only
+    snapshot = Marshal.load(Marshal.dump(sample_snapshots.first))
+    face = snapshot.fetch(:faces).first
+    face.delete(:normal)
+    face[:plane] = [2.0, 0.0, 0.0, -2.0]
+    bytes = Bridge.encode_input([snapshot])
+    # 32-byte batch + 80-byte Cell + 32-byte Face header
+    assert_equal [1.0, 0.0, 0.0],
+                 bytes.byteslice(144, 24).unpack('E3')
+    assert_equal 1, bytes.byteslice(8, 8).unpack1('Q<')
+  end
+
   def test_legacy_v1_encoding_ignores_hole_metadata_and_remains_byte_identical
     snapshots = Marshal.load(Marshal.dump(sample_snapshots))
     snapshots[0][:faces][0][:inner_loops] = [
