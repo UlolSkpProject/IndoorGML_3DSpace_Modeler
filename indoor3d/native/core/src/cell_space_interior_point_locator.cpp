@@ -22,9 +22,9 @@ constexpr double EPSILON = 1.0e-12;
 constexpr std::size_t BVH_LEAF_TRIANGLES = 6;
 constexpr std::size_t MAX_SEARCH_NODES = 200000;
 // Room floor triangulation experiment; State and Adjacency stay unchanged.
-// The same threshold as the SFO diagnostic: normal.z <= -0.1 for a
-// normalized outward-facing solid Face. Inclined floors are included.
-constexpr double ROOM_FLOOR_MIN_NEGATIVE_NORMAL_Z = 0.1;
+// A Face is Floor only if its normalized outward normal has Z <= -0.6.
+// Inclined floors are accepted only when they satisfy that same criterion.
+constexpr double ROOM_FLOOR_MIN_NEGATIVE_NORMAL_Z = 0.6;
 // SketchUp/native coordinates are inches; +1000 mm in world Z.
 constexpr double ROOM_REFERENCE_FLOOR_OFFSET = 1000.0 / 25.4;
 // Protect the Native V7 reference/debug serialization size bound.
