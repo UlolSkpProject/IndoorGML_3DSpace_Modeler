@@ -231,13 +231,16 @@ void propose_loop(
         turns[i]=std::abs(angle)<=noise ? 0.0 : angle;
     }
 
-    // Two laps: for outer CCW rings (+360 total) the first pass resolves
-    // a negative run that straddles the canonical ring seam. For holes
-    // (-360 total), deterministic canonical ordering and an independent
-    // per-ring accumulator avoid depending on unrelated loops.
+    // Outer CCW rings have +360 total turn: a warm-up lap resolves a
+    // negative run straddling the canonical seam before emitting on lap 2.
+    // Inner CW rings have -360 total turn: their accumulator must NOT
+    // carry across whole laps, which would fabricate threshold crossings
+    // when the configured threshold exceeds the ring's total reflex.
+    // Each loop always starts with its OWN zeroed accumulator.
     double accumulated=0.0;
     const std::size_t initial_count=output.size();
-    for (std::size_t lap=0;lap<2;++lap)
+    const std::size_t laps=loop.hole ? 1 : 2;
+    for (std::size_t lap=0;lap<laps;++lap)
         for (std::size_t i=0;i<n;++i)
         {
             accumulated+=turns[i];
@@ -249,7 +252,7 @@ void propose_loop(
             if (turns[i]>=0.0 || accumulated>-threshold+1.0e-9)
                 continue;
             accumulated=0.0;
-            if (lap==0) continue;
+            if (!loop.hole && lap==0) continue;
             const auto direction=angular_bisector(loop,i,turns[i]);
             if (!direction) continue;
             output.push_back({
