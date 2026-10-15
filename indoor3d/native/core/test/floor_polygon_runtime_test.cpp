@@ -102,7 +102,7 @@ void test_exit_code_failure_stage_distinctions()
             near_ceiling.diagnostics.rejected_clearance>=1,
             "Boundary-near reference should report insufficient clearance");
 
-    const auto success=locate_reference_before(valid,0.001);
+    const auto success=locate_reference_before(box(20),0.001);
     require(success.exit_code==StateExitCode::Success &&
             success.state_point.has_value() &&
             success.diagnostics.accepted_references>=1,
@@ -115,7 +115,7 @@ void test_exit_code_failure_stage_distinctions()
 
 void test_face_bvh_uses_plane_from_source()
 {
-    auto cell=box();
+    auto cell=box(20);
     for (FaceData& f:cell.faces)
     {
         f.has_plane=true;
@@ -202,7 +202,7 @@ void test_no_wall_query_remains_safe()
 
 void test_single_convex_floor_state_only_before()
 {
-    const CellData cell=box();
+    const CellData cell=box(20);
     const auto result=locate_reference_before(cell,0.001);
     require(result.state_point.has_value(),"First floor centroid must become State");
     require(result.reference_points.empty(),
@@ -211,8 +211,8 @@ void test_single_convex_floor_state_only_before()
             result.debug_graph.edges.empty() &&
             result.debug_graph.loop_candidates.empty(),
             "Single Floor produces a one-node BEFORE Graph without AFTER");
-    require(near(result.state_point->x,5.0) &&
-            near(result.state_point->y,5.0) &&
+    require(near(result.state_point->x,10.0) &&
+            near(result.state_point->y,10.0) &&
             near(result.state_point->z,1000.0/25.4),
             "State must be the floor centroid raised by world Z +1000mm");
 }
@@ -267,7 +267,7 @@ void test_shared_edge_with_mismatched_vertex_splits_merges_once()
 }
 void test_stair_uses_same_first_reference_policy()
 {
-    auto cell=box();
+    auto cell=box(20);
     cell.category=CellSpaceCategory::Stair;
     const auto result=locate_reference_before(cell,0.001);
     require(result.state_point.has_value() &&
@@ -275,6 +275,16 @@ void test_stair_uses_same_first_reference_policy()
             "Stair State and BEFORE must follow the same Reference policy");
     require(result.debug_graph.loop_candidates.empty(),
             "Stair BEFORE must never create collapse certificates");
+}
+void test_before_rejects_sphere_radius_below_150mm()
+{
+    const auto result=locate_reference_before(box(10),0.001);
+    require(!result.state_point.has_value() &&
+            result.exit_code==StateExitCode::NoReferenceCandidates,
+            "Sphere radius below 150mm must be rejected before BEFORE");
+    require(result.debug_graph.nodes.empty() &&
+            result.diagnostics.accepted_references==0,
+            "Rejected small sphere must not leak into the BEFORE graph");
 }
 void test_short_room_has_no_reference_state()
 {
@@ -313,6 +323,7 @@ int main()
     test_shared_boundary_midpoint_without_matching_tessellation();
     test_shared_edge_with_mismatched_vertex_splits_merges_once();
     test_stair_uses_same_first_reference_policy();
+    test_before_rejects_sphere_radius_below_150mm();
     test_short_room_has_no_reference_state();
     test_hole_queue_and_failed_diagnostics();
     return 0;

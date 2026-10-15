@@ -19,6 +19,7 @@ double len(Vec3 a) { return std::sqrt(squared(a)); }
 
 constexpr double FLOOR_MIN_NEGATIVE_NORMAL_Z=0.6;
 constexpr std::size_t MAX_FINAL_REFERENCES=4096;
+constexpr double MIN_REFERENCE_RADIUS=150.0/25.4; // 150 mm in SketchUp inches
 
 // These seeds are the ONLY candidates eligible to become a Room/Stair
 // State. No volume centroid / spatial search / Triangle BVH fallback.
@@ -148,8 +149,10 @@ CellSpaceInteriorPointResult locate_reference_before(
         const double wall_distance=solid.nearest_wall_distance(seed.position);
         const double radius=std::isfinite(wall_distance) ?
             std::max(0.0,wall_distance-tolerance) : 0.0;
-        // No walls: retain the valid State (radius 0 draws no circle),
-        // rather than turning formerly valid geometry into a failure.
+        // Reject undersized spheres before State promotion and BEFORE graph
+        // construction, so downstream edges and loop certificates can never
+        // refer to a candidate whose usable wall radius is below 150 mm.
+        if (radius<MIN_REFERENCE_RADIUS) continue;
 
         if (!result.state_point)
             result.state_point=seed.position;
