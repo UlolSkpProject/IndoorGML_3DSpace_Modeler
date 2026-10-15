@@ -117,9 +117,10 @@ std::optional<Vec3> find_state_point(
     StateSearchMetrics* metrics = nullptr
 );
 
-// BEFORE seed locations only: Room = area centroid of each final Floor
-// polygon; Stair = midpoint of an Edge shared by two final Floor polygons.
-// Both retain the existing +1000mm world-Z placement and Solid BVH check.
+// BEFORE seeds for BOTH Room and Stair: the area centroid of EVERY
+// final Floor polygon plus the midpoint of each straight boundary shared
+// by TWO distinct final polygons (never triangulation-internal edges).
+// Retains +1000mm world-Z placement and the Solid BVH safety checks.
 std::vector<ReferencePoint> find_reference_points(
     const CellData& cell,
     const Vec3& state_point,
