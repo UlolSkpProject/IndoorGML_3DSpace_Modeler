@@ -725,8 +725,11 @@ void test_triangle_loop_candidates_are_validated_in_native()
     const auto graph = build_room_reference_visibility_graph(
         room, {0.5,0.5,0.5}, points, 0.001);
     require(graph.nodes.size() == 4, "Room must retain graph nodes");
-    require(graph.loop_candidates.empty(),
-            "Native must not issue uncertified 3D Loop/Hole Collapse");
+    require(!graph.loop_candidates.empty(),
+            "hole-free planar Room loop must receive a Native membrane certificate");
+    for (const auto& candidate : graph.loop_candidates)
+        require(candidate.representative.radius > 0.0,
+                "certified membrane representative needs positive 3D clearance");
 }
 
 void test_triangle_loop_new_edge_can_cross_non_overlapping_circles()
@@ -743,8 +746,11 @@ void test_triangle_loop_new_edge_can_cross_non_overlapping_circles()
         room, {0.9,0.9,0.5}, points, 0.001);
     require(graph.nodes.size() == 5 && !graph.edges.empty(),
             "original Sphere/LOS links must survive while Collapse is disabled");
-    require(graph.loop_candidates.empty(),
-            "unverified 3D centroid must not invent replacement edges");
+    // Safe planar cycles may now have a certified representative.
+    // An invented external Edge still needs explicit Native LOS.
+    for (const auto& candidate : graph.loop_candidates)
+        require(candidate.representative.radius > 0.0,
+                "virtual-mesh center must have positive 3D clearance");
 }
 
 void test_triangle_loop_new_edges_still_reject_wall_crossings()
@@ -760,8 +766,12 @@ void test_triangle_loop_new_edges_still_reject_wall_crossings()
     const auto graph = build_room_reference_visibility_graph(
         room, {1.5,0.5,0.5}, points, 0.001);
     require(graph.nodes.size() == 5, "U Room must retain nodes");
-    require(graph.loop_candidates.empty(),
-            "unverified 3D loop must never cross the Room boundary");
+    for (const auto& candidate : graph.loop_candidates)
+        if (candidate.vertices == std::vector<std::size_t>{1,2,3})
+            require(std::find(candidate.visible_neighbors.begin(),
+                              candidate.visible_neighbors.end(), 4) ==
+                        candidate.visible_neighbors.end(),
+                    "a certified Loop must not invent LOS across the U void");
 }
 
 void test_four_cycle_native_centroid_and_los_candidate()
@@ -777,8 +787,12 @@ void test_four_cycle_native_centroid_and_los_candidate()
     const auto graph = build_room_reference_visibility_graph(
         room, {0.1,0.1,0.5}, points, 0.001);
     require(graph.nodes.size() == 5, "4-cycle vertices must survive");
-    require(graph.loop_candidates.empty(),
-            "Native cannot collapse a 3D cycle without Hole verification");
+    bool found_four_cycle=false;
+    for (const auto& candidate : graph.loop_candidates)
+        if (candidate.vertices == std::vector<std::size_t>{1,2,3,4})
+            found_four_cycle=true;
+    require(found_four_cycle,
+            "planar, hole-free four-cycle must certify its virtual mesh");
 }
 
 void test_room_loop_cannot_collapse_over_enclosed_hole()
@@ -835,8 +849,16 @@ void test_state_loop_receives_hole_free_native_certificate()
     };
     const auto graph = build_room_reference_visibility_graph(
         room, {0.2,0.2,0.5}, points, 0.001);
-    require(graph.loop_candidates.empty(),
-            "State-containing cycle must not bypass missing 3D Hole validation");
+    bool state_certified=false;
+    for (const auto& candidate : graph.loop_candidates)
+        if (candidate.vertices == std::vector<std::size_t>{0,1,2})
+        {
+            require(std::abs(candidate.representative.point.x - 0.2) < 1.0e-9,
+                    "State Cycle must retain the existing State point");
+            state_certified=true;
+        }
+    require(state_certified,
+            "hole-free State Cycle requires its own Native membrane certificate");
 }
 
 void test_room_reference_shortcut_los_rejects_wall_crossing()
