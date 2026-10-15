@@ -268,7 +268,12 @@ module ULOL
           rep_node = if candidate.fetch(:state_loop)
                        nil
                      else
-                       { point: candidate.fetch(:point), radius: candidate.fetch(:radius) }.freeze
+                       {
+                         point: candidate.fetch(:point),
+                         radius: candidate.fetch(:radius),
+                         protected: true,
+                         protection_reason: :certified_loop_representative
+                       }.freeze
                      end
 
           # The certificate is an explicit Native attestation, not a Ruby
