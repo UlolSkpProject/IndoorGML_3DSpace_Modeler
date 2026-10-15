@@ -209,6 +209,28 @@ void test_concave_union_is_not_merged()
           "An L-shaped concave union must keep both completed leaves");
 }
 
+void test_merge_convexity_alone_allows_fifty_millimetre_flatness()
+{
+    // A 25.4 mm step represents a tessellated, visually straight boundary.
+    // It is accepted by the merge-only 50 mm turn tolerance even though the
+    // caller's topology tolerance remains 0.001 inch.
+    const auto within=merge_convex_partitions({
+        {6,1,make_face(rectangle(0,0,10,10))},
+        {6,1,make_face(rectangle(10,0,20,9))}
+    },0.001);
+    check(within.accepted_merges==1 && within.leaves.size()==1,
+          "Merge convexity must flatten a sub-50 mm inward boundary step");
+
+    // A 76.2 mm step remains a material concavity and must not be hidden by
+    // the merge-only allowance.
+    const auto beyond=merge_convex_partitions({
+        {6,1,make_face(rectangle(0,0,10,10))},
+        {6,1,make_face(rectangle(10,0,20,7))}
+    },0.001);
+    check(beyond.accepted_merges==0 && beyond.leaves.size()==2,
+          "Merge convexity must reject an inward step beyond 50 mm");
+}
+
 void test_mismatched_shared_edge_vertices_still_merge()
 {
     const auto left=make_face({
@@ -586,6 +608,7 @@ int main()
     test_failed_attempt_never_mutates_source();
     test_adjacent_partition_rectangles_merge_to_one_convex_leaf();
     test_concave_union_is_not_merged();
+    test_merge_convexity_alone_allows_fifty_millimetre_flatness();
     test_mismatched_shared_edge_vertices_still_merge();
     test_distinct_coplanar_floor_faces_coarsen_together();
     test_non_coplanar_floor_faces_stay_separate();

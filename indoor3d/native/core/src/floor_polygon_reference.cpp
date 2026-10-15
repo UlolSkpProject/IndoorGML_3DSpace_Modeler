@@ -13,6 +13,13 @@ namespace IndoorGMLAdjacencyNative::FloorPartition
 {
 namespace
 {
+// SketchUp stores native geometry in inches. Floor outlines that are visually
+// straight can contain small inward bends from wall tessellation, so only the
+// coarsening convexity test treats reflex turns within 50 mm as flat. Edge
+// matching, coplanarity, area conservation, holes and LOS keep the caller's
+// much tighter topology tolerance.
+constexpr double MERGE_CONVEXITY_TOLERANCE=50.0/25.4;
+
 Vec3 sub(Vec3 a,Vec3 b) { return {a.x-b.x,a.y-b.y,a.z-b.z}; }
 Vec3 add(Vec3 a,Vec3 b) { return {a.x+b.x,a.y+b.y,a.z+b.z}; }
 Vec3 mul(Vec3 a,double t) { return {a.x*t,a.y*t,a.z*t}; }
@@ -281,12 +288,14 @@ std::optional<std::vector<Vec2>> stitch_single_cycle(
 bool convex_ccw(const std::vector<Vec2>& ring,double tolerance)
 {
     if (ring.size()<3 || ring_area(ring)<=tolerance*tolerance) return false;
+    const double turn_tolerance=std::max(
+        tolerance,MERGE_CONVEXITY_TOLERANCE);
     for (std::size_t i=0;i<ring.size();++i)
     {
         const Vec2 a=ring[(i+ring.size()-1)%ring.size()];
         const Vec2 b=ring[i],c=ring[(i+1)%ring.size()];
         const double scale=length2(a,b)+length2(b,c);
-        if (cross2(a,b,c)<-tolerance*scale) return false;
+        if (cross2(a,b,c)<-turn_tolerance*scale) return false;
     }
     return true;
 }
