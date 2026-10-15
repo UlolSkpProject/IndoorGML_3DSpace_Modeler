@@ -50,19 +50,52 @@ class ReferenceGraphSimplifierTest < Minitest::Test
     assert_empty result[:merged_into]
   end
 
-  def test_long_local_detour_prevents_merging_even_with_all_los_edges
-    # Candidate B is covered by State's disk, and every neighbor has LOS
-    # to State, but replacing the short C--B--D route by C--State--D
-    # would add >25% distance.
+  def test_local_detour_limit_no_longer_blocks_a_los_safe_contraction
+    # B bridges the very short C-B-D path; replacing that detour through
+    # State is much longer. All retained connections already exist.
     source = graph(
-      [node(1, 2, 2), node(1, 0, 0.1),
-       node(0.5, 0, 0.3), node(1.5, 0, 0.3)],
+      [node(1, 1.5, 2), node(1, 0, 1),
+       node(0.9, 0, 0.2), node(1.1, 0, 0.2)],
       [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3]]
     )
 
     result = Simplifier.simplify(source)
 
-    assert_equal [0, 1, 2, 3], result[:original_indices]
+    assert_equal [0, 2, 3], result[:original_indices]
+    assert_equal [[0, 1], [0, 2]], result[:edges]
+    assert_equal [[1, 0]], result[:merged_into]
+    assert_equal 5, source[:edges].size
+  end
+
+  def test_ab_distance_uses_larger_radius_instead_of_small_radius_times_1_5
+    # d(A,B)=1.55 is beyond the old 1.5*min(3,1)=1.5 cutoff.
+    # It still respects the separate cluster diameter cap of 1.6*1=1.6.
+    source = graph(
+      [node(0, 0, 3), node(1.55, 0, 1), node(3, 0, 0.1)],
+      [[0, 1], [0, 2], [1, 2]]
+    )
+    result = Simplifier.simplify(source)
+    assert_equal [0, 2], result[:original_indices]
+    assert_equal [[0, 1]], result[:edges]
+  end
+
+  def test_ab_distance_is_strictly_less_than_larger_radius
+    source = graph(
+      [node(0, 0, 2), node(2, 0, 1.5), node(4, 0, 0.2)],
+      [[0, 1], [0, 2], [1, 2]]
+    )
+    result = Simplifier.simplify(source)
+    assert_equal [0, 1, 2], result[:original_indices]
+    assert_empty result[:merged_into]
+  end
+
+  def test_cluster_diameter_cap_is_still_enforced
+    source = graph(
+      [node(0, 0, 10), node(1, 0, 0.1), node(2, 0, 0.1)],
+      [[0, 1], [0, 2], [1, 2]]
+    )
+    result = Simplifier.simplify(source)
+    assert_equal [0, 1, 2], result[:original_indices]
     assert_empty result[:merged_into]
   end
 

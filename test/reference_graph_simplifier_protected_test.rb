@@ -67,13 +67,54 @@ class ReferenceGraphSimplifierProtectedTest < Minitest::Test
     assert_equal 0, clear[:original_indices].first
   end
 
-  def test_long_chain_without_triangles_is_not_a_cluster
+  def test_chain_without_common_neighbor_requires_native_los
     graph = source(
       [n(0, 0, 5), n(1, 0, 1), n(2, 0, 1), n(3, 0, 1)],
       [[0, 1], [1, 2], [2, 3]]
     )
-    result = Simplify.simplify(graph, los_batch: ->(pairs) { Array.new(pairs.length, true) })
+    original_edges = graph[:edges]
+
+    no_native = Simplify.simplify(graph)
+    assert_equal [0, 1, 2, 3], no_native[:original_indices]
+    assert_equal original_edges, no_native[:edges]
+
+    blocked = Simplify.simplify(graph, los_batch: ->(pairs) { Array.new(pairs.length, false) })
+    assert_equal [0, 1, 2, 3], blocked[:original_indices]
+    assert_equal original_edges, blocked[:edges]
+
+    calls = []
+    accepted = Simplify.simplify(graph, los_batch: lambda { |pairs|
+      calls.concat(pairs)
+      Array.new(pairs.length, true)
+    })
+    assert_equal [0, 2, 3], accepted[:original_indices]
+    assert_equal [[0, 1], [1, 2]], accepted[:edges]
+    assert_equal [[1, 0]], accepted[:merged_into]
+    assert_equal [[0.0, 2.0]], calls.map { |a, b| [a.x, b.x] }
+    assert_equal original_edges, graph[:edges]
+  end
+
+  def test_native_los_exception_rejects_new_chain_edge_without_mutating_input
+    graph = source(
+      [n(0, 0, 5), n(1, 0, 1), n(2, 0, 1), n(3, 0, 1)],
+      [[0, 1], [1, 2], [2, 3]]
+    )
+    result = Simplify.simplify(graph, los_batch: ->(*) { raise 'native error' })
     assert_equal [0, 1, 2, 3], result[:original_indices]
+    assert_equal graph[:edges], result[:edges]
+    assert_empty result[:merged_into]
+    assert_equal [[0, 1], [1, 2], [2, 3]], graph[:edges]
+  end
+
+  def test_meaningful_degree_four_junction_is_not_absorbed
+    graph = source(
+      [n(0, 0, 5), n(0.4, 0, 1), n(0.6, 0, 0.2),
+       n(0.6, 0.2, 0.2), n(0.6, -0.2, 0.2)],
+      [[0, 1], [1, 2], [1, 3], [1, 4]]
+    )
+    result = Simplify.simplify(graph, los_batch: ->(pairs) { Array.new(pairs.length, true) })
+    assert_equal [0, 1, 2, 3, 4], result[:original_indices]
+    assert_equal graph[:edges], result[:edges]
     assert_empty result[:merged_into]
   end
 

@@ -9,9 +9,7 @@ module ULOL
       # BEFORE and its Native certificate records stay unchanged.
       module ReferenceGraphSimplifier
         EPSILON = 1.0e-9
-        CLUSTER_DISTANCE_FACTOR = 1.5
         MAX_CLUSTER_DIAMETER_FACTOR = 1.6
-        MAX_LOCAL_DETOUR_FACTOR = 1.25
         MAX_CLUSTER_SIZE = 8
 
         module_function
@@ -50,13 +48,13 @@ module ULOL
               next if members.length >= MAX_CLUSTER_SIZE
               next if index.zero? || protected.include?(current_origins[index])
               next if adjacency[index].length < 2
-              # Do not contract bridges, isolated ends or meaningful junctions.
-              next unless common_neighbor?(center, index, adjacency)
+              # Degree-2 chain nodes no longer need a common neighbor.
+              # Preserve meaningful articulation junctions (degree >= 3).
               next if meaningful_branch?(index, adjacency)
               next if radius(nodes[index]) > radius(nodes[center]) + EPSILON
               d = distance(nodes[center][:point], nodes[index][:point])
-              next if d > CLUSTER_DISTANCE_FACTOR *
-                            [radius(nodes[center]), radius(nodes[index])].min + EPSILON
+              # Strict distance to the larger wall-clearance radius.
+              next unless d < [radius(nodes[center]), radius(nodes[index])].max
               next unless (members + [index]).combination(2).all? do |a, b|
                 distance(nodes[a][:point], nodes[b][:point]) <=
                   MAX_CLUSTER_DIAMETER_FACTOR *
@@ -73,22 +71,20 @@ module ULOL
             # Attempt the largest compact cluster first, then shrink
             # deterministically if one external gateway cannot be replaced.
             while members.length > 1
-              if acceptable_detour?(members, center, nodes, adjacency)
-                checks = prepare_los(members, center, nodes, adjacency, los_batch)
-                if checks
-                  attempt = ReferenceGraphContraction.contract(
-                    graph,
-                    members: members,
-                    representative: center,
-                    protected_indices: current_origins.each_with_index.filter_map do |id, i|
-                      i if protected.include?(id)
-                    end,
-                    los_validator: checks
-                  )
-                  if attempt[:accepted]
-                    graph = attempt[:graph]
-                    break
-                  end
+              checks = prepare_los(members, center, nodes, adjacency, los_batch)
+              if checks
+                attempt = ReferenceGraphContraction.contract(
+                  graph,
+                  members: members,
+                  representative: center,
+                  protected_indices: current_origins.each_with_index.filter_map do |id, i|
+                    i if protected.include?(id)
+                  end,
+                  los_validator: checks
+                )
+                if attempt[:accepted]
+                  graph = attempt[:graph]
+                  break
                 end
               end
               members.pop
@@ -144,6 +140,7 @@ module ULOL
           connected.any? { |other| !reached[other] }
         end
 
+        # Diagnostic helper only; not a prerequisite for AFTER contraction.
         def common_neighbor?(a, b, adjacency)
           adjacency[a].any? { |index| index != b && adjacency[b].include?(index) }
         end
@@ -158,21 +155,6 @@ module ULOL
           end
           result.each { |v| v.uniq!; v.sort! }
           result
-        end
-
-        def acceptable_detour?(members, representative, nodes, adjacency)
-          removed = members.reject { |i| i == representative }
-          removed.all? do |index|
-            outside = adjacency[index].reject { |i| members.include?(i) }
-            outside.combination(2).all? do |a, b|
-              next true if adjacency[a].include?(b)
-              before = distance(nodes[a][:point], nodes[index][:point]) +
-                       distance(nodes[index][:point], nodes[b][:point])
-              after = distance(nodes[a][:point], nodes[representative][:point]) +
-                      distance(nodes[representative][:point], nodes[b][:point])
-              after <= MAX_LOCAL_DETOUR_FACTOR * before + EPSILON
-            end
-          end
         end
 
         def prepare_los(members, representative, nodes, adjacency, los_batch)
