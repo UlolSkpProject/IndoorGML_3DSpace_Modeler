@@ -34,6 +34,11 @@ module ULOL
                                            nodes.length != origins.length ||
                                            origins.first != 0
 
+          # Native 3D Hole certification is deliberately unavailable in
+          # this experiment. Without certificates, enumerating all cycles
+          # is both expensive and unable to authorize a single Collapse.
+          return unchanged(after_graph, 0, 0) if Array(verified_candidates).empty?
+
           loops = cycle_loops(nodes, edges)
           return unchanged(after_graph, 0, 0) if loops.empty?
 
