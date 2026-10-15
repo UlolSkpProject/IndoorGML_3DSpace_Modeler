@@ -35,6 +35,75 @@ ReferenceCheck inspect_reference(const FaceSolid& solid,Vec3 point,double tol)
         return ReferenceCheck::Outside;
     return ReferenceCheck::Valid;
 }
+
+bool viable_reference(const FaceSolid& solid,Vec3 point,double tolerance)
+{
+    if (inspect_reference(solid,point,tolerance)!=ReferenceCheck::Valid)
+        return false;
+    const double wall_distance=solid.nearest_wall_distance(point);
+    const double radius=std::isfinite(wall_distance) ?
+        std::max(0.0,wall_distance-tolerance) : 0.0;
+    return radius>=MIN_REFERENCE_RADIUS;
+}
+
+bool merged_group_is_safe(
+    const PartitionLeaf& merged,
+    const std::vector<std::size_t>& members,
+    const std::vector<PartitionLeaf>& original,
+    const FaceSolid& solid,double tolerance)
+{
+    const ReferenceSeeds representative=generate_reference_seeds(
+        {merged},tolerance,{1000.0/25.4,1});
+    if (representative.points.empty()) return false;
+    const Vec3 center=representative.points.front().position;
+    if (!viable_reference(solid,center,tolerance)) return false;
+
+    std::vector<PartitionLeaf> replaced;
+    replaced.reserve(members.size());
+    for (std::size_t index:members)
+    {
+        if (index>=original.size()) return false;
+        replaced.push_back(original[index]);
+    }
+    const ReferenceSeeds old_seeds=generate_reference_seeds(
+        replaced,tolerance,{1000.0/25.4,MAX_FINAL_REFERENCES});
+    for (const Seed& seed:old_seeds.points)
+    {
+        if (!viable_reference(solid,seed.position,tolerance)) continue;
+        if (squared(sub(center,seed.position))<=tolerance*tolerance) continue;
+        if (!solid.visible(center,seed.position,tolerance)) return false;
+    }
+    return true;
+}
+
+std::vector<PartitionLeaf> safely_coarsen(
+    const std::vector<PartitionLeaf>& original,
+    const FaceSolid& solid,double tolerance)
+{
+    CoarsenedPartitions proposed=merge_convex_partitions(original,tolerance);
+    if (proposed.accepted_merges==0) return original;
+    std::vector<std::size_t> order(proposed.leaves.size());
+    for (std::size_t i=0;i<order.size();++i) order[i]=i;
+    std::sort(order.begin(),order.end(),[&](std::size_t a,std::size_t b) {
+        return proposed.source_leaf_indices[a].front()<
+               proposed.source_leaf_indices[b].front();
+    });
+    std::vector<PartitionLeaf> result;
+    bool kept_merge=false;
+    for (std::size_t i:order)
+    {
+        const auto& members=proposed.source_leaf_indices[i];
+        if (members.size()==1 || merged_group_is_safe(
+                proposed.leaves[i],members,original,solid,tolerance))
+        {
+            kept_merge=kept_merge || members.size()>1;
+            result.push_back(std::move(proposed.leaves[i]));
+            continue;
+        }
+        for (std::size_t index:members) result.push_back(original[index]);
+    }
+    return kept_merge ? result : original;
+}
 } // namespace
 
 CellSpaceInteriorPointResult locate_reference_before(
@@ -88,6 +157,12 @@ CellSpaceInteriorPointResult locate_reference_before(
     result.exit_code=partition_limit ?
         StateExitCode::PartitionLimitReached : StateExitCode::PartitionFailed;
     if (leaves.empty()) return result;
+
+    // Remove artificial partition seams only when the exact union remains a
+    // hole-free convex polygon. A merged centroid must also remain a viable
+    // Native reference and see every viable seed it replaces; otherwise that
+    // group falls back to the original completed leaves.
+    leaves=safely_coarsen(leaves,solid,tolerance);
 
     result.debug_graph.floor_partitions.reserve(leaves.size());
     for (const PartitionLeaf& leaf:leaves)

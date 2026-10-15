@@ -4,6 +4,8 @@
 #include <cmath>
 #include <limits>
 #include <map>
+#include <optional>
+#include <queue>
 #include <tuple>
 #include <utility>
 
@@ -75,6 +77,309 @@ struct SharedSegment {
     Vec3 end;
 };
 
+struct Segment2 {
+    Vec2 first;
+    Vec2 second;
+};
+
+double cross2(Vec2 a,Vec2 b,Vec2 c)
+{
+    return (b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+}
+double squared2(Vec2 a,Vec2 b)
+{
+    const double x=a.x-b.x,y=a.y-b.y;
+    return x*x+y*y;
+}
+double length2(Vec2 a,Vec2 b)
+{
+    return std::sqrt(squared2(a,b));
+}
+double ring_area(const std::vector<Vec2>& ring)
+{
+    double twice=0.0;
+    for (std::size_t i=0;i<ring.size();++i)
+    {
+        const Vec2 a=ring[i],b=ring[(i+1)%ring.size()];
+        twice+=a.x*b.y-a.y*b.x;
+    }
+    return twice*0.5;
+}
+double ring_perimeter(const std::vector<Vec2>& ring)
+{
+    double result=0.0;
+    for (std::size_t i=0;i<ring.size();++i)
+        result+=length2(ring[i],ring[(i+1)%ring.size()]);
+    return result;
+}
+std::vector<Vec2> ring_in_frame(const PartitionLeaf& leaf,const Frame& frame)
+{
+    std::vector<Vec2> result;
+    result.reserve(leaf.polygon.outer.points.size());
+    for (Vec2 point:leaf.polygon.outer.points)
+        result.push_back(frame.project(leaf.polygon.frame.lift(point)));
+    return result;
+}
+std::vector<Segment2> ring_edges(const std::vector<Vec2>& ring)
+{
+    std::vector<Segment2> result;
+    result.reserve(ring.size());
+    for (std::size_t i=0;i<ring.size();++i)
+        result.push_back({ring[i],ring[(i+1)%ring.size()]});
+    return result;
+}
+bool point_on_segment(Vec2 point,const Segment2& segment,double tolerance)
+{
+    const double segment_length=length2(segment.first,segment.second);
+    if (segment_length<=tolerance) return false;
+    if (std::abs(cross2(segment.first,segment.second,point))>
+        tolerance*segment_length) return false;
+    const double dx=segment.second.x-segment.first.x;
+    const double dy=segment.second.y-segment.first.y;
+    const double t=((point.x-segment.first.x)*dx+
+                    (point.y-segment.first.y)*dy)/
+                   (segment_length*segment_length);
+    return t>=-tolerance/segment_length &&
+           t<=1.0+tolerance/segment_length;
+}
+int boundary_relation(Vec2 point,const Segment2& source,
+                      const std::vector<Segment2>& other,double tolerance)
+{
+    const double sx=source.second.x-source.first.x;
+    const double sy=source.second.y-source.first.y;
+    for (const Segment2& edge:other)
+    {
+        if (!point_on_segment(point,edge,tolerance)) continue;
+        const double ox=edge.second.x-edge.first.x;
+        const double oy=edge.second.y-edge.first.y;
+        return sx*ox+sy*oy<0.0 ? -1 : 1;
+    }
+    return 0;
+}
+
+std::optional<std::vector<Segment2>> exposed_segments(
+    const std::vector<Segment2>& source,
+    const std::vector<Segment2>& other,
+    double tolerance,double* shared_length)
+{
+    std::vector<Segment2> result;
+    for (const Segment2& edge:source)
+    {
+        const double dx=edge.second.x-edge.first.x;
+        const double dy=edge.second.y-edge.first.y;
+        const double edge_length=std::sqrt(dx*dx+dy*dy);
+        if (edge_length<=tolerance) return std::nullopt;
+        const double denominator=edge_length*edge_length;
+        std::vector<double> parameters{0.0,1.0};
+        for (const Segment2& candidate:other)
+            for (Vec2 point:{candidate.first,candidate.second})
+            {
+                if (!point_on_segment(point,edge,tolerance)) continue;
+                double t=((point.x-edge.first.x)*dx+
+                          (point.y-edge.first.y)*dy)/denominator;
+                t=std::max(0.0,std::min(1.0,t));
+                parameters.push_back(t);
+            }
+        std::sort(parameters.begin(),parameters.end());
+        parameters.erase(std::unique(parameters.begin(),parameters.end(),
+            [=](double a,double b) {
+                return std::abs(a-b)*edge_length<=tolerance;
+            }),parameters.end());
+        for (std::size_t i=0;i+1<parameters.size();++i)
+        {
+            const double first=parameters[i],last=parameters[i+1];
+            if ((last-first)*edge_length<=tolerance) continue;
+            const Vec2 a{edge.first.x+dx*first,edge.first.y+dy*first};
+            const Vec2 b{edge.first.x+dx*last,edge.first.y+dy*last};
+            const Vec2 midpoint{(a.x+b.x)*0.5,(a.y+b.y)*0.5};
+            const int relation=boundary_relation(midpoint,{a,b},other,tolerance);
+            if (relation>0) return std::nullopt; // overlapping material
+            if (relation<0)
+            {
+                if (shared_length) *shared_length+=length2(a,b);
+                continue;
+            }
+            result.push_back({a,b});
+        }
+    }
+    return result;
+}
+
+std::optional<std::vector<Vec2>> stitch_single_cycle(
+    const std::vector<Segment2>& segments,double tolerance)
+{
+    if (segments.size()<3) return std::nullopt;
+    std::vector<Vec2> vertices;
+    const auto vertex_id=[&](Vec2 point) {
+        for (std::size_t i=0;i<vertices.size();++i)
+            if (squared2(vertices[i],point)<=tolerance*tolerance) return i;
+        vertices.push_back(point);
+        return vertices.size()-1;
+    };
+    struct Directed { std::size_t first=0,second=0; };
+    std::vector<Directed> edges;
+    for (const Segment2& segment:segments)
+    {
+        const std::size_t first=vertex_id(segment.first);
+        const std::size_t second=vertex_id(segment.second);
+        if (first==second) return std::nullopt;
+        edges.push_back({first,second});
+    }
+    std::vector<std::vector<std::size_t>> outgoing(vertices.size());
+    std::vector<std::size_t> incoming(vertices.size(),0);
+    for (std::size_t i=0;i<edges.size();++i)
+    {
+        outgoing[edges[i].first].push_back(i);
+        ++incoming[edges[i].second];
+    }
+    for (std::size_t i=0;i<vertices.size();++i)
+        if (outgoing[i].size()!=1 || incoming[i]!=1) return std::nullopt;
+    std::size_t start=0;
+    for (std::size_t i=1;i<vertices.size();++i)
+        if (std::tie(vertices[i].x,vertices[i].y)<
+            std::tie(vertices[start].x,vertices[start].y)) start=i;
+    std::vector<bool> used(edges.size(),false);
+    std::vector<Vec2> ring;
+    std::size_t current=start;
+    do
+    {
+        ring.push_back(vertices[current]);
+        const std::size_t edge=outgoing[current].front();
+        if (used[edge]) return std::nullopt;
+        used[edge]=true;
+        current=edges[edge].second;
+        if (ring.size()>edges.size()) return std::nullopt;
+    } while (current!=start);
+    if (ring.size()!=edges.size() ||
+        std::find(used.begin(),used.end(),false)!=used.end())
+        return std::nullopt;
+
+    bool changed=true;
+    while (changed && ring.size()>3)
+    {
+        changed=false;
+        for (std::size_t i=0;i<ring.size();++i)
+        {
+            const Vec2 a=ring[(i+ring.size()-1)%ring.size()];
+            const Vec2 b=ring[i];
+            const Vec2 c=ring[(i+1)%ring.size()];
+            const double scale=length2(a,b)+length2(b,c);
+            const double forward=(b.x-a.x)*(c.x-b.x)+
+                                 (b.y-a.y)*(c.y-b.y);
+            if (std::abs(cross2(a,b,c))<=tolerance*scale &&
+                forward>=-tolerance*scale)
+            {
+                ring.erase(ring.begin()+i);
+                changed=true;
+                break;
+            }
+        }
+    }
+    return ring.size()>=3 ? std::optional<std::vector<Vec2>>(ring) : std::nullopt;
+}
+
+bool convex_ccw(const std::vector<Vec2>& ring,double tolerance)
+{
+    if (ring.size()<3 || ring_area(ring)<=tolerance*tolerance) return false;
+    for (std::size_t i=0;i<ring.size();++i)
+    {
+        const Vec2 a=ring[(i+ring.size()-1)%ring.size()];
+        const Vec2 b=ring[i],c=ring[(i+1)%ring.size()];
+        const double scale=length2(a,b)+length2(b,c);
+        if (cross2(a,b,c)<-tolerance*scale) return false;
+    }
+    return true;
+}
+
+std::optional<PartitionLeaf> merge_pair(
+    const PartitionLeaf& first,const PartitionLeaf& second,double tolerance)
+{
+    if (first.source_face_id!=second.source_face_id ||
+        !first.polygon.holes.empty() || !second.polygon.holes.empty())
+        return std::nullopt;
+    const Frame& frame=first.polygon.frame;
+    const std::vector<Vec2> a=ring_in_frame(first,frame);
+    const std::vector<Vec2> b=ring_in_frame(second,frame);
+    const auto bounds=[](const std::vector<Vec2>& ring) {
+        Bounds2 result{ring.front(),ring.front()};
+        for (Vec2 point:ring)
+        {
+            result.minimum.x=std::min(result.minimum.x,point.x);
+            result.minimum.y=std::min(result.minimum.y,point.y);
+            result.maximum.x=std::max(result.maximum.x,point.x);
+            result.maximum.y=std::max(result.maximum.y,point.y);
+        }
+        return result;
+    };
+    if (a.empty() || b.empty()) return std::nullopt;
+    const Bounds2 a_bounds=bounds(a),b_bounds=bounds(b);
+    if (a_bounds.maximum.x<b_bounds.minimum.x-tolerance ||
+        b_bounds.maximum.x<a_bounds.minimum.x-tolerance ||
+        a_bounds.maximum.y<b_bounds.minimum.y-tolerance ||
+        b_bounds.maximum.y<a_bounds.minimum.y-tolerance)
+        return std::nullopt;
+    for (Vec2 point:b)
+    {
+        const Vec3 world=frame.lift(point);
+        const Vec3 local=second.polygon.frame.lift(
+            second.polygon.frame.project(world));
+        if (distance(world,local)>tolerance) return std::nullopt;
+    }
+    const auto a_edges=ring_edges(a),b_edges=ring_edges(b);
+    double shared=0.0;
+    const auto exposed_a=exposed_segments(a_edges,b_edges,tolerance,&shared);
+    const auto exposed_b=exposed_segments(b_edges,a_edges,tolerance,nullptr);
+    if (!exposed_a || !exposed_b || shared<=tolerance) return std::nullopt;
+    std::vector<Segment2> exposed=*exposed_a;
+    exposed.insert(exposed.end(),exposed_b->begin(),exposed_b->end());
+    const auto ring=stitch_single_cycle(exposed,tolerance);
+    if (!ring || !convex_ccw(*ring,tolerance)) return std::nullopt;
+    const double expected=std::abs(ring_area(a))+std::abs(ring_area(b));
+    const double actual=ring_area(*ring);
+    const double area_tolerance=std::max(
+        tolerance*tolerance*16.0,
+        tolerance*(ring_perimeter(a)+ring_perimeter(b)+ring_perimeter(*ring))*2.0);
+    if (!std::isfinite(actual) ||
+        std::abs(actual-expected)>area_tolerance) return std::nullopt;
+    std::vector<Vec3> world;
+    world.reserve(ring->size());
+    for (Vec2 point:*ring) world.push_back(frame.lift(point));
+    const auto prepared=prepare(first.polygon.plane,world,{},tolerance);
+    if (!prepared.face || !prepared.face->holes.empty()) return std::nullopt;
+    return PartitionLeaf{
+        first.source_face_id,std::min(first.depth,second.depth),
+        std::move(*prepared.face)
+    };
+}
+
+std::vector<Vec3> world_signature(const PartitionLeaf& leaf)
+{
+    std::vector<Vec3> points;
+    for (Vec2 point:leaf.polygon.outer.points)
+        points.push_back(leaf.polygon.frame.lift(point));
+    if (points.empty()) return points;
+    const auto less=[](Vec3 a,Vec3 b) {
+        return std::tie(a.x,a.y,a.z)<std::tie(b.x,b.y,b.z);
+    };
+    const auto minimum=std::min_element(points.begin(),points.end(),less);
+    std::rotate(points.begin(),minimum,points.end());
+    return points;
+}
+bool signature_less(const PartitionLeaf& a,const PartitionLeaf& b)
+{
+    if (a.source_face_id!=b.source_face_id)
+        return a.source_face_id<b.source_face_id;
+    const auto first=world_signature(a),second=world_signature(b);
+    const auto less=[](Vec3 x,Vec3 y) {
+        return std::tie(x.x,x.y,x.z)<std::tie(y.x,y.y,y.z);
+    };
+    if (std::lexicographical_compare(
+            first.begin(),first.end(),second.begin(),second.end(),less)) return true;
+    if (std::lexicographical_compare(
+            second.begin(),second.end(),first.begin(),first.end(),less)) return false;
+    return a.depth<b.depth;
+}
+
 std::optional<SharedSegment> shared_overlap(
     const EdgePiece& first,const EdgePiece& second,double tol)
 {
@@ -123,6 +428,87 @@ std::vector<EdgePiece> boundary_edges(
     return edges;
 }
 } // namespace
+
+CoarsenedPartitions merge_convex_partitions(
+    const std::vector<PartitionLeaf>& completed,double tolerance)
+{
+    struct Item {
+        PartitionLeaf leaf;
+        std::vector<std::size_t> members;
+        bool alive=true;
+    };
+    CoarsenedPartitions output;
+    std::vector<Item> items;
+    items.reserve(completed.size());
+    for (std::size_t i=0;i<completed.size();++i)
+        items.push_back({completed[i],{i},true});
+    const auto sort_items=[](const Item& a,const Item& b) {
+        if (signature_less(a.leaf,b.leaf)) return true;
+        if (signature_less(b.leaf,a.leaf)) return false;
+        return a.members<b.members;
+    };
+    std::sort(items.begin(),items.end(),sort_items);
+    if (std::isfinite(tolerance) && tolerance>0.0)
+    {
+        struct Candidate {
+            std::size_t first=0,second=0;
+            PartitionLeaf merged;
+            double area=0.0;
+            std::vector<std::size_t> members;
+        };
+        const auto better=[](const Candidate& a,const Candidate& b) {
+            if (a.area!=b.area) return a.area>b.area;
+            if (signature_less(a.merged,b.merged)) return true;
+            if (signature_less(b.merged,a.merged)) return false;
+            return a.members<b.members;
+        };
+        const auto worse=[&](const Candidate& a,const Candidate& b) {
+            return better(b,a);
+        };
+        std::priority_queue<Candidate,std::vector<Candidate>,decltype(worse)>
+            candidates(worse);
+        const auto enqueue=[&](std::size_t i,std::size_t j) {
+            if (i==j || !items[i].alive || !items[j].alive) return;
+            if (j<i) std::swap(i,j);
+            auto merged=merge_pair(items[i].leaf,items[j].leaf,tolerance);
+            if (!merged) return;
+            std::vector<std::size_t> members=items[i].members;
+            members.insert(members.end(),items[j].members.begin(),items[j].members.end());
+            std::sort(members.begin(),members.end());
+            const double area=std::abs(merged->polygon.outer.signed_area);
+            candidates.push({i,j,std::move(*merged),area,std::move(members)});
+        };
+        for (std::size_t i=0;i<items.size();++i)
+            for (std::size_t j=i+1;j<items.size();++j) enqueue(i,j);
+        while (!candidates.empty())
+        {
+            Candidate selected=candidates.top();
+            candidates.pop();
+            if (!items[selected.first].alive || !items[selected.second].alive)
+                continue;
+            items[selected.first].alive=false;
+            items[selected.second].alive=false;
+            const std::size_t merged_index=items.size();
+            items.push_back({
+                std::move(selected.merged),std::move(selected.members),true
+            });
+            for (std::size_t i=0;i<merged_index;++i)
+                if (items[i].alive) enqueue(i,merged_index);
+            ++output.accepted_merges;
+        }
+    }
+    items.erase(std::remove_if(items.begin(),items.end(),
+        [](const Item& item) { return !item.alive; }),items.end());
+    std::sort(items.begin(),items.end(),sort_items);
+    output.leaves.reserve(items.size());
+    output.source_leaf_indices.reserve(items.size());
+    for (Item& item:items)
+    {
+        output.leaves.push_back(std::move(item.leaf));
+        output.source_leaf_indices.push_back(std::move(item.members));
+    }
+    return output;
+}
 
 ReferenceSeeds generate_reference_seeds(
     const std::vector<PartitionLeaf>& completed,

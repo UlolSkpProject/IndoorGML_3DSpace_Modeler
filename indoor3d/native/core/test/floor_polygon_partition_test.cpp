@@ -1,4 +1,4 @@
-#include "floor_polygon_validation.h"
+#include "floor_polygon_reference.h"
 
 #include <algorithm>
 #include <cmath>
@@ -180,6 +180,111 @@ void test_failed_attempt_never_mutates_source()
               near(face.holes.front().points[i].y,preserved_hole[i].y),
               "Failed partition modified Inner Loop coordinates");
 }
+
+void test_adjacent_partition_rectangles_merge_to_one_convex_leaf()
+{
+    const std::vector<PartitionLeaf> leaves{
+        {3,2,make_face(rectangle(0,0,4,4))},
+        {3,2,make_face(rectangle(4,0,8,4))}
+    };
+    const auto result=merge_convex_partitions(leaves,0.001);
+    check(result.accepted_merges==1 && result.leaves.size()==1,
+          "Adjacent completed rectangles must coarsen to one convex leaf");
+    check(result.leaves.front().polygon.outer.points.size()==4 &&
+          near(result.leaves.front().polygon.outer.signed_area,32.0),
+          "Merged rectangle must preserve its canonical outer ring and area");
+    check(result.source_leaf_indices.front()==std::vector<std::size_t>({0,1}),
+          "Merged leaf must retain the exact input leaf membership");
+}
+
+void test_concave_union_is_not_merged()
+{
+    const std::vector<PartitionLeaf> leaves{
+        {5,1,make_face(rectangle(0,0,2,8))},
+        {5,1,make_face(rectangle(2,0,8,2))}
+    };
+    const auto result=merge_convex_partitions(leaves,0.001);
+    check(result.accepted_merges==0 && result.leaves.size()==2,
+          "An L-shaped concave union must keep both completed leaves");
+}
+
+void test_mismatched_shared_edge_vertices_still_merge()
+{
+    const auto left=make_face({
+        {0,0,0},{4,0,0},{4,1,0},{4,3,0},{4,4,0},{0,4,0}
+    });
+    const auto right=make_face(rectangle(4,0,8,4));
+    const auto result=merge_convex_partitions(
+        {{7,1,left},{7,1,right}},0.001);
+    check(result.accepted_merges==1 && result.leaves.size()==1 &&
+          result.leaves.front().polygon.outer.points.size()==4,
+          "T-junction fragments on a shared edge must cancel before merging");
+}
+
+void test_different_source_faces_are_not_coarsened_together()
+{
+    const auto result=merge_convex_partitions({
+        {10,0,make_face(rectangle(0,0,4,4))},
+        {11,0,make_face(rectangle(4,0,8,4))}
+    },0.001);
+    check(result.accepted_merges==0 && result.leaves.size()==2,
+          "Coarsening must preserve original SketchUp Floor face ownership");
+}
+
+void test_hole_bearing_leaf_is_never_coarsened()
+{
+    const auto with_hole=make_face(
+        rectangle(0,0,8,8),{rectangle(2,2,3,3)});
+    const auto adjacent=make_face(rectangle(8,0,12,8));
+    const auto result=merge_convex_partitions({
+        {12,0,with_hole},{12,0,adjacent}
+    },0.001);
+    check(result.accepted_merges==0 && result.leaves.size()==2,
+          "A Hole-bearing leaf must never enter convex coarsening");
+}
+
+void test_coarsening_does_not_mutate_input_leaves()
+{
+    const std::vector<PartitionLeaf> leaves{
+        {14,1,make_face(rectangle(0,0,4,4))},
+        {14,1,make_face(rectangle(4,0,8,4))}
+    };
+    const auto first=leaves.front().polygon.outer.points;
+    const auto second=leaves.back().polygon.outer.points;
+    const auto result=merge_convex_partitions(leaves,0.001);
+    check(result.accepted_merges==1,
+          "Non-destructive fixture must still exercise one merge");
+    check(leaves.front().polygon.outer.points.size()==first.size() &&
+          leaves.back().polygon.outer.points.size()==second.size(),
+          "Coarsening must not resize caller-owned boundary rings");
+    for (std::size_t i=0;i<first.size();++i)
+        check(near(leaves.front().polygon.outer.points[i].x,first[i].x) &&
+              near(leaves.front().polygon.outer.points[i].y,first[i].y),
+              "Coarsening modified the first caller-owned leaf");
+    for (std::size_t i=0;i<second.size();++i)
+        check(near(leaves.back().polygon.outer.points[i].x,second[i].x) &&
+              near(leaves.back().polygon.outer.points[i].y,second[i].y),
+              "Coarsening modified the second caller-owned leaf");
+}
+
+void test_iterative_convex_grid_coarsens_to_one_polygon()
+{
+    const std::vector<PartitionLeaf> leaves{
+        {16,2,make_face(rectangle(0,0,4,4))},
+        {16,2,make_face(rectangle(4,0,8,4))},
+        {16,2,make_face(rectangle(0,4,4,8))},
+        {16,2,make_face(rectangle(4,4,8,8))}
+    };
+    const auto result=merge_convex_partitions(leaves,0.001);
+    check(result.accepted_merges==3 && result.leaves.size()==1,
+          "A 2x2 artificial partition grid must reach one convex polygon");
+    check(result.leaves.front().polygon.outer.points.size()==4 &&
+          near(result.leaves.front().polygon.outer.signed_area,64.0),
+          "Iterative coarsening must preserve the full grid area");
+    check(result.source_leaf_indices.front()==
+              std::vector<std::size_t>({0,1,2,3}),
+          "Iterative coarsening must retain all original leaf memberships");
+}
 }
 
 int main()
@@ -190,5 +295,12 @@ int main()
     test_multiple_holes_on_single_chord();
     test_tangent_and_overlapping_edge_do_not_commit();
     test_failed_attempt_never_mutates_source();
+    test_adjacent_partition_rectangles_merge_to_one_convex_leaf();
+    test_concave_union_is_not_merged();
+    test_mismatched_shared_edge_vertices_still_merge();
+    test_different_source_faces_are_not_coarsened_together();
+    test_hole_bearing_leaf_is_never_coarsened();
+    test_coarsening_does_not_mutate_input_leaves();
+    test_iterative_convex_grid_coarsens_to_one_polygon();
     return 0;
 }
