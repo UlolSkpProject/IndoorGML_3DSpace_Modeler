@@ -936,6 +936,48 @@ void test_room_reference_shortcut_los_rejects_wall_crossing()
             "Room LOS must reject non-Room requests");
 }
 
+void test_reference_shared_edge_1000mm_and_3d_spheres()
+{
+    // Never extrapolate an Edge shorter than 1000mm.
+    const CellData short_room = shallow_reflex_prism_cell(0.7);
+    require(find_reference_points(short_room, {2,0.5,0.5}, 0.001).empty(),
+            "a short Edge must not generate extrapolated reference coordinates");
+
+    const CellData tall = tall_room(shallow_reflex_prism_cell(0.7));
+    const auto references = find_reference_points(tall, {2,0.5,0.5}, 0.001);
+    bool has_corner = false;
+    for (const ReferencePoint& reference : references)
+        if (reference.kind == ReferencePointKind::Corner)
+        {
+            require(std::abs(reference.point.z - 1000.0 / 25.4) < 1.0e-8,
+                    "Corner must lie exactly 1000mm above the shared Edge minimum");
+            has_corner = true;
+        }
+    require(has_corner, "tall reflex Room must generate a reference candidate");
+
+    CellData room = unit_box_cell();
+    room.category = CellSpaceCategory::Room;
+    const std::vector<ReferencePoint> points{
+        {{0.5,0.5,0.2},ReferencePointKind::Final},
+        {{0.5,0.5,0.8},ReferencePointKind::Final}
+    };
+    const auto graph = build_room_reference_visibility_graph(
+        room, {0.5,0.5,0.5}, points, 0.001);
+    require(graph.nodes.size() == 3, "Sphere test lost nodes");
+    require(std::abs(graph.nodes[1].radius - 0.199) < 1.0e-9 &&
+            std::abs(graph.nodes[2].radius - 0.199) < 1.0e-9,
+            "inscribed Sphere radius must include floor and ceiling");
+    for (const ReferenceGraphEdge& edge : graph.edges)
+        require(!(edge.first == 1 && edge.second == 2),
+                "XY coincident but Z-separated spheres must not connect");
+
+    const auto los = validate_room_reference_segments(
+        room, {{{0.2,0.2,0.2},{0.8,0.8,0.8}},
+               {{0.2,0.2,0.2},{1.5,0.8,0.8}}}, 0.001);
+    require(los.size() == 2 && los[0] && !los[1],
+            "3D Room LOS must allow vertical motion only inside its Solid");
+}
+
 void test_non_room_reference_points_are_empty()
 {
     const std::array<CellSpaceCategory,4> categories{{
@@ -978,6 +1020,7 @@ int main()
     test_concave_room_reference_points();
     test_state_anchored_room_reference_cluster();
     test_non_room_reference_points_are_empty();
+    test_reference_shared_edge_1000mm_and_3d_spheres();
     test_room_visibility_graph_circle_overlap_and_blocked_los();
     test_room_reference_shortcut_los_rejects_wall_crossing();
     test_triangle_loop_candidates_are_validated_in_native();
