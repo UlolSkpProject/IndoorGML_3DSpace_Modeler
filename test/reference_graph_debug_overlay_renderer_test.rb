@@ -15,6 +15,7 @@ unless defined?(Geom::Point3d)
 end
 
 GL_LINE_STRIP = 3 unless defined?(GL_LINE_STRIP)
+GL_LINES = 1 unless defined?(GL_LINES)
 
 require_relative '../indoor3d/ui/overlays/renderers/reference_graph_debug_overlay_renderer'
 
@@ -53,7 +54,16 @@ class ReferenceGraphDebugOverlayRendererTest < Minitest::Test
       outer: [Point.new(0, 0, 0), Point.new(4, 0, 0), Point.new(4, 3, 0)],
       holes: [[Point.new(1, 1, 0), Point.new(2, 1, 0), Point.new(1, 2, 0)]]
     }
-    model = Struct.new(:debug_floor_partitions).new([partition])
+    graph = {
+      nodes: [
+        { point: Point.new(0, 0, 1) },
+        { point: Point.new(4, 3, 1) }
+      ],
+      edges: [[0, 1]]
+    }
+    model = Struct.new(:debug_floor_partitions, :debug_reference_graphs).new(
+      [partition], [graph]
+    )
     transform = Object.new
     def transform.overlay_render_points(points)
       points.map { |point| Point.new(point.x + 1, point.y + 2, point.z + 0.5) }
@@ -93,8 +103,13 @@ class ReferenceGraphDebugOverlayRendererTest < Minitest::Test
                  points.map { |point| [point.x, point.y, point.z] }
   end
 
-  def test_circle_and_graph_edge_rendering_are_removed
+  def test_circle_rendering_is_removed_but_graph_edges_remain
     refute_respond_to @renderer, :draw_circles
-    refute_respond_to @renderer, :draw_edges
+    assert_respond_to @renderer, :draw_edges
+
+    view = FakeView.new(-1.0)
+    @renderer.draw_edges(view)
+    assert_equal 1, view.draw_calls.length
+    assert_equal [:draw2d, GL_LINES], view.draw_calls.first.first(2)
   end
 end

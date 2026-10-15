@@ -6,6 +6,9 @@ module ULOL
       # Runtime-only visualization of Native's completed Floor partitions.
       class ReferenceGraphDebugOverlayRenderer
         PARTITION_COLOR = Sketchup::Color.new(255, 120, 0, 230)
+        EDGE_COLOR = Sketchup::Color.new(0, 0, 0)
+        CLEAR_ADDED_EDGE_COLOR = Sketchup::Color.new(0, 125, 170)
+        BLOCKED_ADDED_EDGE_COLOR = Sketchup::Color.new(210, 55, 40)
 
         def initialize(indoor_model:, transform_context:)
           @indoor_model = indoor_model
@@ -41,6 +44,50 @@ module ULOL
           end
         end
 
+        def draw_edges(view)
+          view.line_width = 1
+          view.line_stipple = '' if view.respond_to?(:line_stipple=)
+
+          each_graph do |graph|
+            nodes = graph[:nodes]
+            base_count = graph.fetch(:original_edge_count, graph[:edges].length)
+            draw_edge_group(view, nodes, graph[:edges].first(base_count), EDGE_COLOR)
+            additions = Array(graph[:added_edges])
+            draw_edge_group(
+              view, nodes,
+              additions.select { |record| record[:classification] == :clear }.map { |record| record[:edge] },
+              CLEAR_ADDED_EDGE_COLOR
+            )
+            draw_edge_group(
+              view, nodes,
+              additions.select { |record| record[:classification] == :blocked }.map { |record| record[:edge] },
+              BLOCKED_ADDED_EDGE_COLOR
+            )
+          end
+        rescue StandardError => error
+          log_debug_error(:edges, error)
+        ensure
+          view.line_width = 1 if view.respond_to?(:line_width=)
+        end
+
+        def draw_edge_group(view, nodes, edges, color)
+          segments = Array(edges).filter_map do |first, second|
+            next unless nodes[first] && nodes[second]
+
+            [nodes[first][:point], nodes[second][:point]]
+          end
+          return if segments.empty?
+
+          view.drawing_color = color
+          model_points = render_points(segments.flatten(1))
+          if top_down_view?(view)
+            screen_points = model_points.map { |point| view.screen_coords(point) }
+            view.draw2d(GL_LINES, screen_points)
+          else
+            view.draw(GL_LINES, model_points)
+          end
+        end
+
         def extent_points
           points = []
           each_partition do |partition|
@@ -69,6 +116,14 @@ module ULOL
             next unless partition && Array(partition[:outer]).length >= 3
 
             yield partition
+          end
+        end
+
+        def each_graph
+          Array(@indoor_model.debug_reference_graphs).each do |graph|
+            next unless graph && graph[:nodes] && graph[:edges]
+
+            yield graph
           end
         end
 
