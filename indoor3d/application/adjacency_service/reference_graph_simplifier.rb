@@ -9,7 +9,6 @@ module ULOL
       # BEFORE and its Native certificate records stay unchanged.
       module ReferenceGraphSimplifier
         EPSILON = 1.0e-9
-        MAX_CLUSTER_DIAMETER_FACTOR = 1.6
         MAX_CLUSTER_SIZE = 8
 
         module_function
@@ -55,11 +54,6 @@ module ULOL
               d = distance(nodes[center][:point], nodes[index][:point])
               # Strict distance to the larger wall-clearance radius.
               next unless d < [radius(nodes[center]), radius(nodes[index])].max
-              next unless (members + [index]).combination(2).all? do |a, b|
-                distance(nodes[a][:point], nodes[b][:point]) <=
-                  MAX_CLUSTER_DIAMETER_FACTOR *
-                    [radius(nodes[a]), radius(nodes[b])].min + EPSILON
-              end
               members << index
             end
             next if members.length < 2

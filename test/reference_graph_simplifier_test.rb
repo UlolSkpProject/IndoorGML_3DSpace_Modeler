@@ -52,10 +52,13 @@ class ReferenceGraphSimplifierTest < Minitest::Test
 
   def test_local_detour_limit_no_longer_blocks_a_los_safe_contraction
     # B bridges the very short C-B-D path; replacing that detour through
-    # State is much longer. All retained connections already exist.
+    # State is much longer. Protected endpoints keep this test focused
+    # on removing the intervening B without removing C and D.
+    # All retained connections already exist.
     source = graph(
       [node(1, 1.5, 2), node(1, 0, 1),
-       node(0.9, 0, 0.2), node(1.1, 0, 0.2)],
+       node(0.9, 0, 0.2).merge(protected: true),
+       node(1.1, 0, 0.2).merge(protected: true)],
       [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3]]
     )
 
@@ -89,14 +92,21 @@ class ReferenceGraphSimplifierTest < Minitest::Test
     assert_empty result[:merged_into]
   end
 
-  def test_cluster_diameter_cap_is_still_enforced
+  def test_small_node_radii_no_longer_block_cluster_membership
+    # Every removed neighbor has radius 0.1, so the old pairwise 1.6*0.1
+    # constraint rejected all of them despite the large State radius.
+    # Retain one non-State endpoint by the existing State policy.
     source = graph(
-      [node(0, 0, 10), node(1, 0, 0.1), node(2, 0, 0.1)],
-      [[0, 1], [0, 2], [1, 2]]
+      [node(0, 0, 10), node(1, 0, 0.1),
+       node(2, 0, 0.1), node(5, 0, 0.1)],
+      [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]]
     )
     result = Simplifier.simplify(source)
-    assert_equal [0, 1, 2], result[:original_indices]
-    assert_empty result[:merged_into]
+    assert_equal [0, 3], result[:original_indices]
+    assert_equal [[0, 1]], result[:edges]
+    assert_equal [[1, 0], [2, 0]], result[:merged_into]
+    assert_equal 4, source[:nodes].size
+    assert_equal 6, source[:edges].size
   end
 
   def test_insufficient_disk_coverage_does_not_absorb_node
