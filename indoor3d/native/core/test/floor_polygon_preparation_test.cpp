@@ -180,6 +180,36 @@ void test_outer_reflex_direction_and_threshold()
             "A single notch exceeding 30 degrees should yield a candidate");
 }
 
+void test_downward_floor_normal_preserves_reflex_direction()
+{
+    // Actual Room/Stair Floors commonly have outward -Z normals.
+    // Reflected 2D winding must still put the bisector INSIDE the L.
+    const auto outline=polygon({
+        {0,0,0},{3,0,0},{3,1,0},
+        {1,1,0},{1,3,0},{0,3,0}
+    });
+    const auto face=prepare({0,0,-1},outline,{},0.001);
+    require(face,"Downward-facing Floor should normalize");
+    require(face.face->outer.signed_area>0.0,
+            "Outer winding must normalize relative to negative Face normal");
+    const auto plan=propose_splits(*face.face);
+    require(plan.candidates.size()==1,
+            "Downward Floor must preserve the one reflex split candidate");
+    const auto& candidate=plan.candidates[0];
+    const Frame& frame=face.face->frame;
+    const Vec3 direction{
+        frame.u.x*candidate.primary_direction.x+
+            frame.v.x*candidate.primary_direction.y,
+        frame.u.y*candidate.primary_direction.x+
+            frame.v.y*candidate.primary_direction.y,
+        frame.u.z*candidate.primary_direction.x+
+            frame.v.z*candidate.primary_direction.y
+    };
+    require(close(frame.lift(candidate.origin),Vec3{1,1,0}) &&
+            direction.x<0 && direction.y<0,
+            "Bisector must point into L interior for both Face normal signs");
+}
+
 void test_accumulated_small_reflex_turns()
 {
     const auto ring=polygon({
@@ -259,6 +289,7 @@ int main()
     test_inclined_face_and_nonplanar_rejection();
     test_inner_loop_order_determinism();
     test_outer_reflex_direction_and_threshold();
+    test_downward_floor_normal_preserves_reflex_direction();
     test_accumulated_small_reflex_turns();
     test_hole_candidates_and_first_vertex_fallback();
     test_input_winding_does_not_change_world_split_origin();
