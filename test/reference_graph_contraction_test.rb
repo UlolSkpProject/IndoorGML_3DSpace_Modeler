@@ -6,6 +6,11 @@ require_relative '../indoor3d/application/adjacency_service/reference_graph_cont
 class ReferenceGraphContractionTest < Minitest::Test
   Contract = ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphContraction
   Point = Struct.new(:x, :y, :z)
+  ResettingDupPoint = Struct.new(:x, :y, :z) do
+    def dup
+      self.class.new(0.0, 0.0, 0.0)
+    end
+  end
 
   def node(x, y = 0, z = 1, radius = 1)
     { point: Point.new(x.to_f, y.to_f, z.to_f), radius: radius.to_f }.freeze
@@ -141,6 +146,29 @@ class ReferenceGraphContractionTest < Minitest::Test
     assert result[:graph][:nodes][1][:point].frozen?
     refute_same source[:nodes][1][:point], result[:graph][:nodes][1][:point]
     assert_equal 5, source[:nodes].length
+  end
+
+  def test_coordinate_reconstruction_does_not_depend_on_point_dup
+    points = [
+      ResettingDupPoint.new(10.0, 20.0, 30.0),
+      ResettingDupPoint.new(40.0, 50.0, 60.0),
+      ResettingDupPoint.new(70.0, 80.0, 90.0)
+    ]
+    source = graph(
+      points.map { |point| { point: point, radius: 1.0 }.freeze },
+      [[0, 1], [1, 2]]
+    )
+
+    result = Contract.contract(source, members: [1, 2], representative: 1)
+
+    assert result[:accepted]
+    assert_equal [[10.0, 20.0, 30.0], [40.0, 50.0, 60.0]],
+                 result[:graph][:nodes].map { |entry|
+                   point = entry[:point]
+                   [point.x, point.y, point.z]
+                 }
+    refute_same points[0], result[:graph][:nodes][0][:point]
+    refute_same points[1], result[:graph][:nodes][1][:point]
   end
 
   def test_reversed_members_and_edges_produce_identical_result

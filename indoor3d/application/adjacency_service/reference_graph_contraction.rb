@@ -191,7 +191,10 @@ module ULOL
 
         def duplicate_node(node)
           copy = node.dup
-          copy[:point] = node[:point].dup.freeze
+          point = node[:point]
+          # Geom::Point3d#dup returns an origin point in SketchUp 2026.
+          # Reconstruct from coordinates so contractions preserve geometry.
+          copy[:point] = point.class.new(point.x, point.y, point.z).freeze
           copy.freeze
         end
 
