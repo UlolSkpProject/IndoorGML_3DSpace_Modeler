@@ -21,7 +21,7 @@ constexpr std::uint64_t INPUT_VERSION_V2 = 2;
 constexpr std::uint64_t INPUT_VERSION_V3 = 3;
 constexpr std::uint64_t INPUT_VERSION_V4 = 4;
 constexpr std::uint64_t RESULT_VERSION = 1;
-constexpr std::uint64_t STATE_RESULT_VERSION = 7;
+constexpr std::uint64_t STATE_RESULT_VERSION = 8;
 constexpr std::size_t INPUT_HEADER_SIZE = 32;
 constexpr std::size_t CELL_FIXED_SIZE_V1 = 80;
 constexpr std::size_t CELL_FIXED_SIZE_V2 = 96;
@@ -490,15 +490,23 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
 
     for (const StatePointResult& result : results)
     {
-        require_finite(result.point.x, "state point x");
-        require_finite(result.point.y, "state point y");
-        require_finite(result.point.z, "state point z");
+        // V8 per-cell envelope: index, success, optional XYZ, optional Graph.
+        // No candidate is NOT a native exception.
         writer.append_u64(checked_u64(result.cell_index, "state cell index"));
-        writer.append_double(result.point.x);
-        writer.append_double(result.point.y);
-        writer.append_double(result.point.z);
-        // TEMP DEBUG SUPPORT: remove reference_status when temporary diagnostics are removed.
-        writer.append_u64(result.reference_status);
+        writer.append_u64(result.point ? 1 : 0);
+        if (result.point)
+        {
+            require_finite(result.point->x, "state point x");
+            require_finite(result.point->y, "state point y");
+            require_finite(result.point->z, "state point z");
+            writer.append_double(result.point->x);
+            writer.append_double(result.point->y);
+            writer.append_double(result.point->z);
+        }
+        const bool has_graph = result.point.has_value() &&
+            (!result.graph_node_points.empty() || !result.reference_points.empty());
+        writer.append_u64(has_graph ? 1 : 0);
+        if (!has_graph) continue; // V8: graph=nil is a valid result.
         if (result.reference_points.size() != result.reference_kinds.size())
             throw std::invalid_argument("reference point/kind count mismatch");
         writer.append_u64(checked_u64(result.reference_points.size(), "reference point count"));
