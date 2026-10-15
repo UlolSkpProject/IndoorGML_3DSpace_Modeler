@@ -44,10 +44,9 @@ CellSpaceInteriorPointResult locate_reference_before(
     if (cell.category!=CellSpaceCategory::Room &&
         cell.category!=CellSpaceCategory::Stair) return result;
 
-    result.exit_code=StateExitCode::InvalidSolidGeometry;
-    FaceSolid solid(cell,tolerance);
-    if (!solid.valid()) return result;
-
+    // Diagnose absent/invalid Floor loops BEFORE constructing the
+    // Solid BVH, otherwise invalid Floor geometry is misreported as a
+    // generic invalid Solid and the exact failure stage is lost.
     result.exit_code=StateExitCode::NoFloorFaces;
     std::vector<PartitionLeaf> leaves;
     bool partition_limit=false;
@@ -78,6 +77,11 @@ CellSpaceInteriorPointResult locate_reference_before(
     if (result.diagnostics.floor_faces==0) return result;
     result.exit_code=StateExitCode::FloorPreparationFailed;
     if (result.diagnostics.prepared_faces==0) return result;
+
+    result.exit_code=StateExitCode::InvalidSolidGeometry;
+    FaceSolid solid(cell,tolerance);
+    if (!solid.valid()) return result;
+
     result.exit_code=partition_limit ?
         StateExitCode::PartitionLimitReached : StateExitCode::PartitionFailed;
     if (leaves.empty()) return result;
