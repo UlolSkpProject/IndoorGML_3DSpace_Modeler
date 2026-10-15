@@ -5,8 +5,8 @@ module ULOL
     module IndoorCore
       # Non-destructive reduction of the V5 Room visibility graph.
       #
-      # A native Edge already means overlapping XY disks AND unobstructed LOS.
-      # We only remove a node if a larger, directly visible disk covers its
+      # A native Edge already means overlapping 3D spheres AND unobstructed LOS.
+      # We only remove a node if a larger, directly visible sphere covers its
       # center, all its currently surviving neighbors can see the same
       # representative, and the local detour is acceptably short.
       #
@@ -37,7 +37,7 @@ module ULOL
 
           alive = Array.new(size, true)
           absorbed = []
-          # Small disks are considered first; State remains non-removable.
+          # Small spheres are considered first; State remains non-removable.
           candidates = (1...size).sort_by do |index|
             [radius(nodes[index]), index]
           end
@@ -95,7 +95,11 @@ module ULOL
         end
 
         def distance(first, second)
-          Math.hypot(first.x - second.x, first.y - second.y)
+          Math.sqrt(
+            (first.x - second.x)**2 +
+            (first.y - second.y)**2 +
+            (first.z - second.z)**2
+          )
         end
 
         def radius(node)
