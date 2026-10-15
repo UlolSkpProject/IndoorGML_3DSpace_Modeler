@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace IndoorGMLAdjacencyNative
@@ -12,8 +13,10 @@ namespace IndoorGMLAdjacencyNative
 struct StatePointResult
 {
     std::size_t cell_index = 0;
-    Vec3 point;
-    std::uint64_t reference_status = 0;
+    // A record is emitted for EVERY requested Cell. No State candidate
+    // is a normal negative result, not an omitted result or an exception.
+    std::optional<Vec3> point;
+    std::uint64_t reference_status = 0; // temporary legacy diagnostics
     std::vector<Vec3> reference_points;
     std::vector<std::uint64_t> reference_kinds;
     // Auxiliary Room debug graph, serialized only with State-result V5.
