@@ -608,8 +608,8 @@ module ULOL
             category = cell_space.category_code.to_s
             return true unless %w[room stair].include?(category.downcase)
 
-            # TEMP DEBUG: Room = final-region centroid, Stair = polygon-
-            # shared-edge midpoint; both use BEFORE references only here.
+            # TEMP DEBUG: Room/Stair both seed final-polygon centroids
+            # and shared polygon-boundary midpoints for BEFORE.
             label = "#{prefix} cell=#{cell_space.id} category=#{category} "
             case reference_status.to_i
             when 1
