@@ -1,336 +1,292 @@
 # frozen_string_literal: true
 
 require 'minitest/autorun'
+require_relative 'collapsed_contract_fixture_test'
 require_relative '../indoor3d/application/adjacency_service/reference_graph_loop_collapser'
-require_relative '../indoor3d/application/adjacency_service/reference_graph_debug_mode'
 
 class ReferenceGraphLoopCollapserTest < Minitest::Test
+  include CollapsedContractFixture
   Collapse = ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphLoopCollapser
-  Mode = ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode
-  Point = Struct.new(:x, :y, :z)
 
-  def n(x, y, radius = 1)
-    { point: Point.new(x.to_f, y.to_f, 0.5), radius: radius.to_f }.freeze
+  def isolated_triangle(ids = [1, 2, 3])
+    raise ArgumentError unless ids == [1, 2, 3]
+    graph([node(20, 20), node(0, 0), node(2, 0), node(1, 2)],
+          [[1, 2], [1, 3], [2, 3]])
   end
 
-  def graph(nodes, edges)
-    { nodes: nodes.freeze, edges: edges.map(&:freeze).freeze,
-      original_indices: (0...nodes.length).to_a.freeze }.freeze
+  def triangle_cert(visible: [], p: point(1, 0.7), radius: 1.0)
+    certificate([1, 2, 3], p, visible: visible, radius: radius)
   end
 
-  def verified(triple, point, neighbors)
-    { triangle: triple.freeze, point: point, radius: 1.0,
-      visible_neighbors: neighbors.freeze }.freeze
+  def square_cert(ids = [1, 2, 3, 4], p: point(1, 1), visible: [])
+    certificate(ids, p, visible: visible)
   end
 
-  def test_new_point_replaces_triangle_without_changing_original_graph
-    original = graph(
-      [n(10, 10), n(0, 0), n(2, 0), n(1, 2)],
-      [[1, 2], [1, 3], [2, 3]]
-    )
-    candidate = verified([1, 2, 3], Point.new(1, 2.0 / 3, 0.5), [])
-    reduced = Collapse.collapse(original, [candidate])
-
-    assert_equal 2, reduced[:nodes].size
-    assert_equal 0, reduced[:nodes][0][:point].x - 10
-    assert_nil reduced[:original_indices].last
-    assert_equal 1, reduced[:collapse_count]
-    assert_equal 0, reduced[:edges].length
-    assert_equal 4, original[:nodes].size
-    assert_equal 3, original[:edges].size
+  def test_no_native_certificate_never_contracts_even_if_cycle_is_obvious
+    source = isolated_triangle
+    result = Collapse.collapse(source, [])
+    assert_equal 0, result[:collapse_count]
+    assert_equal 0, result[:loop_count]
+    assert_equal source[:original_indices], result[:original_indices]
+    assert_equal source[:edges], result[:edges]
   end
 
-  def test_native_visibility_is_required_for_every_external_connection
-    source = graph(
-      [n(0, 1), n(2, 0), n(3, 1), n(2, 2), n(4, 1)],
-      [[0, 1], [1, 2], [1, 3], [2, 3], [2, 4], [3, 4]]
-    )
-    invalid = verified([1, 2, 3], Point.new(2.33, 1, 0.5), [0])
-    assert_equal 0, Collapse.collapse(source, [invalid])[:collapse_count]
-
-    valid = verified([1, 2, 3], Point.new(2.33, 1, 0.5), [0, 4])
-    result = Collapse.collapse(source, [valid])
+  def test_hole_free_native_triangle_cert_creates_one_representative
+    source = isolated_triangle
+    result = Collapse.collapse(source, [triangle_cert])
     assert_equal 1, result[:collapse_count]
-    assert_equal [0, 4, nil], result[:original_indices]
-    assert_equal 2, result[:edges].length
+    assert_equal 1, result[:eligible_count]
+    assert_equal [0, nil], result[:original_indices]
+    assert_equal 2, result[:nodes].length
+    assert_equal [], result[:edges]
+    assert_equal point(1, 0.7), result[:nodes].last[:point]
+    assert_equal 1.0, result[:nodes].last[:radius]
+    assert_equal [[1, nil], [2, nil], [3, nil]], result[:merged_into]
+    assert_equal 1, result[:contraction_history].length
+    assert_equal 4, source[:nodes].length
   end
 
-  def test_native_verified_center_can_collapse_despite_large_detour
-    source = graph(
-      [n(10, 10), n(0, 0), n(3, 0), n(0, 3),
-       n(2.99, 0.0), n(3.01, 0.0)],
-      [[1, 2], [1, 3], [2, 3], [2, 4], [2, 5]]
-    )
-    center = verified([1, 2, 3], Point.new(1.0, 1.0, 0.5), [4, 5])
-    result = Collapse.collapse(source, [center])
-
-    # The detour exceeds the former 25% limit, but the candidate is
-    # validated and its external links are preserved.
-    assert_equal 1, result[:collapse_count]
-    assert_equal 4, result[:nodes].size
-    assert_equal [0, 4, 5, nil], result[:original_indices]
-    assert_equal [[1, 3], [2, 3]], result[:edges]
-    assert_equal 6, source[:nodes].size
-    assert_equal 5, source[:edges].size
-  end
-
-  def test_state_in_triangle_is_preserved_as_representative
-    source = graph(
-      [n(0, 0), n(1, 0), n(0.5, 0.4), n(0, 1)],
-      [[0, 1], [0, 2], [1, 2], [0, 3], [1, 3]]
-    )
-    # A State cycle must now receive an explicit hole-free verification
-    # from Native; it must never bypass the geometry topology guard.
-    without_native = Collapse.collapse(source, [])
-    assert_equal 0, without_native[:collapse_count]
-    assert_equal source[:edges], without_native[:edges]
-
-    checked = verified([0, 1, 2], source[:nodes][0][:point], [])
-    result = Collapse.collapse(source, [checked])
-
+  def test_state_triangle_retains_unmodified_state_as_representative
+    source = graph([node(0, 0), node(1, 0), node(0.5, 0.4), node(0, 1)],
+                   [[0, 1], [0, 2], [1, 2], [0, 3], [1, 3]])
+    cert = certificate([0, 1, 2], point(0, 0), visible: [3])
+    result = Collapse.collapse(source, [cert])
     assert_equal 1, result[:collapse_count]
     assert_equal [0, 3], result[:original_indices]
     assert_equal [[0, 1]], result[:edges]
-    assert_same source[:nodes][0], result[:nodes][0]
+    assert_equal point(0, 0), result[:nodes][0][:point]
+    assert_equal [[1, 0], [2, 0]], result[:merged_into]
+    assert_equal 0, result[:contraction_history][0][:representative_index]
   end
 
-  def test_graph_without_native_candidates_does_not_invent_new_points
-    source = graph(
-      [n(10, 10), n(0, 0), n(2, 0), n(1, 2)],
-      [[1, 2], [1, 3], [2, 3]]
-    )
-    assert_equal 0, Collapse.collapse(source, [])[:collapse_count]
-  end
-
-  def test_deferred_collapse_of_four_cycle
-    source = graph(
-      [n(10, 10), n(0, 0), n(2, 0), n(2, 2), n(0, 2)],
-      [[1, 2], [2, 3], [3, 4], [1, 4]]
-    )
-    candidate = { vertices: [1, 2, 3, 4],
-                  point: Point.new(1, 1, 0.5),
-                  radius: 1.0,
-                  visible_neighbors: [] }
-    result = Collapse.collapse(source, [candidate])
-
-    assert_equal 1, result[:collapse_count]
-    assert_equal 1, result[:loop_count]
-    assert_equal [0, nil], result[:original_indices]
-    assert_empty result[:edges]
-    assert_equal 5, source[:nodes].size
-  end
-
-  def test_five_cycle_preserves_all_external_neighbors
-    source = graph(
-      [n(10, 10), n(0, 0), n(2, 0), n(3, 1), n(1.5, 3), n(-0.5, 1), n(4, 1)],
-      [[1, 2], [2, 3], [3, 4], [4, 5], [1, 5], [3, 6]]
-    )
-    candidate = { vertices: [1, 2, 3, 4, 5],
-                  point: Point.new(1.2, 1.2, 0.5),
-                  radius: 1.0,
-                  visible_neighbors: [6] }
-    result = Collapse.collapse(source, [candidate])
-
-    assert_equal 1, result[:collapse_count]
-    assert_equal [0, 6, nil], result[:original_indices]
-    assert_equal [[1, 2]], result[:edges]
-    assert_equal 7, source[:nodes].size
-  end
-
-  def test_chorded_four_cycle_is_not_minimal
-    source = graph(
-      [n(10, 10), n(0, 0), n(2, 0), n(2, 2), n(0, 2)],
-      [[1, 2], [2, 3], [3, 4], [1, 4], [1, 3]]
-    )
-    candidate = { vertices: [1, 2, 3, 4],
-                  point: Point.new(1, 1, 0.5),
-                  radius: 1.0,
-                  visible_neighbors: [] }
-    result = Collapse.collapse(source, [candidate])
-
+  def test_state_ring_is_not_replaced_by_certificate_center
+    source = graph([node(0, 0), node(1, 0), node(1, 1), node(0, 1)],
+                   [[0, 1], [1, 2], [2, 3], [0, 3]])
+    fake = certificate([0, 1, 2, 3], point(0.5, 0.5))
+    result = Collapse.collapse(source, [fake])
     assert_equal 0, result[:collapse_count]
-    assert_equal [0, 1, 2, 3, 4], result[:original_indices]
-    assert_equal 0, result[:loop_count] # no Native certificate for this chorded ring
+    assert_equal [0, 1, 2, 3], result[:original_indices]
   end
 
-  def test_verified_tilted_planar_cycle_can_collapse
-    source = graph(
-      [n(10, 10),
-       { point: Point.new(0.0, 0.0, 0.5), radius: 1.0 },
-       { point: Point.new(2.0, 0.0, 0.6), radius: 1.0 },
-       { point: Point.new(2.0, 2.0, 0.6), radius: 1.0 },
-       { point: Point.new(0.0, 2.0, 0.5), radius: 1.0 }],
-      [[1, 2], [2, 3], [3, 4], [1, 4]]
-    )
-    cert = {
-      vertices: [1, 2, 3, 4],
-      point: Point.new(1.0, 1.0, 0.55),
-      radius: 0.3,
-      visible_neighbors: []
-    }
-    result = Collapse.collapse(source, [cert])
+  def test_state_four_cycle_requires_missing_internal_los_callback
+    source = graph([node(0, 0), node(2, 0), node(2, 2), node(0, 2)],
+                   [[0, 1], [1, 2], [2, 3], [0, 3]])
+    cert = certificate([0, 1, 2, 3], point(0, 0))
+    reject = Collapse.collapse(source, [cert])
+    assert_equal 0, reject[:collapse_count]
+    native_calls = []
+    permit = Collapse.collapse(source, [cert], los_validator: lambda { |a, b|
+      native_calls << [a, b]
+      true
+    })
+    assert_equal 1, permit[:collapse_count]
+    assert_equal [0], permit[:original_indices]
+    assert_equal 2, native_calls.first.size
+    assert_operator native_calls.size, :>=, 1
+  end
 
+  def test_missing_loop_member_in_after_rejects_original_native_certificate
+    source = graph([node(20, 20), node(0, 0), node(1, 2)],
+                   [[1, 2]], origins: [0, 1, 3], merges: [[2, 1]])
+    result = Collapse.collapse(source, [triangle_cert])
+    assert_equal 0, result[:collapse_count]
+    assert_equal [0, 1, 3], result[:original_indices]
+    assert_equal [[2, 1]], result[:merged_into]
+  end
+
+  def test_reindexed_after_original_ids_map_exact_native_cycle
+    source = graph([node(20, 20), node(0, 0), node(2, 0), node(1, 2)],
+                   [[1, 2], [1, 3], [2, 3]], origins: [0, 7, 12, 15])
+    cert = certificate([7, 12, 15], point(1, 0.7))
+    result = Collapse.collapse(source, [cert])
     assert_equal 1, result[:collapse_count]
     assert_equal [0, nil], result[:original_indices]
-    assert_equal 5, source[:nodes].length
+    assert_equal [[7, nil], [12, nil], [15, nil]], result[:merged_into]
   end
 
-  def test_native_certificate_does_not_override_missing_after_edge
-    source = graph(
-      [n(10, 10), n(0, 0), n(2, 0), n(2, 2), n(0, 2)],
-      [[1, 2], [2, 3], [3, 4]]
-    )
-    candidate = {
-      vertices: [1, 2, 3, 4],
-      point: Point.new(1, 1, 0.5),
-      radius: 0.2,
-      visible_neighbors: []
-    }
-    result = Collapse.collapse(source, [candidate])
+  def test_chorded_four_cycle_rejected_even_with_certificate
+    source = graph([node(20, 20), node(0, 0), node(2, 0), node(2, 2), node(0, 2)],
+                   [[1, 2], [2, 3], [3, 4], [1, 4], [1, 3]])
+    result = Collapse.collapse(source, [square_cert])
+    assert_equal 0, result[:collapse_count]
+    assert_equal 0, result[:loop_count]
+  end
 
+  def test_missing_cycle_edge_rejects_certificate
+    source = graph([node(20, 20), node(0, 0), node(2, 0), node(2, 2), node(0, 2)],
+                   [[1, 2], [2, 3], [3, 4]])
+    result = Collapse.collapse(source, [square_cert])
     assert_equal 0, result[:collapse_count]
     assert_equal source[:edges], result[:edges]
   end
 
-  def test_console_has_six_modes
-    output, = capture_io do
-      assert_equal :before, Mode.before!
-      assert_equal :after, Mode.after!
-      assert_equal :collapsed, Mode.collapsed!
-      assert Mode.collapsed?
-      assert_equal :optimized, Mode.optimized!
-      assert Mode.optimized?
-      assert_equal :internal, Mode.internal!
-      assert Mode.internal?
-      assert_equal :connected, Mode.connected!
-      assert Mode.connected?
-      assert_equal :before, Mode.before!
-    end
-    assert_includes output, 'COLLAPSED'
-    assert_includes output, 'OPTIMIZED'
-    assert_includes output, 'INTERNAL'
-    assert_includes output, 'CONNECTED'
-  end
-  def test_deferred_batch_collapses_two_disjoint_triangles_simultaneously
-    source = graph(
-      [n(10, 10), n(0, 0), n(2, 0), n(1, 2),
-       n(5, 0), n(7, 0), n(6, 2)],
-      [[1, 2], [1, 3], [2, 3],
-       [4, 5], [4, 6], [5, 6]]
-    )
-    candidates = [
-      verified([1, 2, 3], Point.new(1, 0.67, 0.5), []),
-      verified([4, 5, 6], Point.new(6, 0.67, 0.5), [])
-    ]
-
-    result = Collapse.collapse(source, candidates)
-
-    assert_equal 2, result[:collapse_count]
-    assert_equal 2, result[:triangle_count]
-    assert_equal 2, result[:eligible_count]
-    assert_equal [0, nil, nil], result[:original_indices]
-    assert_empty result[:edges]
-    assert_equal 3, result[:nodes].length
-    assert_equal 7, source[:nodes].length
-    assert_equal 6, source[:edges].length
+  def test_overlap_conflict_selects_smaller_then_original_ids
+    source = graph([node(20, 20), node(0, 0), node(2, 0), node(1, 1), node(3, 1)],
+                   [[1, 2], [1, 3], [2, 3], [2, 4], [3, 4]])
+    a = certificate([1, 2, 3], point(1, 0.35), visible: [4])
+    b = certificate([2, 3, 4], point(2, 0.7), visible: [1])
+    first = Collapse.collapse(source, [a, b])
+    second = Collapse.collapse(source, [b, a])
+    assert_equal first, second
+    assert_equal 2, first[:eligible_count]
+    assert_equal 1, first[:collapse_count]
+    assert_equal [0, 4, nil], first[:original_indices]
+    assert_equal 1, first[:rejected_count]
   end
 
-  def test_shared_vertex_loops_cannot_be_collapsed_in_same_batch
+  def test_cross_edge_between_removed_sets_blocks_simultaneous_collapse
     source = graph(
-      [n(10, 10), n(0, 0), n(2, 0), n(1, 1), n(3, 1)],
-      [[1, 2], [1, 3], [2, 3], [2, 4], [3, 4]]
+      [node(20, 20), node(0, 0), node(2, 0), node(1, 2),
+       node(5, 0), node(7, 0), node(6, 2)],
+      [[1, 2], [1, 3], [2, 3], [4, 5], [4, 6], [5, 6], [3, 4]]
     )
-    candidates = [
-      verified([1, 2, 3], Point.new(1, 0.33, 0.5), [4]),
-      verified([2, 3, 4], Point.new(2, 0.67, 0.5), [1])
-    ]
-
-    result = Collapse.collapse(source, candidates)
-
-    assert_equal 1, result[:collapse_count]
-    assert_equal 2, result[:eligible_count]
-    assert_equal [0, 4, nil], result[:original_indices]
-    assert_equal [[1, 2]], result[:edges]
-    assert_equal 5, source[:nodes].length
-    assert_equal 5, source[:edges].length
-  end
-
-  def test_disjoint_loops_with_cross_edge_require_unverified_center_to_center_los
-    source = graph(
-      [n(10, 10), n(0, 0), n(2, 0), n(1, 2),
-       n(5, 0), n(7, 0), n(6, 2)],
-      [[1, 2], [1, 3], [2, 3],
-       [4, 5], [4, 6], [5, 6], [3, 4]]
-    )
-    candidates = [
-      verified([1, 2, 3], Point.new(1, 0.67, 0.5), [4]),
-      verified([4, 5, 6], Point.new(6, 0.67, 0.5), [3])
-    ]
-
-    result = Collapse.collapse(source, candidates)
-
+    a = certificate([1, 2, 3], point(1, 0.7), visible: [4])
+    b = certificate([4, 5, 6], point(6, 0.7), visible: [3])
+    result = Collapse.collapse(source, [b, a])
     assert_equal 2, result[:eligible_count]
     assert_equal 1, result[:collapse_count]
     assert_equal [0, 4, 5, 6, nil], result[:original_indices]
     assert_equal [[1, 2], [1, 3], [1, 4], [2, 3]], result[:edges]
   end
 
-  def test_batch_result_does_not_depend_on_native_candidate_order
+  def test_independent_disjoint_cycles_use_fresh_indices_between_contractions
     source = graph(
-      [n(10, 10), n(0, 0), n(2, 0), n(1, 2),
-       n(5, 0), n(7, 0), n(6, 2)],
+      [node(20, 20), node(0, 0), node(2, 0), node(1, 2),
+       node(5, 0), node(7, 0), node(6, 2)],
       [[1, 2], [1, 3], [2, 3], [4, 5], [4, 6], [5, 6]]
     )
-    candidates = [
-      verified([1, 2, 3], Point.new(1, 0.67, 0.5), []),
-      verified([4, 5, 6], Point.new(6, 0.67, 0.5), [])
-    ]
-
-    first = Collapse.collapse(source, candidates)
-    second = Collapse.collapse(source, candidates.reverse)
-
-    assert_equal first, second
-    assert_equal 2, first[:collapse_count]
+    a = certificate([1, 2, 3], point(1, 0.7))
+    b = certificate([4, 5, 6], point(6, 0.7))
+    forward = Collapse.collapse(source, [a, b])
+    backward = Collapse.collapse(source, [b, a])
+    assert_equal forward, backward
+    assert_equal 2, forward[:collapse_count]
+    assert_equal [0, nil, nil], forward[:original_indices]
+    assert_empty forward[:edges]
+    assert_equal 2, forward[:contraction_history].length
+    assert_equal 7, source[:nodes].length
   end
 
-  def test_prevalidated_collapse_candidate_does_not_depend_on_circle_radius
-    source = graph(
-      [n(10, 10), n(0, 0), n(2, 0), n(1, 2)],
-      [[1, 2], [1, 3], [2, 3]]
-    )
-    candidate = verified([1, 2, 3], Point.new(1, 2.0 / 3, 0.5), []).merge(radius: 0.0)
-    result = Collapse.collapse(source, [candidate])
+  def test_input_candidate_order_and_cycle_rotation_do_not_change_output
+    source = isolated_triangle
+    a = triangle_cert
+    rotated = a.merge(vertices: [2, 3, 1])
+    reverse = a.merge(vertices: [1, 3, 2])
+    original = Collapse.collapse(source, [a])
+    assert_equal original, Collapse.collapse(source, [rotated])
+    assert_equal original, Collapse.collapse(source, [reverse])
+    assert_equal 1, Collapse.collapse(source, [a, reverse])[:collapse_count]
+  end
 
+  def test_legacy_triangle_key_is_accepted_but_vertices_are_canonical
+    source = isolated_triangle
+    legacy = triangle_cert.dup
+    legacy[:triangle] = legacy.delete(:vertices)
+    result = Collapse.collapse(source, [legacy])
     assert_equal 1, result[:collapse_count]
-    assert_equal [0, nil], result[:original_indices]
   end
 
-  def test_state_loop_without_hole_free_native_certificate_is_never_collapsed
-    source = graph(
-      [n(0, 0), n(2, 0), n(1, 2), n(4, 0)],
-      [[0, 1], [0, 2], [1, 2], [0, 3], [1, 3]]
-    )
+  def test_original_indices_merge_history_and_contraction_history_are_preserved
+    source = graph([node(20, 20), node(0, 0), node(2, 0), node(1, 2), node(25, 25)],
+                   [[1, 2], [1, 3], [2, 3]], merges: [[9, 4]])
+    source = source.merge(contraction_history: [{ from_before: true }.freeze].freeze).freeze
+    result = Collapse.collapse(source, [triangle_cert])
+    assert_equal 1, result[:collapse_count]
+    assert_equal [0, 4, nil], result[:original_indices]
+    assert_includes result[:merged_into], [9, 4]
+    assert_includes result[:merged_into], [1, nil]
+    assert_equal({ from_before: true }, result[:contraction_history].first)
+    assert_equal 2, result[:contraction_history].size
+  end
+
+  def test_native_certificate_external_los_must_cover_all_boundary_gateways
+    source = graph([node(0, 3), node(0, 0), node(2, 0), node(1, 2), node(3, 2)],
+                   [[0, 1], [1, 2], [1, 3], [2, 3], [3, 4]])
+    missing = triangle_cert(visible: [0])
+    blocked = Collapse.collapse(source, [missing])
+    assert_equal 0, blocked[:collapse_count]
+    accepted = Collapse.collapse(source, [missing], los_validator: ->(*) { true })
+    assert_equal 1, accepted[:collapse_count]
+    assert_equal [0, 4, nil], accepted[:original_indices]
+    assert_equal [[0, 2], [1, 2]], accepted[:edges]
+  end
+
+  def test_optional_point_validator_can_veto_native_certified_center
+    source = isolated_triangle
+    blocked = Collapse.collapse(source, [triangle_cert], point_validator: ->(*) { false })
+    assert_equal 0, blocked[:collapse_count]
+    assert_equal source[:original_indices], blocked[:original_indices]
+    allowed = Collapse.collapse(source, [triangle_cert], point_validator: ->(*) { true })
+    assert_equal 1, allowed[:collapse_count]
+  end
+
+  def test_malformed_certificate_is_rejected_without_inferred_hole_free_status
+    source = isolated_triangle
+    [
+      { vertices: [1, 2, 3], point: [1, 1, 5] }, # missing radius
+      { vertices: [1, 2, 3], point: [Float::NAN, 1, 5], radius: 1 },
+      { vertices: [1, 2, 3], point: [1, 1, 5], radius: -1 },
+      { vertices: [1, 2, 2], point: [1, 1, 5], radius: 1 },
+      { vertices: [1, 2, 3], point: [1, 1, 5], radius: 1, visible_neighbors: ['0'] }
+    ].each do |record|
+      assert_equal 0, Collapse.collapse(source, [record])[:collapse_count]
+    end
+  end
+
+  def test_no_input_hash_nodes_edges_or_certificate_arrays_are_mutated
+    source = isolated_triangle
+    candidate = triangle_cert
+    before_nodes = Marshal.dump(source)
+    before_certificate = Marshal.dump(candidate)
+    Collapse.collapse(source, [candidate])
+    assert_equal before_nodes, Marshal.dump(source)
+    assert_equal before_certificate, Marshal.dump(candidate)
+    assert source[:nodes].frozen?
+    assert source[:edges].frozen?
+  end
+
+  def test_all_edges_sorted_unique_and_in_range_after_multiple_collapses
+    source = graph([node(0, 4), node(0, 0), node(2, 0), node(1, 2),
+                    node(5, 0), node(7, 0), node(6, 2), node(10, 2)],
+                   [[0, 1], [1, 2], [1, 3], [2, 3], [4, 5], [4, 6], [5, 6], [6, 7]])
+    a = triangle_cert(visible: [0])
+    b = certificate([4, 5, 6], point(6, 0.7), visible: [7])
+    result = Collapse.collapse(source, [a, b])
+    assert_equal 2, result[:collapse_count]
+    assert_equal 8 - 3 - 3 + 2, result[:nodes].length
+    assert_equal result[:nodes].length, result[:original_indices].length
+    assert_equal result[:edges].sort.uniq, result[:edges]
+    assert result[:edges].all? { |i, j| i.is_a?(Integer) && j.is_a?(Integer) && i < j && j < result[:nodes].length }
+    assert_equal 0, result[:original_indices].first
+  end
+
+  def test_noop_graph_still_normalizes_edge_order_and_keeps_weights_aligned
+    source = graph([node(20, 20), node(0, 0), node(2, 0), node(1, 2)],
+                   [[1, 3], [2, 3], [1, 2]])
+    source = source.merge(edges: [[2, 3], [1, 3], [1, 2]],
+                          edge_weights: [23, 13, 12],
+                          edge_metadata: [{ id: 23 }, { id: 13 }, { id: 12 }]).freeze
+    before = Marshal.dump(source)
     result = Collapse.collapse(source, [])
-
-    assert_equal 0, result[:collapse_count]
-    assert_equal 0, result[:loop_count] # no certified cycle
-    assert_equal source[:edges], result[:edges]
-    assert_equal source[:nodes], result[:nodes]
+    assert_equal [[1, 2], [1, 3], [2, 3]], result[:edges]
+    assert_equal [12, 13, 23], result[:edge_weights]
+    assert_equal [12, 13, 23], result[:edge_metadata].map { |item| item[:id] }
+    assert_equal before, Marshal.dump(source)
   end
 
-  def test_native_hole_rejection_does_not_invent_loop_representative
-    source = graph(
-      [n(5, 5), n(0, 0), n(4, 0), n(4, 4), n(0, 4)],
-      [[1, 2], [2, 3], [3, 4], [1, 4]]
-    )
-    # No Native candidate is present when a wall slice lies inside the
-    # 4-cycle. The original disconnected graph must remain unchanged.
-    result = Collapse.collapse(source, [])
-
+  def test_common_primitive_unsupported_added_edge_annotations_fail_closed
+    source = isolated_triangle.merge(added_edges: []).freeze
+    result = Collapse.collapse(source, [triangle_cert])
     assert_equal 0, result[:collapse_count]
-    assert_equal 0, result[:loop_count] # no certified cycle
-    assert_equal source[:nodes], result[:nodes]
-    assert_equal source[:edges], result[:edges]
+    assert_equal source[:original_indices], result[:original_indices]
   end
 
+  def test_more_than_415_after_nodes_does_not_disable_cycle_reduction
+    source = isolated_triangle
+    expanded = source[:nodes] + Array.new(420) { |i| node(100 + i, 500) }
+    source = graph(expanded, source[:edges])
+    result = Collapse.collapse(source, [triangle_cert])
+    assert_equal 1, result[:collapse_count]
+    assert_equal expanded.size - 3 + 1, result[:nodes].size
+  end
 end
