@@ -49,6 +49,7 @@ module ULOL
         ).freeze
 
         class ProtocolError < StandardError; end
+        class StateUnavailableError < StandardError; end
 
         class BinaryReader
           attr_reader :position
