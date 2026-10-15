@@ -995,72 +995,87 @@ CellData l_partition_prism()
     return cell;
 }
 
-void test_stair_before_uses_final_polygon_shared_edge_midpoints()
+// Room AND Stair must use the SAME two seed sources after the SAME
+// final Floor partition: polygon surface centroid + genuine shared-edge
+// midpoint. The categories differ only in downstream graph stages.
+void test_room_and_stair_both_seed_centroids_and_shared_edges()
 {
-    CellData stair=tall_room(l_partition_prism());
-    stair.category=CellSpaceCategory::Stair;
-    const auto result=locate_cell_space_interior_points(stair,0.001);
-    require(result.state_point.has_value(),
-            "Stair State must not be affected by reference generation");
-    require(result.reference_status==ReferencePointStatus::Succeeded,
-            "Stair reference generation should report a successful attempt");
+    CellData cell=tall_room(l_partition_prism());
+    cell.category=CellSpaceCategory::Room;
+    const auto room=locate_cell_space_interior_points(cell,0.001);
+    cell.category=CellSpaceCategory::Stair;
+    const auto stair=locate_cell_space_interior_points(cell,0.001);
 
-    std::vector<Vec3> firsts,finals;
-    for (const ReferencePoint& candidate : result.reference_points)
+    require(room.state_point.has_value() && stair.state_point.has_value(),
+            "neither Room nor Stair may lose State");
+    require(room.reference_status==ReferencePointStatus::Succeeded &&
+            stair.reference_status==ReferencePointStatus::Succeeded,
+            "Room and Stair must both generate BEFORE candidates");
+
+    const auto collect=[](const CellSpaceInteriorPointResult& result,
+                          ReferencePointKind kind) {
+        std::vector<Vec3> result_points;
+        for (const ReferencePoint& p : result.reference_points)
+            if (p.kind==kind) result_points.push_back(p.point);
+        return result_points;
+    };
+    const auto room_face=collect(room,ReferencePointKind::Face);
+    const auto stair_face=collect(stair,ReferencePointKind::Face);
+    const auto room_final=collect(room,ReferencePointKind::Final);
+    const auto stair_final=collect(stair,ReferencePointKind::Final);
+    require(room_face.size() >= 3,
+            "concave L Floor should have partition centroids AND seam midpoints");
+    require(room_face.size()==stair_face.size(),
+            "Room and Stair candidate policies must be identical");
+    require(room_final.size()==stair_final.size(),
+            "Room and Stair final graph nodes must have identical seed counts");
+
+    for (std::size_t i=0;i<room_face.size();++i)
     {
-        if (candidate.kind==ReferencePointKind::Face)
-            firsts.push_back(candidate.point);
-        if (candidate.kind==ReferencePointKind::Final)
-            finals.push_back(candidate.point);
+        const Vec3& a=room_face[i];
+        const Vec3& b=stair_face[i];
+        require(length_squared(subtract(a,b))<1.0e-16,
+                "Room and Stair must return precisely the same seed positions");
+        require(std::abs(a.z-1000.0/25.4)<1.0e-9,
+                "both seed kinds must retain the +1000mm world-Z lift");
     }
-    require(!firsts.empty(),
-            "Stair L floor needs shared-polygon-edge references");
-    require(firsts.size()==finals.size(),
-            "Stair BEFORE should use every valid shared Edge midpoint");
-    require(result.debug_graph.nodes.size()==finals.size()+1,
-            "Stair BEFORE must contain State plus final shared Edge refs");
-    require(result.debug_graph.loop_candidates.empty(),
-            "Stair must stay BEFORE-only; no Collapse certificates");
-    for (const Vec3& p : firsts)
-    {
-        require(std::abs(p.z-1000.0/25.4)<1.0e-9,
-                "Stair shared-edge midpoint must keep the world-Z lift");
-        // The only non-collinear joining boundaries between final L
-        // polygons are portions of x=1 or y=1, ending at the reflex
-        // vertex (1,1). Their midpoint lies strictly inside the floor.
-        require(p.x>0 && p.x<3 && p.y>0 && p.y<3,
-                "Stair shared Edge midpoint must belong to a floor interior");
-    }
+    require(room.debug_graph.nodes.size()==room_final.size()+1 &&
+            stair.debug_graph.nodes.size()==stair_final.size()+1,
+            "both BEFORE graphs must contain State and all accepted Final seeds");
+    require(stair.debug_graph.loop_candidates.empty(),
+            "Stair is BEFORE-only; do not turn on Collapse certificates");
 }
 
-void test_stair_single_convex_floor_has_no_shared_edge_seed()
+void test_single_convex_floor_has_only_one_centroid_for_both()
 {
-    CellData stair=tall_room(unit_box_cell());
-    stair.category=CellSpaceCategory::Stair;
-    const auto result=locate_cell_space_interior_points(stair,0.001);
-    require(result.state_point.has_value(),"convex Stair lost State");
-    require(result.reference_status==ReferencePointStatus::Succeeded,
-            "Stair should attempt reference generation even with one polygon");
-    require(result.reference_points.empty(),
-            "Stair must not use internal triangulation edges as polygon seams");
-    require(result.debug_graph.nodes.size()==1,
-            "single-polygon Stair BEFORE must still display its State");
-}
-
-void test_room_still_uses_polygon_centroid_on_identical_geometry()
-{
-    CellData room=tall_room(l_partition_prism());
-    room.category=CellSpaceCategory::Room;
-    const auto result=locate_cell_space_interior_points(room,0.001);
-    require(result.state_point.has_value(),
-            "same geometry must still produce a Room State");
-    require(result.reference_status==ReferencePointStatus::Succeeded,
-            "Room reference generation must remain available");
-    std::size_t count=0;
-    for (const ReferencePoint& candidate : result.reference_points)
-        if (candidate.kind==ReferencePointKind::Face) ++count;
-    require(count>=2,
-            "Room must retain region centroids, not use Stair midpoint policy");
+    for (CellSpaceCategory category :
+         {CellSpaceCategory::Room,CellSpaceCategory::Stair})
+    {
+        CellData cell=tall_room(unit_box_cell());
+        cell.category=category;
+        const auto result=locate_cell_space_interior_points(cell,0.001);
+        require(result.state_point.has_value(),
+                "convex single-polygon Room/Stair lost State");
+        require(result.reference_status==ReferencePointStatus::Succeeded,
+                "both Room and Stair must attempt Floor seeds");
+        std::size_t face_count=0,final_count=0;
+        for (const ReferencePoint& candidate : result.reference_points)
+        {
+            if (candidate.kind==ReferencePointKind::Face)
+            {
+                ++face_count;
+                require(std::abs(candidate.point.x-0.5)<1.0e-9 &&
+                        std::abs(candidate.point.y-0.5)<1.0e-9 &&
+                        std::abs(candidate.point.z-1000.0/25.4)<1.0e-9,
+                        "single convex Floor reference must be its area centroid");
+            }
+            if (candidate.kind==ReferencePointKind::Final) ++final_count;
+        }
+        require(face_count==1 && final_count==1,
+                "internal triangulation edges must NOT generate extra seeds");
+        require(result.debug_graph.nodes.size()==2,
+                "Room/Stair single Floor BEFORE is State + one centroid");
+    }
 }
 
 void test_non_room_reference_points_are_empty()
@@ -1116,9 +1131,8 @@ int main()
     test_floor_hole_does_not_create_void_candidates();
     test_single_floor_face_with_hole_keeps_multiple_regions();
     test_3d_sphere_and_vertical_los();
-    test_stair_before_uses_final_polygon_shared_edge_midpoints();
-    test_stair_single_convex_floor_has_no_shared_edge_seed();
-    test_room_still_uses_polygon_centroid_on_identical_geometry();
+    test_room_and_stair_both_seed_centroids_and_shared_edges();
+    test_single_convex_floor_has_only_one_centroid_for_both();
     test_non_room_reference_points_are_empty();
 
     test_room_visibility_graph_circle_overlap_and_blocked_los();
