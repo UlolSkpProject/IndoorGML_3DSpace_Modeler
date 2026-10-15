@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <map>
 #include <numeric>
 #include <optional>
 #include <queue>
@@ -1054,7 +1055,173 @@ struct CornerVertex
 {
     Vec3 point;
     std::vector<Vec3> rays;
+    // Two actual 3D wall faces meeting along a shared SketchUp edge.
+    // Empty for the preserved legacy State-Z debug graph path.
+    std::vector<std::size_t> incident_faces;
 };
+
+// Match exact solid boundary edges in 3D (quantized only to tolerate tiny
+// transformed-coordinate noise). XY coincidence alone is NOT adjacency.
+using TopologyVertexKey = std::array<std::int64_t, 3>;
+using TopologyEdgeKey = std::pair<TopologyVertexKey, TopologyVertexKey>;
+struct TopologyFaceEdge
+{
+    std::size_t face_index = 0;
+    Vec3 first;
+    Vec3 second;
+};
+
+std::optional<TopologyVertexKey> topology_vertex_key(
+    const Vec3& point, double epsilon
+)
+{
+    const auto quantize = [epsilon](double v) -> std::optional<std::int64_t> {
+        const double scaled = v / epsilon;
+        if (!std::isfinite(scaled) ||
+            std::abs(scaled) >= static_cast<double>(
+                std::numeric_limits<std::int64_t>::max() / 2))
+            return std::nullopt;
+        return static_cast<std::int64_t>(std::llround(scaled));
+    };
+    const auto x = quantize(point.x);
+    const auto y = quantize(point.y);
+    const auto z = quantize(point.z);
+    if (!x || !y || !z) return std::nullopt;
+    return TopologyVertexKey{*x, *y, *z};
+}
+
+// At a wall/wall shared edge, each planar face supplies the horizontal
+// direction pointing from that edge INTO the face, not along the shared edge.
+// The XY-projected normal defines the wall tangent; the polygon centroid
+// chooses its correct sign. Vertical tilts cannot generate a fake XY turn.
+std::optional<Vec3> topology_wall_ray(
+    const FaceData& face, const Vec3& first, const Vec3& second
+)
+{
+    const double horizontal = std::hypot(face.normal.x, face.normal.y);
+    if (horizontal <= EPSILON) return std::nullopt;
+    const Vec3 tangent{-face.normal.y / horizontal,
+                        face.normal.x / horizontal, 0.0};
+    const Vec3 midpoint = multiply(add(first, second), 0.5);
+    double projected = 0.0;
+    for (const Vec3& point : face.outer_points)
+        projected += dot(subtract(point, midpoint), tangent);
+    if (std::abs(projected) <= EPSILON * face.outer_points.size())
+        return std::nullopt;
+    return projected > 0.0 ? tangent : multiply(tangent, -1.0);
+}
+
+// The corner graph is built from SHARED 3D FACE EDGES, not from the
+// accidental meeting of equal-Z wall-slice endpoints.
+std::vector<CornerVertex> topology_wall_corners_at_z(
+    const CellData& cell,
+    double slice_z,
+    double tolerance,
+    double geometry_epsilon
+)
+{
+    std::map<TopologyEdgeKey, std::vector<TopologyFaceEdge>> edge_faces;
+    const double z_epsilon = std::max(tolerance * 0.01, 1.0e-9);
+    const double edge_epsilon = std::max(geometry_epsilon, 1.0e-9);
+    const auto near_3d = [edge_epsilon](const Vec3& a, const Vec3& b) {
+        return length_squared(subtract(a, b)) <=
+               edge_epsilon * edge_epsilon;
+    };
+    for (std::size_t face_index = 0; face_index < cell.faces.size(); ++face_index)
+    {
+        const FaceData& face = cell.faces[face_index];
+        const double normal_xy = std::hypot(face.normal.x, face.normal.y);
+        if (normal_xy <= EPSILON ||
+            std::abs(face.normal.z) >
+                normal_xy * ROOM_WALL_SLICE_MAX_NORMAL_Z_XY_RATIO ||
+            face.outer_points.size() < 3)
+            continue;
+
+        const std::vector<Vec3>& ring = face.outer_points;
+        for (std::size_t i = 0; i < ring.size(); ++i)
+        {
+            const Vec3& first = ring[i];
+            const Vec3& second = ring[(i + 1) % ring.size()];
+            // A wall's nearly horizontal seam can change its vertical
+            // inclination but must not be treated as a plan-view corner.
+            if (std::abs(second.z - first.z) <= z_epsilon ||
+                slice_z < std::min(first.z, second.z) - z_epsilon ||
+                slice_z > std::max(first.z, second.z) + z_epsilon)
+                continue;
+
+            const auto first_key = topology_vertex_key(first, edge_epsilon);
+            const auto second_key = topology_vertex_key(second, edge_epsilon);
+            if (!first_key || !second_key || *first_key == *second_key)
+                continue;
+            const TopologyEdgeKey key = *first_key < *second_key ?
+                TopologyEdgeKey{*first_key, *second_key} :
+                TopologyEdgeKey{*second_key, *first_key};
+            edge_faces[key].push_back({face_index, first, second});
+        }
+    }
+
+    std::vector<CornerVertex> corners;
+    for (const auto& item : edge_faces)
+    {
+        const std::vector<TopologyFaceEdge>& shared = item.second;
+        // A manifold wall edge is incident to precisely two faces.
+        // Higher-degree/nonmanifold junctions are not guessed.
+        if (shared.size() != 2 ||
+            shared[0].face_index == shared[1].face_index)
+            continue;
+        const TopologyFaceEdge& first = shared[0];
+        const TopologyFaceEdge& second = shared[1];
+        if (!((near_3d(first.first, second.first) &&
+               near_3d(first.second, second.second)) ||
+              (near_3d(first.first, second.second) &&
+               near_3d(first.second, second.first))))
+            continue;
+
+        const double dz = first.second.z - first.first.z;
+        if (std::abs(dz) <= z_epsilon) continue;
+        const double fraction = (slice_z - first.first.z) / dz;
+        if (fraction < -1.0e-8 || fraction > 1.0 + 1.0e-8)
+            continue;
+        const Vec3 anchor = add(first.first,
+            multiply(subtract(first.second, first.first),
+                     std::max(0.0, std::min(1.0, fraction))));
+        const FaceData& face_a = cell.faces[first.face_index];
+        const FaceData& face_b = cell.faces[second.face_index];
+        const auto ray_a = topology_wall_ray(
+            face_a, first.first, first.second);
+        const auto ray_b = topology_wall_ray(
+            face_b, second.first, second.second);
+        if (!ray_a || !ray_b) continue;
+
+        Vec3 a = *ray_a;
+        Vec3 b = *ray_b;
+        const double n1 = std::hypot(face_a.normal.x, face_a.normal.y);
+        const double n2 = std::hypot(face_b.normal.x, face_b.normal.y);
+        if (n1 <= EPSILON || n2 <= EPSILON) continue;
+        const double normal_dot =
+            (face_a.normal.x * face_b.normal.x +
+             face_a.normal.y * face_b.normal.y) / (n1 * n2);
+        if (normal_dot > std::cos(
+                ROOM_REFLEX_NOISE_DEGREES * 3.14159265358979323846 / 180.0))
+        {
+            // Coplanar/seam edges bridge boundary continuity, but they
+            // accumulate ZERO turning even when their 3D tilt changes.
+            b = multiply(a, -1.0);
+        }
+        else if (normal_dot < -1.0 + 1.0e-8)
+        {
+            // Opposed normals are geometrically ambiguous as a Room corner.
+            continue;
+        }
+
+        // Two separate shared edges may hit the same slice XY coordinate
+        // (mesh seams). Keep the true face-pair incidences, not a synthetic
+        // degree-two corner made by XY-only merging.
+        corners.push_back({anchor, {a, b},
+                           {first.face_index, second.face_index}});
+    }
+    return corners;
+}
 } // namespace
 
 std::vector<ReferencePoint> find_reference_points_at_height(
@@ -1083,9 +1250,14 @@ std::vector<ReferencePoint> find_reference_points_at_height(
         wall_segments_at_z(cell, slice_z, tolerance);
     if (walls.empty()) return {};
 
-    // Collect shared endpoints of vertical slices. Only degree-two vertices
-    // define an unambiguous corner; seam vertices and junctions are excluded.
+    // Real 3D Face/Edge topology supplies the corner junctions for local
+    // Floor+1m candidate discovery. Keep the legacy slice-vertex construction
+    // ONLY for the already-validated State-Z debug graph snapshot.
     std::vector<CornerVertex> vertices;
+    if (floor_triangles)
+        vertices = topology_wall_corners_at_z(
+            cell, slice_z, tolerance, geometry_epsilon
+        );
     const auto add_ray = [&](const Vec3& point, const Vec3& toward) {
         const Vec3 direction = subtract(toward, point);
         const double edge_length = std::hypot(direction.x, direction.y);
@@ -1111,10 +1283,13 @@ std::vector<ReferencePoint> find_reference_points_at_height(
         }
         vertex->rays.push_back(unit);
     };
-    for (const WallSegment& wall : walls)
+    if (!floor_triangles)
     {
-        add_ray(wall.a, wall.b);
-        add_ray(wall.b, wall.a);
+        for (const WallSegment& wall : walls)
+        {
+            add_ray(wall.a, wall.b);
+            add_ray(wall.b, wall.a);
+        }
     }
 
     // Classify each degree-two corner at the LOCAL floor+1000mm slice into a signed exterior
@@ -1162,15 +1337,49 @@ std::vector<ReferencePoint> find_reference_points_at_height(
             if (near_xy(vertices[i].point, point, geometry_epsilon)) return i;
         return vertex_count;
     };
-    for (const WallSegment& wall : walls)
+    if (floor_triangles)
     {
-        const std::size_t a = index_of(wall.a);
-        const std::size_t b = index_of(wall.b);
-        if (a == b || a == vertex_count || b == vertex_count) continue;
-        if (std::find(neighbors[a].begin(), neighbors[a].end(), b) == neighbors[a].end())
-            neighbors[a].push_back(b);
-        if (std::find(neighbors[b].begin(), neighbors[b].end(), a) == neighbors[b].end())
-            neighbors[b].push_back(a);
+        // A face in an ordinary wall strip joins its two incident
+        // wall/wall junctions. Coplanar subdivision seams remain in
+        // the graph with zero turn; they do not create false corners.
+        std::vector<std::vector<std::size_t>> face_corners(cell.faces.size());
+        for (std::size_t i = 0; i < vertices.size(); ++i)
+            for (std::size_t face : vertices[i].incident_faces)
+                face_corners[face].push_back(i);
+
+        for (const std::vector<std::size_t>& indices : face_corners)
+        {
+            // Complex faces can meet 3+ junctions; connecting all pairs
+            // forces non-simple components into the strong-reflex fallback.
+            for (std::size_t x = 0; x < indices.size(); ++x)
+                for (std::size_t y = x + 1; y < indices.size(); ++y)
+                {
+                    const std::size_t a = indices[x];
+                    const std::size_t b = indices[y];
+                    if (a == b) continue;
+                    if (std::find(neighbors[a].begin(), neighbors[a].end(), b) ==
+                        neighbors[a].end())
+                        neighbors[a].push_back(b);
+                    if (std::find(neighbors[b].begin(), neighbors[b].end(), a) ==
+                        neighbors[b].end())
+                        neighbors[b].push_back(a);
+                }
+        }
+    }
+    else
+    {
+        for (const WallSegment& wall : walls)
+        {
+            const std::size_t a = index_of(wall.a);
+            const std::size_t b = index_of(wall.b);
+            if (a == b || a == vertex_count || b == vertex_count) continue;
+            if (std::find(neighbors[a].begin(), neighbors[a].end(), b) ==
+                neighbors[a].end())
+                neighbors[a].push_back(b);
+            if (std::find(neighbors[b].begin(), neighbors[b].end(), a) ==
+                neighbors[b].end())
+                neighbors[b].push_back(a);
+        }
     }
 
     // Accumulate signed curvature across actual connected wall segments.
