@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <map>
+#include <set>
 #include <numeric>
 #include <optional>
 #include <queue>
@@ -722,12 +724,276 @@ bool clear_path(
 
 } // namespace
 
-// Floor-triangle experiment: every floor face is already triangulated in the
-// native geometry snapshot (FaceData::triangles), including holes and slopes.
-// An eligible triangle's arithmetic centroid is moved exactly +1000 mm along
-// WORLD Z, not along the triangle normal. Only valid points inside the whole
-// CellSpace Solid are retained. Do not merge/prune seeds here: BEFORE must
-// show the complete candidate set, and AFTER onward owns graph reduction.
+// Floor-region experiment: use the SketchUp-triangulated Floor surface as
+// a constrained mesh. Greedily merge only edge-adjacent, exactly coplanar
+// triangles whose UNION has one simple, convex boundary. A hole always
+// leaves multiple boundary rings and can never pass this validation.
+// Adjacent coplanar SketchUp Faces can be merged too, provided their mesh
+// edges match. The original geometry and its triangles are never modified.
+namespace
+{
+using FloorVertexKey = std::array<std::int64_t, 3>;
+using FloorEdgeKey = std::pair<FloorVertexKey, FloorVertexKey>;
+
+struct FloorTriangle
+{
+    std::array<Vec3, 3> vertices;
+    std::array<FloorVertexKey, 3> keys;
+    Vec3 outward_normal;
+    Vec3 centroid;
+    double area = 0.0;
+    bool mergeable = false;
+};
+
+struct FloorRegion
+{
+    std::vector<std::size_t> triangles;
+    Vec3 centroid;
+    double area = 0.0;
+    bool active = true;
+};
+
+std::optional<FloorVertexKey> floor_vertex_key(
+    const Vec3& p, double epsilon
+)
+{
+    const auto quantize = [epsilon](double coordinate)
+        -> std::optional<std::int64_t>
+    {
+        const double scaled = coordinate / epsilon;
+        if (!std::isfinite(scaled) ||
+            std::abs(scaled) > static_cast<double>(
+                std::numeric_limits<std::int64_t>::max() / 4))
+            return std::nullopt;
+        return static_cast<std::int64_t>(std::llround(scaled));
+    };
+    const auto x = quantize(p.x);
+    const auto y = quantize(p.y);
+    const auto z = quantize(p.z);
+    if (!x || !y || !z) return std::nullopt;
+    return FloorVertexKey{*x, *y, *z};
+}
+
+FloorEdgeKey floor_edge_key(
+    const FloorVertexKey& a, const FloorVertexKey& b
+)
+{
+    return a < b ? FloorEdgeKey{a, b} : FloorEdgeKey{b, a};
+}
+
+// Validate the ACTUAL triangle union, not its convex hull. In particular:
+//  - every boundary vertex has degree two;
+//  - exactly one boundary ring must consume every boundary edge;
+//  - all ring turns must be convex in the Face plane;
+//  - polygon area must match the sum of original triangle areas;
+//  - every triangle must be coplanar and have matching outward normals.
+// An unmerged single triangle never needs this reconstruction.
+bool convex_floor_union(
+    const std::vector<std::size_t>& members,
+    const std::vector<FloorTriangle>& triangles,
+    double planar_tolerance,
+    double tolerance
+)
+{
+    if (members.size() < 2) return false;
+    const FloorTriangle& first = triangles[members.front()];
+    if (!first.mergeable) return false;
+    const Vec3 reference_normal = first.outward_normal;
+    const Vec3 plane_origin = first.vertices[0];
+    double original_area = 0.0;
+
+    std::map<FloorEdgeKey, std::size_t> edge_counts;
+    std::map<FloorVertexKey, Vec3> vertex_positions;
+    for (const std::size_t id : members)
+    {
+        const FloorTriangle& t = triangles[id];
+        if (!t.mergeable ||
+            dot(t.outward_normal, reference_normal) < 1.0 - 1.0e-9)
+            return false;
+        original_area += t.area;
+        for (std::size_t v=0; v<3; ++v)
+        {
+            if (std::abs(dot(subtract(t.vertices[v], plane_origin),
+                             reference_normal)) > planar_tolerance)
+                return false;
+            vertex_positions.emplace(t.keys[v], t.vertices[v]);
+            const FloorEdgeKey key = floor_edge_key(
+                t.keys[v], t.keys[(v+1)%3]);
+            const std::size_t count = ++edge_counts[key];
+            if (count > 2) return false;
+        }
+    }
+    std::map<FloorVertexKey, std::vector<FloorVertexKey>> boundary;
+    std::size_t edge_count = 0;
+    for (const auto& entry : edge_counts)
+    {
+        if (entry.second != 1) continue;
+        const FloorVertexKey& a = entry.first.first;
+        const FloorVertexKey& b = entry.first.second;
+        boundary[a].push_back(b);
+        boundary[b].push_back(a);
+        ++edge_count;
+    }
+    if (edge_count < 3 || boundary.size() != edge_count)
+        return false;
+    for (const auto& vertex : boundary)
+        if (vertex.second.size() != 2 ||
+            vertex.second[0] == vertex.second[1])
+            return false;
+
+    // Walk just ONE boundary ring. A Hole produces a second ring and
+    // fails the all-edges-consumed check below.
+    std::vector<FloorVertexKey> ring;
+    ring.reserve(edge_count);
+    const FloorVertexKey start = boundary.begin()->first;
+    FloorVertexKey current = start;
+    std::optional<FloorVertexKey> previous;
+    for (std::size_t step=0; step<edge_count; ++step)
+    {
+        ring.push_back(current);
+        const auto& adjacent = boundary.at(current);
+        const FloorVertexKey next =
+            previous && adjacent[0] == *previous ?
+                adjacent[1] : adjacent[0];
+        previous = current;
+        current = next;
+        if (current == start && step+1 < edge_count)
+            return false;
+    }
+    if (current != start || ring.size() != boundary.size())
+        return false;
+
+    // Signed area and convexity are measured in the common 3D Floor plane.
+    double twice_area = 0.0;
+    for (std::size_t i=0; i<ring.size(); ++i)
+    {
+        const Vec3 a = subtract(vertex_positions.at(ring[i]), plane_origin);
+        const Vec3 b = subtract(
+            vertex_positions.at(ring[(i+1)%ring.size()]), plane_origin);
+        twice_area += dot(cross(a,b), reference_normal);
+    }
+    const double signed_area = 0.5 * twice_area;
+    const double area_tolerance =
+        std::max(original_area * 1.0e-7, tolerance * tolerance);
+    if (std::abs(signed_area) <= area_tolerance ||
+        std::abs(std::abs(signed_area)-original_area) > area_tolerance)
+        return false;
+    const double orientation = signed_area > 0.0 ? 1.0 : -1.0;
+
+    for (std::size_t i=0; i<ring.size(); ++i)
+    {
+        const Vec3& a = vertex_positions.at(ring[i]);
+        const Vec3& b = vertex_positions.at(ring[(i+1)%ring.size()]);
+        const Vec3& c = vertex_positions.at(ring[(i+2)%ring.size()]);
+        const Vec3 ab = subtract(b,a);
+        const Vec3 bc = subtract(c,b);
+        const double len_ab = length(ab);
+        const double len_bc = length(bc);
+        if (len_ab <= planar_tolerance || len_bc <= planar_tolerance)
+            return false;
+        const double turn = orientation * dot(cross(ab,bc), reference_normal);
+        if (turn < -planar_tolerance * std::max(len_ab,len_bc))
+            return false;
+    }
+    return true;
+}
+
+std::vector<FloorRegion> merge_convex_floor_triangles(
+    const std::vector<FloorTriangle>& triangles,
+    double planar_tolerance,
+    double tolerance
+)
+{
+    std::vector<FloorRegion> regions;
+    regions.reserve(triangles.size() * 2);
+    for (std::size_t i=0; i<triangles.size(); ++i)
+        regions.push_back({{i}, triangles[i].centroid,
+                           triangles[i].area, true});
+
+    // Candidate adjacency is based ONLY on true shared triangle edges.
+    // A boundary of a Hole has no opposite triangle, thus no candidate pair.
+    std::map<FloorEdgeKey, std::vector<std::size_t>> edge_owners;
+    for (std::size_t i=0; i<triangles.size(); ++i)
+    {
+        const FloorTriangle& t = triangles[i];
+        if (!t.mergeable) continue;
+        for (std::size_t j=0; j<3; ++j)
+            edge_owners[floor_edge_key(
+                t.keys[j], t.keys[(j+1)%3])].push_back(i);
+    }
+    std::vector<std::set<std::size_t>> adjacency(triangles.size());
+    std::queue<std::pair<std::size_t,std::size_t>> pending;
+    for (const auto& entry : edge_owners)
+    {
+        const auto& owners = entry.second;
+        // Non-manifold edges are not safe for region merging.
+        if (owners.size() != 2 || owners[0] == owners[1])
+            continue;
+        const std::size_t a = std::min(owners[0], owners[1]);
+        const std::size_t b = std::max(owners[0], owners[1]);
+        if (adjacency[a].insert(b).second)
+        {
+            adjacency[b].insert(a);
+            pending.push({a,b});
+        }
+    }
+
+    // Greedy convex partition; failed merges preserve BOTH old regions.
+    // When either region grows, its new union is rechecked from scratch.
+    while (!pending.empty())
+    {
+        const auto [a,b] = pending.front();
+        pending.pop();
+        if (!regions[a].active || !regions[b].active ||
+            !adjacency[a].count(b))
+            continue;
+        const FloorRegion& ra = regions[a];
+        const FloorRegion& rb = regions[b];
+        std::vector<std::size_t> combined = ra.triangles;
+        combined.insert(combined.end(), rb.triangles.begin(),
+                        rb.triangles.end());
+        if (!convex_floor_union(combined, triangles,
+                                planar_tolerance, tolerance))
+            continue;
+
+        const double total_area = ra.area + rb.area;
+        const Vec3 weighted = multiply(add(
+            multiply(ra.centroid, ra.area),
+            multiply(rb.centroid, rb.area)), 1.0 / total_area);
+        const std::size_t merged_id = regions.size();
+        regions.push_back({std::move(combined), weighted, total_area, true});
+        adjacency.emplace_back();
+
+        // Copy neighbors BEFORE rewiring; the just-created region is
+        // allowed to grow with either constituent's former neighbors.
+        std::set<std::size_t> next = adjacency[a];
+        next.insert(adjacency[b].begin(), adjacency[b].end());
+        next.erase(a);
+        next.erase(b);
+        regions[a].active = false;
+        regions[b].active = false;
+        for (const std::size_t other : next)
+        {
+            adjacency[other].erase(a);
+            adjacency[other].erase(b);
+            if (!regions[other].active) continue;
+            adjacency[merged_id].insert(other);
+            adjacency[other].insert(merged_id);
+            pending.push({std::min(merged_id,other),
+                          std::max(merged_id,other)});
+        }
+        adjacency[a].clear();
+        adjacency[b].clear();
+    }
+    return regions;
+}
+
+} // namespace
+
+// Per convex Floor-region: area-weighted surface centroid + 1000 mm on
+// world Z. If a merged region's elevated centroid is not inside the
+// Solid, fall back to its original triangles, preserving valid references.
+// Native does not pre-merge final graph nodes; AFTER continues to do that.
 std::vector<ReferencePoint> find_reference_points(
     const CellData& cell,
     const Vec3& state_point,
@@ -741,48 +1007,106 @@ std::vector<ReferencePoint> find_reference_points(
     TriangleBvh bvh(solid_triangles);
     if (bvh.empty()) return {};
 
-    std::vector<ReferencePoint> points;
-    points.reserve(std::min<std::size_t>(
-        solid_triangles.size() * 2, MAX_ROOM_REFERENCE_DEBUG_POINTS));
-
-    const double minimum_state_distance_squared = tolerance * tolerance;
-    std::size_t accepted = 0;
-
+    const double span = std::max({
+        cell.bounds.maximum.x - cell.bounds.minimum.x,
+        cell.bounds.maximum.y - cell.bounds.minimum.y,
+        cell.bounds.maximum.z - cell.bounds.minimum.z
+    });
+    const double edge_tolerance = std::max({
+        tolerance * 0.05, span * 1.0e-10, 1.0e-8
+    });
+    const double planar_tolerance = std::max(tolerance * 0.05, 1.0e-8);
+    std::vector<FloorTriangle> floor_triangles;
     for (const FaceData& face : cell.faces)
     {
         const double normal_length = length(face.normal);
         if (!std::isfinite(normal_length) || normal_length <= EPSILON ||
             face.normal.z > -ROOM_FLOOR_MIN_NEGATIVE_NORMAL_Z * normal_length)
             continue;
-
+        const Vec3 unit_normal = multiply(face.normal, 1.0/normal_length);
         for (const Triangle& triangle : face.triangles)
         {
-            // Degenerate triangles do not have a usable floor surface.
             const Vec3 ab = subtract(triangle.points[1], triangle.points[0]);
             const Vec3 ac = subtract(triangle.points[2], triangle.points[0]);
-            if (length_squared(cross(ab, ac)) <= EPSILON) continue;
+            const double area = 0.5 * length(cross(ab,ac));
+            if (!std::isfinite(area) || area <= EPSILON) continue;
+            const Vec3 centroid = multiply(add(add(
+                triangle.points[0], triangle.points[1]),
+                triangle.points[2]), 1.0/3.0);
+            FloorTriangle candidate;
+            candidate.vertices = triangle.points;
+            candidate.outward_normal = unit_normal;
+            candidate.centroid = centroid;
+            candidate.area = area;
+            candidate.mergeable = true;
+            for (std::size_t i=0; i<3; ++i)
+            {
+                const auto key = floor_vertex_key(
+                    triangle.points[i], edge_tolerance);
+                if (!key)
+                {
+                    candidate.mergeable = false;
+                    break;
+                }
+                candidate.keys[i] = *key;
+            }
+            if (candidate.mergeable &&
+                (candidate.keys[0] == candidate.keys[1] ||
+                 candidate.keys[1] == candidate.keys[2] ||
+                 candidate.keys[2] == candidate.keys[0]))
+                candidate.mergeable = false;
+            floor_triangles.push_back(std::move(candidate));
+        }
+    }
+    if (floor_triangles.empty()) return {};
 
-            Vec3 point = multiply(add(add(triangle.points[0],
-                                          triangle.points[1]),
-                                          triangle.points[2]), 1.0 / 3.0);
-            point.z += ROOM_REFERENCE_FLOOR_OFFSET;
-            if (!std::isfinite(point.x) || !std::isfinite(point.y) ||
-                !std::isfinite(point.z) ||
-                !bvh_inside(bvh, point, tolerance) ||
-                bvh.nearest_distance(point) <= tolerance)
-                continue;
+    const std::vector<FloorRegion> regions = merge_convex_floor_triangles(
+        floor_triangles, planar_tolerance, tolerance);
+    std::vector<std::size_t> survivors;
+    for (std::size_t i=0; i<regions.size(); ++i)
+        if (regions[i].active) survivors.push_back(i);
+    // Deterministic order independent of the order of greedy merges.
+    std::sort(survivors.begin(), survivors.end(),
+        [&](std::size_t a, std::size_t b) {
+            return *std::min_element(regions[a].triangles.begin(),
+                                      regions[a].triangles.end()) <
+                   *std::min_element(regions[b].triangles.begin(),
+                                      regions[b].triangles.end());
+        });
 
-            // Face is the original green 1st-stage diagnostic marker.
-            // Final is the SAME spatial candidate passed into BEFORE.
-            // Only the State position itself is represented by State, to
-            // avoid adding two coincident graph nodes.
-            points.push_back({point, ReferencePointKind::Face});
-            if (length_squared(subtract(point, state_point)) >
-                minimum_state_distance_squared)
-                points.push_back({point, ReferencePointKind::Final});
-            ++accepted;
-            if (accepted >= MAX_ROOM_REFERENCE_POINTS)
-                return points;
+    std::vector<ReferencePoint> points;
+    points.reserve(std::min<std::size_t>(
+        survivors.size() * 2, MAX_ROOM_REFERENCE_DEBUG_POINTS));
+    std::size_t accepted = 0;
+    const auto add_region_point = [&](Vec3 point) -> bool
+    {
+        point.z += ROOM_REFERENCE_FLOOR_OFFSET;
+        if (!std::isfinite(point.x) || !std::isfinite(point.y) ||
+            !std::isfinite(point.z) ||
+            !bvh_inside(bvh, point, tolerance) ||
+            bvh.nearest_distance(point) <= tolerance)
+            return false;
+        points.push_back({point, ReferencePointKind::Face});
+        // State owns its position; do not duplicate it as a Final node.
+        if (length_squared(subtract(point, state_point)) >
+            tolerance * tolerance)
+            points.push_back({point, ReferencePointKind::Final});
+        ++accepted;
+        return true;
+    };
+
+    for (const std::size_t region_id : survivors)
+    {
+        if (accepted >= MAX_ROOM_REFERENCE_POINTS) break;
+        const FloorRegion& region = regions[region_id];
+        if (add_region_point(region.centroid)) continue;
+        // No successful original triangle is sacrificed by a newly
+        // invalid merged-region centroid (ceiling/slab overhang etc.).
+        if (region.triangles.size() <= 1) continue;
+        for (const std::size_t triangle_id : region.triangles)
+        {
+            if (accepted >= MAX_ROOM_REFERENCE_POINTS) break;
+            add_region_point(floor_triangles[triangle_id].centroid);
         }
     }
     return points;
