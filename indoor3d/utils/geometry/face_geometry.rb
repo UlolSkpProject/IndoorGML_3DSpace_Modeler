@@ -113,8 +113,10 @@ module ULOL
             end
             next if points.length < 3
 
-            normal = face.normal.transform(transformation)
-            normal.normalize!
+            # Face.plane is authored by SketchUp. Transform the PLANE,
+            # not its normal alone: nonuniform scales require the
+            # inverse-transpose normal transform handled by SketchUp.
+            plane = transformation * face.plane
             triangles = face_mesh_triangles(face, transformation).map do |triangle|
               triangle.map { |point| [point.x.to_f, point.y.to_f, point.z.to_f] }
             end
@@ -126,7 +128,7 @@ module ULOL
             end
             {
               points: points,
-              normal: [normal.x.to_f, normal.y.to_f, normal.z.to_f],
+              plane: plane.map(&:to_f),
               inner_loops: inner_loops,
               triangles: triangles
             }

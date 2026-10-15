@@ -20,6 +20,7 @@ constexpr std::uint64_t INPUT_VERSION_V1 = 1;
 constexpr std::uint64_t INPUT_VERSION_V2 = 2;
 constexpr std::uint64_t INPUT_VERSION_V3 = 3;
 constexpr std::uint64_t INPUT_VERSION_V4 = 4;
+constexpr std::uint64_t INPUT_VERSION_V5 = 5;
 constexpr std::uint64_t RESULT_VERSION = 1;
 constexpr std::uint64_t STATE_RESULT_VERSION = 9;
 constexpr std::size_t INPUT_HEADER_SIZE = 32;
@@ -27,6 +28,7 @@ constexpr std::size_t CELL_FIXED_SIZE_V1 = 80;
 constexpr std::size_t CELL_FIXED_SIZE_V2 = 96;
 constexpr std::size_t CELL_FIXED_SIZE_V3 = 104;
 constexpr std::size_t FACE_FIXED_SIZE = 56;
+constexpr std::size_t FACE_FIXED_SIZE_V5 = 64;
 constexpr std::size_t PAIR_FIXED_SIZE = 40;
 constexpr std::size_t CANDIDATE_SIZE = 56;
 
@@ -146,7 +148,9 @@ FaceData parse_face(const std::uint8_t* data, std::size_t size, std::uint64_t ve
 {
     Reader reader(data, size);
     const std::size_t record_size = checked_size(reader.read_u64(), "face record size");
-    if (record_size != size || record_size < FACE_FIXED_SIZE)
+    const std::size_t minimum_size =
+        version >= INPUT_VERSION_V5 ? FACE_FIXED_SIZE_V5 : FACE_FIXED_SIZE;
+    if (record_size != size || record_size < minimum_size)
     {
         throw std::invalid_argument("face record size is invalid");
     }
@@ -164,7 +168,24 @@ FaceData parse_face(const std::uint8_t* data, std::size_t size, std::uint64_t ve
     }
 
     FaceData face;
-    face.normal = read_vec3(reader, "face normal");
+    if (version >= INPUT_VERSION_V5)
+    {
+        const Vec3 coefficients=read_vec3(reader, "face plane normal");
+        const double d=reader.read_double();
+        require_finite(d, "face plane D");
+        const double squared=coefficients.x*coefficients.x+
+            coefficients.y*coefficients.y+coefficients.z*coefficients.z;
+        if (!std::isfinite(squared) || squared<=1.0e-24)
+            throw std::invalid_argument("face plane normal is invalid");
+        const double scale=1.0/std::sqrt(squared);
+        face.normal={coefficients.x*scale,coefficients.y*scale,coefficients.z*scale};
+        face.plane={face.normal,d*scale};
+        face.has_plane=true;
+    }
+    else
+    {
+        face.normal = read_vec3(reader, "face normal");
+    }
 
     if (outer_count > reader.remaining() / 24)
     {
@@ -298,7 +319,9 @@ CellData parse_cell(
         cell.category = static_cast<CellSpaceCategory>(raw_category);
     }
 
-    if (face_count > reader.remaining() / FACE_FIXED_SIZE)
+    const std::size_t minimum_face_size =
+        version >= INPUT_VERSION_V5 ? FACE_FIXED_SIZE_V5 : FACE_FIXED_SIZE;
+    if (face_count > reader.remaining() / minimum_face_size)
     {
         throw std::invalid_argument("face count exceeds cell record");
     }
@@ -311,7 +334,7 @@ CellData parse_cell(
         }
         Reader size_reader(reader.current(), reader.remaining());
         const std::size_t face_size = checked_size(size_reader.read_u64(), "face record size");
-        if (face_size < FACE_FIXED_SIZE || face_size > reader.remaining())
+        if (face_size < minimum_face_size || face_size > reader.remaining())
         {
             throw std::invalid_argument("face record boundary is invalid");
         }
@@ -359,7 +382,8 @@ std::vector<CellData> parse_input_batch(const std::uint8_t* data, std::size_t si
     if (version != INPUT_VERSION_V1 &&
         version != INPUT_VERSION_V2 &&
         version != INPUT_VERSION_V3 &&
-        version != INPUT_VERSION_V4)
+        version != INPUT_VERSION_V4 &&
+        version != INPUT_VERSION_V5)
     {
         throw std::invalid_argument("unsupported adjacency input version");
     }

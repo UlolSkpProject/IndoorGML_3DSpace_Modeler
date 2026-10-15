@@ -8,7 +8,7 @@ module ULOL
         OUTPUT_MAGIC = "IGMLRES\0".b.freeze
         STATE_OUTPUT_MAGIC = "IGMLSTA\0".b.freeze
         PROTOCOL_VERSION = 1
-        GEOMETRY_PROTOCOL_VERSION = 4
+        GEOMETRY_PROTOCOL_VERSION = 5
         REFERENCE_POINTS_RESULT_VERSION = 2
         STATE_RESULT_VERSION = 9
         TRIANGLE_RESULT_VERSION = 6
@@ -21,6 +21,7 @@ module ULOL
         CELL_FIXED_SIZE = 80
         GEOMETRY_CELL_FIXED_SIZE = 104
         FACE_FIXED_SIZE = 56
+        PLANE_FACE_FIXED_SIZE = 64
         VEC3_SIZE = 24
         TRIANGLE_SIZE = 72
 
@@ -482,7 +483,7 @@ module ULOL
         def encode_input(snapshots)
           snapshots = Array(snapshots)
           buffer = String.new(
-            capacity: encoded_input_size(snapshots, CELL_FIXED_SIZE, include_inner_loops: false),
+            capacity: encoded_input_size(snapshots, CELL_FIXED_SIZE, include_inner_loops: false, include_plane: false),
             encoding: Encoding::BINARY
           )
           buffer << INPUT_MAGIC
@@ -500,7 +501,7 @@ module ULOL
           raise ProtocolError, 'State option count does not match snapshots' unless state_options.length == snapshots.length
 
           buffer = String.new(
-            capacity: encoded_input_size(snapshots, GEOMETRY_CELL_FIXED_SIZE, include_inner_loops: true),
+            capacity: encoded_input_size(snapshots, GEOMETRY_CELL_FIXED_SIZE, include_inner_loops: true, include_plane: true),
             encoding: Encoding::BINARY
           )
           buffer << INPUT_MAGIC
@@ -729,25 +730,25 @@ module ULOL
           }
         end
 
-        def encoded_input_size(snapshots, cell_fixed_size, include_inner_loops:)
+        def encoded_input_size(snapshots, cell_fixed_size, include_inner_loops:, include_plane:)
           total = INPUT_HEADER_SIZE
           snapshots.each do |snapshot|
             faces = Array(Hash(snapshot)[:faces])
             total += cell_fixed_size
             faces.each do |face|
-              total += encoded_face_size(face, include_inner_loops: include_inner_loops)
+              total += encoded_face_size(face, include_inner_loops: include_inner_loops, include_plane: include_plane)
             end
           end
           total
         end
         private_class_method :encoded_input_size
 
-        def encoded_face_size(face, include_inner_loops: false)
+        def encoded_face_size(face, include_inner_loops: false, include_plane: false)
           face = Hash(face)
           points = Array(face[:points])
           triangles = Array(face[:triangles])
           holes = include_inner_loops ? Array(face[:inner_loops]) : []
-          FACE_FIXED_SIZE +
+          (include_plane ? PLANE_FACE_FIXED_SIZE : FACE_FIXED_SIZE) +
             (points.length * VEC3_SIZE) +
             (triangles.length * TRIANGLE_SIZE) +
             holes.sum { |loop| 8 + Array(loop).length * VEC3_SIZE }
@@ -776,7 +777,7 @@ module ULOL
           append_pack(buffer, [record_size, cell_index, faces.length, 0], 'Q<Q<Q<Q<')
           append_vec3(buffer, minimum, 'cell bounds min')
           append_vec3(buffer, maximum, 'cell bounds max')
-          faces.each_with_index { |face, face_index| append_face(buffer, face, cell_index, face_index, include_inner_loops: false) }
+          faces.each_with_index { |face, face_index| append_face(buffer, face, cell_index, face_index, include_inner_loops: false, include_plane: false) }
         end
         private_class_method :append_cell_v1
 
@@ -795,7 +796,7 @@ module ULOL
           category = encode_cell_category(option[:category_code])
 
           record_size = GEOMETRY_CELL_FIXED_SIZE
-          faces.each { |face| record_size += encoded_face_size(face, include_inner_loops: true) }
+          faces.each { |face| record_size += encoded_face_size(face, include_inner_loops: true, include_plane: true) }
 
           append_pack(
             buffer,
@@ -806,7 +807,7 @@ module ULOL
           append_vec3(buffer, maximum, 'cell bounds max')
           append_pack(buffer, [fixed_z], 'E')
           append_pack(buffer, [category], 'Q<')
-          faces.each_with_index { |face, face_index| append_face(buffer, face, cell_index, face_index, include_inner_loops: true) }
+          faces.each_with_index { |face, face_index| append_face(buffer, face, cell_index, face_index, include_inner_loops: true, include_plane: true) }
         end
         private_class_method :append_cell_v3
 
@@ -822,15 +823,28 @@ module ULOL
         end
         private_class_method :encode_cell_category
 
-        def append_face(buffer, face, cell_index, face_index, include_inner_loops:)
+        def append_face(buffer, face, cell_index, face_index, include_inner_loops:, include_plane:)
           face = Hash(face)
-          normal = Array(face.fetch(:normal))
+          # Legacy V1 sends a 3-vector. Geometry V5 sends the full
+          # SketchUp-authored plane; never recompute D from a vertex.
+          plane = include_plane ? Array(face.fetch(:plane)) : nil
+          normal = include_plane ? nil : Array(face[:normal] || Array(face.fetch(:plane)).first(3))
           points = Array(face[:points])
           triangles = Array(face[:triangles])
           holes = include_inner_loops ? Array(face[:inner_loops]) : []
           face_label = "cell #{cell_index} face #{face_index}"
 
-          validate_vec3!(normal, "#{face_label} normal")
+          if include_plane
+            unless plane.length == 4 && plane.all? { |value| value.is_a?(Numeric) && value.to_f.finite? }
+              raise ProtocolError, "#{face_label} plane must have four finite coefficients"
+            end
+            a, b, c, = plane.map(&:to_f)
+            if a * a + b * b + c * c <= 1.0e-24
+              raise ProtocolError, "#{face_label} plane normal is degenerate"
+            end
+          else
+            validate_vec3!(normal, "#{face_label} normal")
+          end
           if points.length < 3
             raise ProtocolError, "#{face_label} has fewer than 3 outer points"
           end
@@ -840,9 +854,13 @@ module ULOL
             end
           end
 
-          record_size = encoded_face_size(face, include_inner_loops: include_inner_loops)
+          record_size = encoded_face_size(face, include_inner_loops: include_inner_loops, include_plane: include_plane)
           append_pack(buffer, [record_size, points.length, triangles.length, holes.length], 'Q<Q<Q<Q<')
-          append_vec3(buffer, normal, "#{face_label} normal")
+          if include_plane
+            append_pack(buffer, plane.map(&:to_f), 'E4')
+          else
+            append_vec3(buffer, normal, "#{face_label} normal")
+          end
 
           points.each { |point| append_vec3(buffer, point, "#{face_label} outer point") }
           holes.each_with_index do |loop, loop_index|

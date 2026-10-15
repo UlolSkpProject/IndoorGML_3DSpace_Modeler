@@ -30,11 +30,23 @@ struct Triangle
     std::array<Vec3, 3> points;
 };
 
+struct Plane
+{
+    // Ax + By + Cz + D = 0; coefficients are in the SAME world/parent
+    // coordinates as the transformed boundary vertices.
+    Vec3 normal;
+    double d = 0.0;
+};
+
 struct FaceData
 {
     // Shared immutable-by-convention source geometry. Consumers of
     // partitioning use const FaceData&, never mutate this mesh or loops.
+    // Derived from plane for Geometry V5 (not sent separately).
+    // Kept for Exact Adjacency's existing normal comparisons.
     Vec3 normal;
+    Plane plane;
+    bool has_plane = false; // Legacy V1-V4 and synthetic fixtures
     std::vector<Vec3> outer_points;
     std::vector<std::vector<Vec3>> inner_loops;
     std::vector<Triangle> triangles;
