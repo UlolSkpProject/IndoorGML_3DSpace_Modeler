@@ -319,6 +319,13 @@ module ULOL
               next unless cell_space&.valid?
 
               cell_id = cell_space.id
+              # AFTER protects the State, certified ring nodes, their
+              # external gateways and explicitly marked semantic nodes.
+              # Reuse that exact protection policy for debug colors rather
+              # than reimplementing it in the Overlay renderer.
+              before = @debug_reference_graph_by_cell_id&.[](cell_id)
+              protected_lookup, protected_positions =
+                protected_reference_visuals_for(cell_id, before)
               # An unavailable Native LOS graph must never masquerade as an
               # internal graph by falling back to old candidate diagnostics.
               next if selected_mode == :internal && !room_internal_graph_for(cell_id)
@@ -335,15 +342,28 @@ module ULOL
                           when :connected then room_internal_connected_graph_for(cell_id)
                           end
               if displayed
-                # After mode shows only retained black Final points. Their
-                # native purple/red source diagnostics remain in originals.
-                Array(displayed[:nodes]).drop(1).each do |node|
-                  by_kind[4] << node[:point]
+                # Existing Stage overlays retain their usual Final points.
+                # Kind 5 identifies protected Reference Points (magenta X);
+                # State index 0 keeps its dedicated State overlay.
+                displayed_origins = Array(displayed[:original_indices])
+                Array(displayed[:nodes]).each_with_index do |node, index|
+                  next if index.zero?
+                  id = displayed_origins.empty? ? index : displayed_origins[index]
+                  protected = node[:protected] ||
+                              %i[door transition junction].include?(node[:semantic_role]) ||
+                              (!id.nil? && protected_lookup[id])
+                  by_kind[protected ? 5 : 4] << node[:point]
                 end
               else
                 Array(originals[cell_id]).each do |entry|
                   if entry.is_a?(Hash)
-                    by_kind[entry[:kind].to_i] << entry[:point]
+                    kind = entry[:kind].to_i
+                    point = entry[:point]
+                    if kind == 4 && point &&
+                       protected_positions[[point.x, point.y, point.z]]
+                      kind = 5
+                    end
+                    by_kind[kind] << point
                   else
                     by_kind[0] << entry # Legacy in-memory data
                   end
@@ -354,6 +374,32 @@ module ULOL
           end
 
           private
+
+          # Immutable BEFORE graphs: avoid rebuilding protected adjacency
+          # sets on every SketchUp Overlay frame.
+          def protected_reference_visuals_for(cell_id, source)
+            return [{}, {}] unless source
+
+            cache = (@debug_reference_protection_visuals_by_cell_id ||= {})
+            entry = cache[cell_id]
+            return [entry[:ids], entry[:positions]] if entry && entry[:source].equal?(source)
+
+            protected_ids = ReferenceGraphSimplifier.protected_originals(source, [])
+            lookup = protected_ids.to_h { |id| [id, true] }.freeze
+            origins = Array(source[:original_indices])
+            positions = {}
+            Array(source[:nodes]).each_with_index do |node, index|
+              next if index.zero?
+              id = origins.empty? ? index : origins[index]
+              next unless lookup[id]
+
+              point = node[:point]
+              positions[[point.x, point.y, point.z].freeze] = true
+            end
+            positions.freeze
+            cache[cell_id] = { source: source, ids: lookup, positions: positions }.freeze
+            [lookup, positions]
+          end
 
           def cell_space_lifecycle_service
             @cell_space_lifecycle_service ||= CellSpaceLifecycleService.new(
@@ -719,6 +765,7 @@ module ULOL
 
             # Invalidate the lazy reduced cache only when Native supplies
             # new geometry. Before mode remains at its prior processing cost.
+            @debug_reference_protection_visuals_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_simplified_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_collapsed_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_optimized_by_cell_id&.delete(cell_space.id)
@@ -728,6 +775,7 @@ module ULOL
           rescue StandardError
             # Debug rendering must never block the State/CellSpace lifecycle.
             @debug_reference_graph_by_cell_id&.delete(cell_space.id)
+            @debug_reference_protection_visuals_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_simplified_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_collapsed_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_optimized_by_cell_id&.delete(cell_space.id)
@@ -919,6 +967,7 @@ module ULOL
 
             @debug_reference_points_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_by_cell_id&.delete(cell_space.id)
+            @debug_reference_protection_visuals_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_simplified_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_collapsed_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_optimized_by_cell_id&.delete(cell_space.id)
