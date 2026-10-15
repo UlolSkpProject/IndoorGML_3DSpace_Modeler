@@ -61,6 +61,54 @@ NormalizedFace normal_face(const std::vector<Vec3>& outer,
     require(result.face.has_value(),"Test polygon preparation failed");
     return *result.face;
 }
+void test_exit_code_failure_stage_distinctions()
+{
+    const auto valid=box();
+    require(locate_reference_before(valid,0.0).exit_code==
+                StateExitCode::InvalidInput,
+            "Nonpositive tolerance must report invalid input");
+
+    auto no_floor=valid;
+    for (FaceData& f:no_floor.faces)f.normal={0,0,1};
+    const auto floorless=locate_reference_before(no_floor,0.001);
+    require(floorless.exit_code==StateExitCode::NoFloorFaces &&
+            floorless.diagnostics.floor_faces==0,
+            "No downward Floor must return NO_FLOOR");
+
+    auto invalid_floor=valid;
+    invalid_floor.faces[0].outer_points.resize(2);
+    const auto bad_floor=locate_reference_before(invalid_floor,0.001);
+    require(bad_floor.exit_code==StateExitCode::FloorPreparationFailed &&
+            bad_floor.diagnostics.floor_faces==1 &&
+            bad_floor.diagnostics.prepared_faces==0,
+            "Malformed Floor should not be obscured by Solid BVH creation");
+
+    auto bad_solid=valid;
+    bad_solid.faces[2].outer_points.resize(2);
+    const auto invalid_solid=locate_reference_before(bad_solid,0.001);
+    require(invalid_solid.exit_code==StateExitCode::InvalidSolidGeometry &&
+            invalid_solid.diagnostics.prepared_faces==1,
+            "Invalid nonfloor Face must report the Solid geometry stage");
+
+    const auto outside=locate_reference_before(box(10,20),0.001);
+    require(outside.exit_code==StateExitCode::OutsideSolid &&
+            outside.diagnostics.reference_candidates>=1 &&
+            outside.diagnostics.rejected_outside>=1,
+            "1000 mm above a low ceiling should report OUTSIDE_SOLID");
+
+    const auto near_ceiling=locate_reference_before(
+        box(10,1000.0/25.4+0.0005),0.001);
+    require(near_ceiling.exit_code==StateExitCode::InsufficientClearance &&
+            near_ceiling.diagnostics.rejected_clearance>=1,
+            "Boundary-near reference should report insufficient clearance");
+
+    const auto success=locate_reference_before(valid,0.001);
+    require(success.exit_code==StateExitCode::Success &&
+            success.state_point.has_value() &&
+            success.diagnostics.accepted_references>=1,
+            "Existing successful Cell must remain exit code 0");
+}
+
 void test_box_face_bvh_without_triangles()
 {
     const CellData cell=box();
@@ -178,6 +226,7 @@ void test_hole_queue_and_failed_diagnostics()
 }
 int main()
 {
+    test_exit_code_failure_stage_distinctions();
     test_box_face_bvh_without_triangles();
     test_single_convex_floor_state_only_before();
     test_l_floor_queue_and_state_promoted_without_triangles();

@@ -61,42 +61,70 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_equal legacy_encode_input(snapshots), Bridge.encode_input(snapshots)
   end
 
-  def test_reference_v8_decodes_state_success_failure_and_optional_graph
-    bytes = "IGMLSTA\0".b + [8, 3, 0].pack('Q<3')
-    # Cell 0: valid State with one debug reference and two graph nodes
-    bytes << [0, 1].pack('Q<2') << [1.0, 2.0, 3.0].pack('E3')
-    bytes << [1].pack('Q<') # graph present
+  def test_reference_v9_decodes_success_failure_optional_graph_and_diagnostics
+    bytes = "IGMLSTA\0".b + [9, 3, 0].pack('Q<3')
+    # Cell 0: one bad Polygon and several rejected references do not
+    # invalidate the Cell's successful State.
+    bytes << [0, 0].pack('Q<2') << [1.0, 2.0, 3.0].pack('E3')
+    bytes << [1].pack('Q<') # Graph present
+    bytes << [10, 10, 9, 1, 12, 0, 2, 1, 9].pack('Q<9')
     bytes << [1].pack('Q<') << [4.0, 5.0, 6.0].pack('E3') << [4].pack('Q<')
     bytes << [2].pack('Q<')
     bytes << [1.0, 2.0, 3.0, 1.0].pack('E4')
     bytes << [4.0, 5.0, 6.0, 0.5].pack('E4')
-    bytes << [1, 0, 1].pack('Q<3') # one edge
-    bytes << [0].pack('Q<') # no collapse candidates
-    # Cell 1: valid State without a Graph
-    bytes << [1, 1].pack('Q<2') << [7.0, 8.0, 9.0].pack('E3')
-    bytes << [0].pack('Q<')
-    # Cell 2: valid native computation, but no State candidate.
-    bytes << [2, 0, 0].pack('Q<3')
+    bytes << [1, 0, 1].pack('Q<3') << [0].pack('Q<')
+    # Cell 1: valid State, Graph omitted.
+    bytes << [1, 0].pack('Q<2') << [7.0, 8.0, 9.0].pack('E3')
+    bytes << [0].pack('Q<') << [1, 1, 1, 0, 1, 0, 0, 0, 1].pack('Q<9')
+    # Cell 2: all candidates rejected as outside the solid.
+    bytes << [2, 60, 0].pack('Q<3')
+    bytes << [1, 1, 1, 0, 1, 0, 1, 0, 0].pack('Q<9')
 
     decoded = Bridge.decode_state_result(bytes).fetch(:results)
-    assert_equal({ success: true, state_point: [1.0, 2.0, 3.0] },
-                 decoded[0].slice(:success, :state_point))
+    assert_equal(
+      { exit_code: 0, state_point: [1.0, 2.0, 3.0] },
+      decoded.fetch(0).slice(:exit_code, :state_point)
+    )
+    assert_equal 1, decoded[0][:diagnostics][:failed_polygons]
+    assert_equal 2, decoded[0][:diagnostics][:rejected_outside]
+    assert_equal 9, decoded[0][:diagnostics][:accepted_references]
     assert_equal [[0, 1]], decoded[0][:graph][:edges]
     assert_equal [[4.0, 5.0, 6.0]], decoded[0][:graph][:debug_points]
     assert_equal [4], decoded[0][:graph][:debug_kinds]
-    assert_equal({ success: true, state_point: [7.0, 8.0, 9.0], graph: nil },
-                 decoded[1])
-    assert_equal({ success: false, state_point: nil, graph: nil }, decoded[2])
+    assert_nil decoded[1][:graph]
+    assert_equal 0, decoded[1][:exit_code]
+    assert_equal [7.0, 8.0, 9.0], decoded[1][:state_point]
+    assert_equal 60, decoded[2][:exit_code]
+    assert_nil decoded[2][:state_point]
+    assert_nil decoded[2][:graph]
   end
 
-  def test_reference_v8_rejects_contradictory_failure_with_graph
-    bytes = "IGMLSTA\0".b + [8, 1, 0, 0, 0, 1].pack('Q<6')
+  def test_reference_v9_rejects_failure_with_graph
+    bytes = "IGMLSTA\0".b + [9, 1, 0, 0, 60, 1].pack('Q<6')
     assert_raises(Bridge::ProtocolError) { Bridge.decode_state_result(bytes) }
   end
 
-  def test_reference_v8_rejects_old_native_protocol
-    bytes = "IGMLSTA\0".b + [7, 0, 0].pack('Q<3')
+  def test_reference_v9_rejects_unknown_exit_code
+    bytes = "IGMLSTA\0".b + [9, 1, 0, 0, 999, 0].pack('Q<6')
     assert_raises(Bridge::ProtocolError) { Bridge.decode_state_result(bytes) }
+  end
+
+  def test_reference_v9_rejects_old_native_protocol
+    bytes = "IGMLSTA\0".b + [8, 0, 0].pack('Q<3')
+    assert_raises(Bridge::ProtocolError) { Bridge.decode_state_result(bytes) }
+  end
+
+  def test_reference_exit_code_labels_have_distinct_failure_categories
+    codes = Bridge::STATE_EXIT_CODES
+    assert_equal :success, codes.fetch(0)
+    assert_equal :no_floor_faces, codes.fetch(30)
+    assert_equal :floor_preparation_failed, codes.fetch(31)
+    assert_equal :partition_failed, codes.fetch(40)
+    assert_equal :no_reference_candidates, codes.fetch(50)
+    assert_equal :outside_solid, codes.fetch(60)
+    assert_equal :insufficient_clearance, codes.fetch(61)
+    assert_equal :mixed_reference_rejections, codes.fetch(62)
+    assert_equal codes.size, codes.keys.uniq.size
   end
 
   def test_result_decoding_restores_snapshot_face_references

@@ -1177,35 +1177,67 @@ void test_protocol_v4_preserves_holes_and_triangles()
             "V4 parser must retain original coordinate payloads");
 }
 
-void test_result_v8_encodes_explicit_state_failure_and_optional_graph()
+void test_result_v9_encodes_exit_codes_and_partial_failure_diagnostics()
 {
     StatePointResult success;
     success.cell_index=0;
+    success.exit_code=StateExitCode::Success;
     success.point=Vec3{1,2,3};
+    success.diagnostics.floor_faces=10;
+    success.diagnostics.failed_polygons=1;
+    success.diagnostics.rejected_outside=2;
+    success.diagnostics.accepted_references=9;
     success.reference_points.push_back({4,5,6});
     success.reference_kinds.push_back(4);
     success.graph_node_points.push_back({1,2,3});
     success.graph_node_radii.push_back(0.5);
+
     StatePointResult no_state;
     no_state.cell_index=1;
+    no_state.exit_code=StateExitCode::OutsideSolid;
+    no_state.diagnostics.reference_candidates=2;
+    no_state.diagnostics.rejected_outside=2;
     const auto bytes=serialize_state_result_batch({success,no_state});
-    require(read_u64_le(bytes,8)==8 && read_u64_le(bytes,16)==2,
-            "State result must use V8 and emit one record per target");
-    require(read_u64_le(bytes,32)==0 && read_u64_le(bytes,40)==1 &&
+    require(read_u64_le(bytes,8)==9 && read_u64_le(bytes,16)==2,
+            "Result protocol must use V9 and one record per State target");
+    require(read_u64_le(bytes,32)==0 && read_u64_le(bytes,40)==0 &&
             read_u64_le(bytes,72)==1,
-            "V8 success record must include State and Graph");
-    require(read_u64_le(bytes,176)==1 && read_u64_le(bytes,184)==0 &&
-            read_u64_le(bytes,192)==0 && bytes.size()==200,
-            "V8 failure must be an explicit nil-State/nil-Graph record");
+            "V9 success has exit code 0, State point and graph");
+    require(read_u64_le(bytes,80)==10 &&
+            read_u64_le(bytes,104)==1 &&
+            read_u64_le(bytes,128)==2 &&
+            read_u64_le(bytes,144)==9,
+            "V9 diagnostics must retain partial failures with success");
+    // Body with 1 reference (40 bytes) and 1 node (32 bytes)
+    // plus 3 count fields (3x8 bytes) => 96 bytes.
+    const std::size_t second=152+96;
+    require(read_u64_le(bytes,second)==1 &&
+            read_u64_le(bytes,second+8)==60 &&
+            read_u64_le(bytes,second+16)==0 &&
+            read_u64_le(bytes,second+24+4*8)==2 &&
+            bytes.size()==second+24+9*8,
+            "V9 failure must serialize explicit ExitCode and nil State/Graph");
 
     StatePointResult state_only;
     state_only.cell_index=0;
+    state_only.exit_code=StateExitCode::Success;
     state_only.point=Vec3{2,3,4};
-    const auto only_bytes=serialize_state_result_batch({state_only});
-    require(read_u64_le(only_bytes,40)==1 &&
-            read_u64_le(only_bytes,72)==0 &&
-            only_bytes.size()==80,
-            "State without a Graph must be a successful V8 result");
+    const auto single=serialize_state_result_batch({state_only});
+    require(read_u64_le(single,40)==0 &&
+            read_u64_le(single,72)==0 && single.size()==152,
+            "A valid State without Graph remains code 0");
+
+    bool rejected=false;
+    try
+    {
+        StatePointResult contradiction;
+        contradiction.cell_index=0;
+        contradiction.point=Vec3{1,2,3};
+        contradiction.exit_code=StateExitCode::OutsideSolid;
+        (void)serialize_state_result_batch({contradiction});
+    }
+    catch (const std::invalid_argument&) { rejected=true; }
+    require(rejected,"Contradictory ExitCode and State must be rejected");
 }
 
 } // namespace
@@ -1213,7 +1245,7 @@ void test_result_v8_encodes_explicit_state_failure_and_optional_graph()
 int main()
 {
     test_protocol_v4_preserves_holes_and_triangles();
-    test_result_v8_encodes_explicit_state_failure_and_optional_graph();
+    test_result_v9_encodes_exit_codes_and_partial_failure_diagnostics();
     test_z_sweep_matches_bruteforce();
     test_shared_face_analysis();
     test_state_volume_centroid_on_box();
