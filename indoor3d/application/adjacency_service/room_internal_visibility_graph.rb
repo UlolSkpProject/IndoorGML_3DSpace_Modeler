@@ -15,8 +15,12 @@ module ULOL
       # MUST NOT be treated as navigable/exportable IndoorGML connections.
       # This is a diagnostic graph only.
       module RoomInternalVisibilityGraph
-        MAX_NODES = 192
+        # Preserve exhaustive Kruskal behavior for small Room graphs.
+        # Floor-triangle seeds may legitimately create thousands of nodes.
+        MAX_EXHAUSTIVE_NODES = 192
+        MAX_NODES = 4097 # 4096 floor triangles + the fixed State
         MAX_PAIRS_PER_BATCH = 2048
+        LARGE_GRAPH_NEIGHBOR_COUNTS = [4, 16, 64, 256].freeze
 
         module_function
 
@@ -61,6 +65,16 @@ module ULOL
           if union.components == 1
             return snapshot(nodes, original_edges, original_weights, originals,
                             [], component_count_before, union.components, 0)
+          end
+
+          # Dense all-pairs allocation is deliberately preserved only for
+          # small graphs. A large Floor-triangle graph uses bounded nearest
+          # intercomponent searches and the same 3D Native LOS/blocked tags.
+          if nodes.size > MAX_EXHAUSTIVE_NODES
+            return build_large_graph(
+              nodes, original_edges, original_weights, originals,
+              points, union, los_batch
+            )
           end
 
           # Only across ORIGINAL distinct components. Geometry is queried once
@@ -121,6 +135,96 @@ module ULOL
             nodes, final_edges, final_weights, originals, additions,
             component_count_before, union.components, checked_pairs
           )
+        end
+
+        # Scalable high-node-count experimental path. The original <=192
+        # algorithm above remains untouched. This search never allocates an
+        # O(N^2) list; every new connection still passes Native 3D LOS.
+        # A LOS-blocked fallback remains diagnostic only, not navigable.
+        def build_large_graph(nodes, original_edges, original_weights,
+                              originals, points, union, los_batch)
+          before = union.components
+          checked = {}
+          clear_additions = []
+          blocked_additions = []
+          blocked_pool = []
+          attempts = 0
+
+          LARGE_GRAPH_NEIGHBOR_COUNTS.each do |nearest|
+            break if union.components == 1
+
+            candidates = sparse_nearest_external_pairs(points, union, nearest)
+            candidates.reject! { |record| checked.key?([record[1], record[2]]) }
+            candidates.sort_by! { |distance_squared, a, b| [distance_squared, a, b] }
+
+            candidates.each_slice(MAX_PAIRS_PER_BATCH) do |batch|
+              results = los_batch.call(
+                batch.map { |_dist, a, b| [points[a], points[b]] }
+              )
+              unless results.is_a?(Array) && results.length == batch.length &&
+                     results.all? { |valid| valid == true || valid == false }
+                raise ArgumentError, 'Native LOS batch returned invalid results'
+              end
+
+              attempts += batch.length
+              batch.each_with_index do |(dist_sq, a, b), i|
+                checked[[a, b]] = true
+                if results[i]
+                  next unless union.join(a, b)
+
+                  clear_additions << addition(a, b, Math.sqrt(dist_sq), :clear)
+                else
+                  blocked_pool << [dist_sq, a, b]
+                end
+              end
+              break if union.components == 1
+            end
+          end
+
+          # Never disguise a blocked route as navigable. This fallback is
+          # identical in classification to the exhaustive implementation.
+          if union.components > 1
+            blocked_pool.sort_by! { |dist_sq, a, b| [dist_sq, a, b] }
+            blocked_pool.each do |dist_sq, a, b|
+              next unless union.join(a, b)
+
+              blocked_additions << addition(a, b, Math.sqrt(dist_sq), :blocked)
+              break if union.components == 1
+            end
+          end
+
+          additions = clear_additions + blocked_additions
+          edges = (original_edges.map(&:dup) + additions.map { |item| item[:edge] }).map(&:freeze).freeze
+          weights = (original_weights + additions.map { |item| item[:length] }).freeze
+          snapshot(nodes, edges, weights, originals, additions,
+                   before, union.components, attempts)
+        end
+
+        def sparse_nearest_external_pairs(points, union, count)
+          # Per-source K-nearest disjoint-component pairs; sort is
+          # deterministic, and memory is O(K*N) rather than O(N^2).
+          roots = points.indices.map { |i| union.find(i) }
+          unique = {}
+          points.each_with_index do |a, i|
+            best = []
+            points.each_with_index do |b, j|
+              next if i == j || roots[i] == roots[j]
+
+              dx = a.x - b.x
+              dy = a.y - b.y
+              dz = a.z - b.z
+              dist_sq = dx * dx + dy * dy + dz * dz
+              next if best.size >= count && dist_sq > best[-1][0]
+
+              first, last = i < j ? [i, j] : [j, i]
+              candidate = [dist_sq, first, last]
+              at = best.bsearch_index { |item| item >= candidate } || best.size
+              best.insert(at, candidate)
+              best.pop if best.size > count
+            end
+            best.each { |record| unique[[record[1], record[2]]] = record }
+          end
+          unique.values
         end
 
         def distance(a, b)
