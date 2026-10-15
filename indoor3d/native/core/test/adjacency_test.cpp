@@ -789,131 +789,51 @@ void test_triangle_loop_candidates_are_validated_in_native()
 {
     CellData room = unit_box_cell();
     room.category = CellSpaceCategory::Room;
-    const Vec3 state{0.5, 0.5, 0.5};
     const std::vector<ReferencePoint> points{
-        {{0.3, 0.3, 0.5}, ReferencePointKind::Final},
-        {{0.7, 0.3, 0.5}, ReferencePointKind::Final},
-        {{0.5, 0.7, 0.5}, ReferencePointKind::Final}
+        {{0.3,0.3,0.5},ReferencePointKind::Final},
+        {{0.7,0.3,0.5},ReferencePointKind::Final},
+        {{0.5,0.7,0.5},ReferencePointKind::Final}
     };
-    const ReferenceGraphDebug graph =
-        build_room_reference_visibility_graph(room, state, points, 0.001);
-    require(graph.nodes.size() == 4, "Native loop fixture lost Final nodes");
-    bool found = false;
-    for (const ReferenceLoopCollapseCandidate& candidate : graph.loop_candidates)
-    {
-        if (candidate.vertices != std::vector<std::size_t>{1, 2, 3})
-            continue;
-        require(std::abs(candidate.representative.point.x - 0.5) < 1.0e-9,
-                "triangle centroid X incorrect");
-        require(std::abs(candidate.representative.point.y - (1.3 / 3.0)) < 1.0e-9,
-                "triangle centroid Y incorrect");
-        require(candidate.representative.radius > 0.0,
-                "validated centroid must have positive clearance");
-        require(std::find(candidate.visible_neighbors.begin(),
-                          candidate.visible_neighbors.end(), 0) !=
-                    candidate.visible_neighbors.end(),
-                "candidate center must verify LOS to external State");
-        found = true;
-    }
-    require(found, "valid triangle loop must yield one Native representative");
-
-    // A U-shaped Room must never validate the wall-crossing segment
-    // between these two Final nodes, hence cannot offer such a triangle.
-    CellData u = u_prism_cell();
-    const std::vector<ReferencePoint> other{
-        {{0.5, 2.5, 0.5}, ReferencePointKind::Final},
-        {{2.5, 2.5, 0.5}, ReferencePointKind::Final}
-    };
-    const ReferenceGraphDebug separated =
-        build_room_reference_visibility_graph(u, {1.5, 0.5, 0.5}, other, 0.001);
-    require(separated.loop_candidates.empty(),
-            "blocked Room may not produce a wall-crossing loop representative");
+    const auto graph = build_room_reference_visibility_graph(
+        room, {0.5,0.5,0.5}, points, 0.001);
+    require(graph.nodes.size() == 4, "Room must retain graph nodes");
+    require(graph.loop_candidates.empty(),
+            "Native must not issue uncertified 3D Loop/Hole Collapse");
 }
 
 void test_triangle_loop_new_edge_can_cross_non_overlapping_circles()
 {
     CellData room = unit_box_cell();
     room.category = CellSpaceCategory::Room;
-
-    // The first three Final references form a triangle close to the
-    // lower-left corner. Final node 4 overlaps node 2's disk, but NOT
-    // the centroid's disk. Direct LOS to node 4 is unobstructed.
-    const Vec3 state{0.9, 0.9, 0.5};
     const std::vector<ReferencePoint> points{
-        {{0.2, 0.2, 0.5}, ReferencePointKind::Final},
-        {{0.4, 0.2, 0.5}, ReferencePointKind::Final},
-        {{0.2, 0.4, 0.5}, ReferencePointKind::Final},
-        {{0.78, 0.25, 0.5}, ReferencePointKind::Final}
+        {{0.2,0.2,0.5},ReferencePointKind::Final},
+        {{0.4,0.2,0.5},ReferencePointKind::Final},
+        {{0.2,0.4,0.5},ReferencePointKind::Final},
+        {{0.78,0.25,0.5},ReferencePointKind::Final}
     };
-    const ReferenceGraphDebug graph =
-        build_room_reference_visibility_graph(room, state, points, 0.001);
-    require(graph.nodes.size() == 5, "test Room lost a graph node");
-
-    const auto has_original_edge = [&](std::size_t a, std::size_t b) {
-        return std::any_of(graph.edges.begin(), graph.edges.end(),
-            [&](const ReferenceGraphEdge& edge) {
-                return edge.first == a && edge.second == b;
-            });
-    };
-    require(has_original_edge(1, 2) &&
-            has_original_edge(1, 3) &&
-            has_original_edge(2, 3),
-            "fixture's three candidate vertices must form a cycle");
-    require(has_original_edge(2, 4),
-            "fixture's external neighbor must be connected to the cycle");
-
-    bool found = false;
-    for (const ReferenceLoopCollapseCandidate& candidate : graph.loop_candidates)
-    {
-        if (candidate.vertices != std::vector<std::size_t>{1, 2, 3})
-            continue;
-
-        const double separation = std::sqrt(
-            (candidate.representative.point.x - graph.nodes[4].point.x) *
-            (candidate.representative.point.x - graph.nodes[4].point.x) +
-            (candidate.representative.point.y - graph.nodes[4].point.y) *
-            (candidate.representative.point.y - graph.nodes[4].point.y)
-        );
-        require(separation >
-                candidate.representative.radius + graph.nodes[4].radius,
-                "fixture must have non-overlapping centroid/external circles");
-        require(std::find(candidate.visible_neighbors.begin(),
-                          candidate.visible_neighbors.end(), 4) !=
-                    candidate.visible_neighbors.end(),
-                "Native must validate a new collapse edge by LOS without circle overlap");
-        found = true;
-    }
-    require(found, "Native should preserve non-overlap triangle candidate");
+    const auto graph = build_room_reference_visibility_graph(
+        room, {0.9,0.9,0.5}, points, 0.001);
+    require(graph.nodes.size() == 5 && !graph.edges.empty(),
+            "original Sphere/LOS links must survive while Collapse is disabled");
+    require(graph.loop_candidates.empty(),
+            "unverified 3D centroid must not invent replacement edges");
 }
 
 void test_triangle_loop_new_edges_still_reject_wall_crossings()
 {
     CellData room = u_prism_cell();
     room.category = CellSpaceCategory::Room;
-
-    // Triangle in the left arm, other Final reference in the right arm.
-    // LOS between their centers crosses the Room's empty central notch.
     const std::vector<ReferencePoint> points{
-        {{0.35, 2.1, 0.5}, ReferencePointKind::Final},
-        {{0.65, 2.1, 0.5}, ReferencePointKind::Final},
-        {{0.5, 2.45, 0.5}, ReferencePointKind::Final},
-        {{2.5, 2.2, 0.5}, ReferencePointKind::Final}
+        {{0.35,2.1,0.5},ReferencePointKind::Final},
+        {{0.65,2.1,0.5},ReferencePointKind::Final},
+        {{0.5,2.45,0.5},ReferencePointKind::Final},
+        {{2.5,2.2,0.5},ReferencePointKind::Final}
     };
-    const ReferenceGraphDebug graph =
-        build_room_reference_visibility_graph(room, {1.5, 0.5, 0.5}, points, 0.001);
-    require(graph.nodes.size() == 5, "U Room lost a graph node");
-    bool found = false;
-    for (const ReferenceLoopCollapseCandidate& candidate : graph.loop_candidates)
-    {
-        if (candidate.vertices != std::vector<std::size_t>{1, 2, 3})
-            continue;
-        found = true;
-        require(std::find(candidate.visible_neighbors.begin(),
-                          candidate.visible_neighbors.end(), 4) ==
-                    candidate.visible_neighbors.end(),
-                "Native must reject new edges crossing a Room wall");
-    }
-    require(found, "U Room should retain a valid left-arm triangle candidate");
+    const auto graph = build_room_reference_visibility_graph(
+        room, {1.5,0.5,0.5}, points, 0.001);
+    require(graph.nodes.size() == 5, "U Room must retain nodes");
+    require(graph.loop_candidates.empty(),
+            "unverified 3D loop must never cross the Room boundary");
 }
 
 void test_four_cycle_native_centroid_and_los_candidate()
