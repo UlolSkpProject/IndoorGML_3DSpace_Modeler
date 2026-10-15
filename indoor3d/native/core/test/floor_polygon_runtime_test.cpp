@@ -122,6 +122,35 @@ void test_shared_boundary_midpoint_without_matching_tessellation()
     require(near(mid.x,4)&&near(mid.y,2),
             "Shared-edge seed must lie at the exact boundary midpoint");
 }
+void test_shared_edge_with_mismatched_vertex_splits_merges_once()
+{
+    const auto first=normal_face({
+        {0,0,0},{4,0,0},{4,1,0},{4,4,0},{0,4,0}
+    });
+    const auto second=normal_face({
+        {4,0,0},{8,0,0},{8,4,0},{4,4,0},{4,3,0}
+    });
+    const std::vector<PartitionLeaf> leaves{
+        {0,0,first},{0,0,second}
+    };
+    const auto result=generate_reference_seeds(leaves,0.001);
+    require(result.shared_segments==1 && result.points.size()==3,
+            "Collinear T-junction fragments must merge into ONE shared edge");
+    const auto& middle=result.points.back().position;
+    require(near(middle.x,4.0)&&near(middle.y,2.0),
+            "Merged edge midpoint must be independent of Vertex splits");
+}
+void test_stair_uses_same_first_reference_policy()
+{
+    auto cell=box();
+    cell.category=CellSpaceCategory::Stair;
+    const auto result=locate_reference_before(cell,0.001);
+    require(result.state_point.has_value() &&
+            result.debug_graph.nodes.size()==1,
+            "Stair State and BEFORE must follow the same Reference policy");
+    require(result.debug_graph.loop_candidates.empty(),
+            "Stair BEFORE must never create collapse certificates");
+}
 void test_short_room_has_no_reference_state()
 {
     const auto cell=box(10,20); // +1000 mm lies ABOVE ceiling
@@ -153,6 +182,8 @@ int main()
     test_single_convex_floor_state_only_before();
     test_l_floor_queue_and_state_promoted_without_triangles();
     test_shared_boundary_midpoint_without_matching_tessellation();
+    test_shared_edge_with_mismatched_vertex_splits_merges_once();
+    test_stair_uses_same_first_reference_policy();
     test_short_room_has_no_reference_state();
     test_hole_queue_and_failed_diagnostics();
     return 0;
