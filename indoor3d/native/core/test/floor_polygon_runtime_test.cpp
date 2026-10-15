@@ -1,0 +1,159 @@
+#include "floor_polygon_reference.h"
+#include "floor_face_solid.h"
+#include "cell_space_interior_point_locator.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <iostream>
+#include <vector>
+
+using namespace IndoorGMLAdjacencyNative;
+using namespace IndoorGMLAdjacencyNative::FloorPartition;
+
+namespace
+{
+void require(bool condition,const char* message)
+{
+    if (!condition) { std::cerr<<message<<'\n';std::exit(1); }
+}
+bool near(double a,double b,double tol=1.0e-6)
+{
+    return std::abs(a-b)<=tol;
+}
+FaceData face(Vec3 normal,const std::vector<Vec3>& outer,
+              const std::vector<std::vector<Vec3>>& holes={})
+{
+    FaceData f;
+    f.normal=normal;
+    f.outer_points=outer;
+    f.inner_loops=holes;
+    // Key regression: the entire pipeline runs with NO triangles.
+    return f;
+}
+CellData box(double width=10,double height=80)
+{
+    const double w=width,h=height;
+    const Vec3 a{0,0,0},b{w,0,0},c{w,w,0},d{0,w,0};
+    const Vec3 A{0,0,h},B{w,0,h},C{w,w,h},D{0,w,h};
+    CellData cell;
+    cell.category=CellSpaceCategory::Room;
+    cell.flags=CELL_FLAG_NEEDS_STATE;
+    cell.bounds={{0,0,0},{w,w,h}};
+    cell.faces={
+        face({0,0,-1},{a,d,c,b}),
+        face({0,0,1},{A,B,C,D}),
+        face({0,-1,0},{a,b,B,A}),
+        face({1,0,0},{b,c,C,B}),
+        face({0,1,0},{c,d,D,C}),
+        face({-1,0,0},{d,a,A,D})
+    };
+    return cell;
+}
+std::vector<Vec3> rectangle(double x0,double y0,double x1,double y1)
+{
+    return {{x0,y0,0},{x1,y0,0},{x1,y1,0},{x0,y1,0}};
+}
+NormalizedFace normal_face(const std::vector<Vec3>& outer,
+                           const std::vector<std::vector<Vec3>>& holes={})
+{
+    const auto result=prepare({0,0,-1},outer,holes,0.001);
+    require(result.face.has_value(),"Test polygon preparation failed");
+    return *result.face;
+}
+void test_box_face_bvh_without_triangles()
+{
+    const CellData cell=box();
+    FaceSolid solid(cell,0.001);
+    require(solid.valid(),"Loop-only cube must form a valid Face BVH");
+    require(solid.inside({5,5,39},0.001),"Solid center must be inside");
+    require(!solid.inside({15,5,39},0.001),"Outside point must be rejected");
+    require(near(solid.nearest_distance({5,5,39}),5.0),
+            "Point-to-polygon boundary distance must include wall surfaces");
+    require(solid.visible({5,5,25},{5,5,50},0.001),
+            "Unblocked vertical LOS must be accepted");
+    require(!solid.visible({5,5,25},{15,5,25},0.001),
+            "LOS leaving solid must be rejected");
+}
+void test_single_convex_floor_state_only_before()
+{
+    const CellData cell=box();
+    const auto result=locate_reference_before(cell,0.001);
+    require(result.state_point.has_value(),"First floor centroid must become State");
+    require(result.reference_points.empty(),
+            "Promoted first Reference must NOT duplicate the State");
+    require(result.debug_graph.nodes.size()==1 &&
+            result.debug_graph.edges.empty() &&
+            result.debug_graph.loop_candidates.empty(),
+            "Single Floor produces a one-node BEFORE Graph without AFTER");
+    require(near(result.state_point->x,5.0) &&
+            near(result.state_point->y,5.0) &&
+            near(result.state_point->z,1000.0/25.4),
+            "State must be the floor centroid raised by world Z +1000mm");
+}
+void test_l_floor_queue_and_state_promoted_without_triangles()
+{
+    const auto l=std::vector<Vec3>{
+        {0,0,0},{8,0,0},{8,2,0},
+        {2,2,0},{2,8,0},{0,8,0}
+    };
+    const auto normalized=normal_face(l);
+    const auto queue=partition_queue(normalized,0,0.001);
+    require(queue.accepted_splits>=1 && queue.completed.size()>=2,
+            "L-shaped floor must be partitioned through Queue");
+    const auto refs=generate_reference_seeds(queue.completed,0.001);
+    require(refs.points.size()>=3 && refs.shared_segments>=1,
+            "Two L partitions must yield centroids and a shared-edge midpoint");
+    // Check that no new partitioning code mutates original Face geometry.
+    require(l.size()==6 && l[3].x==2 && l[3].y==2,
+            "Queue partitioning must leave source immutable");
+}
+void test_shared_boundary_midpoint_without_matching_tessellation()
+{
+    const auto left=normal_face(rectangle(0,0,4,4));
+    const auto right=normal_face(rectangle(4,0,8,4));
+    const std::vector<PartitionLeaf> leaves{
+        {0,0,left},{0,1,right}
+    };
+    const auto refs=generate_reference_seeds(leaves,0.001);
+    require(refs.shared_segments==1 && refs.points.size()==3,
+            "Two adjacent quads must generate 2 centroids and 1 midpoint");
+    const auto& mid=refs.points.back().position;
+    require(near(mid.x,4)&&near(mid.y,2),
+            "Shared-edge seed must lie at the exact boundary midpoint");
+}
+void test_short_room_has_no_reference_state()
+{
+    const auto cell=box(10,20); // +1000 mm lies ABOVE ceiling
+    const auto result=locate_reference_before(cell,0.001);
+    require(!result.state_point.has_value(),
+            "No valid 1000mm Reference means explicit no-State result");
+    require(result.debug_graph.nodes.empty(),
+            "Failure must not fabricate a BEFORE Graph");
+}
+void test_hole_queue_and_failed_diagnostics()
+{
+    const auto prepared=normal_face(
+        rectangle(0,0,12,12),
+        {rectangle(3,3,5,5)});
+    const auto batch=partition_queue(prepared,0,0.001);
+    require(batch.attempted_splits>0,
+            "Hole-bearing Face must enter the split Queue");
+    require(batch.completed.size()+batch.failed.size()>0,
+            "Each queued domain must finish or remain as a debug failure");
+    for (const auto& failure:batch.failed)
+        require(!failure.rejected_candidates.empty() ||
+                failure.invalid_child || failure.limit_exceeded,
+                "Unsplit polygons must retain a concrete debug reason");
+}
+}
+int main()
+{
+    test_box_face_bvh_without_triangles();
+    test_single_convex_floor_state_only_before();
+    test_l_floor_queue_and_state_promoted_without_triangles();
+    test_shared_boundary_midpoint_without_matching_tessellation();
+    test_short_room_has_no_reference_state();
+    test_hole_queue_and_failed_diagnostics();
+    return 0;
+}

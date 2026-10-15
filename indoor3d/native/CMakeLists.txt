@@ -218,6 +218,35 @@ if(BUILD_TESTING)
         COMMAND indoor_gml_floor_polygon_partition_test
     )
 
+    # Phase 8-10 Face-only runtime and BEFORE Graph regression fixtures.
+    add_executable(indoor_gml_floor_polygon_runtime_test
+        core/test/floor_polygon_runtime_test.cpp
+        core/src/floor_polygon_preparation.cpp
+        core/src/floor_polygon_intersections.cpp
+        core/src/floor_polygon_graph.cpp
+        core/src/floor_polygon_cycles.cpp
+        core/src/floor_polygon_regions.cpp
+        core/src/floor_polygon_validation.cpp
+        core/src/floor_polygon_queue.cpp
+        core/src/floor_polygon_reference.cpp
+        core/src/floor_face_solid.cpp
+        core/src/floor_reference_before.cpp
+        core/src/cell_space_interior_point_locator.cpp
+    )
+
+    target_include_directories(indoor_gml_floor_polygon_runtime_test PRIVATE
+        "${CORE_ROOT}/include"
+    )
+    target_link_libraries(indoor_gml_floor_polygon_runtime_test PRIVATE
+        indoor_gml_geometry
+    )
+    indoor_gml_configure_cpp_target(indoor_gml_floor_polygon_runtime_test)
+
+    add_test(
+        NAME indoor_gml_floor_polygon_runtime_phase_8_10
+        COMMAND indoor_gml_floor_polygon_runtime_test
+    )
+
     add_executable(indoor_gml_validity_native_test
         validity/test/validity_test.cpp
         validity/src/validity_checker.cpp
