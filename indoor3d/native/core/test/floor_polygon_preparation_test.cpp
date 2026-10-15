@@ -20,6 +20,11 @@ void require(bool ok, const char* message)
     }
 }
 
+void require(const PreparationResult& r,const char* msg)
+{
+    require(r.face.has_value(),msg);
+}
+
 bool close(double a,double b,double epsilon=1.0e-8)
 {
     return std::abs(a-b)<=epsilon;
