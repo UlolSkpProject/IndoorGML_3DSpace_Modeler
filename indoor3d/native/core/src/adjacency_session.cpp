@@ -76,6 +76,10 @@ std::size_t AdjacencySession::start_state_check()
         std::lock_guard<std::mutex> lock(result_mutex_);
         state_results_.clear();
     }
+    {
+        std::lock_guard<std::mutex> lock(error_mutex_);
+        first_error_.clear();
+    }
 
     phase_.store(ProgressPhase::State, std::memory_order_relaxed);
     current_.store(0, std::memory_order_relaxed);
@@ -131,11 +135,13 @@ void AdjacencySession::state_worker_loop()
                     state_tolerance_
                 );
             const StateSearchMetrics& metrics = result.state_metrics;
+            // Every requested Cell gets an explicit record, including
+            // successful computation with NO valid State candidate.
+            StatePointResult state_result;
+            state_result.cell_index = cells_[cell_position].index;
+            state_result.point = result.state_point;
             if (result.state_point)
             {
-                StatePointResult state_result;
-                state_result.cell_index = cells_[cell_position].index;
-                state_result.point = *result.state_point;
                 state_result.reference_status =
                     static_cast<std::uint64_t>(result.reference_status);
                 state_result.reference_points.reserve(result.reference_points.size());
@@ -181,18 +187,39 @@ void AdjacencySession::state_worker_loop()
                         record.visible_neighbors.push_back(static_cast<std::uint64_t>(index));
                     state_result.graph_loop_candidates.push_back(std::move(record));
                 }
-                local_results.push_back(std::move(state_result));
                 if (metrics.volume_centroid_succeeded)
                     state_volume_centroid_success_count_.fetch_add(1, std::memory_order_relaxed);
             }
+            local_results.push_back(std::move(state_result));
             if (metrics.used_bvh)
                 state_bvh_count_.fetch_add(1, std::memory_order_relaxed);
             atomic_add(state_bvh_build_duration_, metrics.bvh_build_duration);
             atomic_add(state_bvh_search_duration_, metrics.bvh_search_duration);
         }
+        catch (const std::exception& error)
+        {
+            // Native execution failure is distinct from no candidate.
+            {
+                std::lock_guard<std::mutex> lock(error_mutex_);
+                if (first_error_.empty())
+                    first_error_ = "State native worker cell " +
+                        std::to_string(cells_[cell_position].index) +
+                        ": " + error.what();
+            }
+            failed_.store(true, std::memory_order_release);
+            cancel_requested_.store(true, std::memory_order_release);
+        }
         catch (...)
         {
-            // Cell-local State failures are intentionally represented by a missing result.
+            {
+                std::lock_guard<std::mutex> lock(error_mutex_);
+                if (first_error_.empty())
+                    first_error_ = "State native worker cell " +
+                        std::to_string(cells_[cell_position].index) +
+                        ": unexpected exception";
+            }
+            failed_.store(true, std::memory_order_release);
+            cancel_requested_.store(true, std::memory_order_release);
         }
 
         current_.fetch_add(1, std::memory_order_release);
@@ -240,6 +267,12 @@ std::vector<std::uint8_t> AdjacencySession::get_state_result_bytes()
         throw std::runtime_error("state result requested before state check completed");
 
     join_workers();
+    if (failed_.load(std::memory_order_acquire))
+    {
+        std::lock_guard<std::mutex> lock(error_mutex_);
+        throw std::runtime_error(first_error_.empty() ?
+            "State native worker failed" : first_error_);
+    }
     std::vector<StatePointResult> copy;
     {
         std::lock_guard<std::mutex> lock(result_mutex_);
