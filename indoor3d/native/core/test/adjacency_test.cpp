@@ -1178,6 +1178,60 @@ void test_protocol_v4_preserves_holes_and_triangles()
             "V4 parser must retain original coordinate payloads");
 }
 
+void test_protocol_v5_decodes_authoritative_plane_and_derives_normal()
+{
+    std::vector<std::uint8_t> bytes{'I','G','M','L','A','D','J',0};
+    append_u64_le(bytes,5); // Geometry V5
+    append_u64_le(bytes,1);
+    append_u64_le(bytes,0);
+
+    constexpr std::size_t face_size=64+4*24+8+4*24+72;
+    append_u64_le(bytes,104+face_size);
+    append_u64_le(bytes,0);
+    append_u64_le(bytes,CELL_FLAG_NEEDS_STATE|CELL_FLAG_ADJACENCY_TARGET);
+    append_u64_le(bytes,1);
+    append_u64_le(bytes,0);
+    append_vec3_le(bytes,{0,0,7});
+    append_vec3_le(bytes,{10,10,8});
+    append_f64_le(bytes,0);
+    append_u64_le(bytes,static_cast<std::uint64_t>(CellSpaceCategory::Room));
+
+    append_u64_le(bytes,face_size);
+    append_u64_le(bytes,4);
+    append_u64_le(bytes,1);
+    append_u64_le(bytes,1);
+    append_vec3_le(bytes,{0,0,-2}); // deliberately nonunit
+    append_f64_le(bytes,14);        // -2*z + 14 = 0 => z = 7
+    const std::vector<Vec3> outside{
+        {0,0,7},{0,10,7},{10,10,7},{10,0,7}
+    };
+    const std::vector<Vec3> hole{
+        {3,3,7},{7,3,7},{7,7,7},{3,7,7}
+    };
+    for (const Vec3& p:outside) append_vec3_le(bytes,p);
+    append_u64_le(bytes,4);
+    for (const Vec3& p:hole) append_vec3_le(bytes,p);
+    append_vec3_le(bytes,{0,0,7});
+    append_vec3_le(bytes,{10,0,7});
+    append_vec3_le(bytes,{0,10,7});
+
+    const auto cells=parse_input_batch(bytes.data(),bytes.size());
+    require(cells.size()==1 && cells[0].faces.size()==1,
+            "V5 Face parser lost source geometry");
+    const FaceData& f=cells[0].faces.front();
+    require(f.has_plane && std::abs(f.plane.d-7.0)<1.0e-12 &&
+            std::abs(f.normal.z+1.0)<1.0e-12 &&
+            std::abs(f.plane.normal.z+1.0)<1.0e-12,
+            "V5 plane coefficients must normalize with correct D and normal");
+    require(f.inner_loops.size()==1 && f.inner_loops[0].size()==4 &&
+            f.triangles.size()==1,
+            "V5 Plane header must not displace hole loops or triangles");
+    const auto prepared=FloorPartition::prepare(
+        f.plane,f.outer_loop(),f.holes(),0.001);
+    require(bool(prepared) && std::abs(prepared.face->frame.origin.z-7)<1.0e-10,
+            "Native partition must use authoritative SketchUp D coefficient");
+}
+
 void test_result_v9_encodes_exit_codes_and_partial_failure_diagnostics()
 {
     StatePointResult success;
@@ -1246,6 +1300,7 @@ void test_result_v9_encodes_exit_codes_and_partial_failure_diagnostics()
 int main()
 {
     test_protocol_v4_preserves_holes_and_triangles();
+    test_protocol_v5_decodes_authoritative_plane_and_derives_normal();
     test_result_v9_encodes_exit_codes_and_partial_failure_diagnostics();
     test_z_sweep_matches_bruteforce();
     test_shared_face_analysis();

@@ -19,7 +19,7 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_equal legacy_encode_input(sample_snapshots), Bridge.encode_input(sample_snapshots)
   end
 
-  def test_geometry_v4_serializes_hole_loops_and_keeps_triangle_payload
+  def test_geometry_v5_serializes_plane_holes_and_keeps_triangle_payload
     snapshots = Marshal.load(Marshal.dump(sample_snapshots))
     hole = [
       [1.0, 0.2, 0.2], [1.0, 0.8, 0.2],
@@ -32,7 +32,7 @@ class AdjacencyNativeBridgeTest < Minitest::Test
        { needs_state: false, adjacency_dirty: true }]
     )
     assert_equal "IGMLADJ\0".b, bytes.byteslice(0, 8)
-    assert_equal 4, bytes.byteslice(8, 8).unpack1('Q<')
+    assert_equal 5, bytes.byteslice(8, 8).unpack1('Q<')
     assert_equal 2, bytes.byteslice(16, 8).unpack1('Q<')
 
     first_cell = 32
@@ -42,7 +42,9 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_equal 4, bytes.byteslice(first_face + 8, 8).unpack1('Q<')
     assert_equal 2, bytes.byteslice(first_face + 16, 8).unpack1('Q<')
     assert_equal 1, bytes.byteslice(first_face + 24, 8).unpack1('Q<')
-    inner_offset = first_face + 56 + 4 * 24
+    assert_equal [1.0, 0.0, 0.0, -1.0],
+                 bytes.byteslice(first_face + 32, 32).unpack('E4')
+    inner_offset = first_face + 64 + 4 * 24
     assert_equal 4, bytes.byteslice(inner_offset, 8).unpack1('Q<')
     assert_equal hole.flatten, bytes.byteslice(inner_offset + 8, 4 * 24).unpack('E*')
     triangles_offset = inner_offset + 8 + 4 * 24
@@ -51,6 +53,26 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     second_cell = first_cell + bytes.byteslice(first_cell, 8).unpack1('Q<')
     assert_equal 10, bytes.byteslice(second_cell + 16, 8).unpack1('Q<')
     assert_equal 0, bytes.byteslice(second_cell + 104 + 24, 8).unpack1('Q<')
+  end
+
+  def test_geometry_v5_requires_authoritative_plane_and_ignores_normal_metadata
+    snapshot = Marshal.load(Marshal.dump(sample_snapshots.first))
+    original = snapshot[:faces].first
+    bytes = Bridge.encode_geometry_input([snapshot], [{ needs_state: true }])
+
+    original[:normal] = [-1.0, 0.0, 0.0] # deliberately contradictory
+    modified = Bridge.encode_geometry_input([snapshot], [{ needs_state: true }])
+    assert_equal bytes, modified, 'V5 must use plane exclusively, not normal'
+
+    original.delete(:plane)
+    assert_raises(Bridge::ProtocolError) do
+      Bridge.encode_geometry_input([snapshot], [{ needs_state: true }])
+    end
+
+    original[:plane] = [0.0, 0.0, 0.0, 1.0]
+    assert_raises(Bridge::ProtocolError) do
+      Bridge.encode_geometry_input([snapshot], [{ needs_state: true }])
+    end
   end
 
   def test_legacy_v1_encoding_ignores_hole_metadata_and_remains_byte_identical
@@ -211,7 +233,8 @@ class AdjacencyNativeBridgeTest < Minitest::Test
       },
       faces: [
         {
-          normal: normal,
+          normal: normal, # retained in fixture for V1 byte-compatibility
+          plane: [normal[0], normal[1], normal[2], -(normal[0] * max_x)],
           points: points,
           triangles: [
             [points[0], points[1], points[2]],

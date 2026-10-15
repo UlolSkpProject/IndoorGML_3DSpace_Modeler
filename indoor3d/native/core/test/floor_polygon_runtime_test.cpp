@@ -109,6 +109,24 @@ void test_exit_code_failure_stage_distinctions()
             "Existing successful Cell must remain exit code 0");
 }
 
+void test_face_bvh_uses_plane_from_source()
+{
+    auto cell=box();
+    for (FaceData& f:cell.faces)
+    {
+        f.has_plane=true;
+        const Vec3 point=f.outer_points.front();
+        f.plane={f.normal,-(f.normal.x*point.x+f.normal.y*point.y+f.normal.z*point.z)};
+    }
+    FaceSolid solid(cell,0.001);
+    require(solid.valid() && solid.inside({5,5,39},0.001),
+            "Face BVH must accept FaceData.plane with preserved orientation");
+    const auto state=locate_reference_before(cell,0.001);
+    require(state.exit_code==StateExitCode::Success &&
+            state.state_point.has_value(),
+            "Room State must use authoritative plane path without triangles");
+}
+
 void test_box_face_bvh_without_triangles()
 {
     const CellData cell=box();
@@ -227,6 +245,7 @@ void test_hole_queue_and_failed_diagnostics()
 int main()
 {
     test_exit_code_failure_stage_distinctions();
+    test_face_bvh_uses_plane_from_source();
     test_box_face_bvh_without_triangles();
     test_single_convex_floor_state_only_before();
     test_l_floor_queue_and_state_promoted_without_triangles();

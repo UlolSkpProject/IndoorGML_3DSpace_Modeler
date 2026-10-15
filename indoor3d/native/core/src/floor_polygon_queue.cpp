@@ -16,19 +16,16 @@ std::vector<Vec3> world_loop(const Frame& frame,const RegionLoop& loop)
     return result;
 }
 std::optional<NormalizedFace> normalize_child(
-    const Frame& frame,const PartitionRegion& child,double tolerance)
+    const NormalizedFace& parent,const PartitionRegion& child,double tolerance)
 {
     std::vector<std::vector<Vec3>> holes;
     holes.reserve(child.holes.size());
     for (const RegionLoop& hole:child.holes)
-        holes.push_back(world_loop(frame,hole));
-    const Plane authoritative={
-        frame.n,-(frame.n.x*frame.origin.x+
-                  frame.n.y*frame.origin.y+
-                  frame.n.z*frame.origin.z)
-    };
-    const auto result=prepare(authoritative,
-                              world_loop(frame,child.outer),holes,tolerance);
+        holes.push_back(world_loop(parent.frame,hole));
+    // Preserve the ORIGINAL authoritative plane unchanged during
+    // recursive splitting. Never reconstruct D from child vertices.
+    const auto result=prepare(parent.plane,
+                              world_loop(parent.frame,child.outer),holes,tolerance);
     return result.face;
 }
 } // namespace
@@ -110,7 +107,7 @@ PartitionBatch partition_queue(const NormalizedFace& source,
             for (const PartitionRegion& child:children)
             {
                 auto normalized=normalize_child(
-                    item.polygon.frame,child,tolerance);
+                    item.polygon,child,tolerance);
                 if (!normalized)
                 {
                     valid=false;

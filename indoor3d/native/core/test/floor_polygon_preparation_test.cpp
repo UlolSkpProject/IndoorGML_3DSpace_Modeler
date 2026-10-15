@@ -85,6 +85,32 @@ void test_normalize_loop_winding_start_and_duplicate_closing()
             "Hole source vertex mapping must survive orientation reversal");
 }
 
+void test_authoritative_plane_origin_and_nonplanarity()
+{
+    // SketchUp Plane and all Vertex data are in the same model frame.
+    // Even if the first point is slightly off-plane (inside tolerance),
+    // the 2D frame origin must lie exactly on the given plane.
+    const Plane source{{0,0,2},-14}; // z=7, nonunit coefficients
+    const std::vector<Vec3> outer{
+        {0,0,7.00005},{5,0,7},{5,5,7},{0,5,7}
+    };
+    const auto result=prepare(source,outer,{},0.0001);
+    require(result.face.has_value(),
+            "Authoritative SketchUp Plane should accept vertex noise within tolerance");
+    require(close(result.face->frame.origin.z,7.0,1.0e-10) &&
+            close(result.face->plane.d,-7.0,1.0e-10),
+            "D must be preserved and frame origin projected onto actual plane");
+    const auto projected=result.face->frame.lift(result.face->outer.points.front());
+    require(close(projected.z,7.0,1.0e-10),
+            "Lifted 2D geometry must stay on the authoritative plane");
+
+    auto nonplanar=outer;
+    nonplanar[1].z+=0.01;
+    const auto rejected=prepare(source,nonplanar,{},0.0001);
+    require(!rejected.face && rejected.error==PreparationError::NonPlanarLoop,
+            "SketchUp Plane must not conceal genuine nonplanar vertices");
+}
+
 void test_inclined_face_and_nonplanar_rejection()
 {
     const auto slope=polygon({
@@ -286,6 +312,7 @@ void test_input_winding_does_not_change_world_split_origin()
 int main()
 {
     test_normalize_loop_winding_start_and_duplicate_closing();
+    test_authoritative_plane_origin_and_nonplanarity();
     test_inclined_face_and_nonplanar_rejection();
     test_inner_loop_order_determinism();
     test_outer_reflex_direction_and_threshold();

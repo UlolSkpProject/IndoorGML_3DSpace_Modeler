@@ -838,7 +838,7 @@ module ULOL
             unless plane.length == 4 && plane.all? { |value| value.is_a?(Numeric) && value.to_f.finite? }
               raise ProtocolError, "#{face_label} plane must have four finite coefficients"
             end
-            a, b, c, = plane.map(&:to_f)
+            a, b, c, _d = plane.map(&:to_f)
             if a * a + b * b + c * c <= 1.0e-24
               raise ProtocolError, "#{face_label} plane normal is degenerate"
             end
