@@ -132,8 +132,10 @@ void test_inner_loop_order_determinism()
         require(close(a.x,b.x)&&close(a.y,b.y),
                 "Hole processing order must not depend on SketchUp enumeration");
     }
-    require(one.face->holes[0].source_loop_index==2 &&
-            one.face->holes[1].source_loop_index==1,
+    require(one.face->holes[0].source_loop_index==1 &&
+            one.face->holes[1].source_loop_index==2 &&
+            two.face->holes[0].source_loop_index==2 &&
+            two.face->holes[1].source_loop_index==1,
             "Hole source-loop IDs must be preserved after sorting");
 }
 
