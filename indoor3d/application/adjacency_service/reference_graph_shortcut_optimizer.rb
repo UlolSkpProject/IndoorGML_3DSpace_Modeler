@@ -1,133 +1,98 @@
 # frozen_string_literal: true
 
+require_relative 'reference_graph_contraction'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
-      # Experimental, non-destructive post-Collapse shortcut reduction.
-      # Only immutable State, degree-two nodes, and orthogonal projection
-      # onto the neighbor segment are geometric eligibility conditions.
-      #
-      # A missing direct A-C edge MUST pass Native Room LOS before it can
-      # be introduced. Existing A-C edges already passed Native LOS.
-      # No inscribed circle, deviation threshold, or detour cap is used.
-      # The original BEFORE / AFTER / COLLAPSED snapshots are untouched.
+      # Independent OPTIMIZED pass. Does not inspect COLLAPSED certificates.
+      # All topology edits and node remapping belong to the shared primitive.
       module ReferenceGraphShortcutOptimizer
         EPSILON = 1.0e-9
-
+        SEMANTIC_ROLES = %i[door transition junction].freeze
         module_function
 
-        # los_validator receives two root-local Point3d objects and must
-        # return true ONLY for a verified clear segment in the same Room.
-        # With no validator, a missing direct edge is never synthesized.
-        def optimize(graph, los_validator: nil)
-          nodes = Array(graph.fetch(:nodes))
-          edges = Array(graph.fetch(:edges))
-          return unchanged(graph) if nodes.size < 3
-
-          adjacency = Array.new(nodes.size) { {} }
-          edges.each do |a, b|
-            next unless a.is_a?(Integer) && b.is_a?(Integer)
-            next if a.negative? || b.negative? || a >= nodes.size ||
-                    b >= nodes.size || a == b
-
-            adjacency[a][b] = true
-            adjacency[b][a] = true
-          end
-
-          alive = Array.new(nodes.size, true)
+        def optimize(collapsed_graph, los_validator: nil)
+          graph = canonical_snapshot(collapsed_graph)
+          original_positions = (0...graph.fetch(:nodes).length).to_a
           removed = []
-          validated_new_edges = {}
-          failed_los = {}
+          # Remember newly validated edges by stable *input* node identities,
+          # since primitive contractions reindex the current graph each time.
+          new_edges_by_identity = {}
+          los_cache = {}
 
-          # Reevaluate connectivity after every accepted contraction.
           loop do
-            chosen = nil
-            validated_new_edge = nil
+            nodes = graph.fetch(:nodes)
+            adjacency = neighbors(nodes.length, graph.fetch(:edges))
+            origins = graph.fetch(:original_indices)
+            candidates = (1...nodes.length).select do |index|
+              adjacency[index].length == 2 && !protected_node?(nodes[index])
+            end.sort_by { |index| stable_key(index, nodes, origins) }
 
-            (1...nodes.size).each do |middle|
-              next unless alive[middle]
-              neighbors = adjacency[middle].keys.sort
-              next unless neighbors.size == 2
+            changed = false
+            candidates.each do |middle|
+              endpoints = adjacency[middle].sort_by { |index| stable_key(index, nodes, origins) }
+              representative, other = endpoints
+              next unless projected_between?(nodes[representative][:point],
+                                             nodes[middle][:point], nodes[other][:point])
 
-              first, last = neighbors
-              next unless projected_between?(
-                nodes[first][:point], nodes[middle][:point], nodes[last][:point]
-              )
-
-              # No pre-existing Edge is REQUIRED, but a new one is allowed
-              # only after Native checks the geometry without circle overlap.
-              if !adjacency[first].key?(last)
-                segment_key = [first, last].sort.freeze
-                next if failed_los[segment_key]
-                next unless los_validator
-                unless los_validator.call(
-                  nodes[first][:point], nodes[last][:point]
-                ) == true
-                  failed_los[segment_key] = true
-                  next
+              # Contract always verifies any NEW representative-boundary edge.
+              # Existing direct edges were already Native LOS-validated.
+              query = lambda do |first, last|
+                key = segment_key(first, last)
+                unless los_cache.key?(key)
+                  los_cache[key] = begin
+                    !!(los_validator && los_validator.call(first, last) == true)
+                  rescue StandardError
+                    false
+                  end
                 end
-
-                validated_new_edge = segment_key
-              else
-                validated_new_edge = nil
+                los_cache[key]
               end
+              result = ReferenceGraphContraction.contract(
+                graph,
+                members: [representative, middle],
+                representative: representative,
+                los_validator: query
+              )
+              next unless result[:accepted]
 
-              chosen = [middle, first, last]
-              break
+              removed << original_positions[middle]
+              removed_set = result[:removed_indices].to_h { |index| [index, true] }
+              next_positions = original_positions.each_with_index.filter_map do |identity, index|
+                identity unless removed_set[index]
+              end
+              result[:new_edges].each do |first, last|
+                ids = [next_positions.fetch(first), next_positions.fetch(last)].sort.freeze
+                new_edges_by_identity[ids] = true
+              end
+              original_positions = next_positions
+              graph = result.fetch(:graph)
+              changed = true
+              break # Recompute degree and indices after EVERY contraction.
             end
-
-            break unless chosen
-
-            middle, first, last = chosen
-            adjacency[first].delete(middle)
-            adjacency[last].delete(middle)
-
-            if validated_new_edge
-              adjacency[first][last] = true
-              adjacency[last][first] = true
-              validated_new_edges[validated_new_edge] = true
-            end
-
-            adjacency[middle].clear
-            alive[middle] = false
-            removed << middle
+            break unless changed
           end
 
-          return unchanged(graph) if removed.empty?
+          final_id_to_index = original_positions.each_with_index.to_h
+          final_edges = graph.fetch(:edges).to_h { |edge| [edge, true] }
+          surviving_native_edges = new_edges_by_identity.keys.filter_map do |first, last|
+            a = final_id_to_index[first]
+            b = final_id_to_index[last]
+            next if a.nil? || b.nil?
+            edge = [a, b].sort
+            edge.freeze if final_edges[edge]
+          end.uniq.sort.freeze
 
-          kept = (0...nodes.size).select { |i| alive[i] }
-          remap = {}
-          kept.each_with_index { |old, current| remap[old] = current }
-
-          final_edges = kept.flat_map do |index|
-            adjacency[index].keys.filter_map do |neighbor|
-              next unless alive[neighbor] && index < neighbor
-
-              [remap[index], remap[neighbor]].freeze
-            end
-          end.sort.freeze
-          new_edges = validated_new_edges.keys.filter_map do |a, b|
-            next unless alive[a] && alive[b] && adjacency[a].key?(b)
-
-            [remap[a], remap[b]].freeze
-          end.sort.freeze
-
-          result = {
-            nodes: kept.map { |index| nodes[index] }.freeze,
-            edges: final_edges,
-            shortcut_removed_count: removed.size,
+          graph.merge(
+            shortcut_removed_count: removed.length,
             shortcut_removed_indices: removed.freeze,
-            shortcut_native_los_edges: new_edges
-          }
-          if graph.key?(:original_indices)
-            origins = Array(graph[:original_indices])
-            result[:original_indices] = kept.map { |index| origins[index] }.freeze
-          end
-          graph.merge(result).freeze
+            shortcut_native_los_edges: surviving_native_edges
+          ).freeze
         end
 
-        # Strict 3D interior projection, not a projected XY overlap.
-        # A missing shortcut still requires Native 3D LOS before acceptance.
+        # A strict interior orthogonal projection in all THREE dimensions.
+        # No XY-only test and no Ruby-based approximation of Native LOS.
         def projected_between?(a, b, c)
           dx = c.x - a.x
           dy = c.y - a.y
@@ -141,12 +106,67 @@ module ULOL
           t.finite? && t > EPSILON && t < 1.0 - EPSILON
         end
 
-        def unchanged(graph)
-          graph.merge(
-            shortcut_removed_count: 0,
-            shortcut_removed_indices: [].freeze,
-            shortcut_native_los_edges: [].freeze
-          ).freeze
+        def stable_key(index, nodes, origins)
+          origin = origins[index]
+          point = nodes[index].fetch(:point)
+          origin.nil? ? [1, point.x, point.y, point.z, index] : [0, origin, point.x, point.y, point.z, index]
+        end
+
+        def segment_key(first, last)
+          a = [first.x, first.y, first.z].freeze
+          b = [last.x, last.y, last.z].freeze
+          (a <=> b).positive? ? [b, a].freeze : [a, b].freeze
+        end
+
+        def protected_node?(node)
+          node[:protected] || SEMANTIC_ROLES.include?(node[:semantic_role])
+        end
+
+        def neighbors(count, edges)
+          adjacency = Array.new(count) { [] }
+          edges.each do |first, last|
+            adjacency[first] << last
+            adjacency[last] << first
+          end
+          adjacency.each(&:sort!)
+        end
+
+        # Complete standard Graph Snapshot even when no contraction is possible.
+        # Canonicalize ordering while retaining edge metadata by original edge.
+        def canonical_snapshot(source)
+          raw_nodes = Array(source.fetch(:nodes))
+          raw_edges = Array(source.fetch(:edges))
+          origins = source.key?(:original_indices) ? Array(source[:original_indices]) : (0...raw_nodes.length).to_a
+          unless origins.length == raw_nodes.length && (raw_nodes.empty? || origins.first == 0)
+            raise ArgumentError, 'invalid collapsed original_indices'
+          end
+          unless raw_nodes.all? { |node| ReferenceGraphContraction.valid_node?(node) }
+            raise ArgumentError, 'invalid collapsed nodes'
+          end
+          unless raw_edges.all? { |pair|
+            pair.is_a?(Array) && pair.length == 2 &&
+              pair.all? { |i| i.is_a?(Integer) && i.between?(0, raw_nodes.length - 1) } &&
+              pair[0] != pair[1]
+          }
+            raise ArgumentError, 'invalid collapsed edges'
+          end
+          normalized = raw_edges.map(&:sort)
+          raise ArgumentError, 'duplicate collapsed edge' if normalized.uniq.length != normalized.length
+          order = (0...normalized.length).sort_by { |i| normalized[i] }
+          graph = source.merge(
+            nodes: raw_nodes.map { |node| ReferenceGraphContraction.duplicate_node(node) }.freeze,
+            edges: order.map { |i| normalized[i].freeze }.freeze,
+            original_indices: origins.freeze,
+            merged_into: Array(source[:merged_into]).map { |entry| Array(entry).dup.freeze }.freeze,
+            contraction_history: Array(source[:contraction_history]).dup.freeze
+          )
+          %i[edge_weights edge_metadata].each do |field|
+            next unless source.key?(field)
+            values = Array(source[field])
+            raise ArgumentError, "invalid #{field}" unless values.length == raw_edges.length
+            graph[field] = order.map { |i| values[i] }.freeze
+          end
+          graph.freeze
         end
       end
     end
