@@ -27,6 +27,11 @@ constexpr std::size_t MAX_SEARCH_NODES = 200000;
 // A Face is Floor only if its normalized outward normal has Z <= -0.6.
 // Inclined floors are accepted only when they satisfy that same criterion.
 constexpr double ROOM_FLOOR_MIN_NEGATIVE_NORMAL_Z = 0.6;
+// Use the SAME signed-turn accumulator as wall Corner discovery.
+// A sequence of small negative (reflex) turns must reach 30 degrees
+// before it forces a Floor-region partition; convex turns offset the run.
+constexpr double ROOM_FLOOR_CUMULATIVE_REFLEX_DEGREES = 30.0;
+constexpr double ROOM_FLOOR_TURN_NOISE_DEGREES = 0.25;
 // SketchUp/native coordinates are inches; +1000 mm in world Z.
 constexpr double ROOM_REFERENCE_FLOOR_OFFSET = 1000.0 / 25.4;
 // Protect the Native V7 reference/debug serialization size bound.
@@ -784,11 +789,12 @@ FloorEdgeKey floor_edge_key(
 // Validate the ACTUAL triangle union, not its convex hull. In particular:
 //  - every boundary vertex has degree two;
 //  - exactly one boundary ring must consume every boundary edge;
-//  - all ring turns must be convex in the Face plane;
+//  - the cumulative negative (reflex) turn stays below 30 degrees;
 //  - polygon area must match the sum of original triangle areas;
 //  - every triangle must be coplanar and have matching outward normals.
+// Permits a gently concave region; it is NOT a strictly convexity check.
 // An unmerged single triangle never needs this reconstruction.
-bool convex_floor_union(
+bool cumulative_turn_floor_union(
     const std::vector<std::size_t>& members,
     const std::vector<FloorTriangle>& triangles,
     double planar_tolerance,
@@ -880,6 +886,13 @@ bool convex_floor_union(
         return false;
     const double orientation = signed_area > 0.0 ? 1.0 : -1.0;
 
+    // Calculate each external XY/plane signed turn in DEGREES. Unlike
+    // an immediate any-reflex veto, a single small notch does not force
+    // an extra Floor region. Adjacent small reflex angles accumulate,
+    // while convex turns offset the running negative amount.
+    std::vector<double> turns;
+    turns.reserve(ring.size());
+    constexpr double RAD_TO_DEGREES = 180.0 / 3.14159265358979323846;
     for (std::size_t i=0; i<ring.size(); ++i)
     {
         const Vec3& a = vertex_positions.at(ring[i]);
@@ -891,11 +904,60 @@ bool convex_floor_union(
         const double len_bc = length(bc);
         if (len_ab <= planar_tolerance || len_bc <= planar_tolerance)
             return false;
-        const double turn = orientation * dot(cross(ab,bc), reference_normal);
-        if (turn < -planar_tolerance * std::max(len_ab,len_bc))
-            return false;
+        const double signed_cross =
+            orientation * dot(cross(ab,bc), reference_normal);
+        const double signed_dot = dot(ab,bc);
+        const double degrees =
+            std::atan2(signed_cross,signed_dot) * RAD_TO_DEGREES;
+        if (!std::isfinite(degrees)) return false;
+        turns.push_back(
+            std::abs(degrees) <= ROOM_FLOOR_TURN_NOISE_DEGREES ?
+                0.0 : degrees
+        );
     }
-    return true;
+
+    // A polygon ring has no canonical first Vertex. Traverse twice to
+    // preserve accumulated negative turns across the arbitrary ring seam.
+    // Its total signed turn is +360 degrees, so a reset occurs during
+    // a full lap and the next lap observes the cyclic steady state.
+    RoomSignedTurnAccumulator accumulation(
+        ROOM_FLOOR_CUMULATIVE_REFLEX_DEGREES);
+    for (std::size_t lap=0; lap<2; ++lap)
+        for (double degrees : turns)
+            if (accumulation.advance(degrees))
+                return false;
+
+    // A mildly concave polygon's area centroid can fall OUTSIDE its real
+    // triangle union. Never merge in that case: the original pieces
+    // remain intact and their centroids are tested independently.
+    Vec3 area_moment{0,0,0};
+    for (const std::size_t id : members)
+        area_moment = add(area_moment,
+            multiply(triangles[id].centroid,triangles[id].area));
+    const Vec3 area_centroid =
+        multiply(area_moment,1.0/original_area);
+
+    const auto inside_triangle = [&](const FloorTriangle& t) {
+        const Vec3 e0 = subtract(t.vertices[1],t.vertices[0]);
+        const Vec3 e1 = subtract(t.vertices[2],t.vertices[0]);
+        const Vec3 p = subtract(area_centroid,t.vertices[0]);
+        const double d00=dot(e0,e0);
+        const double d01=dot(e0,e1);
+        const double d11=dot(e1,e1);
+        const double d20=dot(p,e0);
+        const double d21=dot(p,e1);
+        const double denom=d00*d11-d01*d01;
+        if (denom <= EPSILON) return false;
+        const double u=(d11*d20-d01*d21)/denom;
+        const double v=(d00*d21-d01*d20)/denom;
+        constexpr double BARYCENTRIC_EPSILON = 1.0e-9;
+        return u >= -BARYCENTRIC_EPSILON &&
+               v >= -BARYCENTRIC_EPSILON &&
+               u+v <= 1.0 + BARYCENTRIC_EPSILON;
+    };
+    for (const std::size_t id : members)
+        if (inside_triangle(triangles[id])) return true;
+    return false;
 }
 
 std::vector<FloorRegion> merge_convex_floor_triangles(
@@ -909,14 +971,14 @@ std::vector<FloorRegion> merge_convex_floor_triangles(
     regions.reserve(triangles.size() * 2);
     std::vector<std::size_t> owners(triangles.size());
 
-    // Recognize a convex, hole-free SketchUp Face AS A WHOLE before any
-    // pairwise greedy merge. This yields one area centroid regardless of
-    // how Face#mesh happened to triangulate that convex polygon.
+    // Recognize a hole-free SketchUp Face with cumulative reflex <30deg
+    // AS A WHOLE before pairwise merges. A single weakly concave notch
+    // is not enough to create redundant Ref Points.
     for (const auto& group : face_groups)
     {
         if (group.empty()) continue;
         if (group.size() > 1 &&
-            convex_floor_union(group, triangles,
+            cumulative_turn_floor_union(group, triangles,
                                planar_tolerance, tolerance))
         {
             double area = 0.0;
@@ -933,7 +995,8 @@ std::vector<FloorRegion> merge_convex_floor_triangles(
         }
         else
         {
-            // Concave/hole/nonmanifold face: keep all original triangles.
+            // Strongly concave, Hole-bearing or nonmanifold Face: preserve
+            // original triangles until safe region-level merging.
             for (std::size_t id : group)
             {
                 owners[id] = regions.size();
@@ -971,7 +1034,7 @@ std::vector<FloorRegion> merge_convex_floor_triangles(
         }
     }
 
-    // Greedy convex partition; failed merges preserve BOTH old regions.
+    // Greedy cumulative-turn partition; failed merges preserve BOTH old regions.
     // When either region grows, its new union is rechecked from scratch.
     while (!pending.empty())
     {
@@ -985,7 +1048,7 @@ std::vector<FloorRegion> merge_convex_floor_triangles(
         std::vector<std::size_t> combined = ra.triangles;
         combined.insert(combined.end(), rb.triangles.begin(),
                         rb.triangles.end());
-        if (!convex_floor_union(combined, triangles,
+        if (!cumulative_turn_floor_union(combined, triangles,
                                 planar_tolerance, tolerance))
             continue;
 
@@ -1023,7 +1086,7 @@ std::vector<FloorRegion> merge_convex_floor_triangles(
 
 } // namespace
 
-// Per convex Floor-region: area-weighted surface centroid + 1000 mm on
+// Per accepted Floor-region: area-weighted surface centroid + 1000 mm on
 // world Z. If a merged region's elevated centroid is not inside the
 // Solid, fall back to its original triangles, preserving valid references.
 // Native does not pre-merge final graph nodes; AFTER continues to do that.
