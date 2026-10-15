@@ -118,9 +118,16 @@ module ULOL
             triangles = face_mesh_triangles(face, transformation).map do |triangle|
               triangle.map { |point| [point.x.to_f, point.y.to_f, point.z.to_f] }
             end
+            inner_loops = face.loops.reject(&:outer?).map do |loop|
+              loop.vertices.map do |vertex|
+                point = vertex.position.transform(transformation)
+                [point.x.to_f, point.y.to_f, point.z.to_f]
+              end
+            end
             {
               points: points,
               normal: [normal.x.to_f, normal.y.to_f, normal.z.to_f],
+              inner_loops: inner_loops,
               triangles: triangles
             }
           end.compact
