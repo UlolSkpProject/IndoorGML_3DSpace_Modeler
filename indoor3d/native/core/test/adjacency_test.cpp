@@ -519,6 +519,61 @@ void test_concave_floor_partitions_without_filling_its_notch()
             "concave Floor must be partitioned into fewer convex regions");
 }
 
+// The same -30-degree signed-turn policy used by the former wall
+// corner detector is now used to decide whether a Floor region needs
+// partitioning. A shallow reflex does NOT force an extra Reference Point.
+void test_floor_single_reflex_below_30_degrees_stays_one_region()
+{
+    const std::array<double,2> shallow_depths{{0.25, 0.5}};
+    for (double depth : shallow_depths)
+    {
+        CellData room = tall_room(shallow_reflex_prism_cell(depth));
+        const auto references = find_reference_points(room, {2,0.5,40}, 0.001);
+        std::size_t face_count=0;
+        for (const ReferencePoint& point : references)
+            if (point.kind == ReferencePointKind::Face) ++face_count;
+        require(face_count == 1,
+                "14- or 28-degree single reflex must keep one Floor region");
+    }
+}
+
+void test_floor_single_reflex_over_30_degrees_forces_partition()
+{
+    CellData room = tall_room(shallow_reflex_prism_cell(0.7));
+    const auto references = find_reference_points(room, {2,0.5,40}, 0.001);
+    std::size_t face_count=0;
+    for (const ReferencePoint& point : references)
+        if (point.kind == ReferencePointKind::Face) ++face_count;
+    require(face_count >= 2,
+            "38-degree single reflex must prevent whole-Floor merge");
+}
+
+void test_floor_many_small_reflex_turns_accumulate()
+{
+    CellData room = tall_room(gradual_reflex_arc());
+    const auto references = find_reference_points(room, {3,2,40}, 0.001);
+    std::size_t face_count=0;
+    for (const ReferencePoint& point : references)
+        if (point.kind == ReferencePointKind::Face) ++face_count;
+    // Individual curved-wall turns are 16.86, 13.27, 5.67 and
+    // 2.86 degrees. Their negative run exceeds the cumulative 30.
+    require(face_count >= 2,
+            "small reflex corners accumulating beyond 30deg must partition");
+}
+
+void test_floor_cumulative_turn_respects_convex_cancellation()
+{
+    // The shared accumulator is independent of a particular Face fixture.
+    // Positive bends reduce the still-open reflex run, as for wall corners.
+    RoomSignedTurnAccumulator accumulation(30.0);
+    require(!accumulation.advance(-16.0), "first 16deg is too shallow");
+    require(!accumulation.advance(+8.0), "convex turn must offset reflex");
+    require(!accumulation.advance(-21.0),
+            "net -29deg must not force a Floor split");
+    require(accumulation.advance(-1.0),
+            "net -30deg must force a Floor split");
+}
+
 void test_floor_reference_in_short_room_is_rejected()
 {
     CellData room = unit_box_cell();
@@ -881,6 +936,10 @@ int main()
     test_convex_floor_asymmetric_mesh_has_area_centroid();
     test_coplanar_adjacent_floor_faces_merge();
     test_concave_floor_partitions_without_filling_its_notch();
+    test_floor_single_reflex_below_30_degrees_stays_one_region();
+    test_floor_single_reflex_over_30_degrees_forces_partition();
+    test_floor_many_small_reflex_turns_accumulate();
+    test_floor_cumulative_turn_respects_convex_cancellation();
     test_floor_reference_in_short_room_is_rejected();
     test_inclined_floor_uses_world_z_not_surface_normal();
     test_floor_hole_does_not_create_void_candidates();
