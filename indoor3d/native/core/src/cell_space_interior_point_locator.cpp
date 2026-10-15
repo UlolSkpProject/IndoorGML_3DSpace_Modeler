@@ -9,7 +9,6 @@
 #include <functional>
 #include <limits>
 #include <map>
-#include <set>
 #include <numeric>
 #include <optional>
 #include <queue>
@@ -28,9 +27,9 @@ constexpr std::size_t MAX_SEARCH_NODES = 200000;
 // Ignore numerical angle noise and emit at a cumulative -30 degree turn.
 constexpr double ROOM_REFLEX_NOISE_DEGREES = 0.25;
 constexpr double ROOM_CUMULATIVE_TURN_DEGREES = 30.0;
-// Maximum vertical-to-horizontal normal ratio for a face to contribute
-// to the State-height Room wall slice (about 5.71 degrees from vertical).
-constexpr double ROOM_WALL_SLICE_MAX_NORMAL_Z_XY_RATIO = 0.1;
+// Maximum |normal.z| / hypot(normal.x, normal.y) for a Room wall.
+// Classifies Face topology directly, without any horizontal wall slicing.
+constexpr double ROOM_WALL_MAX_NORMAL_Z_XY_RATIO = 0.1;
 // Fraction of the inward corner ray to the first opposite vertical wall.
 // 0.55 places the purple Corner candidate 55% of the way from the corner.
 constexpr double ROOM_REFERENCE_INWARD_DISTANCE_FRACTION = 0.55;
@@ -40,7 +39,6 @@ constexpr double ROOM_SHORTCUT_MAX_DEVIATION_WIDTH_FRACTION = 0.15;
 constexpr double ROOM_SHORTCUT_MIN_CLEARANCE_FRACTION = 0.35;
 // Each cluster radius is 15% of the local XY corridor width.
 constexpr double ROOM_LOCAL_WIDTH_CLUSTER_FRACTION = 0.15;
-constexpr std::size_t MAX_ROOM_WALL_SEGMENTS = 2048;
 constexpr std::size_t MAX_ROOM_REFERENCE_POINTS = 4096;
 // Additional debug records (red merged + black final) do not consume the
 // original Face/Corner sampling cap.
@@ -696,159 +694,6 @@ std::optional<Vec3> find_state_point(
 
 namespace
 {
-struct WallSegment
-{
-    Vec3 a;
-    Vec3 b;
-};
-
-double cross_xy(const Vec3& a, const Vec3& b)
-{
-    return a.x * b.y - a.y * b.x;
-}
-
-double distance_xy_squared(const Vec3& a, const Vec3& b)
-{
-    const double dx = a.x - b.x;
-    const double dy = a.y - b.y;
-    return dx * dx + dy * dy;
-}
-
-bool near_xy(const Vec3& a, const Vec3& b, double epsilon)
-{
-    return distance_xy_squared(a, b) <= epsilon * epsilon;
-}
-
-// Local XY width is twice the nearest vertical-wall clearance at State Z.
-// Floors and ceilings must not reduce the merger radius.
-double nearest_wall_clearance(const std::vector<WallSegment>& walls, const Vec3& p)
-{
-    double nearest = std::numeric_limits<double>::infinity();
-    for (const WallSegment& wall : walls)
-    {
-        const Vec3 edge = subtract(wall.b, wall.a);
-        const double edge_sq = edge.x * edge.x + edge.y * edge.y;
-        if (edge_sq <= EPSILON * EPSILON) continue;
-        const Vec3 offset = subtract(p, wall.a);
-        const double projection = (offset.x * edge.x + offset.y * edge.y) / edge_sq;
-        const double t = std::max(0.0, std::min(1.0, projection));
-        nearest = std::min(nearest, distance_xy_squared(
-            p, add(wall.a, multiply(edge, t))
-        ));
-    }
-    return std::isfinite(nearest) ? std::sqrt(nearest) : 0.0;
-}
-
-double local_cluster_radius(const std::vector<WallSegment>& walls, const Vec3& p)
-{
-    return 2.0 * ROOM_LOCAL_WIDTH_CLUSTER_FRACTION *
-           nearest_wall_clearance(walls, p);
-}
-
-std::vector<WallSegment> wall_segments_at_z(
-    const CellData& cell, double z, double tolerance
-)
-{
-    std::vector<WallSegment> segments;
-    const double z_epsilon = std::max(tolerance * 0.01, 1.0e-9);
-    const double xy_epsilon = std::max(tolerance * 0.01, 1.0e-9);
-
-    for (const FaceData& face : cell.faces)
-    {
-        const double horizontal_normal = std::hypot(face.normal.x, face.normal.y);
-        if (horizontal_normal <= EPSILON ||
-            std::abs(face.normal.z) > horizontal_normal * ROOM_WALL_SLICE_MAX_NORMAL_Z_XY_RATIO ||
-            face.outer_points.size() < 3)
-            continue;
-
-        const Vec3 tangent = normalize(Vec3{-face.normal.y, face.normal.x, 0.0});
-        std::vector<Vec3> intersections;
-        const std::vector<Vec3>& ring = face.outer_points;
-        for (std::size_t i = 0; i < ring.size(); ++i)
-        {
-            const Vec3& first = ring[i];
-            const Vec3& second = ring[(i + 1) % ring.size()];
-            const double z1 = first.z - z;
-            const double z2 = second.z - z;
-            if (std::abs(z1) <= z_epsilon && std::abs(z2) <= z_epsilon)
-            {
-                if (!near_xy(first, second, xy_epsilon))
-                    intersections.push_back(first), intersections.push_back(second);
-                continue;
-            }
-            // Half-open intersection prevents counting vertices twice.
-            if ((z1 <= 0.0 && z2 > 0.0) || (z2 <= 0.0 && z1 > 0.0))
-            {
-                const double t = (z - first.z) / (second.z - first.z);
-                intersections.push_back({
-                    first.x + t * (second.x - first.x),
-                    first.y + t * (second.y - first.y),
-                    z
-                });
-            }
-        }
-
-        std::sort(intersections.begin(), intersections.end(),
-            [&](const Vec3& lhs, const Vec3& rhs) {
-                return dot(lhs, tangent) < dot(rhs, tangent);
-            });
-        intersections.erase(std::unique(intersections.begin(), intersections.end(),
-            [&](const Vec3& lhs, const Vec3& rhs) {
-                return near_xy(lhs, rhs, xy_epsilon);
-            }), intersections.end());
-
-        // SketchUp polygon rings yield even intersections. An odd number can
-        // occur with a triangulated input ring: recover its extremal slice.
-        if (intersections.size() % 2 != 0 && intersections.size() >= 2)
-        {
-            intersections = {intersections.front(), intersections.back()};
-        }
-        for (std::size_t i = 1; i < intersections.size(); i += 2)
-        {
-            WallSegment segment{intersections[i - 1], intersections[i]};
-            segment.a.z = z;
-            segment.b.z = z;
-            if (near_xy(segment.a, segment.b, xy_epsilon)) continue;
-            const bool duplicate = std::any_of(segments.begin(), segments.end(),
-                [&](const WallSegment& other) {
-                    return (near_xy(other.a, segment.a, xy_epsilon) &&
-                            near_xy(other.b, segment.b, xy_epsilon)) ||
-                           (near_xy(other.a, segment.b, xy_epsilon) &&
-                            near_xy(other.b, segment.a, xy_epsilon));
-                });
-            if (!duplicate) segments.push_back(segment);
-            if (segments.size() >= MAX_ROOM_WALL_SEGMENTS) return segments;
-        }
-    }
-    return segments;
-}
-
-// First strictly-positive intersection of the directed ray with a wall slice.
-// This uses the wall cross-section rather than ray/triangle intersections,
-// avoiding duplicate hits along SketchUp triangulation edges.
-double opposite_wall_distance(
-    const std::vector<WallSegment>& walls,
-    const Vec3& origin,
-    const Vec3& direction,
-    double tolerance
-)
-{
-    double best = std::numeric_limits<double>::infinity();
-    for (const WallSegment& wall : walls)
-    {
-        const Vec3 edge = subtract(wall.b, wall.a);
-        const double denominator = cross_xy(direction, edge);
-        if (std::abs(denominator) <= EPSILON) continue;
-        const Vec3 delta = subtract(wall.a, origin);
-        const double t = cross_xy(delta, edge) / denominator;
-        const double u = cross_xy(delta, direction) / denominator;
-        if (t <= tolerance * 4.0 || u < -1.0e-9 || u > 1.0 + 1.0e-9)
-            continue;
-        best = std::min(best, t);
-    }
-    return best;
-}
-
 bool safe_reference(
     const TriangleBvh& bvh,
     const Vec3& point,
@@ -886,100 +731,6 @@ bool clear_path(
         const Vec3 candidate = add(first, multiply(segment, t));
         if (!bvh_inside(bvh, candidate, tolerance) ||
             bvh.nearest_distance(candidate) <= tolerance)
-            return false;
-    }
-    return true;
-}
-
-// Protect the actual 2D Room boundary when deciding whether a candidate
-// lies on a redundant detour. A handful of 3D BVH samples alone can miss
-// a thin wall between the samples.
-bool crosses_wall_slice(
-    const std::vector<WallSegment>& walls,
-    const Vec3& first,
-    const Vec3& last,
-    double tolerance
-)
-{
-    const Vec3 chord = subtract(last, first);
-    const double length_sq = distance_xy_squared(first, last);
-    if (length_sq <= tolerance * tolerance) return true;
-    for (const WallSegment& wall : walls)
-    {
-        const Vec3 edge = subtract(wall.b, wall.a);
-        const Vec3 delta = subtract(wall.a, first);
-        const double denom = cross_xy(chord, edge);
-        if (std::abs(denom) > EPSILON)
-        {
-            const double t = cross_xy(delta, edge) / denom;
-            const double u = cross_xy(delta, chord) / denom;
-            const double t_eps = tolerance / std::sqrt(length_sq);
-            const double edge_len = std::hypot(edge.x, edge.y);
-            const double u_eps = edge_len > EPSILON ? tolerance / edge_len : 0.0;
-            if (t >= -t_eps && t <= 1.0 + t_eps &&
-                u >= -u_eps && u <= 1.0 + u_eps)
-                return true;
-        }
-        else if (std::abs(cross_xy(delta, chord)) <=
-                 tolerance * std::sqrt(length_sq))
-        {
-            // Collinear or almost collinear overlap is unsafe.
-            const double a = dot(subtract(wall.a, first), chord) / length_sq;
-            const double b = dot(subtract(wall.b, first), chord) / length_sq;
-            if (std::max(a, b) >= 0.0 && std::min(a, b) <= 1.0)
-                return true;
-        }
-    }
-    return false;
-}
-
-// The candidate to remove must be approximately on a navigable chord,
-// and the chord must stay inside the Room without cutting a wall or
-// unacceptably reducing corridor clearance.
-bool redundant_corner_candidate(
-    const TriangleBvh& bvh,
-    const std::vector<WallSegment>& walls,
-    const Vec3& previous,
-    const Vec3& middle,
-    const Vec3& next,
-    double tolerance
-)
-{
-    const Vec3 chord = subtract(next, previous);
-    const double chord_sq = distance_xy_squared(previous, next);
-    if (chord_sq <= tolerance * tolerance) return false;
-
-    const Vec3 offset = subtract(middle, previous);
-    const double projection =
-        (offset.x * chord.x + offset.y * chord.y) / chord_sq;
-    if (projection <= 0.0 || projection >= 1.0) return false;
-
-    const Vec3 foot = add(previous, multiply(chord, projection));
-    const double deviation = std::sqrt(distance_xy_squared(middle, foot));
-    const double min_clearance = std::min({
-        nearest_wall_clearance(walls, previous),
-        nearest_wall_clearance(walls, middle),
-        nearest_wall_clearance(walls, next)
-    });
-    if (min_clearance <= tolerance * 2.0 ||
-        deviation > std::max(
-            tolerance,
-            2.0 * ROOM_SHORTCUT_MAX_DEVIATION_WIDTH_FRACTION * min_clearance
-        ))
-        return false;
-
-    if (crosses_wall_slice(walls, previous, next, tolerance)) return false;
-
-    const double min_allowed_clearance = std::max(
-        tolerance * 2.0,
-        ROOM_SHORTCUT_MIN_CLEARANCE_FRACTION * min_clearance
-    );
-    for (std::size_t step = 1; step < 8; ++step)
-    {
-        const Vec3 point = add(previous, multiply(chord, step / 8.0));
-        if (!bvh_inside(bvh, point, tolerance) ||
-            bvh.nearest_distance(point) <= tolerance ||
-            nearest_wall_clearance(walls, point) < min_allowed_clearance)
             return false;
     }
     return true;
@@ -1066,7 +817,7 @@ std::vector<CornerVertex> topology_wall_corners(
         const double normal_xy = std::hypot(face.normal.x, face.normal.y);
         if (normal_xy <= EPSILON ||
             std::abs(face.normal.z) >
-                normal_xy * ROOM_WALL_SLICE_MAX_NORMAL_Z_XY_RATIO ||
+                normal_xy * ROOM_WALL_MAX_NORMAL_Z_XY_RATIO ||
             face.outer_points.size() < 3)
             continue;
 
