@@ -14,6 +14,12 @@ namespace
 {
 using FloorPartition::Vec2;
 using FloorPartition::Location;
+// A wall is a Face whose normal is predominantly horizontal.
+// Signed orientation does not matter. Inclined walls are allowed;
+// near-horizontal floors and ceilings never constrain BEFORE radii.
+// Mirrors the existing 0.6 normalized floor threshold without
+// affecting the logic that selects Floor Faces.
+constexpr double MAX_ABS_WALL_NORMAL_Z=0.6;
 Vec3 sub(Vec3 a,Vec3 b) { return {a.x-b.x,a.y-b.y,a.z-b.z}; }
 Vec3 add(Vec3 a,Vec3 b) { return {a.x+b.x,a.y+b.y,a.z+b.z}; }
 Vec3 mul(Vec3 a,double k) { return {a.x*k,a.y*k,a.z*k}; }
@@ -105,6 +111,8 @@ FaceSolid::FaceSolid(const CellData& cell,double tolerance)
         if (!prepared.face) return;
         Surface surface;
         surface.face=*prepared.face;
+        surface.is_wall=
+            std::abs(surface.face.frame.n.z)<MAX_ABS_WALL_NORMAL_Z;
         surface.box=empty_box();
         const auto expand=[&](const FloorPartition::NormalizedLoop& ring) {
             for (Vec2 p:ring.points)
@@ -133,6 +141,8 @@ std::size_t FaceSolid::build(std::size_t begin,std::size_t end)
     {
         nodes_[id].begin=begin;
         nodes_[id].count=end-begin;
+        for (std::size_t i=begin;i<end;++i)
+            nodes_[id].has_wall|=surfaces_[order_[i]].is_wall;
         return id;
     }
     const Vec3 ext=sub(bounds.maximum,bounds.minimum);
@@ -151,6 +161,7 @@ std::size_t FaceSolid::build(std::size_t begin,std::size_t end)
     const std::size_t right=build(middle,end);
     nodes_[id].left=left;
     nodes_[id].right=right;
+    nodes_[id].has_wall=nodes_[left].has_wall || nodes_[right].has_wall;
     return id;
 }
 
@@ -188,27 +199,33 @@ double FaceSolid::face_distance(const Surface& surface,Vec3 p) const
     for (const auto& hole:face.holes) measure(hole);
     return best;
 }
-double FaceSolid::closest(std::size_t node,Vec3 point,double best) const
+double FaceSolid::closest(std::size_t node,Vec3 point,double best,
+                          bool walls_only) const
 {
     const Node& n=nodes_[node];
+    if (walls_only && !n.has_wall) return best;
     if (box_distance(n.box,point)>=best) return best;
     if (n.leaf())
     {
         for (std::size_t i=n.begin;i<n.begin+n.count;++i)
-            best=std::min(best,face_distance(surfaces_[order_[i]],point));
+        {
+            const Surface& face=surfaces_[order_[i]];
+            if (walls_only && !face.is_wall) continue;
+            best=std::min(best,face_distance(face,point));
+        }
         return best;
     }
     const double l=box_distance(nodes_[n.left].box,point);
     const double r=box_distance(nodes_[n.right].box,point);
     if (l<r)
     {
-        best=closest(n.left,point,best);
-        best=closest(n.right,point,best);
+        best=closest(n.left,point,best,walls_only);
+        best=closest(n.right,point,best,walls_only);
     }
     else
     {
-        best=closest(n.right,point,best);
-        best=closest(n.left,point,best);
+        best=closest(n.right,point,best,walls_only);
+        best=closest(n.left,point,best,walls_only);
     }
     return best;
 }
@@ -216,7 +233,15 @@ double FaceSolid::nearest_distance(Vec3 point) const
 {
     if (!valid_||!finite(point))
         return std::numeric_limits<double>::infinity();
-    return closest(0,point,std::numeric_limits<double>::infinity());
+    return closest(0,point,std::numeric_limits<double>::infinity(),false);
+}
+double FaceSolid::nearest_wall_distance(Vec3 point) const
+{
+    if (!valid_||!finite(point))
+        return std::numeric_limits<double>::infinity();
+    // Shared BVH for both queries. Subtrees without wall Faces are
+    // skipped, so wall-only radius does not require an O(Faces) scan.
+    return closest(0,point,std::numeric_limits<double>::infinity(),true);
 }
 
 void FaceSolid::collect_hits(std::size_t node,Vec3 origin,

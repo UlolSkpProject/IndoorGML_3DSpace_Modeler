@@ -121,12 +121,15 @@ CellSpaceInteriorPointResult locate_reference_before(
                 duplicate=true;break;
             }
         if (duplicate) continue;
-        const double radius=solid.nearest_distance(seed.position)-tolerance;
-        if (!std::isfinite(radius)||radius<=0.0)
-        {
-            ++result.diagnostics.rejected_clearance;
-            continue;
-        }
+        // BEFORE circle radii are the distance to WALL Faces only.
+        // The +1000 mm floor offset and ceiling must not cap them.
+        // All-boundary containment/clearance was already verified by
+        // inspect_reference() above and remains strictly unchanged.
+        const double wall_distance=solid.nearest_wall_distance(seed.position);
+        const double radius=std::isfinite(wall_distance) ?
+            std::max(0.0,wall_distance-tolerance) : 0.0;
+        // No walls: retain the valid State (radius 0 draws no circle),
+        // rather than turning formerly valid geometry into a failure.
 
         if (!result.state_point)
             result.state_point=seed.position;

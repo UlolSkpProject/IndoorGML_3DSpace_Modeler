@@ -141,6 +141,61 @@ void test_box_face_bvh_without_triangles()
     require(!solid.visible({5,5,25},{15,5,25},0.001),
             "LOS leaving solid must be rejected");
 }
+void test_before_radius_ignores_floor_and_ceiling()
+{
+    // Wide enclosed room: floor is ~39.37" away, walls are 100" away.
+    // New circles MUST exceed the floor offset without changing State.
+    const CellData room=box(200,80);
+    FaceSolid solid(room,0.001);
+    const Vec3 reference{100,100,1000.0/25.4};
+    require(solid.inside(reference,0.001),
+            "Wall-radius reference must still pass full 3D Solid containment");
+    require(solid.nearest_distance(reference)<40,
+            "Full Solid clearance should remain floor-limited");
+    require(near(solid.nearest_wall_distance(reference),100.0),
+            "Wall-only BVH must skip floor and ceiling Faces");
+    require(near(solid.nearest_wall_distance({2,100,1000.0/25.4}),2.0),
+            "Wall-only radius must still respect a nearby vertical wall");
+
+    const auto state=locate_reference_before(room,0.001);
+    require(state.exit_code==StateExitCode::Success &&
+            state.state_point.has_value() &&
+            state.debug_graph.nodes.size()==1,
+            "Valid room should still produce the SAME State and BEFORE node");
+    require(near(state.debug_graph.nodes.front().radius,100.0-0.001),
+            "BEFORE circle radius must use wall distance rather than floor");
+
+    // 1000mm State lies only 0.02" below the ceiling: still the
+    // identical wall radius; roof clearance is only used for validity.
+    const CellData low_ceiling=box(200,1000.0/25.4+0.02);
+    const auto near_roof=locate_reference_before(low_ceiling,0.001);
+    require(near_roof.exit_code==StateExitCode::Success &&
+            near_roof.debug_graph.nodes.size()==1 &&
+            near(near_roof.debug_graph.nodes.front().radius,100.0-0.001),
+            "Ceiling clearance must NOT shrink an accepted BEFORE circle");
+
+    // Exceeding the ceiling DOES invalidate State; this safety rule
+    // is deliberately independent from circle radius selection.
+    const auto outside=locate_reference_before(box(200,20),0.001);
+    require(outside.exit_code==StateExitCode::OutsideSolid &&
+            !outside.state_point,
+            "Wall radius must NOT bypass full-Solid State validation");
+}
+void test_no_wall_query_remains_safe()
+{
+    CellData cell;
+    cell.faces={face({0,0,-1},{
+        {0,0,0},{0,10,0},{10,10,0},{10,0,0}
+    })};
+    FaceSolid solid(cell,0.001);
+    require(solid.valid(),
+            "A Face with no wall still builds its standard Solid BVH");
+    require(std::isinf(solid.nearest_wall_distance({5,5,3})),
+            "No wall faces must yield infinity instead of floor distance");
+    require(near(solid.nearest_distance({5,5,3}),3),
+            "Existing all-face distance must remain unchanged");
+}
+
 void test_single_convex_floor_state_only_before()
 {
     const CellData cell=box();
@@ -247,6 +302,8 @@ int main()
     test_exit_code_failure_stage_distinctions();
     test_face_bvh_uses_plane_from_source();
     test_box_face_bvh_without_triangles();
+    test_before_radius_ignores_floor_and_ceiling();
+    test_no_wall_query_remains_safe();
     test_single_convex_floor_state_only_before();
     test_l_floor_queue_and_state_promoted_without_triangles();
     test_shared_boundary_midpoint_without_matching_tessellation();
