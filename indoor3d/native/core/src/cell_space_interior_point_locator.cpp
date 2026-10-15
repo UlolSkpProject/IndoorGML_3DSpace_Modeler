@@ -1577,6 +1577,13 @@ void certify_planar_loop(
     std::size_t& test_budget)
 {
     if (graph.loop_candidates.size()>=256 || test_budget==0) return;
+    // A certified ring must be induced: no chord across its membrane.
+    for (std::size_t i=0;i<cycle.size();++i)
+        for (std::size_t j=i+2;j<cycle.size();++j)
+        {
+            if (i==0 && j==cycle.size()-1) continue;
+            if (linked[cycle[i]][cycle[j]]) return;
+        }
     const auto patch=triangulate_planar_graph_loop(cycle,graph.nodes,tolerance);
     if (!patch) return;
     std::vector<bool> is_cycle(graph.nodes.size(),false);
@@ -1677,7 +1684,7 @@ void validate_virtual_mesh_loop_candidates(
             if (next<=start || used[next] || cycle.size()>=32)
                 continue;
             bool chord=false;
-            for (std::size_t i=0;i+1<cycle.size();++i)
+            for (std::size_t i=1;i+1<cycle.size();++i)
                 if (linked[next][cycle[i]])
                 {
                     chord=true;
