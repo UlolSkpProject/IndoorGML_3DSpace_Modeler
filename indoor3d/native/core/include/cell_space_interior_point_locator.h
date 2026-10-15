@@ -117,13 +117,17 @@ std::optional<Vec3> find_state_point(
     StateSearchMetrics* metrics = nullptr
 );
 
+// BEFORE seed locations only: Room = area centroid of each final Floor
+// polygon; Stair = midpoint of an Edge shared by two final Floor polygons.
+// Both retain the existing +1000mm world-Z placement and Solid BVH check.
 std::vector<ReferencePoint> find_reference_points(
     const CellData& cell,
     const Vec3& state_point,
     double tolerance
 );
 
-// Room-only, non-mutating diagnostic graph. No references are merged here.
+// Non-mutating BEFORE visibility graph for Room and Stair. No final Floor
+// polygons or original SketchUp entities are modified here.
 ReferenceGraphDebug build_room_reference_visibility_graph(
     const CellData& cell,
     const Vec3& state_point,
