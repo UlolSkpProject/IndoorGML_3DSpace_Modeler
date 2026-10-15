@@ -131,8 +131,8 @@ ReferenceGraphDebug build_room_reference_visibility_graph(
     double tolerance
 );
 
-// Room-only exact wall-slice and BVH LOS verification, independent of disks.
-// Reuses the same guards as Native's previously validated graph edges.
+// Room-only 3D Solid-boundary LOS verification for any point elevations.
+// Uses BVH segment/triangle crossings, not horizontal wall slices.
 std::vector<bool> validate_room_reference_segments(
     const CellData& cell,
     const std::vector<std::pair<Vec3, Vec3>>& segments,
