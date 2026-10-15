@@ -164,7 +164,8 @@ LoopResult prepare_loop(
             return {{},PreparationError::NonPlanarLoop};
         const Vec2 projected=frame.project(p);
         if (!std::isfinite(projected.x)||!std::isfinite(projected.y))
-            return {{},PreparationError::InvalidOuterLoop};
+            return {{},hole ? PreparationError::InvalidInnerLoop :
+                            PreparationError::InvalidOuterLoop};
         if (loop.points.empty() ||
             distance_squared(loop.points.back(),projected)>tolerance*tolerance)
         {
