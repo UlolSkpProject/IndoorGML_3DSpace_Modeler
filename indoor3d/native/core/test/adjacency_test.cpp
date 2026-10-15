@@ -578,6 +578,35 @@ void test_floor_hole_does_not_create_void_candidates()
             "Floor with a Hole must remain split into four safe convex strips");
 }
 
+void test_single_floor_face_with_hole_keeps_multiple_regions()
+{
+    CellData room = tall_room(ring_prism_cell());
+    // Represent the whole ring Floor as ONE SketchUp Face with an
+    // inner loop, using its eight pre-existing constrained triangles.
+    FaceData ring_face = room.faces[0];
+    for (std::size_t id=1; id<4; ++id)
+        ring_face.triangles.insert(ring_face.triangles.end(),
+            room.faces[id].triangles.begin(), room.faces[id].triangles.end());
+    room.faces.erase(room.faces.begin(), room.faces.begin()+4);
+    room.faces.insert(room.faces.begin(), ring_face);
+
+    const auto references = find_reference_points(room, {1,1,40}, 0.001);
+    std::size_t count = 0;
+    for (const ReferencePoint& ref : references)
+    {
+        if (ref.kind != ReferencePointKind::Face) continue;
+        const Vec3& p = ref.point;
+        require(p.x > 0 && p.x < 10 && p.y > 0 && p.y < 10,
+                "single-Face Hole region centroid escaped outer boundary");
+        require(!(p.x > 4.9 && p.x < 5.1 &&
+                  p.y > 4.9 && p.y < 5.1),
+                "single-Face Hole must not be filled by a convex merge");
+        ++count;
+    }
+    require(count >= 4 && count < 8,
+            "Hole Face must partition into safe regions, not keep every triangle");
+}
+
 void test_room_visibility_graph_circle_overlap_and_blocked_los()
 {
     CellData room = unit_box_cell();
@@ -855,6 +884,7 @@ int main()
     test_floor_reference_in_short_room_is_rejected();
     test_inclined_floor_uses_world_z_not_surface_normal();
     test_floor_hole_does_not_create_void_candidates();
+    test_single_floor_face_with_hole_keeps_multiple_regions();
     test_3d_sphere_and_vertical_los();
     test_non_room_reference_points_are_empty();
 
