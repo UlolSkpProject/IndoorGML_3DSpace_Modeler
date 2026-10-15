@@ -563,7 +563,7 @@ module ULOL
               outcome = Hash(results[index])
               coordinates = outcome[:state_point]
               unless outcome[:success] == true && coordinates
-                raise NativeAdjacencyBridge::ProtocolError,
+                raise NativeAdjacencyBridge::StateUnavailableError,
                       "Native State candidate unavailable for #{cell_space.id}"
               end
 
