@@ -34,19 +34,18 @@ module ULOL
                                            nodes.length != origins.length ||
                                            origins.first != 0
 
-          # Native 3D Hole certification is deliberately unavailable in
-          # this experiment. Without certificates, enumerating all cycles
-          # is both expensive and unable to authorize a single Collapse.
+          # Only Native-certified virtual membranes can collapse.
+          # AFTER may have absorbed some of the original nodes; require
+          # the ENTIRE certified induced ring to survive unchanged.
           return unchanged(after_graph, 0, 0) if Array(verified_candidates).empty?
-
-          loops = cycle_loops(nodes, edges)
-          return unchanged(after_graph, 0, 0) if loops.empty?
 
           candidates = Array(verified_candidates).each_with_object({}) do |record, lookup|
             vertices = Array(record[:vertices] || record[:triangle]).sort
             lookup[vertices] = record if vertices.length.between?(3, MAX_LOOP_VERTICES) &&
                                          vertices.uniq.length == vertices.length
           end
+          loops = verified_cycles(nodes, edges, origins, candidates)
+          return unchanged(after_graph, 0, 0) if loops.empty?
 
           # Freeze the detection snapshot logically: both eligibility and
           # conflict resolution use the original AFTER nodes and edges only.
@@ -163,6 +162,42 @@ module ULOL
             eligible_count: eligible.length,
             merged_into: Array(after_graph[:merged_into])
           }.freeze
+        end
+
+        # Verify that a Native-certified ring is still induced in AFTER.
+        # A valid Surface-Mesh certificate is never inferred in Ruby.
+        def verified_cycles(nodes, edges, origins, certificates)
+          index_of = {}
+          origins.each_with_index do |original, index|
+            index_of[original] = index unless original.nil?
+          end
+          adjacency = Array.new(nodes.length) { {} }
+          edges.each do |a, b|
+            next unless a.is_a?(Integer) && b.is_a?(Integer) &&
+                        a.between?(0, nodes.length - 1) &&
+                        b.between?(0, nodes.length - 1) && a != b
+
+            adjacency[a][b] = true
+            adjacency[b][a] = true
+          end
+
+          certificates.filter_map do |originals, record|
+            ordered = Array(record[:vertices] || record[:triangle])
+            next unless ordered.sort == originals
+            vertices = ordered.map { |id| index_of[id] }
+            next if vertices.any?(&:nil?) ||
+                    vertices.uniq.length != vertices.length
+
+            length = vertices.length
+            next unless length.times.all? { |i|
+              adjacency[vertices[i]].key?(vertices[(i + 1) % length])
+            }
+            members = vertices.to_h { |id| [id, true] }
+            next unless vertices.all? { |id|
+              adjacency[id].keys.count { |neighbor| members[neighbor] } == 2
+            }
+            vertices.freeze
+          end
         end
 
         def unchanged(after_graph, loops = 0, eligible = 0)
