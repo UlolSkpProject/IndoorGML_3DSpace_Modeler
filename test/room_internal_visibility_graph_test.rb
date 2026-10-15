@@ -89,6 +89,40 @@ class RoomInternalVisibilityGraphTest < Minitest::Test
     assert_raises(RuntimeError) { Builder.build(original, los_batch: ->(_pairs) { raise 'Native failure' }) }
   end
 
+  def test_large_floor_graph_connects_without_allocating_all_pairs
+    # Synthetic centroids from a long tessellated floor, with State at 0.
+    count = Builder::MAX_EXHAUSTIVE_NODES + 1
+    original = graph(Array.new(count) { |i| node(i * 0.3, 0, i * 0.01) })
+    batches = []
+    connected = Builder.build(original, los_batch: lambda { |pairs|
+      batches << pairs.size
+      Array.new(pairs.size, true)
+    })
+
+    assert_equal 1, connected[:component_count_after]
+    assert_equal count - 1, connected[:clear_added_count]
+    assert_equal 0, connected[:blocked_added_count]
+    assert_equal count - 1, connected[:edges].length
+    assert_operator connected[:checked_pairs], :<, count * (count - 1) / 2
+    assert batches.all? { |size| size <= Builder::MAX_PAIRS_PER_BATCH }
+    assert_equal original[:nodes], connected[:nodes]
+  end
+
+  def test_large_floor_graph_never_calls_blocked_edge_clear
+    count = Builder::MAX_EXHAUSTIVE_NODES + 1
+    original = graph(Array.new(count) { |i| node(i, 0) })
+    connected = Builder.build(original, los_batch: lambda { |pairs|
+      Array.new(pairs.size, false)
+    })
+
+    assert_equal 1, connected[:component_count_after]
+    assert_equal 0, connected[:clear_added_count]
+    assert_equal count - 1, connected[:blocked_added_count]
+    assert connected[:added_edges].all? { |record|
+      record[:classification] == :blocked && record[:los_clear] == false
+    }
+  end
+
   def test_state_origin_and_node_limit_checked
     invalid = graph([node(0, 0), node(1, 0)]).merge(original_indices: [3, 4])
     assert_raises(ArgumentError) do
