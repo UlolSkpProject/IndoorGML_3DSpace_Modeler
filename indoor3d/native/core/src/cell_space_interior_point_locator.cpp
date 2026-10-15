@@ -1096,7 +1096,7 @@ struct StairSharedSegment
 // Return one midpoint per maximal straight shared-edge chain, rather than
 // one per underlying SketchUp triangulation fragment. Junctions and corners
 // deliberately terminate a chain. A nonmanifold edge (>2 owners) is ignored.
-std::vector<Vec3> stair_partition_shared_edge_midpoints(
+std::vector<Vec3> floor_partition_shared_edge_midpoints(
     const std::vector<FloorTriangle>& triangles,
     const std::vector<FloorRegion>& regions,
     double tolerance
@@ -1342,7 +1342,7 @@ std::vector<ReferencePoint> find_reference_points(
     if (accepted < MAX_ROOM_REFERENCE_POINTS)
     {
         const std::vector<Vec3> midpoints =
-            stair_partition_shared_edge_midpoints(
+            floor_partition_shared_edge_midpoints(
                 floor_triangles, regions, edge_tolerance);
         for (const Vec3& midpoint : midpoints)
         {
