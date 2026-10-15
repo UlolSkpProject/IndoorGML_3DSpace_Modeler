@@ -6,7 +6,7 @@ module ULOL
       # A second application of the same degree-two Shortcut rule AFTER
       # LOS-prioritized Kruskal connects the OPTIMIZED graph components.
       #
-      # State is immutable, B must have precisely two neighbors, its XY
+      # State is immutable, B must have precisely two neighbors, its 3D
       # projection must lie strictly inside AC, and AC must have Native LOS.
       # No circle, angle, deviation or detour threshold is introduced.
       #
