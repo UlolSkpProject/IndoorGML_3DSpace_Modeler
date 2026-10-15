@@ -900,15 +900,48 @@ bool convex_floor_union(
 
 std::vector<FloorRegion> merge_convex_floor_triangles(
     const std::vector<FloorTriangle>& triangles,
+    const std::vector<std::vector<std::size_t>>& face_groups,
     double planar_tolerance,
     double tolerance
 )
 {
     std::vector<FloorRegion> regions;
     regions.reserve(triangles.size() * 2);
-    for (std::size_t i=0; i<triangles.size(); ++i)
-        regions.push_back({{i}, triangles[i].centroid,
-                           triangles[i].area, true});
+    std::vector<std::size_t> owners(triangles.size());
+
+    // Recognize a convex, hole-free SketchUp Face AS A WHOLE before any
+    // pairwise greedy merge. This yields one area centroid regardless of
+    // how Face#mesh happened to triangulate that convex polygon.
+    for (const auto& group : face_groups)
+    {
+        if (group.empty()) continue;
+        if (group.size() > 1 &&
+            convex_floor_union(group, triangles,
+                               planar_tolerance, tolerance))
+        {
+            double area = 0.0;
+            Vec3 moment{0,0,0};
+            for (std::size_t id : group)
+            {
+                const FloorTriangle& t = triangles[id];
+                area += t.area;
+                moment = add(moment, multiply(t.centroid, t.area));
+            }
+            const std::size_t region_id = regions.size();
+            regions.push_back({group, multiply(moment, 1.0/area), area, true});
+            for (std::size_t id : group) owners[id] = region_id;
+        }
+        else
+        {
+            // Concave/hole/nonmanifold face: keep all original triangles.
+            for (std::size_t id : group)
+            {
+                owners[id] = regions.size();
+                regions.push_back({{id}, triangles[id].centroid,
+                                   triangles[id].area, true});
+            }
+        }
+    }
 
     // Candidate adjacency is based ONLY on true shared triangle edges.
     // A boundary of a Hole has no opposite triangle, thus no candidate pair.
@@ -919,9 +952,9 @@ std::vector<FloorRegion> merge_convex_floor_triangles(
         if (!t.mergeable) continue;
         for (std::size_t j=0; j<3; ++j)
             edge_owners[floor_edge_key(
-                t.keys[j], t.keys[(j+1)%3])].push_back(i);
+                t.keys[j], t.keys[(j+1)%3])].push_back(owners[i]);
     }
-    std::vector<std::set<std::size_t>> adjacency(triangles.size());
+    std::vector<std::set<std::size_t>> adjacency(regions.size());
     std::queue<std::pair<std::size_t,std::size_t>> pending;
     for (const auto& entry : edge_owners)
     {
@@ -1017,6 +1050,7 @@ std::vector<ReferencePoint> find_reference_points(
     });
     const double planar_tolerance = std::max(tolerance * 0.05, 1.0e-8);
     std::vector<FloorTriangle> floor_triangles;
+    std::vector<std::vector<std::size_t>> face_groups;
     for (const FaceData& face : cell.faces)
     {
         const double normal_length = length(face.normal);
@@ -1024,6 +1058,7 @@ std::vector<ReferencePoint> find_reference_points(
             face.normal.z > -ROOM_FLOOR_MIN_NEGATIVE_NORMAL_Z * normal_length)
             continue;
         const Vec3 unit_normal = multiply(face.normal, 1.0/normal_length);
+        face_groups.emplace_back();
         for (const Triangle& triangle : face.triangles)
         {
             const Vec3 ab = subtract(triangle.points[1], triangle.points[0]);
@@ -1055,13 +1090,14 @@ std::vector<ReferencePoint> find_reference_points(
                  candidate.keys[1] == candidate.keys[2] ||
                  candidate.keys[2] == candidate.keys[0]))
                 candidate.mergeable = false;
+            face_groups.back().push_back(floor_triangles.size());
             floor_triangles.push_back(std::move(candidate));
         }
     }
     if (floor_triangles.empty()) return {};
 
     const std::vector<FloorRegion> regions = merge_convex_floor_triangles(
-        floor_triangles, planar_tolerance, tolerance);
+        floor_triangles, face_groups, planar_tolerance, tolerance);
     std::vector<std::size_t> survivors;
     for (std::size_t i=0; i<regions.size(); ++i)
         if (regions[i].active) survivors.push_back(i);
