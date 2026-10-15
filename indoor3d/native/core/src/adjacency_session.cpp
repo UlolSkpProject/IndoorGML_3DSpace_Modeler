@@ -129,11 +129,15 @@ void AdjacencySession::state_worker_loop()
         const std::size_t cell_position = state_targets_[static_cast<std::size_t>(position)];
         try
         {
+            const CellData& cell=cells_[cell_position];
+            // Room/Stair: new Polygon->Reference->State->BEFORE route.
+            // Other categories keep their established State strategy
+            // until their own Reference policy exists (no regressions).
             const CellSpaceInteriorPointResult result =
-                locate_cell_space_interior_points(
-                    cells_[cell_position],
-                    state_tolerance_
-                );
+                (cell.category==CellSpaceCategory::Room ||
+                 cell.category==CellSpaceCategory::Stair) ?
+                locate_reference_before(cell,state_tolerance_) :
+                locate_cell_space_interior_points(cell,state_tolerance_);
             const StateSearchMetrics& metrics = result.state_metrics;
             // Every requested Cell gets an explicit record, including
             // successful computation with NO valid State candidate.

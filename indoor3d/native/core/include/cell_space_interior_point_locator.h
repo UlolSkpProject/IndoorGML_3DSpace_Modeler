@@ -144,6 +144,13 @@ std::vector<bool> validate_room_reference_segments(
     double tolerance
 );
 
+// Phase 10: Loop-only Room/Stair State selection and BEFORE graph;
+ // legacy State service remains available for other CellSpace categories.
+CellSpaceInteriorPointResult locate_reference_before(
+    const CellData& cell,
+    double tolerance
+);
+
 CellSpaceInteriorPointResult locate_cell_space_interior_points(
     const CellData& cell,
     double tolerance

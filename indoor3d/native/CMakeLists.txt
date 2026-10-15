@@ -87,6 +87,9 @@ add_library(indoor_gml_native MODULE
     core/src/floor_polygon_queue.cpp
     core/include/floor_polygon_reference.h
     core/src/floor_polygon_reference.cpp
+    core/include/floor_face_solid.h
+    core/src/floor_face_solid.cpp
+    core/src/floor_reference_before.cpp
     core/src/native_entry.cpp
     core/src/native_api.cpp
     core/src/adjacency_data.cpp
@@ -195,6 +198,9 @@ if(BUILD_TESTING)
         core/src/floor_polygon_validation.cpp
         core/src/floor_polygon_queue.cpp
         core/src/floor_polygon_reference.cpp
+        core/src/floor_face_solid.cpp
+        core/src/floor_reference_before.cpp
+        core/src/cell_space_interior_point_locator.cpp
     )
 
     target_include_directories(indoor_gml_floor_polygon_partition_test PRIVATE

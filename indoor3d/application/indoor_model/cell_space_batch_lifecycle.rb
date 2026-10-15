@@ -575,10 +575,9 @@ module ULOL
                 store_debug_reference_graph(
                   cell_space, graph[:nodes], graph[:edges], graph[:loop_candidates]
                 )
-                # Precompute the existing optional graph stages only while
-                # the shared geometry session remains live.
-                preload_native_shortcuts_for(cell_space, index)
-                preload_room_internal_graph_for(cell_space, index)
+                # BEFORE-only experiment: do not calculate AFTER,
+                # COLLAPSED, OPTIMIZED or INTERNAL as a side effect.
+                # The original graph is stored for SketchUp BEFORE mode.
               else
                 clear_debug_reference_points(cell_space)
               end
