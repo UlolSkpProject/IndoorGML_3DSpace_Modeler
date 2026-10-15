@@ -7,7 +7,8 @@ module ULOL
       # the AFTER graph. All loops are detected and evaluated against the SAME
       # original After snapshot; only then is a single batch graph constructed.
       #
-      # Native V7 prevalidates representative positions and LOS to original nodes.
+      # Native certifies planar virtual Loop meshes against all Solid boundary Faces,
+      # then prevalidates replacement centers and LOS to original nodes.
       # A replacement never gains an invented LOS edge. Overlapping cycles,
       # or cycles joined by an edge between nodes both being removed, are
       # conflicting and cannot be contracted in the same batch.
