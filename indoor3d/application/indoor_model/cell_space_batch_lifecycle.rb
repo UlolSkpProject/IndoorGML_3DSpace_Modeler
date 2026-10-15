@@ -507,7 +507,7 @@ module ULOL
                 keys: keys,
                 state_options: state_options
               )
-              state_result = NativeAdjacencyBridge.compute_state_from_open_session do |_event, payload|
+              state_result = NativeAdjacencyBridge.compute_reference_from_open_session do |_event, payload|
                 current = payload[:current].to_i
                 total = payload[:total].to_i
                 next if current == last_state_progress
@@ -548,39 +548,40 @@ module ULOL
               raise
             end
 
-            points = Hash(state_result[:points])
-            reference_points = Hash(state_result[:reference_points])
-            reference_kinds = Hash(state_result[:reference_kinds])
-            reference_statuses = Hash(state_result[:reference_statuses])
-            graph_nodes = Hash(state_result[:graph_nodes])
-            graph_edges = Hash(state_result[:graph_edges])
-            graph_loop_candidates = Hash(state_result[:graph_loop_candidates])
+            results = Hash(state_result[:results])
             session_entries.each_with_index do |entry, index|
               cell_space = pending_by_id[entry[:cell_space].id]
               next unless cell_space
 
-              coordinates = points[index]
-              log_temp_inner_point_result(
-                cell_space,
-                coordinates,
-                reference_statuses[index],
-                reference_points[index]
-              )
-              unless coordinates
+              # Ruby only interprets the Native outcome, never how State
+              # or References were constructed. Errors in the native call
+              # itself propagate separately from a valid success=false.
+              unless results.key?(index)
                 raise NativeAdjacencyBridge::ProtocolError,
-                      "Native State result missing for #{cell_space.id}"
+                      "Native Reference result missing for #{cell_space.id}"
               end
-              store_debug_reference_points(
-                cell_space, reference_points[index], kinds: reference_kinds[index]
-              )
-              store_debug_reference_graph(
-                cell_space, graph_nodes[index], graph_edges[index],
-                graph_loop_candidates[index]
-              )
-              # Native has this CellSpace geometry only until session close.
-              # Precalculate LOS-based shortcuts now, never during draw(view).
-              preload_native_shortcuts_for(cell_space, index)
-              preload_room_internal_graph_for(cell_space, index)
+              outcome = Hash(results[index])
+              coordinates = outcome[:state_point]
+              unless outcome[:success] == true && coordinates
+                raise NativeAdjacencyBridge::ProtocolError,
+                      "Native State candidate unavailable for #{cell_space.id}"
+              end
+
+              graph = outcome[:graph]
+              if graph
+                store_debug_reference_points(
+                  cell_space, graph[:debug_points], kinds: graph[:debug_kinds]
+                )
+                store_debug_reference_graph(
+                  cell_space, graph[:nodes], graph[:edges], graph[:loop_candidates]
+                )
+                # Precompute the existing optional graph stages only while
+                # the shared geometry session remains live.
+                preload_native_shortcuts_for(cell_space, index)
+                preload_room_internal_graph_for(cell_space, index)
+              else
+                clear_debug_reference_points(cell_space)
+              end
               state_point_applier.call(cell_space, coordinates)
             end
 
@@ -590,40 +591,6 @@ module ULOL
                NativeAdjacencyBridge.shared_session_active?
               NativeAdjacencyBridge.close_geometry_session
             end
-          end
-
-          # TEMP DEBUG [REMOVE]: diagnostic output for State/Reference generation.
-          # Remove this method and its two call sites once reference generation is stable.
-          def log_temp_inner_point_result(cell_space, state_coordinates, reference_status, reference_points)
-            return false unless cell_space
-
-            prefix = '[TEMP DEBUG][REMOVE][CellSpaceInteriorPoint]'
-            if state_coordinates.nil?
-              IndoorCore::Logger.puts(
-                "#{prefix} cell=#{cell_space.id} category=#{cell_space.category_code} "                 'State 실패'
-              )
-              return true
-            end
-
-            category = cell_space.category_code.to_s
-            return true unless %w[room stair].include?(category.downcase)
-
-            # TEMP DEBUG: Room/Stair both seed final-polygon centroids
-            # and shared polygon-boundary midpoints for BEFORE.
-            label = "#{prefix} cell=#{cell_space.id} category=#{category} "
-            case reference_status.to_i
-            when 1
-              IndoorCore::Logger.puts(
-                label + "State 성공 + Reference 성공 count=#{Array(reference_points).length}"
-              )
-            when 2
-              IndoorCore::Logger.puts(
-                label + 'State 성공 + Reference 실패 → State만 유지'
-              )
-            end
-            true
-          rescue StandardError
-            false
           end
 
           def store_debug_reference_points(cell_space, coordinate_sets, kinds: nil)
