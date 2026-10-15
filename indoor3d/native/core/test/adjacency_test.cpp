@@ -390,7 +390,7 @@ void test_state_fixed_z()
     require(std::abs(point->z - 0.25) < 1.0e-9, "fixed-Z State point did not preserve fixed Z");
 }
 
-void test_floor_triangles_seed_before_without_native_pruning()
+void test_convex_floor_one_area_centroid_before()
 {
     CellData room = tall_room(unit_box_cell());
     room.category = CellSpaceCategory::Room;
@@ -400,7 +400,8 @@ void test_floor_triangles_seed_before_without_native_pruning()
     require(result.reference_status == ReferencePointStatus::Succeeded,
             "Floor Reference generation failed");
 
-    // Exactly two triangles cover the lower face of this box.
+    // Two mesh triangles cover ONE convex, hole-free Floor Face.
+    // BEFORE must contain one area-centroid node rather than two.
     std::vector<Vec3> face_points, final_points;
     for (const ReferencePoint& ref : result.reference_points)
     {
@@ -412,23 +413,110 @@ void test_floor_triangles_seed_before_without_native_pruning()
                 ref.kind == ReferencePointKind::Final,
                 "Triangle experiment must not create Corner/Merged refs");
     }
-    require(face_points.size() == 2 && final_points.size() == 2,
-            "each valid floor triangle must generate one primary graph seed");
+    require(face_points.size() == 1 && final_points.size() == 1,
+            "convex Floor must merge mesh triangles into one reference");
     for (std::size_t i = 0; i < face_points.size(); ++i)
     {
         const Vec3& p = face_points[i];
-        require(std::abs(p.z - 1000.0/25.4) < 1.0e-9,
-                "floor centroid must move exactly +1000mm in Z");
+        require(std::abs(p.z - 1000.0/25.4) < 1.0e-9 &&
+                std::abs(p.x - 0.5) < 1.0e-9 &&
+                std::abs(p.y - 0.5) < 1.0e-9,
+                "convex Floor area centroid must move exactly +1000mm in Z");
         require(std::abs(final_points[i].x - p.x) < 1.0e-9 &&
                 std::abs(final_points[i].y - p.y) < 1.0e-9 &&
                 std::abs(final_points[i].z - p.z) < 1.0e-9,
                 "Final must preserve unmerged primary Face candidate");
     }
     const ReferenceGraphDebug& graph = result.debug_graph;
-    require(graph.nodes.size() == 3,
-            "BEFORE must contain State plus all two valid floor candidates");
+    require(graph.nodes.size() == 2,
+            "BEFORE must contain State plus the one convex Floor candidate");
     require(graph.loop_candidates.empty(),
             "3D Hole verification cannot be bypassed by floor triangles");
+}
+
+void test_convex_floor_asymmetric_mesh_has_area_centroid()
+{
+    CellData room = tall_room(unit_box_cell());
+    // A skewed, four-triangle fan still covers the entire unit square.
+    // Averaging triangle centroids equally would shift the result.
+    const Vec3 a{0,0,0}, b{1,0,0}, c{1,1,0}, d{0,1,0};
+    const Vec3 inside{0.8,0.3,0};
+    room.faces[0].triangles = {
+        triangle(a,b,inside), triangle(b,c,inside),
+        triangle(c,d,inside), triangle(d,a,inside)
+    };
+    room.faces[0].outer_points = {a,b,c,d};
+    const auto references = find_reference_points(room, {0.5,0.5,40}, 0.001);
+
+    std::vector<Vec3> candidates;
+    for (const auto& ref : references)
+        if (ref.kind == ReferencePointKind::Face)
+            candidates.push_back(ref.point);
+    require(candidates.size() == 1,
+            "convex Face must be one region regardless of triangulation");
+    require(std::abs(candidates[0].x-0.5) < 1.0e-9 &&
+            std::abs(candidates[0].y-0.5) < 1.0e-9 &&
+            std::abs(candidates[0].z-1000.0/25.4) < 1.0e-9,
+            "merged centroid must be area-weighted, not vertex-averaged");
+}
+
+void test_coplanar_adjacent_floor_faces_merge()
+{
+    CellData room = tall_room(unit_box_cell());
+    const Vec3 a{0,0,0}, b{0.5,0,0}, c{0.5,1,0}, d{0,1,0};
+    const Vec3 e{1,0,0}, f{1,1,0};
+    FaceData left;
+    left.normal = {0,0,-1};
+    left.outer_points = {a,b,c,d};
+    left.triangles = {triangle(a,c,b), triangle(a,d,c)};
+    FaceData right;
+    right.normal = {0,0,-1};
+    right.outer_points = {b,e,f,c};
+    right.triangles = {triangle(b,f,e), triangle(b,c,f)};
+    room.faces[0] = left;
+    room.faces.insert(room.faces.begin()+1, right);
+
+    const auto references = find_reference_points(room, {0.5,0.5,40}, 0.001);
+    std::size_t count = 0;
+    for (const auto& ref : references)
+        if (ref.kind == ReferencePointKind::Face)
+        {
+            require(std::abs(ref.point.x-0.5) < 1.0e-9 &&
+                    std::abs(ref.point.y-0.5) < 1.0e-9,
+                    "same-plane split Faces must share their area centroid");
+            ++count;
+        }
+    require(count == 1,
+            "multiple adjacent coplanar Floor Faces must form one convex region");
+}
+
+void test_concave_floor_partitions_without_filling_its_notch()
+{
+    CellData room = tall_room(u_prism_cell());
+    // Combine the bottom and two arms into ONE concave SketchUp Face;
+    // its mesh remains six valid triangles covering the U floor.
+    FaceData combined = room.faces[0];
+    for (std::size_t id = 1; id < 3; ++id)
+        combined.triangles.insert(combined.triangles.end(),
+            room.faces[id].triangles.begin(), room.faces[id].triangles.end());
+    room.faces.erase(room.faces.begin(),room.faces.begin()+3);
+    room.faces.insert(room.faces.begin(), combined);
+
+    const auto references = find_reference_points(room, {0.5,0.5,40}, 0.001);
+    std::size_t count = 0;
+    for (const auto& ref : references)
+    {
+        if (ref.kind != ReferencePointKind::Face) continue;
+        const Vec3& p = ref.point;
+        const bool in_bottom = p.y > 0 && p.y < 1 && p.x > 0 && p.x < 3;
+        const bool in_left = p.x > 0 && p.x < 1 && p.y > 0 && p.y < 3;
+        const bool in_right = p.x > 2 && p.x < 3 && p.y > 0 && p.y < 3;
+        require(in_bottom || in_left || in_right,
+                "concave Floor partition centroid escaped the actual Solid");
+        ++count;
+    }
+    require(count >= 2 && count < 6,
+            "concave Floor must be partitioned into fewer convex regions");
 }
 
 void test_floor_reference_in_short_room_is_rejected()
@@ -469,8 +557,8 @@ void test_inclined_floor_uses_world_z_not_surface_normal()
                 "sloped floor triangle must be moved along world Z");
         ++floor_count;
     }
-    require(floor_count == 2,
-            "inclined Floor must be triangulated without a horizontal slice");
+    require(floor_count == 1,
+            "coplanar sloped Floor triangles must merge into one area centroid");
 }
 
 void test_floor_hole_does_not_create_void_candidates()
@@ -486,7 +574,8 @@ void test_floor_hole_does_not_create_void_candidates()
                 "Floor triangulation generated a point over a hole");
         ++count;
     }
-    require(count > 0, "Room containing a Hole lost all floor candidates");
+    require(count == 4,
+            "Floor with a Hole must remain split into four safe convex strips");
 }
 
 void test_room_visibility_graph_circle_overlap_and_blocked_los()
@@ -759,7 +848,10 @@ int main()
 
 
 
-    test_floor_triangles_seed_before_without_native_pruning();
+    test_convex_floor_one_area_centroid_before();
+    test_convex_floor_asymmetric_mesh_has_area_centroid();
+    test_coplanar_adjacent_floor_faces_merge();
+    test_concave_floor_partitions_without_filling_its_notch();
     test_floor_reference_in_short_room_is_rejected();
     test_inclined_floor_uses_world_z_not_surface_normal();
     test_floor_hole_does_not_create_void_candidates();
