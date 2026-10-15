@@ -1,379 +1,307 @@
 # frozen_string_literal: true
 
+require_relative 'reference_graph_contraction'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
-      # Deferred, non-destructive contraction of simple minimal 3+ cycles in
-      # the AFTER graph. All loops are detected and evaluated against the SAME
-      # original After snapshot; only then is a single batch graph constructed.
-      #
-      # Native certifies planar virtual Loop meshes against all Solid boundary Faces,
-      # then prevalidates replacement centers and LOS to original nodes.
-      # A replacement never gains an invented LOS edge. Overlapping cycles,
-      # or cycles joined by an edge between nodes both being removed, are
-      # conflicting and cannot be contracted in the same batch.
-      #
-      # State is immutable. No shortest-path/detour increase limit is imposed.
-      # BEFORE and AFTER graphs are not mutated by this diagnostic stage.
+      # Non-destructive COLLAPSED stage. Native, not Ruby, certifies that a
+      # BEFORE loop spans a hole-free Solid membrane. This stage only verifies
+      # the certificate's structural applicability to the immutable AFTER
+      # graph, selects nonconflicting candidates, and delegates EVERY graph
+      # mutation to ReferenceGraphContraction.contract.
       module ReferenceGraphLoopCollapser
-        MAX_GRAPH_NODES = 192
         MAX_COLLAPSES = 256
         MAX_LOOP_VERTICES = 32
-        MAX_SEARCH_STEPS = 150000
-        MAX_TRIANGLE_LOOPS = 256
-        MAX_LONG_LOOPS = 512
-        GEOMETRY_EPSILON = 1.0e-8
 
         module_function
 
-        def collapse(after_graph, verified_candidates)
-          nodes = Array(after_graph.fetch(:nodes))
-          edges = Array(after_graph.fetch(:edges))
-          origins = Array(after_graph.fetch(:original_indices))
+        # Callback contract:
+        #   los_validator.call(Point3d, Point3d) == true on Native clear LOS
+        #   point_validator.call(Point3d, Float) == true on valid Solid point
+        # Native certificates also authorize their exact representative and
+        # the member/external links that Native verified. Callbacks are only
+        # needed for edges not covered by that certificate.
+        def collapse(after_graph, verified_candidates, los_validator: nil,
+                     point_validator: nil)
+          source = canonical_snapshot(after_graph)
+          nodes = source.fetch(:nodes)
+          edges = source.fetch(:edges)
+          origins = source.fetch(:original_indices)
+          records = Array(verified_candidates)
 
-          return unchanged(after_graph) if nodes.length > MAX_GRAPH_NODES ||
-                                           nodes.length != origins.length ||
-                                           origins.first != 0
-
-          # Only Native-certified virtual membranes can collapse.
-          # AFTER may have absorbed some of the original nodes; require
-          # the ENTIRE certified induced ring to survive unchanged.
-          return unchanged(after_graph, 0, 0) if Array(verified_candidates).empty?
-
-          candidates = Array(verified_candidates).each_with_object({}) do |record, lookup|
-            vertices = Array(record[:vertices] || record[:triangle]).sort
-            lookup[vertices] = record if vertices.length.between?(3, MAX_LOOP_VERTICES) &&
-                                         vertices.uniq.length == vertices.length
+          unless valid_snapshot?(nodes, edges, origins)
+            return unchanged(source, records.length)
           end
-          loops = verified_cycles(nodes, edges, origins, candidates)
-          return unchanged(after_graph, 0, 0) if loops.empty?
 
-          # Freeze the detection snapshot logically: both eligibility and
-          # conflict resolution use the original AFTER nodes and edges only.
-          # Smaller loops have priority, with deterministic index ties.
-          loops.sort_by! { |vertices| [loop_area(nodes, vertices).abs, vertices.length, vertices] }
-          eligible = loops.filter_map do |vertices|
-            original_ids = vertices.map { |index| origins[index] }
-            next if original_ids.any?(&:nil?)
+          adjacency = adjacency_for(nodes.length, edges)
+          index_of = {}
+          origins.each_with_index { |original, index| index_of[original] = index unless original.nil? }
 
-            state_loop = original_ids.include?(0)
-            # Native prevalidates hole-free topology for ALL loops,
-            # including State-containing cycles. Never allow the State
-            # shortcut to bypass the enclosed-Hole guard.
-            candidate = candidates[original_ids.sort]
+          # Detect and evaluate EVERY candidate from the same frozen AFTER
+          # snapshot; never synthesize a Ruby Hole certificate or new cycle.
+          discovered = records.filter_map do |record|
+            normalized = normalize_certificate(record, nodes.first[:point])
+            next unless normalized
+            candidate = candidate_for(normalized, nodes, origins, index_of, adjacency)
             next unless candidate
-
-            boundary = external_neighbors(vertices, edges)
-            next if boundary.any? { |index| origins[index].nil? }
-
-            if state_loop
-              # Native's existing State edges must already reach ALL external
-              # neighbors. State itself is retained, not regenerated.
-              next unless boundary.all? { |index| edge_exists?(edges, 0, index) }
-              removed = vertices.reject(&:zero?)
-            else
-              # Every external replacement edge was validated by Native LOS,
-              # without a circle-overlap requirement.
-              # Native has already validated the representative against
-              # Room geometry and LOS. Circle radius is not a collapse gate.
-              next unless candidate[:point]
-              visible = Array(candidate[:visible_neighbors])
-              next unless boundary.all? { |index| visible.include?(origins[index]) }
-              removed = vertices
-            end
-
-            {
-              vertices: vertices.freeze,
-              removed: removed.freeze,
-              boundary: boundary.freeze,
-              state_loop: state_loop,
-              candidate: candidate
-            }.freeze
+            candidate.freeze
           end
+          discovered.sort_by! { |candidate| candidate.fetch(:priority) }
 
-          adjacency = Array.new(nodes.length) { {} }
-          edges.each do |a, b|
-            adjacency[a][b] = true
-            adjacency[b][a] = true
+          # If duplicate records disagree, prefer the deterministic record
+          # ordering. Preflight against the original snapshot before selecting
+          # mutually exclusive contractions, so a failed candidate cannot
+          # prevent a later independent candidate from being selected.
+          eligible = []
+          seen_rings = {}
+          discovered.each do |candidate|
+            signature = candidate.fetch(:original_vertices).sort.freeze
+            next if seen_rings[signature]
+            preflight = apply_candidate(source, candidate,
+                                        los_validator: los_validator,
+                                        point_validator: point_validator)
+            next unless preflight[:accepted]
+            seen_rings[signature] = true
+            eligible << candidate
           end
 
           selected = []
-          reserved_vertices = {}
-          eligible.each do |option|
-            break if selected.length >= MAX_COLLAPSES
-
-            # One node cannot belong to two contracts; even loops sharing
-            # State are excluded from the same batch.
-            next if option[:vertices].any? { |index| reserved_vertices[index] }
-
-            # Although their triangles are disjoint, two candidates can have
-            # edges between vertices that BOTH disappear. Keeping both would
-            # demand a new centroid-to-centroid LOS not checked by Native.
-            has_cross_edges = selected.any? do |prior|
-              option[:removed].any? do |a|
-                prior[:removed].any? { |b| adjacency[a].key?(b) }
-              end
-            end
-            next if has_cross_edges
-
-            selected << option
-            option[:vertices].each { |index| reserved_vertices[index] = true }
+          reserved = {}
+          eligible.each do |candidate|
+            break if selected.size >= MAX_COLLAPSES
+            vertices = candidate.fetch(:after_vertices)
+            next if vertices.any? { |index| reserved[index] }
+            # Cross-edges whose two endpoints both disappear would demand
+            # an unchecked new representative-to-representative LOS.
+            removed = candidate.fetch(:removed_indices)
+            next if selected.any? { |other|
+              removed.any? { |a|
+                other.fetch(:removed_indices).any? { |b| adjacency[a].include?(b) }
+              }
+            }
+            selected << candidate
+            vertices.each { |index| reserved[index] = true }
           end
 
-          return unchanged(after_graph, loops.length, eligible.length) if selected.empty?
-
-          # Apply all selected contractions simultaneously. The original graph
-          # is never updated between candidates.
-          removed = {}
-          selected.each { |option| option[:removed].each { |i| removed[i] = true } }
-          survivors = (0...nodes.length).reject { |index| removed[index] }
-          reindex = {}
-          survivors.each_with_index { |old, index| reindex[old] = index }
-
-          new_nodes = survivors.map { |i| nodes[i] }
-          new_origins = survivors.map { |i| origins[i] }
-          new_edges = edges.filter_map do |a, b|
-            next if removed[a] || removed[b]
-            [reindex[a], reindex[b]].sort
+          current = source
+          completed = 0
+          selected.each do |candidate|
+            # Re-resolve CURRENT indices through stable BEFORE original ids.
+            # Original local AFTER indices are never reused after reindexing.
+            outcome = apply_candidate(current, candidate,
+                                      los_validator: los_validator,
+                                      point_validator: point_validator)
+            next unless outcome[:accepted]
+            current = outcome.fetch(:graph)
+            completed += 1
           end
 
-          selected.each do |option|
-            next if option[:state_loop] # Existing State-Neighbor edges survive.
-
-            record = option[:candidate]
-            new_index = new_nodes.length
-            new_nodes << { point: record[:point], radius: record[:radius] }.freeze
-            new_origins << nil
-            option[:boundary].each do |neighbor|
-              # This must always exist because of the conflict screening.
-              target = reindex[neighbor]
-              raise 'Deferred collapse unresolved boundary' unless target
-
-              new_edges << [new_index, target].sort
-            end
-          end
-
-          {
-            nodes: new_nodes.freeze,
-            edges: new_edges.uniq.sort.map(&:freeze).freeze,
-            original_indices: new_origins.freeze,
-            collapse_count: selected.length,
-            loop_count: loops.length,
-            triangle_count: loops.count { |cycle| cycle.length == 3 },
-            eligible_count: eligible.length,
-            merged_into: Array(after_graph[:merged_into])
-          }.freeze
+          stats = {
+            collapse_count: completed,
+            loop_count: discovered.size,
+            eligible_count: eligible.size,
+            rejected_count: records.size - completed,
+            triangle_count: discovered.count { |candidate| candidate[:original_vertices].size == 3 }
+          }
+          current.merge(stats).freeze
         end
 
-        # Verify that a Native-certified ring is still induced in AFTER.
-        # A valid Surface-Mesh certificate is never inferred in Ruby.
-        def verified_cycles(nodes, edges, origins, certificates)
-          index_of = {}
-          origins.each_with_index do |original, index|
-            index_of[original] = index unless original.nil?
-          end
-          adjacency = Array.new(nodes.length) { {} }
-          edges.each do |a, b|
-            next unless a.is_a?(Integer) && b.is_a?(Integer) &&
-                        a.between?(0, nodes.length - 1) &&
-                        b.between?(0, nodes.length - 1) && a != b
-
-            adjacency[a][b] = true
-            adjacency[b][a] = true
-          end
-
-          certificates.filter_map do |originals, record|
-            ordered = Array(record[:vertices] || record[:triangle])
-            next unless ordered.sort == originals
-            vertices = ordered.map { |id| index_of[id] }
-            next if vertices.any?(&:nil?) ||
-                    vertices.uniq.length != vertices.length
-
-            length = vertices.length
-            next unless length.times.all? { |i|
-              adjacency[vertices[i]].key?(vertices[(i + 1) % length])
-            }
-            members = vertices.to_h { |id| [id, true] }
-            next unless vertices.all? { |id|
-              adjacency[id].keys.count { |neighbor| members[neighbor] } == 2
-            }
-            vertices.freeze
-          end
-        end
-
-        def unchanged(after_graph, loops = 0, eligible = 0)
-          after_graph.merge(
-            collapse_count: 0,
-            loop_count: loops,
-            triangle_count: loops,
-            eligible_count: eligible
+        def canonical_snapshot(source)
+          hash = Hash(source)
+          nodes = Array(hash.fetch(:nodes))
+          hash.merge(
+            nodes: nodes.dup.freeze,
+            edges: Array(hash.fetch(:edges)).map { |pair| Array(pair).dup.freeze }.freeze,
+            original_indices: Array(hash.fetch(:original_indices)).dup.freeze,
+            merged_into: Array(hash[:merged_into]).map { |pair| Array(pair).dup.freeze }.freeze,
+            contraction_history: Array(hash[:contraction_history]).dup.freeze
           ).freeze
         end
 
-        def edge_exists?(edges, first, second)
-          edges.any? { |a, b| (a == first && b == second) || (a == second && b == first) }
+        def valid_snapshot?(nodes, edges, origins)
+          return false if nodes.empty? || nodes.size != origins.size || origins.first != 0
+          return false unless origins.compact.all? { |id| id.is_a?(Integer) && id >= 0 }
+          return false unless origins.compact.uniq.size == origins.compact.size
+          return false unless nodes.all? { |record|
+            record.is_a?(Hash) && record[:radius].is_a?(Numeric) &&
+              record[:radius].finite? && record[:radius] >= 0 && valid_point?(record[:point])
+          }
+          seen = {}
+          edges.all? do |pair|
+            a, b = pair
+            next false unless a.is_a?(Integer) && b.is_a?(Integer) &&
+                              a.between?(0, nodes.size - 1) &&
+                              b.between?(0, nodes.size - 1) && a < b
+            key = [a, b]
+            next false if seen[key]
+            seen[key] = true
+          end
         end
 
-        # Enumerate chordless cycles, not just 3-cycles. Only accept simple,
-        # positive-area polygons without other surviving nodes in the interior.
-        # The search is capped to keep debug redraw/cache generation bounded.
-        def cycle_loops(nodes, edges)
-          adj = Array.new(nodes.length) { {} }
+        def valid_point?(point)
+          point && %i[x y z].all? do |axis|
+            value = point.public_send(axis)
+            value.is_a?(Numeric) && value.finite?
+          end
+        rescue NoMethodError
+          false
+        end
+
+        def normalize_certificate(record, point_type_reference)
+          record = Hash(record)
+          ids = Array(record[:vertices] || record[:triangle])
+          return nil unless ids.length.between?(3, MAX_LOOP_VERTICES) &&
+                            ids.uniq.length == ids.length &&
+                            ids.all? { |id| id.is_a?(Integer) && id >= 0 }
+          coordinates = record[:point]
+          coords = if coordinates.respond_to?(:x)
+                     [coordinates.x, coordinates.y, coordinates.z]
+                   else
+                     Array(coordinates)
+                   end
+          return nil unless coords.length == 3 &&
+                            coords.all? { |number| number.is_a?(Numeric) && number.finite? }
+          radius = record[:radius]
+          return nil unless radius.is_a?(Numeric) && radius.finite? && radius >= 0
+          visible = Array(record[:visible_neighbors])
+          return nil unless visible.uniq.size == visible.size &&
+                            visible.all? { |id| id.is_a?(Integer) && id >= 0 }
+          point = point_type_reference.class.new(*coords)
+          {
+            original_vertices: canonical_ring(ids).freeze,
+            point: point.freeze,
+            radius: radius.to_f,
+            visible_originals: visible.freeze
+          }.freeze
+        rescue ArgumentError, TypeError, NoMethodError
+          nil
+        end
+
+        def canonical_ring(ids)
+          min_position = ids.index(ids.min)
+          first = ids.rotate(min_position)
+          backward = [first.first] + first.drop(1).reverse
+          (first <=> backward) <= 0 ? first : backward
+        end
+
+        def adjacency_for(count, edges)
+          adjacency = Array.new(count) { [] }
           edges.each do |a, b|
-            next unless a.is_a?(Integer) && b.is_a?(Integer)
-            next if a.negative? || b.negative? || a >= nodes.length || b >= nodes.length || a == b
-
-            adj[a][b] = true
-            adj[b][a] = true
+            next unless a.is_a?(Integer) && b.is_a?(Integer) &&
+                        a.between?(0, count - 1) && b.between?(0, count - 1) && a != b
+            adjacency[a] << b
+            adjacency[b] << a
           end
-          neighbors = adj.map { |map| map.keys.sort }
-          found = []
-          triangle_count = 0
-          long_count = 0
-          explored = 0
-
-          nodes.length.times do |start|
-            used = Array.new(nodes.length, false)
-            used[start] = true
-            path = [start]
-
-            visit = lambda do |current|
-              explored += 1
-              next if explored > MAX_SEARCH_STEPS
-
-              neighbors[current].each do |nxt|
-                next if nxt <= start || used[nxt]
-                next if path[1...-1].any? { |prev| adj[nxt].key?(prev) }
-
-                if path.length >= 2 && adj[start].key?(nxt)
-                  if path[1] < nxt
-                    candidate = path + [nxt]
-                    if candidate.length == 3
-                      if triangle_count < MAX_TRIANGLE_LOOPS &&
-                         simple_minimal_loop?(candidate, nodes)
-                        found << candidate.freeze
-                        triangle_count += 1
-                      end
-                    elsif long_count < MAX_LONG_LOOPS &&
-                          simple_minimal_loop?(candidate, nodes)
-                      found << candidate.freeze
-                      long_count += 1
-                    end
-                  end
-                  next
-                end
-                next if path.length >= MAX_LOOP_VERTICES
-
-                used[nxt] = true
-                path << nxt
-                visit.call(nxt)
-                path.pop
-                used[nxt] = false
-                break if explored > MAX_SEARCH_STEPS
-              end
-            end
-
-            visit.call(start)
-            break if explored > MAX_SEARCH_STEPS
-          end
-          found
+          adjacency.each(&:sort!)
         end
 
-        # Keep historical direct callers working without restricting the
-        # actual collapse routine to triangles.
-        def cycle_triangles(nodes, edges)
-          cycle_loops(nodes, edges).select { |loop| loop.length == 3 }
+        def candidate_for(certificate, nodes, origins, index_of, adjacency)
+          ring = certificate.fetch(:original_vertices)
+          after = ring.map { |id| index_of[id] }
+          # A BEFORE member absorbed by AFTER cannot be resurrected.
+          return nil if after.any?(&:nil?) || after.uniq.length != after.length
+          members = after.to_h { |index| [index, true] }
+          length = after.size
+          return nil unless length.times.all? do |i|
+            adjacency[after[i]].include?(after[(i + 1) % length])
+          end
+          # Induced ring: precisely two ring-neighbors per member, no chords.
+          return nil unless after.all? do |index|
+            adjacency[index].count { |neighbor| members[neighbor] } == 2
+          end
+
+          state = ring.include?(0)
+          return nil if state && (after.first != 0 || point_key(certificate[:point]) != point_key(nodes[0][:point]))
+          removed = state ? after.reject(&:zero?) : after
+          boundary = after.flat_map { |index| adjacency[index] }
+                          .reject { |index| members[index] }.uniq.sort
+          area = loop_area(nodes, after)
+          return nil unless area.finite? && area.positive?
+
+          # Area and ids are derived for deterministic PRIORITY ONLY.
+          # Ruby does not validate planar membranes or infer Hole-free status.
+          certificate.merge(
+            after_vertices: after.freeze,
+            removed_indices: removed.freeze,
+            boundary_indices: boundary.freeze,
+            state_loop: state,
+            priority: [area, length, ring, point_key(certificate[:point]), certificate[:radius],
+                       certificate[:visible_originals].sort].freeze
+          )
         end
 
         def loop_area(nodes, vertices)
-          vertices.each_with_index.sum do |vertex, index|
+          # Newell-area magnitude handles planar sloping cycles; do not use
+          # signed XY area (which vanishes for nearly vertical planes).
+          nx = ny = nz = 0.0
+          vertices.each_with_index do |vertex, index|
             a = nodes[vertex][:point]
             b = nodes[vertices[(index + 1) % vertices.length]][:point]
-            a.x * b.y - b.x * a.y
-          end * 0.5
-        end
-
-        def orient_xy(a, b, c)
-          (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
-        end
-
-        def segments_touch?(a, b, c, d)
-          u = orient_xy(a, b, c)
-          v = orient_xy(a, b, d)
-          w = orient_xy(c, d, a)
-          x = orient_xy(c, d, b)
-          return false if (u > GEOMETRY_EPSILON && v > GEOMETRY_EPSILON) ||
-                          (u < -GEOMETRY_EPSILON && v < -GEOMETRY_EPSILON) ||
-                          (w > GEOMETRY_EPSILON && x > GEOMETRY_EPSILON) ||
-                          (w < -GEOMETRY_EPSILON && x < -GEOMETRY_EPSILON)
-
-          [a.x, b.x].min <= [c.x, d.x].max + GEOMETRY_EPSILON &&
-            [c.x, d.x].min <= [a.x, b.x].max + GEOMETRY_EPSILON &&
-            [a.y, b.y].min <= [c.y, d.y].max + GEOMETRY_EPSILON &&
-            [c.y, d.y].min <= [a.y, b.y].max + GEOMETRY_EPSILON
-        end
-
-        def inside_polygon?(point, polygon)
-          inside = false
-          polygon.each_with_index do |a, index|
-            b = polygon[(index + 1) % polygon.length]
-            ab = Math.hypot(b.x - a.x, b.y - a.y)
-            return false if ab <= GEOMETRY_EPSILON
-            if orient_xy(a, b, point).abs <= GEOMETRY_EPSILON * ab &&
-               point.x.between?([a.x, b.x].min - GEOMETRY_EPSILON,
-                                [a.x, b.x].max + GEOMETRY_EPSILON) &&
-               point.y.between?([a.y, b.y].min - GEOMETRY_EPSILON,
-                                [a.y, b.y].max + GEOMETRY_EPSILON)
-              return false
-            end
-            if (a.y > point.y) != (b.y > point.y)
-              at_x = a.x + (point.y - a.y) * (b.x - a.x) / (b.y - a.y)
-              inside = !inside if point.x < at_x
-            end
+            nx += a.y * b.z - a.z * b.y
+            ny += a.z * b.x - a.x * b.z
+            nz += a.x * b.y - a.y * b.x
           end
-          inside
+          0.5 * Math.sqrt(nx * nx + ny * ny + nz * nz)
         end
 
-        def simple_minimal_loop?(cycle, nodes)
-          # Conservative 3D safety gate: XY polygon tests do NOT certify
-          # a noncoplanar cycle or prove its interior is Hole-free.
-          # Native 3D loop certificates are currently disabled as well.
-          heights = cycle.map { |index| nodes[index][:point]&.z }
-          return false if heights.any?(&:nil?)
-          return false if heights.max - heights.min > GEOMETRY_EPSILON
-          return false if loop_area(nodes, cycle).abs <= GEOMETRY_EPSILON
+        def apply_candidate(graph, candidate, los_validator:, point_validator:)
+          originals = Array(graph.fetch(:original_indices))
+          current = {}
+          originals.each_with_index { |id, index| current[id] = index unless id.nil? }
+          indices = candidate.fetch(:original_vertices).map { |id| current[id] }
+          return { accepted: false } if indices.any?(&:nil?)
+          representative = candidate.fetch(:state_loop) ? 0 : :new
+          rep_node = if candidate.fetch(:state_loop)
+                       nil
+                     else
+                       { point: candidate.fetch(:point), radius: candidate.fetch(:radius) }.freeze
+                     end
 
-          polygon = cycle.map { |index| nodes[index][:point] }
-          return false if polygon.any?(&:nil?)
-          count = polygon.length
-          count.times do |i|
-            a, b = polygon[i], polygon[(i + 1) % count]
-            return false if Math.hypot(a.x - b.x, a.y - b.y) <= GEOMETRY_EPSILON
-            ((i + 2)...count).each do |j|
-              next if i.zero? && j == count - 1
-              return false if segments_touch?(a, b, polygon[j], polygon[(j + 1) % count])
+          # The certificate is an explicit Native attestation, not a Ruby
+          # geometric guess. Adapter allows exactly the center-to-members
+          # (non-State) and center-to-listed-external-neighbor LOS that Native
+          # certified; all other segments need an actual Native callback.
+          certified_ids = candidate.fetch(:state_loop) ? [] : candidate.fetch(:original_vertices)
+          certified_ids += candidate.fetch(:visible_originals)
+          center = candidate.fetch(:state_loop) ? graph[:nodes][0][:point] : candidate.fetch(:point)
+          point_lookup = Hash.new { |map, key| map[key] = [] }
+          graph.fetch(:nodes).each_with_index do |node, index|
+            point_lookup[point_key(node[:point])] << index
+          end
+          center_key = point_key(center)
+          validated_los = lambda do |first, last|
+            if point_key(first) == center_key
+              matches = point_lookup[point_key(last)]
+              if matches.size == 1 && certified_ids.include?(originals[matches.first])
+                return true
+              end
             end
+            los_validator && los_validator.call(first, last) == true
           end
-
-          chosen = cycle.to_h { |index| [index, true] }
-          nodes.each_with_index do |node, index|
-            next if chosen[index]
-            return false if inside_polygon?(node[:point], polygon)
+          validated_point = lambda do |p, radius|
+            point_key(p) == point_key(candidate[:point]) &&
+              radius == candidate[:radius] &&
+              (!point_validator || point_validator.call(p, radius) == true)
           end
-          true
+          ReferenceGraphContraction.contract(
+            graph, members: indices,
+            representative: representative,
+            new_node: rep_node,
+            los_validator: validated_los,
+            point_validator: validated_point
+          )
         end
 
-        def external_neighbors(vertices, edges)
-          members = vertices.to_h { |index| [index, true] }
-          edges.flat_map do |a, b|
-            if members[a] && !members[b]
-              [b]
-            elsif members[b] && !members[a]
-              [a]
-            else
-              []
-            end
-          end.uniq.sort
+        def point_key(p)
+          [p.x, p.y, p.z]
+        end
+
+        def unchanged(source, rejected)
+          source.merge(
+            collapse_count: 0, loop_count: 0, eligible_count: 0,
+            rejected_count: rejected, triangle_count: 0
+          ).freeze
         end
       end
     end
