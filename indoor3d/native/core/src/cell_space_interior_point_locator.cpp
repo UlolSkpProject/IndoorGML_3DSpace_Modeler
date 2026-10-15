@@ -1893,16 +1893,19 @@ ReferenceGraphDebug build_room_reference_visibility_graph(
             graph.edges.push_back({i,j});
         }
     }
-    // Native-only 3D geometry certificates: virtual Loop triangles
-    // must be disjoint from EVERY Solid boundary Face and inside its
-    // volume. Warped/ambiguous Loops are never collapsed.
-    try
+    // Room keeps its existing downstream Collapse certificates.
+    // Stair is intentionally BEFORE-only in this experiment: compute
+    // State/Final nodes and sphere/LOS edges, but NO Collapse candidates.
+    if (cell.category == CellSpaceCategory::Room)
     {
-        validate_virtual_mesh_loop_candidates(triangles,bvh,graph,tolerance);
-    }
-    catch (...)
-    {
-        graph.loop_candidates.clear(); // Fail closed, preserve BEFORE.
+        try
+        {
+            validate_virtual_mesh_loop_candidates(triangles,bvh,graph,tolerance);
+        }
+        catch (...)
+        {
+            graph.loop_candidates.clear(); // Fail closed, preserve BEFORE.
+        }
     }
     return graph;
 }
