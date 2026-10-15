@@ -19,6 +19,7 @@ constexpr std::uint8_t STATE_OUTPUT_MAGIC[8] = {'I', 'G', 'M', 'L', 'S', 'T', 'A
 constexpr std::uint64_t INPUT_VERSION_V1 = 1;
 constexpr std::uint64_t INPUT_VERSION_V2 = 2;
 constexpr std::uint64_t INPUT_VERSION_V3 = 3;
+constexpr std::uint64_t INPUT_VERSION_V4 = 4;
 constexpr std::uint64_t RESULT_VERSION = 1;
 constexpr std::uint64_t STATE_RESULT_VERSION = 7;
 constexpr std::size_t INPUT_HEADER_SIZE = 32;
@@ -141,7 +142,7 @@ Vec3 read_vec3(Reader& reader, const char* label)
     return value;
 }
 
-FaceData parse_face(const std::uint8_t* data, std::size_t size)
+FaceData parse_face(const std::uint8_t* data, std::size_t size, std::uint64_t version)
 {
     Reader reader(data, size);
     const std::size_t record_size = checked_size(reader.read_u64(), "face record size");
@@ -152,10 +153,11 @@ FaceData parse_face(const std::uint8_t* data, std::size_t size)
 
     const std::size_t outer_count = checked_size(reader.read_u64(), "outer point count");
     const std::size_t triangle_count = checked_size(reader.read_u64(), "triangle count");
-    if (reader.read_u64() != 0)
-    {
+    const std::uint64_t extra = reader.read_u64();
+    const std::size_t inner_count = version >= INPUT_VERSION_V4 ?
+        checked_size(extra, "inner loop count") : 0;
+    if (version < INPUT_VERSION_V4 && extra != 0)
         throw std::invalid_argument("face reserved field is non-zero");
-    }
     if (outer_count < 3)
     {
         throw std::invalid_argument("face must contain at least three outer points");
@@ -172,6 +174,21 @@ FaceData parse_face(const std::uint8_t* data, std::size_t size)
     for (std::size_t index = 0; index < outer_count; ++index)
     {
         face.outer_points.push_back(read_vec3(reader, "outer point"));
+    }
+
+    if (inner_count > reader.remaining() / 8)
+        throw std::invalid_argument("inner loop count exceeds face record");
+    face.inner_loops.reserve(inner_count);
+    for (std::size_t i=0; i<inner_count; ++i)
+    {
+        const std::size_t count=checked_size(reader.read_u64(), "inner vertex count");
+        if (count < 3 || count > reader.remaining()/24)
+            throw std::invalid_argument("invalid inner loop vertex count");
+        std::vector<Vec3> loop;
+        loop.reserve(count);
+        for (std::size_t j=0; j<count; ++j)
+            loop.push_back(read_vec3(reader, "inner loop point"));
+        face.inner_loops.push_back(std::move(loop));
     }
 
     if (triangle_count > reader.remaining() / 72)
@@ -265,13 +282,13 @@ CellData parse_cell(
         throw std::invalid_argument("cell bounds are inverted");
     }
 
-    if (version == INPUT_VERSION_V2 || version == INPUT_VERSION_V3)
+    if (version >= INPUT_VERSION_V2)
     {
         cell.fixed_z = reader.read_double();
         require_finite(cell.fixed_z, "cell fixed z");
     }
 
-    if (version == INPUT_VERSION_V3)
+    if (version >= INPUT_VERSION_V3)
     {
         const std::uint64_t raw_category = reader.read_u64();
         if (raw_category > static_cast<std::uint64_t>(CellSpaceCategory::Window))
@@ -298,7 +315,7 @@ CellData parse_cell(
         {
             throw std::invalid_argument("face record boundary is invalid");
         }
-        cell.faces.push_back(parse_face(reader.current(), face_size));
+        cell.faces.push_back(parse_face(reader.current(), face_size, version));
         reader.skip(face_size);
     }
 
@@ -341,7 +358,8 @@ std::vector<CellData> parse_input_batch(const std::uint8_t* data, std::size_t si
     const std::uint64_t version = reader.read_u64();
     if (version != INPUT_VERSION_V1 &&
         version != INPUT_VERSION_V2 &&
-        version != INPUT_VERSION_V3)
+        version != INPUT_VERSION_V3 &&
+        version != INPUT_VERSION_V4)
     {
         throw std::invalid_argument("unsupported adjacency input version");
     }
