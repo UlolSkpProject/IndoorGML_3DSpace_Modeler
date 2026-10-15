@@ -52,6 +52,28 @@ std::optional<Vec2> ring_probe(const std::vector<Vec2>& ring,
     return std::nullopt;
 }
 
+std::optional<Vec2> region_probe(const PartitionRegion& region,double tolerance)
+{
+    // Do NOT stop at the first point inside Outer: it may be in an
+    // untouched Hole. Probe actual material (Outer minus Inner Loops).
+    const auto& ring=region.outer.points;
+    for (std::size_t i=0;i<ring.size();++i)
+    {
+        const Vec2 from=ring[i],to=ring[(i+1)%ring.size()];
+        const Vec2 edge=sub(to,from);
+        const double side=length(edge);
+        if (side<=2*tolerance) continue;
+        const Vec2 inward={-edge.y/side,edge.x/side};
+        for (double factor:{2.0,4.0,8.0})
+        {
+            const double delta=std::min(factor*tolerance,side*0.15);
+            const Vec2 point=add(mul(add(from,to),0.5),mul(inward,delta));
+            if (inside_region(region,point,tolerance)) return point;
+        }
+    }
+    return std::nullopt;
+}
+
 bool segment_conflict(const PlanarGraph& graph,const GraphEdge& first,
                       const GraphEdge& second,double tolerance)
 {
@@ -196,9 +218,8 @@ ValidationResult validate_partition(const NormalizedFace& source,
     for (std::size_t i=0;i<extraction.regions.size();++i)
     {
         const PartitionRegion& region=extraction.regions[i];
-        const auto probe=ring_probe(region.outer.points,false,tolerance);
-        if (!probe || !inside_region(region,*probe,tolerance) ||
-            classify_domain(source,*probe,tolerance)!=Location::Inside)
+        const auto probe=region_probe(region,tolerance);
+        if (!probe || classify_domain(source,*probe,tolerance)!=Location::Inside)
             return {{},ValidationError::InvalidBoundary};
         for (std::size_t j=0;j<extraction.regions.size();++j)
             if (j!=i && inside_region(extraction.regions[j],*probe,tolerance))

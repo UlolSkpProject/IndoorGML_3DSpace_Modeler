@@ -195,6 +195,10 @@ if(BUILD_TESTING)
         "${CORE_ROOT}/include"
     )
 
+    target_link_libraries(indoor_gml_floor_polygon_partition_test PRIVATE
+        indoor_gml_geometry
+    )
+
     indoor_gml_configure_cpp_target(indoor_gml_floor_polygon_partition_test)
 
     add_test(
