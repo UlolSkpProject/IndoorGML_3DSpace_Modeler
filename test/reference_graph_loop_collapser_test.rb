@@ -153,6 +153,45 @@ class ReferenceGraphLoopCollapserTest < Minitest::Test
     assert_equal 2, result[:loop_count] # two smaller triangles
   end
 
+  def test_verified_tilted_planar_cycle_can_collapse
+    source = graph(
+      [n(10, 10),
+       { point: Point.new(0.0, 0.0, 0.5), radius: 1.0 },
+       { point: Point.new(2.0, 0.0, 0.6), radius: 1.0 },
+       { point: Point.new(2.0, 2.0, 0.6), radius: 1.0 },
+       { point: Point.new(0.0, 2.0, 0.5), radius: 1.0 }],
+      [[1, 2], [2, 3], [3, 4], [1, 4]]
+    )
+    cert = {
+      vertices: [1, 2, 3, 4],
+      point: Point.new(1.0, 1.0, 0.55),
+      radius: 0.3,
+      visible_neighbors: []
+    }
+    result = Collapse.collapse(source, [cert])
+
+    assert_equal 1, result[:collapse_count]
+    assert_equal [0, nil], result[:original_indices]
+    assert_equal 5, source[:nodes].length
+  end
+
+  def test_native_certificate_does_not_override_missing_after_edge
+    source = graph(
+      [n(10, 10), n(0, 0), n(2, 0), n(2, 2), n(0, 2)],
+      [[1, 2], [2, 3], [3, 4]]
+    )
+    candidate = {
+      vertices: [1, 2, 3, 4],
+      point: Point.new(1, 1, 0.5),
+      radius: 0.2,
+      visible_neighbors: []
+    }
+    result = Collapse.collapse(source, [candidate])
+
+    assert_equal 0, result[:collapse_count]
+    assert_equal source[:edges], result[:edges]
+  end
+
   def test_console_has_six_modes
     output, = capture_io do
       assert_equal :before, Mode.before!
