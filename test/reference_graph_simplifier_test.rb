@@ -90,6 +90,20 @@ class ReferenceGraphSimplifierTest < Minitest::Test
     assert_empty result[:edges]
   end
 
+  def test_equal_xy_but_distant_z_is_not_absorbed_by_a_sphere
+    source = graph(
+      [node(0, 0, 5),
+       { point: Point.new(0.0, 0.0, 8.0), radius: 0.2 },
+       { point: Point.new(1.0, 0.0, 8.0), radius: 0.2 }],
+      [[0, 1], [0, 2], [1, 2]]
+    )
+
+    result = Simplifier.simplify(source)
+
+    assert_equal [0, 1, 2], result[:original_indices]
+    assert_empty result[:merged_into]
+  end
+
   def test_console_mode_switches_without_regenerating_any_graph
     output, = capture_io do
       assert_equal :after, Mode.after!
