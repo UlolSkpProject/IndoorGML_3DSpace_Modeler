@@ -734,7 +734,7 @@ bool clear_path(
 // triangles whose UNION has one simple, convex boundary. A hole always
 // leaves multiple boundary rings and can never pass this validation.
 // Adjacent coplanar SketchUp Faces can be merged too, provided their mesh
-// edges match. The original geometry and its triangles are never modified.
+// edges match. Limited concavity is permitted by the signed-turn budget; The original geometry and its triangles are never modified.
 namespace
 {
 using FloorVertexKey = std::array<std::int64_t, 3>;
@@ -960,7 +960,7 @@ bool cumulative_turn_floor_union(
     return false;
 }
 
-std::vector<FloorRegion> merge_convex_floor_triangles(
+std::vector<FloorRegion> merge_floor_triangles_by_cumulative_turn(
     const std::vector<FloorTriangle>& triangles,
     const std::vector<std::vector<std::size_t>>& face_groups,
     double planar_tolerance,
@@ -1159,7 +1159,7 @@ std::vector<ReferencePoint> find_reference_points(
     }
     if (floor_triangles.empty()) return {};
 
-    const std::vector<FloorRegion> regions = merge_convex_floor_triangles(
+    const std::vector<FloorRegion> regions = merge_floor_triangles_by_cumulative_turn(
         floor_triangles, face_groups, planar_tolerance, tolerance);
     std::vector<std::size_t> survivors;
     for (std::size_t i=0; i<regions.size(); ++i)
