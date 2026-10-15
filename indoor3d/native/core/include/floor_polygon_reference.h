@@ -2,6 +2,7 @@
 #include "floor_polygon_queue.h"
 
 #include <cstddef>
+#include <functional>
 #include <vector>
 
 namespace IndoorGMLAdjacencyNative::FloorPartition
@@ -32,12 +33,24 @@ struct CoarsenedPartitions {
     std::vector<std::vector<std::size_t>> source_leaf_indices;
     std::size_t accepted_merges=0;
 };
+// The callback receives the proposed convex union and its input-leaf indices.
+// It can reject a pair before the geometry-only coarsener commits that pair.
+using MergeAcceptance = std::function<bool(
+    const PartitionLeaf&, const std::vector<std::size_t>&)>;
 // Deterministic, non-destructive coarsening of completed leaves from the same
 // original Floor face. A pair is merged only when cancelling its shared
 // boundary produces one hole-free convex polygon with conserved area.
 CoarsenedPartitions merge_convex_partitions(
     const std::vector<PartitionLeaf>& completed,
-    double tolerance);
+    double tolerance,
+    const MergeAcceptance& accept={});
+// Preserve previously safe maximal merges. If a maximal union fails the
+// callback, salvage independently verified smaller convex unions instead
+// of restoring every original leaf in that failed group.
+std::vector<PartitionLeaf> coarsen_with_safe_fallback(
+    const std::vector<PartitionLeaf>& completed,
+    double tolerance,
+    const MergeAcceptance& accept);
 ReferenceSeeds generate_reference_seeds(
     const std::vector<PartitionLeaf>& completed,
     double tolerance,

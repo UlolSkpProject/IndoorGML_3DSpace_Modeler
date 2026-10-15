@@ -1,4 +1,5 @@
 #include "floor_polygon_reference.h"
+#include <stdexcept>
 
 #include <algorithm>
 #include <cmath>
@@ -267,6 +268,152 @@ void test_coarsening_does_not_mutate_input_leaves()
               "Coarsening modified the second caller-owned leaf");
 }
 
+void test_rejected_maximum_recovers_safe_partial_polygon()
+{
+    const std::vector<PartitionLeaf> leaves{
+        {18,1,make_face(rectangle(0,0,4,4))},
+        {18,1,make_face(rectangle(4,0,8,4))},
+        {18,1,make_face(rectangle(8,0,12,4))}
+    };
+    const auto maximal=merge_convex_partitions(leaves,0.001);
+    check(maximal.accepted_merges==2 && maximal.leaves.size()==1,
+          "Three aligned rectangles must have a valid convex maximal union");
+
+    std::size_t rejected_full=0;
+    const auto result=coarsen_with_safe_fallback(
+        leaves,0.001,
+        [&](const PartitionLeaf& merged,const std::vector<std::size_t>& ids) {
+            check(merged.polygon.holes.empty(),
+                  "Safety callback must only receive hole-free merged polygons");
+            if(ids.size()>2) { ++rejected_full;return false; }
+            return true;
+        });
+    check(rejected_full>0,
+          "The rejected maximal union must trigger incremental recovery");
+    check(result.size()==2,
+          "Failed three-leaf union must keep a verified two-leaf union");
+    double total_area=0.0;
+    bool has_pair=false;
+    bool has_singleton=false;
+    for(const PartitionLeaf& leaf:result)
+    {
+        const double area=leaf.polygon.outer.signed_area;
+        total_area+=area;
+        has_pair=has_pair || near(area,32.0);
+        has_singleton=has_singleton || near(area,16.0);
+    }
+    check(has_pair && has_singleton && near(total_area,48.0),
+          "Partial fallback must conserve area and every original leaf");
+    check(leaves.size()==3 && leaves[0].polygon.outer.points.size()==4,
+          "Fallback must leave caller-owned polygons unchanged");
+}
+
+void test_safe_maximum_kept_even_if_intermediate_pair_would_fail()
+{
+    const std::vector<PartitionLeaf> leaves{
+        {19,0,make_face(rectangle(0,0,4,4))},
+        {19,0,make_face(rectangle(4,0,8,4))},
+        {19,0,make_face(rectangle(8,0,12,4))}
+    };
+    std::size_t checks=0;
+    const auto result=coarsen_with_safe_fallback(
+        leaves,0.001,
+        [&](const PartitionLeaf&,const std::vector<std::size_t>& ids) {
+            ++checks;
+            return ids.size()==3; // All old safe final merges must survive.
+        });
+    check(checks==1 && result.size()==1 &&
+          near(result.front().polygon.outer.signed_area,48.0),
+          "Successful maximal merge must be preserved even if pairs fail");
+}
+
+void test_all_failed_safety_preserves_original_order()
+{
+    const std::vector<PartitionLeaf> leaves{
+        {20,1,make_face(rectangle(8,0,12,4))},
+        {20,1,make_face(rectangle(0,0,4,4))},
+        {20,1,make_face(rectangle(4,0,8,4))}
+    };
+    const auto result=coarsen_with_safe_fallback(
+        leaves,0.001,
+        [](const PartitionLeaf&,const std::vector<std::size_t>&) {
+            return false;
+        });
+    check(result.size()==leaves.size(),
+          "A rejected group with no safe smaller merge must retain all leaves");
+    for(std::size_t i=0;i<leaves.size();++i)
+    {
+        const auto& original_points=leaves[i].polygon.outer.points;
+        const auto& returned_points=result[i].polygon.outer.points;
+        check(returned_points.size()==original_points.size(),
+              "No accepted merge must preserve each original ring");
+        for(std::size_t j=0;j<original_points.size();++j)
+            check(near(returned_points[j].x,original_points[j].x) &&
+                  near(returned_points[j].y,original_points[j].y),
+                  "No accepted merge must preserve original input order");
+    }
+}
+
+void test_safe_fallback_keeps_separate_successful_maximal_groups()
+{
+    const std::vector<PartitionLeaf> leaves{
+        {21,1,make_face(rectangle(0,0,4,4))},
+        {21,1,make_face(rectangle(4,0,8,4))},
+        {21,1,make_face(rectangle(8,0,12,4))},
+        {21,1,make_face(rectangle(20,0,24,4))},
+        {21,1,make_face(rectangle(24,0,28,4))}
+    };
+    const auto result=coarsen_with_safe_fallback(
+        leaves,0.001,
+        [](const PartitionLeaf& merged,const std::vector<std::size_t>& ids) {
+            return ids.size()<=2 || merged.polygon.outer.signed_area<=32.0;
+        });
+    check(result.size()==3,
+          "Rejected triple may recover a pair while existing distant pair survives");
+    double total_area=0.0;
+    for(const PartitionLeaf& leaf:result)
+        total_area+=leaf.polygon.outer.signed_area;
+    check(near(total_area,80.0),
+          "Recovery and preexisting successful merges must conserve floor area");
+}
+
+void test_safety_callback_exception_fails_closed()
+{
+    const std::vector<PartitionLeaf> leaves{
+        {22,1,make_face(rectangle(0,0,4,4))},
+        {22,1,make_face(rectangle(4,0,8,4))}
+    };
+    const auto result=coarsen_with_safe_fallback(
+        leaves,0.001,
+        [](const PartitionLeaf&,const std::vector<std::size_t>&) -> bool {
+            throw std::runtime_error("simulated Native LOS error");
+        });
+    check(result.size()==2,
+          "Optional coarsening must fail closed without aborting State");
+}
+
+void test_geometry_merge_guard_applies_before_pair_commit()
+{
+    const std::vector<PartitionLeaf> leaves{
+        {23,1,make_face(rectangle(0,0,4,4))},
+        {23,1,make_face(rectangle(4,0,8,4))},
+        {23,1,make_face(rectangle(20,0,24,4))},
+        {23,1,make_face(rectangle(24,0,28,4))}
+    };
+    const auto result=merge_convex_partitions(
+        leaves,0.001,
+        [](const PartitionLeaf&,const std::vector<std::size_t>& ids) {
+            return ids!=std::vector<std::size_t>({0,1});
+        });
+    check(result.leaves.size()==3 && result.accepted_merges==1,
+          "Rejected pair must not prevent other independent safe pair merges");
+    check(std::find(result.source_leaf_indices.begin(),
+                    result.source_leaf_indices.end(),
+                    std::vector<std::size_t>({2,3}))!=
+          result.source_leaf_indices.end(),
+          "Committed pair must retain its original membership indices");
+}
+
 void test_iterative_convex_grid_coarsens_to_one_polygon()
 {
     const std::vector<PartitionLeaf> leaves{
@@ -302,5 +449,11 @@ int main()
     test_hole_bearing_leaf_is_never_coarsened();
     test_coarsening_does_not_mutate_input_leaves();
     test_iterative_convex_grid_coarsens_to_one_polygon();
+    test_rejected_maximum_recovers_safe_partial_polygon();
+    test_safe_maximum_kept_even_if_intermediate_pair_would_fail();
+    test_all_failed_safety_preserves_original_order();
+    test_safe_fallback_keeps_separate_successful_maximal_groups();
+    test_safety_callback_exception_fails_closed();
+    test_geometry_merge_guard_applies_before_pair_commit();
     return 0;
 }

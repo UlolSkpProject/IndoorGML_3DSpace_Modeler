@@ -430,7 +430,8 @@ std::vector<EdgePiece> boundary_edges(
 } // namespace
 
 CoarsenedPartitions merge_convex_partitions(
-    const std::vector<PartitionLeaf>& completed,double tolerance)
+    const std::vector<PartitionLeaf>& completed,double tolerance,
+    const MergeAcceptance& accept)
 {
     struct Item {
         PartitionLeaf leaf;
@@ -486,6 +487,13 @@ CoarsenedPartitions merge_convex_partitions(
             candidates.pop();
             if (!items[selected.first].alive || !items[selected.second].alive)
                 continue;
+            if (accept)
+            {
+                bool safe=false;
+                try { safe=accept(selected.merged,selected.members); }
+                catch (...) { safe=false; } // Optional safety check fails closed.
+                if (!safe) continue;
+            }
             items[selected.first].alive=false;
             items[selected.second].alive=false;
             const std::size_t merged_index=items.size();
@@ -508,6 +516,74 @@ CoarsenedPartitions merge_convex_partitions(
         output.source_leaf_indices.push_back(std::move(item.members));
     }
     return output;
+}
+
+std::vector<PartitionLeaf> coarsen_with_safe_fallback(
+    const std::vector<PartitionLeaf>& completed,double tolerance,
+    const MergeAcceptance& accept)
+{
+    CoarsenedPartitions proposed=merge_convex_partitions(completed,tolerance);
+    if(proposed.accepted_merges==0) return completed;
+    if(!accept) return proposed.leaves;
+
+    std::vector<std::size_t> order(proposed.leaves.size());
+    for(std::size_t i=0;i<order.size();++i)order[i]=i;
+    std::sort(order.begin(),order.end(),[&](std::size_t a,std::size_t b) {
+        return proposed.source_leaf_indices[a].front()<
+               proposed.source_leaf_indices[b].front();
+    });
+    std::vector<PartitionLeaf> result;
+    bool kept_merge=false;
+    for(std::size_t i:order)
+    {
+        const auto& members=proposed.source_leaf_indices[i];
+        bool safe=members.size()==1;
+        if(!safe)
+        {
+            try { safe=accept(proposed.leaves[i],members); }
+            catch (...) { safe=false; }
+        }
+        if(safe)
+        {
+            kept_merge=kept_merge || members.size()>1;
+            result.push_back(std::move(proposed.leaves[i]));
+            continue;
+        }
+
+        // A rejected maximal union may contain a safe smaller union.
+        // Retry its original leaves and certify EACH pair before committing.
+        std::vector<PartitionLeaf> group;
+        group.reserve(members.size());
+        for(std::size_t j:members)group.push_back(completed[j]);
+        CoarsenedPartitions partial=merge_convex_partitions(
+            group,tolerance,
+            [&](const PartitionLeaf& candidate,
+                const std::vector<std::size_t>& local_members) {
+                std::vector<std::size_t> original_members;
+                original_members.reserve(local_members.size());
+                for(std::size_t j:local_members)
+                    original_members.push_back(members[j]);
+                return accept(candidate,original_members);
+            });
+        if(partial.accepted_merges==0)
+        {
+            // No new safe merge: preserve exactly the original rollback.
+            for(std::size_t j:members)result.push_back(completed[j]);
+            continue;
+        }
+        kept_merge=true;
+        // Stable original-leaf ordering also preserves State promotion.
+        std::vector<std::size_t> local_order(partial.leaves.size());
+        for(std::size_t j=0;j<local_order.size();++j)local_order[j]=j;
+        std::sort(local_order.begin(),local_order.end(),
+                  [&](std::size_t a,std::size_t b) {
+            return partial.source_leaf_indices[a].front()<
+                   partial.source_leaf_indices[b].front();
+        });
+        for(std::size_t j:local_order)
+            result.push_back(std::move(partial.leaves[j]));
+    }
+    return kept_merge ? result : completed;
 }
 
 ReferenceSeeds generate_reference_seeds(
