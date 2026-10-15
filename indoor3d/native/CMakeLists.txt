@@ -73,6 +73,16 @@ add_library(indoor_gml_native MODULE
     core/include/cell_space_interior_point_locator.h
     core/include/floor_polygon_preparation.h
     core/src/floor_polygon_preparation.cpp
+    core/include/floor_polygon_intersections.h
+    core/src/floor_polygon_intersections.cpp
+    core/include/floor_polygon_graph.h
+    core/src/floor_polygon_graph.cpp
+    core/include/floor_polygon_cycles.h
+    core/src/floor_polygon_cycles.cpp
+    core/include/floor_polygon_regions.h
+    core/src/floor_polygon_regions.cpp
+    core/include/floor_polygon_validation.h
+    core/src/floor_polygon_validation.cpp
     core/src/native_entry.cpp
     core/src/native_api.cpp
     core/src/adjacency_data.cpp
@@ -167,6 +177,29 @@ if(BUILD_TESTING)
     add_test(
         NAME indoor_gml_floor_polygon_preparation_phase_1_2
         COMMAND indoor_gml_floor_polygon_preparation_test
+    )
+
+    # Phase 3-7 standalone transactional planar subdivision tests.
+    # Deliberately not called by live State/BEFORE/Exact Adjacency yet.
+    add_executable(indoor_gml_floor_polygon_partition_test
+        core/test/floor_polygon_partition_test.cpp
+        core/src/floor_polygon_preparation.cpp
+        core/src/floor_polygon_intersections.cpp
+        core/src/floor_polygon_graph.cpp
+        core/src/floor_polygon_cycles.cpp
+        core/src/floor_polygon_regions.cpp
+        core/src/floor_polygon_validation.cpp
+    )
+
+    target_include_directories(indoor_gml_floor_polygon_partition_test PRIVATE
+        "${CORE_ROOT}/include"
+    )
+
+    indoor_gml_configure_cpp_target(indoor_gml_floor_polygon_partition_test)
+
+    add_test(
+        NAME indoor_gml_floor_polygon_partition_phase_3_7
+        COMMAND indoor_gml_floor_polygon_partition_test
     )
 
     add_executable(indoor_gml_validity_native_test
