@@ -19,115 +19,84 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_equal legacy_encode_input(sample_snapshots), Bridge.encode_input(sample_snapshots)
   end
 
-  def test_geometry_v2_encoding_carries_state_flags
+  def test_geometry_v4_serializes_hole_loops_and_keeps_triangle_payload
+    snapshots = sample_snapshots
+    hole = [
+      [1.0, 0.2, 0.2], [1.0, 0.8, 0.2],
+      [1.0, 0.8, 0.8], [1.0, 0.2, 0.8]
+    ]
+    snapshots[0][:faces][0][:inner_loops] = [hole]
     bytes = Bridge.encode_geometry_input(
-      sample_snapshots,
-      [
-        { needs_state: true, fixed_z: 0.25 },
-        { needs_state: false, adjacency_dirty: true }
-      ]
+      snapshots,
+      [{ needs_state: true, fixed_z: 0.25 },
+       { needs_state: false, adjacency_dirty: true }]
     )
-
     assert_equal "IGMLADJ\0".b, bytes.byteslice(0, 8)
-    assert_equal 2, bytes.byteslice(8, 8).unpack1('Q<')
+    assert_equal 4, bytes.byteslice(8, 8).unpack1('Q<')
     assert_equal 2, bytes.byteslice(16, 8).unpack1('Q<')
 
     first_cell = 32
-    assert_equal 0, bytes.byteslice(first_cell + 8, 8).unpack1('Q<')
     assert_equal 7, bytes.byteslice(first_cell + 16, 8).unpack1('Q<')
     assert_equal 0.25, bytes.byteslice(first_cell + 88, 8).unpack1('E')
+    first_face = first_cell + 104
+    assert_equal 4, bytes.byteslice(first_face + 8, 8).unpack1('Q<')
+    assert_equal 2, bytes.byteslice(first_face + 16, 8).unpack1('Q<')
+    assert_equal 1, bytes.byteslice(first_face + 24, 8).unpack1('Q<')
+    inner_offset = first_face + 56 + 4 * 24
+    assert_equal 4, bytes.byteslice(inner_offset, 8).unpack1('Q<')
+    assert_equal hole.flatten, bytes.byteslice(inner_offset + 8, 4 * 24).unpack('E*')
+    triangles_offset = inner_offset + 8 + 4 * 24
+    assert_equal snapshots[0][:faces][0][:triangles].flatten,
+                 bytes.byteslice(triangles_offset, 2 * 72).unpack('E*')
     second_cell = first_cell + bytes.byteslice(first_cell, 8).unpack1('Q<')
-    assert_equal 1, bytes.byteslice(second_cell + 8, 8).unpack1('Q<')
     assert_equal 10, bytes.byteslice(second_cell + 16, 8).unpack1('Q<')
+    assert_equal 0, bytes.byteslice(second_cell + 104 + 24, 8).unpack1('Q<')
   end
 
-  def test_state_result_decoder_maps_cell_indices_to_points
-    bytes =
-      "IGMLSTA\0".b +
-      [1, 2, 0].pack('Q<Q<Q<') +
-      [0].pack('Q<') + [1.0, 2.0, 3.0].pack('E3') +
-      [1].pack('Q<') + [4.0, 5.0, 6.0].pack('E3')
-
-    assert_equal(
-      {
-        0 => [1.0, 2.0, 3.0],
-        1 => [4.0, 5.0, 6.0]
-      },
-      Bridge.decode_state_result(bytes)
-    )
+  def test_legacy_v1_encoding_ignores_hole_metadata_and_remains_byte_identical
+    snapshots = sample_snapshots
+    snapshots[0][:faces][0][:inner_loops] = [
+      [[1.0, 0.2, 0.2], [1.0, 0.8, 0.2], [1.0, 0.8, 0.8]]
+    ]
+    assert_equal legacy_encode_input(snapshots), Bridge.encode_input(snapshots)
   end
 
-  def test_state_result_v5_includes_debug_graph_and_preserves_v4
-    v4 = "IGMLSTA\0".b + [4, 1, 0].pack('Q<3')
-    v4 << [0].pack('Q<') << [0.5, 0.5, 0.5].pack('E3')
-    v4 << [1, 0].pack('Q<2')
-    prior = Bridge.decode_state_result(v4)
-    assert_equal [], prior[:graph_nodes][0]
-    assert_equal [], prior[:graph_edges][0]
-    assert_equal [0.5, 0.5, 0.5], prior[:points][0]
+  def test_reference_v8_decodes_state_success_failure_and_optional_graph
+    bytes = "IGMLSTA\0".b + [8, 3, 0].pack('Q<3')
+    # Cell 0: valid State with one debug reference and two graph nodes
+    bytes << [0, 1].pack('Q<2') << [1.0, 2.0, 3.0].pack('E3')
+    bytes << [1].pack('Q<') # graph present
+    bytes << [1].pack('Q<') << [4.0, 5.0, 6.0].pack('E3') << [4].pack('Q<')
+    bytes << [2].pack('Q<')
+    bytes << [1.0, 2.0, 3.0, 1.0].pack('E4')
+    bytes << [4.0, 5.0, 6.0, 0.5].pack('E4')
+    bytes << [1, 0, 1].pack('Q<3') # one edge
+    bytes << [0].pack('Q<') # no collapse candidates
+    # Cell 1: valid State without a Graph
+    bytes << [1, 1].pack('Q<2') << [7.0, 8.0, 9.0].pack('E3')
+    bytes << [0].pack('Q<')
+    # Cell 2: valid native computation, but no State candidate.
+    bytes << [2, 0, 0].pack('Q<3')
 
-    v5 = "IGMLSTA\0".b + [5, 1, 0].pack('Q<3')
-    v5 << [0].pack('Q<') << [0.5, 0.5, 0.5].pack('E3')
-    v5 << [1, 1].pack('Q<2')
-    v5 << [0.25, 0.5, 0.5].pack('E3') << [4].pack('Q<')
-    v5 << [2].pack('Q<')
-    v5 << [0.5, 0.5, 0.5, 1.0].pack('E4')
-    v5 << [0.25, 0.5, 0.5, 0.5].pack('E4')
-    v5 << [1, 0, 1].pack('Q<3')
-    decoded = Bridge.decode_state_result(v5)
-    assert_equal 4, decoded[:reference_kinds][0][0]
-    assert_equal 2, decoded[:graph_nodes][0].length
-    assert_equal({ point: [0.5, 0.5, 0.5], radius: 1.0 }, decoded[:graph_nodes][0][0])
-    assert_equal [[0, 1]], decoded[:graph_edges][0]
+    decoded = Bridge.decode_state_result(bytes).fetch(:results)
+    assert_equal({ success: true, state_point: [1.0, 2.0, 3.0] },
+                 decoded[0].slice(:success, :state_point))
+    assert_equal [[0, 1]], decoded[0][:graph][:edges]
+    assert_equal [[4.0, 5.0, 6.0]], decoded[0][:graph][:debug_points]
+    assert_equal [4], decoded[0][:graph][:debug_kinds]
+    assert_equal({ success: true, state_point: [7.0, 8.0, 9.0], graph: nil },
+                 decoded[1])
+    assert_equal({ success: false, state_point: nil, graph: nil }, decoded[2])
   end
 
-  def test_v6_state_result_decodes_native_validated_triangle_candidates
-    v6 = "IGMLSTA\0".b + [6, 1, 0].pack('Q<3')
-    v6 << [0].pack('Q<') << [0.5, 0.5, 0.5].pack('E3')
-    v6 << [1, 0].pack('Q<2')
-    v6 << [4].pack('Q<')
-    [
-      [0.5, 0.5, 0.5, 0.49],
-      [0.3, 0.3, 0.5, 0.29],
-      [0.7, 0.3, 0.5, 0.29],
-      [0.5, 0.7, 0.5, 0.29]
-    ].each { |node| v6 << node.pack('E4') }
-    v6 << [3, 1, 2, 1, 3, 2, 3].pack('Q<7')
-    v6 << [1, 1, 2, 3].pack('Q<4')
-    v6 << [0.5, 1.3 / 3.0, 0.5, 0.4].pack('E4')
-    v6 << [1, 0].pack('Q<2')
-
-    decoded = Bridge.decode_state_result(v6)
-    assert_equal 4, decoded[:graph_nodes][0].size
-    assert_equal 3, decoded[:graph_edges][0].size
-    assert_equal 1, decoded[:graph_loop_candidates][0].size
-    candidate = decoded[:graph_loop_candidates][0].first
-    assert_equal [1, 2, 3], candidate[:triangle]
-    assert_equal [0], candidate[:visible_neighbors]
-    assert_in_delta(0.5, candidate[:point][0], 1.0e-9)
+  def test_reference_v8_rejects_contradictory_failure_with_graph
+    bytes = "IGMLSTA\0".b + [8, 1, 0, 0, 0, 1].pack('Q<6')
+    assert_raises(Bridge::ProtocolError) { Bridge.decode_state_result(bytes) }
   end
 
-  def test_v7_state_result_decodes_four_cycle_and_retains_v6_compatibility
-    v7 = "IGMLSTA\0".b + [7, 1, 0].pack('Q<3')
-    v7 << [0].pack('Q<') << [0.2, 0.2, 0.5].pack('E3')
-    v7 << [1, 0].pack('Q<2')
-    v7 << [5].pack('Q<')
-    [
-      [0.2, 0.2, 0.5, 0.2],
-      [0.27, 0.27, 0.5, 0.269],
-      [0.73, 0.27, 0.5, 0.269],
-      [0.73, 0.73, 0.5, 0.269],
-      [0.27, 0.73, 0.5, 0.269]
-    ].each { |node| v7 << node.pack('E4') }
-    v7 << [4, 1, 2, 2, 3, 3, 4, 1, 4].pack('Q<9')
-    v7 << [1, 4, 1, 2, 3, 4].pack('Q<6')
-    v7 << [0.5, 0.5, 0.5, 0.499].pack('E4')
-    v7 << [1, 0].pack('Q<2')
-
-    result = Bridge.decode_state_result(v7)
-    assert_equal [[1, 2, 3, 4]], result[:graph_loop_candidates][0].map { |r| r[:vertices] }
-    assert_equal [1, 2, 3, 4], result[:graph_loop_candidates][0][0][:triangle]
-    assert_equal [0], result[:graph_loop_candidates][0][0][:visible_neighbors]
+  def test_reference_v8_rejects_old_native_protocol
+    bytes = "IGMLSTA\0".b + [7, 0, 0].pack('Q<3')
+    assert_raises(Bridge::ProtocolError) { Bridge.decode_state_result(bytes) }
   end
 
   def test_result_decoding_restores_snapshot_face_references
