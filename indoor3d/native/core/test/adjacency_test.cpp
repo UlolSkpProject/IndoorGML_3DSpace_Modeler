@@ -795,6 +795,46 @@ void test_four_cycle_native_centroid_and_los_candidate()
             "planar, hole-free four-cycle must certify its virtual mesh");
 }
 
+void test_tilted_planar_loop_virtual_membrane_is_certified()
+{
+    CellData room = unit_box_cell();
+    room.category = CellSpaceCategory::Room;
+    const std::vector<ReferencePoint> points{
+        {{0.27,0.27,0.477},ReferencePointKind::Final},
+        {{0.73,0.27,0.523},ReferencePointKind::Final},
+        {{0.73,0.73,0.523},ReferencePointKind::Final},
+        {{0.27,0.73,0.477},ReferencePointKind::Final}
+    };
+    const auto graph = build_room_reference_visibility_graph(
+        room,{0.1,0.1,0.5},points,0.001);
+    bool found=false;
+    for (const auto& cert : graph.loop_candidates)
+        if (cert.vertices == std::vector<std::size_t>{1,2,3,4})
+        {
+            require(cert.representative.radius > 0.0,
+                    "tilted membrane needs an inscribed 3D sphere");
+            found=true;
+        }
+    require(found,"tilted but planar four-cycle must be eligible");
+}
+
+void test_warped_four_loop_has_no_unique_membrane()
+{
+    CellData room = unit_box_cell();
+    room.category = CellSpaceCategory::Room;
+    const std::vector<ReferencePoint> points{
+        {{0.27,0.27,0.45},ReferencePointKind::Final},
+        {{0.73,0.27,0.55},ReferencePointKind::Final},
+        {{0.73,0.73,0.45},ReferencePointKind::Final},
+        {{0.27,0.73,0.55},ReferencePointKind::Final}
+    };
+    const auto graph = build_room_reference_visibility_graph(
+        room,{0.1,0.1,0.5},points,0.001);
+    for (const auto& cert : graph.loop_candidates)
+        require(cert.vertices != std::vector<std::size_t>{1,2,3,4},
+                "noncoplanar four-cycle cannot claim one Hole-free membrane");
+}
+
 void test_room_loop_cannot_collapse_over_enclosed_hole()
 {
     const CellData ring = ring_prism_cell();
@@ -975,6 +1015,8 @@ int main()
     test_triangle_loop_new_edge_can_cross_non_overlapping_circles();
     test_triangle_loop_new_edges_still_reject_wall_crossings();
     test_four_cycle_native_centroid_and_los_candidate();
+    test_tilted_planar_loop_virtual_membrane_is_certified();
+    test_warped_four_loop_has_no_unique_membrane();
     test_room_loop_cannot_collapse_over_enclosed_hole();
     test_state_loop_receives_hole_free_native_certificate();
     return 0;
