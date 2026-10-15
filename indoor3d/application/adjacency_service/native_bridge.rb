@@ -8,7 +8,7 @@ module ULOL
         OUTPUT_MAGIC = "IGMLRES\0".b.freeze
         STATE_OUTPUT_MAGIC = "IGMLSTA\0".b.freeze
         PROTOCOL_VERSION = 1
-        GEOMETRY_PROTOCOL_VERSION = 3
+        GEOMETRY_PROTOCOL_VERSION = 4
         REFERENCE_POINTS_RESULT_VERSION = 2
         STATE_RESULT_VERSION = 7
         TRIANGLE_RESULT_VERSION = 6
@@ -451,7 +451,7 @@ module ULOL
         def encode_input(snapshots)
           snapshots = Array(snapshots)
           buffer = String.new(
-            capacity: encoded_input_size(snapshots, CELL_FIXED_SIZE),
+            capacity: encoded_input_size(snapshots, CELL_FIXED_SIZE, include_inner_loops: false),
             encoding: Encoding::BINARY
           )
           buffer << INPUT_MAGIC
@@ -469,7 +469,7 @@ module ULOL
           raise ProtocolError, 'State option count does not match snapshots' unless state_options.length == snapshots.length
 
           buffer = String.new(
-            capacity: encoded_input_size(snapshots, GEOMETRY_CELL_FIXED_SIZE),
+            capacity: encoded_input_size(snapshots, GEOMETRY_CELL_FIXED_SIZE, include_inner_loops: true),
             encoding: Encoding::BINARY
           )
           buffer << INPUT_MAGIC
@@ -724,24 +724,28 @@ module ULOL
           }
         end
 
-        def encoded_input_size(snapshots, cell_fixed_size)
+        def encoded_input_size(snapshots, cell_fixed_size, include_inner_loops:)
           total = INPUT_HEADER_SIZE
           snapshots.each do |snapshot|
             faces = Array(Hash(snapshot)[:faces])
             total += cell_fixed_size
-            faces.each { |face| total += encoded_face_size(face) }
+            faces.each do |face|
+              total += encoded_face_size(face, include_inner_loops: include_inner_loops)
+            end
           end
           total
         end
         private_class_method :encoded_input_size
 
-        def encoded_face_size(face)
+        def encoded_face_size(face, include_inner_loops: false)
           face = Hash(face)
           points = Array(face[:points])
           triangles = Array(face[:triangles])
+          holes = include_inner_loops ? Array(face[:inner_loops]) : []
           FACE_FIXED_SIZE +
             (points.length * VEC3_SIZE) +
-            (triangles.length * TRIANGLE_SIZE)
+            (triangles.length * TRIANGLE_SIZE) +
+            holes.sum { |loop| 8 + Array(loop).length * VEC3_SIZE }
         end
         private_class_method :encoded_face_size
 
@@ -762,12 +766,12 @@ module ULOL
         def append_cell_v1(buffer, snapshot, cell_index)
           minimum, maximum, faces = cell_geometry(snapshot, cell_index)
           record_size = CELL_FIXED_SIZE
-          faces.each { |face| record_size += encoded_face_size(face) }
+          faces.each { |face| record_size += encoded_face_size(face, include_inner_loops: false) }
 
           append_pack(buffer, [record_size, cell_index, faces.length, 0], 'Q<Q<Q<Q<')
           append_vec3(buffer, minimum, 'cell bounds min')
           append_vec3(buffer, maximum, 'cell bounds max')
-          faces.each_with_index { |face, face_index| append_face(buffer, face, cell_index, face_index) }
+          faces.each_with_index { |face, face_index| append_face(buffer, face, cell_index, face_index, include_inner_loops: false) }
         end
         private_class_method :append_cell_v1
 
@@ -786,7 +790,7 @@ module ULOL
           category = encode_cell_category(option[:category_code])
 
           record_size = GEOMETRY_CELL_FIXED_SIZE
-          faces.each { |face| record_size += encoded_face_size(face) }
+          faces.each { |face| record_size += encoded_face_size(face, include_inner_loops: true) }
 
           append_pack(
             buffer,
@@ -797,7 +801,7 @@ module ULOL
           append_vec3(buffer, maximum, 'cell bounds max')
           append_pack(buffer, [fixed_z], 'E')
           append_pack(buffer, [category], 'Q<')
-          faces.each_with_index { |face, face_index| append_face(buffer, face, cell_index, face_index) }
+          faces.each_with_index { |face, face_index| append_face(buffer, face, cell_index, face_index, include_inner_loops: true) }
         end
         private_class_method :append_cell_v3
 
@@ -813,26 +817,34 @@ module ULOL
         end
         private_class_method :encode_cell_category
 
-        def append_face(buffer, face, cell_index, face_index)
+        def append_face(buffer, face, cell_index, face_index, include_inner_loops:)
           face = Hash(face)
           normal = Array(face.fetch(:normal))
           points = Array(face[:points])
           triangles = Array(face[:triangles])
+          holes = include_inner_loops ? Array(face[:inner_loops]) : []
           face_label = "cell #{cell_index} face #{face_index}"
 
           validate_vec3!(normal, "#{face_label} normal")
           if points.length < 3
             raise ProtocolError, "#{face_label} has fewer than 3 outer points"
           end
+          holes.each_with_index do |loop, loop_index|
+            if Array(loop).length < 3
+              raise ProtocolError, "#{face_label} hole #{loop_index} has fewer than 3 points"
+            end
+          end
 
-          record_size =
-            FACE_FIXED_SIZE +
-            (points.length * VEC3_SIZE) +
-            (triangles.length * TRIANGLE_SIZE)
-          append_pack(buffer, [record_size, points.length, triangles.length, 0], 'Q<Q<Q<Q<')
+          record_size = encoded_face_size(face, include_inner_loops: include_inner_loops)
+          append_pack(buffer, [record_size, points.length, triangles.length, holes.length], 'Q<Q<Q<Q<')
           append_vec3(buffer, normal, "#{face_label} normal")
 
           points.each { |point| append_vec3(buffer, point, "#{face_label} outer point") }
+          holes.each_with_index do |loop, loop_index|
+            vertices = Array(loop)
+            append_pack(buffer, [vertices.length], 'Q<')
+            vertices.each { |point| append_vec3(buffer, point, "#{face_label} hole #{loop_index} point") }
+          end
 
           triangles.each_with_index do |triangle, triangle_index|
             vertices = Array(triangle)
