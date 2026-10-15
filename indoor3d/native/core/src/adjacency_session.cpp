@@ -481,7 +481,10 @@ MetricsSnapshot AdjacencySession::get_metrics() const
     snapshot.state_target_count = static_cast<std::uint64_t>(state_targets_.size());
     {
         std::lock_guard<std::mutex> lock(result_mutex_);
-        snapshot.state_success_count = static_cast<std::uint64_t>(state_results_.size());
+        snapshot.state_success_count = static_cast<std::uint64_t>(
+        std::count_if(state_results_.begin(), state_results_.end(),
+            [](const StatePointResult& item) { return item.point.has_value(); })
+    );
         snapshot.adjacent_pair_count = static_cast<std::uint64_t>(results_.size());
     }
     snapshot.state_volume_centroid_success_count =
