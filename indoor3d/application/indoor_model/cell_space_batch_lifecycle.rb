@@ -605,16 +605,20 @@ module ULOL
               return true
             end
 
-            return true unless cell_space.category_code.to_s.casecmp('Room').zero?
+            category = cell_space.category_code.to_s
+            return true unless %w[room stair].include?(category.downcase)
 
+            # TEMP DEBUG: Room = final-region centroid, Stair = polygon-
+            # shared-edge midpoint; both use BEFORE references only here.
+            label = "#{prefix} cell=#{cell_space.id} category=#{category} "
             case reference_status.to_i
             when 1
               IndoorCore::Logger.puts(
-                "#{prefix} cell=#{cell_space.id} category=Room "                 "State 성공 + Reference 성공 count=#{Array(reference_points).length}"
+                label + "State 성공 + Reference 성공 count=#{Array(reference_points).length}"
               )
             when 2
               IndoorCore::Logger.puts(
-                "#{prefix} cell=#{cell_space.id} category=Room "                 'State 성공 + Reference 실패 → State만 유지'
+                label + 'State 성공 + Reference 실패 → State만 유지'
               )
             end
             true
