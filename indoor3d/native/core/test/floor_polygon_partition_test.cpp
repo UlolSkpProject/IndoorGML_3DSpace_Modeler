@@ -28,7 +28,7 @@ NormalizedFace make_face(const std::vector<Vec3>& outer,
                          const std::vector<std::vector<Vec3>>& holes={},
                          double tolerance=0.001)
 {
-    const auto r=prepare({0,0,1},outer,holes,tolerance);
+    const auto r=prepare(Vec3{0,0,1},outer,holes,tolerance);
     check(bool(r),"test source Face normalization failed");
     return *r.face;
 }
