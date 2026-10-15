@@ -1247,6 +1247,463 @@ std::vector<bool> validate_room_reference_segments(
     return visible;
 }
 
+// Conservative 3D loop membrane verification. A graph Loop bounds a
+// UNIQUE planar polygon only when all its vertices are coplanar. We never
+// invent a spanning membrane for warped rings. A candidate mesh must not
+// intersect ANY Solid boundary triangle (including cavity/Hole side walls),
+// and its interior must lie in the actual CellSpace volume.
+namespace
+{
+struct LoopPoint2 { double x = 0.0, y = 0.0; };
+
+double loop_cross_2d(const LoopPoint2& a, const LoopPoint2& b,
+                     const LoopPoint2& c)
+{
+    return (b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+}
+
+bool point_on_loop_segment(const LoopPoint2& p, const LoopPoint2& a,
+                           const LoopPoint2& b, double epsilon)
+{
+    return std::abs(loop_cross_2d(a,b,p)) <=
+        epsilon * std::max(1.0,std::hypot(b.x-a.x,b.y-a.y)) &&
+        p.x >= std::min(a.x,b.x)-epsilon &&
+        p.x <= std::max(a.x,b.x)+epsilon &&
+        p.y >= std::min(a.y,b.y)-epsilon &&
+        p.y <= std::max(a.y,b.y)+epsilon;
+}
+
+bool loop_segments_touch(const LoopPoint2& a, const LoopPoint2& b,
+                         const LoopPoint2& c, const LoopPoint2& d,
+                         double epsilon)
+{
+    const double x=loop_cross_2d(a,b,c);
+    const double y=loop_cross_2d(a,b,d);
+    const double z=loop_cross_2d(c,d,a);
+    const double w=loop_cross_2d(c,d,b);
+    if ((x>epsilon && y < -epsilon || x < -epsilon && y > epsilon) &&
+        (z>epsilon && w < -epsilon || z < -epsilon && w > epsilon))
+        return true;
+    return (std::abs(x)<=epsilon && point_on_loop_segment(c,a,b,epsilon)) ||
+           (std::abs(y)<=epsilon && point_on_loop_segment(d,a,b,epsilon)) ||
+           (std::abs(z)<=epsilon && point_on_loop_segment(a,c,d,epsilon)) ||
+           (std::abs(w)<=epsilon && point_on_loop_segment(b,c,d,epsilon));
+}
+
+bool triangle_contains_point_3d(const Triangle& triangle,
+                                 const Vec3& p, double epsilon)
+{
+    const Vec3 a=triangle.points[0], ab=subtract(triangle.points[1],a),
+               ac=subtract(triangle.points[2],a), ap=subtract(p,a);
+    const double aa=dot(ab,ab), bb=dot(ab,ac), cc=dot(ac,ac);
+    const double denom=aa*cc-bb*bb;
+    if (denom<=EPSILON) return false;
+    const double u=(cc*dot(ap,ab)-bb*dot(ap,ac))/denom;
+    const double v=(aa*dot(ap,ac)-bb*dot(ap,ab))/denom;
+    return u>=-epsilon && v>=-epsilon && u+v<=1.0+epsilon;
+}
+
+bool segment_touches_triangle_3d(const Vec3& a, const Vec3& b,
+                                 const Triangle& triangle, double tolerance)
+{
+    const Vec3 t0=triangle.points[0];
+    const Vec3 normal=cross(subtract(triangle.points[1],t0),
+                            subtract(triangle.points[2],t0));
+    const double nlen=length(normal);
+    if (nlen<=EPSILON) return false;
+    const double da=dot(subtract(a,t0),normal)/nlen;
+    const double db=dot(subtract(b,t0),normal)/nlen;
+    if (da > tolerance && db > tolerance) return false;
+    if (da < -tolerance && db < -tolerance) return false;
+    if (std::abs(da)<=tolerance && std::abs(db)<=tolerance)
+        return triangle_contains_point_3d(triangle,a,1.0e-8) ||
+               triangle_contains_point_3d(triangle,b,1.0e-8);
+    const double denom=da-db;
+    if (std::abs(denom)<=EPSILON) return false;
+    const double fraction=da/denom;
+    if (fraction < -1.0e-8 || fraction > 1.0+1.0e-8)
+        return false;
+    const Vec3 contact=add(a,multiply(subtract(b,a),
+                            std::max(0.0,std::min(1.0,fraction))));
+    return triangle_contains_point_3d(triangle,contact,1.0e-8);
+}
+
+bool triangles_touch_in_3d(const Triangle& a, const Triangle& b,
+                          double tolerance)
+{
+    const Aabb aa=triangle_bounds(a),bb=triangle_bounds(b);
+    if (aa.maximum.x < bb.minimum.x-tolerance ||
+        bb.maximum.x < aa.minimum.x-tolerance ||
+        aa.maximum.y < bb.minimum.y-tolerance ||
+        bb.maximum.y < aa.minimum.y-tolerance ||
+        aa.maximum.z < bb.minimum.z-tolerance ||
+        bb.maximum.z < aa.minimum.z-tolerance)
+        return false;
+
+    const Vec3 na=cross(subtract(a.points[1],a.points[0]),
+                         subtract(a.points[2],a.points[0]));
+    const Vec3 nb=cross(subtract(b.points[1],b.points[0]),
+                         subtract(b.points[2],b.points[0]));
+    const double la=length(na),lb=length(nb);
+    if (la<=EPSILON || lb<=EPSILON) return true; // Uncertain: do not certify.
+    bool coplanar=length(cross(na,nb)) <= la*lb*1.0e-9;
+    if (coplanar)
+        for (const Vec3& p : b.points)
+            if (std::abs(dot(subtract(p,a.points[0]),na))/la > tolerance)
+                coplanar=false;
+    if (coplanar)
+    {
+        // Project the two coplanar 3D triangles onto their best 2D plane.
+        const Vec3 unit=multiply(na,1.0/la);
+        const std::array<double,3> absn{std::abs(unit.x),
+                                        std::abs(unit.y),std::abs(unit.z)};
+        int drop=0;
+        if (absn[1]>absn[drop]) drop=1;
+        if (absn[2]>absn[drop]) drop=2;
+        const auto project=[drop](const Vec3& p) -> LoopPoint2 {
+            if (drop==0) return {p.y,p.z};
+            if (drop==1) return {p.x,p.z};
+            return {p.x,p.y};
+        };
+        std::array<LoopPoint2,3> ap,bp;
+        for (std::size_t i=0;i<3;++i)
+        {
+            ap[i]=project(a.points[i]);
+            bp[i]=project(b.points[i]);
+        }
+        const auto within=[](const LoopPoint2& p,
+                             const std::array<LoopPoint2,3>& tri) {
+            const double x=loop_cross_2d(tri[0],tri[1],p);
+            const double y=loop_cross_2d(tri[1],tri[2],p);
+            const double z=loop_cross_2d(tri[2],tri[0],p);
+            return (x>=-1.0e-8 && y>=-1.0e-8 && z>=-1.0e-8) ||
+                   (x<=1.0e-8 && y<=1.0e-8 && z<=1.0e-8);
+        };
+        for (const auto& p : ap) if (within(p,bp)) return true;
+        for (const auto& p : bp) if (within(p,ap)) return true;
+        for (std::size_t i=0;i<3;++i)
+            for (std::size_t j=0;j<3;++j)
+                if (loop_segments_touch(ap[i],ap[(i+1)%3],
+                         bp[j],bp[(j+1)%3],tolerance)) return true;
+        return false;
+    }
+    for (std::size_t i=0;i<3;++i)
+    {
+        if (segment_touches_triangle_3d(a.points[i],a.points[(i+1)%3],b,
+                                         tolerance)) return true;
+        if (segment_touches_triangle_3d(b.points[i],b.points[(i+1)%3],a,
+                                         tolerance)) return true;
+    }
+    return false;
+}
+
+bool polygon_contains_2d(const LoopPoint2& point,
+                         const std::vector<LoopPoint2>& polygon,
+                         double tolerance)
+{
+    bool inside=false;
+    for (std::size_t i=0;i<polygon.size();++i)
+    {
+        const auto& a=polygon[i];
+        const auto& b=polygon[(i+1)%polygon.size()];
+        if (point_on_loop_segment(point,a,b,tolerance)) return true;
+        if ((a.y>point.y)!=(b.y>point.y))
+            if (point.x < a.x+(point.y-a.y)*(b.x-a.x)/(b.y-a.y))
+                inside=!inside;
+    }
+    return inside;
+}
+
+struct LoopMembrane
+{
+    std::vector<Triangle> triangles;
+    Vec3 centroid{0,0,0};
+    Vec3 origin{0,0,0},axis_u{0,0,0},axis_v{0,0,0},normal{0,0,0};
+    std::vector<LoopPoint2> projected;
+};
+
+std::optional<LoopMembrane> triangulate_planar_graph_loop(
+    const std::vector<std::size_t>& cycle,
+    const std::vector<ReferenceGraphNode>& nodes, double tolerance)
+{
+    if (cycle.size()<3 || cycle.size()>32) return std::nullopt;
+    LoopMembrane membrane;
+    std::vector<Vec3> points;
+    for (std::size_t id : cycle) points.push_back(nodes[id].point);
+    membrane.origin=points[0];
+    const Vec3 first_edge=subtract(points[1],points[0]);
+    if (length(first_edge)<=tolerance) return std::nullopt;
+    membrane.axis_u=normalize(first_edge);
+    // Newell normal works on concave planar loops as well.
+    Vec3 normal{0,0,0};
+    for (std::size_t i=0;i<points.size();++i)
+        normal=add(normal,cross(subtract(points[i],points[0]),
+               subtract(points[(i+1)%points.size()],points[0])));
+    if (length(normal)<=tolerance*tolerance) return std::nullopt;
+    membrane.normal=normalize(normal);
+    membrane.axis_v=normalize(cross(membrane.normal,membrane.axis_u));
+    if (length(cross(membrane.normal,membrane.axis_u))<=0.9)
+        return std::nullopt;
+    for (const Vec3& point : points)
+    {
+        const Vec3 offset=subtract(point,membrane.origin);
+        if (std::abs(dot(offset,membrane.normal))>tolerance)
+            return std::nullopt;
+        membrane.projected.push_back(
+            {dot(offset,membrane.axis_u),dot(offset,membrane.axis_v)});
+    }
+    const std::size_t n=points.size();
+    for (std::size_t i=0;i<n;++i)
+    {
+        if (length(subtract(points[i],points[(i+1)%n]))<=tolerance)
+            return std::nullopt;
+        for (std::size_t j=i+2;j<n;++j)
+        {
+            if (i==0 && j==n-1) continue;
+            if (loop_segments_touch(
+                    membrane.projected[i],membrane.projected[(i+1)%n],
+                    membrane.projected[j],membrane.projected[(j+1)%n],
+                    tolerance)) return std::nullopt;
+        }
+    }
+    double area=0.0;
+    for (std::size_t i=0;i<n;++i)
+    {
+        const auto& a=membrane.projected[i];
+        const auto& b=membrane.projected[(i+1)%n];
+        area+=a.x*b.y-a.y*b.x;
+    }
+    if (area<=tolerance*tolerance*8.0)
+        return std::nullopt; // Newell makes positive orientation.
+    std::vector<std::size_t> remaining(n);
+    std::iota(remaining.begin(),remaining.end(),0);
+    double total_area=0.0;
+    Vec3 moment{0,0,0};
+    while (remaining.size()>3)
+    {
+        bool clipped=false;
+        for (std::size_t index=0;index<remaining.size();++index)
+        {
+            const std::size_t prev=remaining[(index+remaining.size()-1)%remaining.size()];
+            const std::size_t mid=remaining[index];
+            const std::size_t next=remaining[(index+1)%remaining.size()];
+            const double twice=loop_cross_2d(
+                membrane.projected[prev],membrane.projected[mid],
+                membrane.projected[next]);
+            if (twice<=tolerance*tolerance) continue;
+            const Triangle ear{{points[prev],points[mid],points[next]}};
+            bool occupied=false;
+            for (std::size_t other : remaining)
+            {
+                if (other==prev || other==mid || other==next) continue;
+                const auto& p=membrane.projected[other];
+                const double s0=loop_cross_2d(
+                    membrane.projected[prev],membrane.projected[mid],p);
+                const double s1=loop_cross_2d(
+                    membrane.projected[mid],membrane.projected[next],p);
+                const double s2=loop_cross_2d(
+                    membrane.projected[next],membrane.projected[prev],p);
+                if (s0>=-tolerance && s1>=-tolerance && s2>=-tolerance)
+                {
+                    occupied=true;
+                    break;
+                }
+            }
+            if (occupied) continue;
+            membrane.triangles.push_back(ear);
+            const double tri_area=0.5*length(cross(
+                subtract(ear.points[1],ear.points[0]),
+                subtract(ear.points[2],ear.points[0])));
+            moment=add(moment,multiply(triangle_centroid(ear),tri_area));
+            total_area+=tri_area;
+            remaining.erase(remaining.begin()+static_cast<std::ptrdiff_t>(index));
+            clipped=true;
+            break;
+        }
+        if (!clipped) return std::nullopt;
+    }
+    const Triangle last{{points[remaining[0]],points[remaining[1]],
+                          points[remaining[2]]}};
+    membrane.triangles.push_back(last);
+    const double last_area=0.5*length(cross(
+        subtract(last.points[1],last.points[0]),
+        subtract(last.points[2],last.points[0])));
+    moment=add(moment,multiply(triangle_centroid(last),last_area));
+    total_area+=last_area;
+    if (total_area<=tolerance*tolerance) return std::nullopt;
+    membrane.centroid=multiply(moment,1.0/total_area);
+    return membrane;
+}
+
+bool membrane_inside_solid(
+    const LoopMembrane& membrane, const TriangleBvh& bvh,
+    const std::vector<const Triangle*>& solid, double tolerance,
+    std::size_t& intersection_budget)
+{
+    for (const Triangle& patch : membrane.triangles)
+    {
+        // Check the full triangle geometry, not just its centroid.
+        for (const Triangle* face : solid)
+        {
+            if (intersection_budget==0) return false; // Budget: fail closed.
+            --intersection_budget;
+            if (triangles_touch_in_3d(patch,*face,tolerance)) return false;
+        }
+        const Vec3 a=patch.points[0],b=patch.points[1],c=patch.points[2];
+        for (const Vec3& p : {
+            triangle_centroid(patch),
+            multiply(add(add(multiply(a,0.6),multiply(b,0.2)),
+                         multiply(c,0.2)),1.0),
+            multiply(add(add(multiply(a,0.2),multiply(b,0.6)),
+                         multiply(c,0.2)),1.0),
+            multiply(add(add(multiply(a,0.2),multiply(b,0.2)),
+                         multiply(c,0.6)),1.0)
+        })
+        {
+            if (!bvh_inside(bvh,p,tolerance) ||
+                bvh.nearest_distance(p)<=tolerance)
+                return false;
+        }
+    }
+    return true;
+}
+
+void certify_planar_loop(
+    const std::vector<std::size_t>& cycle,
+    const std::vector<std::vector<bool>>& linked,
+    const std::vector<const Triangle*>& solid,
+    const TriangleBvh& bvh,
+    ReferenceGraphDebug& graph, double tolerance,
+    std::size_t& test_budget)
+{
+    if (graph.loop_candidates.size()>=256 || test_budget==0) return;
+    const auto patch=triangulate_planar_graph_loop(cycle,graph.nodes,tolerance);
+    if (!patch) return;
+    std::vector<bool> is_cycle(graph.nodes.size(),false);
+    for (std::size_t v : cycle) is_cycle[v]=true;
+    // Do not remove an existing non-loop node whose center lies on the
+    // spanning membrane; leave it for an independent safe operation.
+    for (std::size_t i=0;i<graph.nodes.size();++i)
+    {
+        if (is_cycle[i]) continue;
+        const Vec3& p=graph.nodes[i].point;
+        const Vec3 delta=subtract(p,patch->origin);
+        if (std::abs(dot(delta,patch->normal))>tolerance) continue;
+        if (polygon_contains_2d(
+            {dot(delta,patch->axis_u),dot(delta,patch->axis_v)},
+            patch->projected,tolerance)) return;
+    }
+    if (!membrane_inside_solid(*patch,bvh,solid,tolerance,test_budget))
+        return;
+
+    const bool includes_state=is_cycle[0];
+    ReferenceLoopCollapseCandidate cert;
+    cert.vertices=cycle;
+    if (includes_state)
+    {
+        cert.representative=graph.nodes[0];
+        graph.loop_candidates.push_back(std::move(cert));
+        return;
+    }
+
+    // An area centroid can lie outside a concave membrane; use ear
+    // centroids as fallback, but each proposed center must have direct
+    // native LOS to every cycle node (not merely intersecting spheres).
+    std::vector<Vec3> centers{patch->centroid};
+    for (const Triangle& ear : patch->triangles)
+        centers.push_back(triangle_centroid(ear));
+    for (const Vec3& center : centers)
+    {
+        if (!bvh_inside(bvh,center,tolerance)) continue;
+        const double radius=bvh.nearest_distance(center)-tolerance;
+        if (!std::isfinite(radius) || radius<=tolerance) continue;
+        bool all_visible=true;
+        for (std::size_t v : cycle)
+            if (!clear_path(bvh,center,graph.nodes[v].point,tolerance))
+            {
+                all_visible=false;
+                break;
+            }
+        if (!all_visible) continue;
+        cert.representative={center,radius};
+        for (std::size_t i=0;i<graph.nodes.size();++i)
+        {
+            if (is_cycle[i]) continue;
+            if (clear_path(bvh,center,graph.nodes[i].point,tolerance))
+                cert.visible_neighbors.push_back(i);
+        }
+        graph.loop_candidates.push_back(std::move(cert));
+        return;
+    }
+}
+
+void validate_virtual_mesh_loop_candidates(
+    const std::vector<const Triangle*>& solid,
+    const TriangleBvh& bvh, ReferenceGraphDebug& graph,
+    double tolerance)
+{
+    constexpr std::size_t MAX_NODES=192;
+    constexpr std::size_t MAX_PATH_STEPS=80000;
+    constexpr std::size_t MAX_TRIANGLE_TESTS=2000000;
+    const std::size_t n=graph.nodes.size();
+    if (n<3 || n>MAX_NODES || solid.empty()) return;
+    std::vector<std::vector<bool>> linked(
+        n,std::vector<bool>(n,false));
+    std::vector<std::vector<std::size_t>> adjacent(n);
+    for (const ReferenceGraphEdge& e : graph.edges)
+    {
+        if (e.first>=n || e.second>=n) continue;
+        linked[e.first][e.second]=linked[e.second][e.first]=true;
+        adjacent[e.first].push_back(e.second);
+        adjacent[e.second].push_back(e.first);
+    }
+    std::size_t steps=0,budget=MAX_TRIANGLE_TESTS;
+    std::vector<bool> used(n,false);
+    std::vector<std::size_t> cycle;
+    std::function<void(std::size_t,std::size_t)> walk;
+    walk=[&](std::size_t start,std::size_t current)
+    {
+        if (++steps>MAX_PATH_STEPS || graph.loop_candidates.size()>=256)
+            return;
+        for (std::size_t next : adjacent[current])
+        {
+            if (next==start)
+            {
+                if (cycle.size()>=3 && cycle[1]<cycle.back())
+                    certify_planar_loop(cycle,linked,solid,bvh,graph,
+                                        tolerance,budget);
+                continue;
+            }
+            if (next<=start || used[next] || cycle.size()>=32)
+                continue;
+            bool chord=false;
+            for (std::size_t i=0;i+1<cycle.size();++i)
+                if (linked[next][cycle[i]])
+                {
+                    chord=true;
+                    break;
+                }
+            if (chord) continue;
+            used[next]=true;
+            cycle.push_back(next);
+            walk(start,next);
+            cycle.pop_back();
+            used[next]=false;
+            if (steps>MAX_PATH_STEPS || budget==0) return;
+        }
+    };
+    for (std::size_t start=0;start<n;++start)
+    {
+        cycle={start};
+        used[start]=true;
+        walk(start,start);
+        used[start]=false;
+        if (steps>MAX_PATH_STEPS || budget==0 ||
+            graph.loop_candidates.size()>=256) break;
+    }
+}
+} // namespace
+
 ReferenceGraphDebug build_room_reference_visibility_graph(
     const CellData& cell,
     const Vec3& state_point,
@@ -1289,11 +1746,17 @@ ReferenceGraphDebug build_room_reference_visibility_graph(
             graph.edges.push_back({i,j});
         }
     }
-    // TODO(reference-loop-3d): Native V7's prior planar loop-hole test is
-    // unsafe for noncoplanar 3D graphs. Generate NO Collapse certificates
-    // until exact 3D enclosed-boundary/Hole verification is implemented.
-    // The Ruby COLLAPSED stage therefore leaves this graph unchanged;
-    // State and valid edges remain available.
+    // Native-only 3D geometry certificates: virtual Loop triangles
+    // must be disjoint from EVERY Solid boundary Face and inside its
+    // volume. Warped/ambiguous Loops are never collapsed.
+    try
+    {
+        validate_virtual_mesh_loop_candidates(triangles,bvh,graph,tolerance);
+    }
+    catch (...)
+    {
+        graph.loop_candidates.clear(); // Fail closed, preserve BEFORE.
+    }
     return graph;
 }
 
