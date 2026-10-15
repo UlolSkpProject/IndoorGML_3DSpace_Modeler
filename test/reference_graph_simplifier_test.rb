@@ -31,8 +31,9 @@ class ReferenceGraphSimplifierTest < Minitest::Test
     assert_equal [0, 3], result[:original_indices]
     assert_equal [[0, 1]], result[:edges]
     assert_equal [[1, 0], [2, 0]], result[:merged_into]
-    assert_same source[:nodes][0], result[:nodes][0]
-    assert_same source[:nodes][3], result[:nodes][1]
+    assert_equal source[:nodes][0][:point], result[:nodes][0][:point]
+    refute_same source[:nodes][0][:point], result[:nodes][0][:point]
+    assert_equal source[:nodes][3][:point], result[:nodes][1][:point]
   end
 
   def test_articulation_point_on_curved_corridor_cannot_be_removed

@@ -1,138 +1,202 @@
 # frozen_string_literal: true
 
+require_relative 'reference_graph_contraction'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
-      # Non-destructive reduction of the V5 Room visibility graph.
-      #
-      # A native Edge already means overlapping 3D spheres AND unobstructed LOS.
-      # We only remove a node if a larger, directly visible sphere covers its
-      # center, all its currently surviving neighbors can see the same
-      # representative, and the local detour is acceptably short.
-      #
-      # Original nodes and edges are NEVER mutated. State (node zero) and
-      # dead-end / isolated nodes are protected. No synthetic LOS edges are
-      # created, so the reduced graph cannot acquire a wall-crossing edge.
+      # Certified-loop-aware compact cluster contraction for AFTER.
+      # BEFORE and its Native certificate records stay unchanged.
       module ReferenceGraphSimplifier
-        MAX_LOCAL_DETOUR_FACTOR = 1.25
         EPSILON = 1.0e-9
+        CLUSTER_DISTANCE_FACTOR = 1.5
+        MAX_CLUSTER_DIAMETER_FACTOR = 1.6
+        MAX_LOCAL_DETOUR_FACTOR = 1.25
+        MAX_CLUSTER_SIZE = 8
 
         module_function
 
-        def simplify(source)
-          nodes = Array(source.fetch(:nodes))
-          edges = Array(source.fetch(:edges))
-          size = nodes.length
-          return snapshot(nodes, edges, (0...size).to_a, []) if size <= 2
+        # los_batch: Native ->( [[Point3d,Point3d], ...] ) { [true/false,...] }
+        # Without an open Native session, only already validated graph
+        # edges are allowed to replace external connections.
+        def simplify(source, protected_indices: [], los_batch: nil)
+          initial_nodes = Array(source.fetch(:nodes))
+          initial_edges = Array(source.fetch(:edges))
+          originals = Array(source[:original_indices] || (0...initial_nodes.size).to_a)
+          raise ArgumentError, 'invalid source indices' unless originals.length == initial_nodes.length &&
+                                                               (originals.empty? || originals.first == 0)
 
-          neighbors = Array.new(size) { [] }
-          edges.each do |first, second|
-            next unless first.is_a?(Integer) && second.is_a?(Integer)
-            next unless first >= 0 && first < second && second < size
-
-            neighbors[first] << second
-            neighbors[second] << first
-          end
-          neighbors.each(&:freeze)
-
-          alive = Array.new(size, true)
-          absorbed = []
-          # Small spheres are considered first; State remains non-removable.
-          candidates = (1...size).sort_by do |index|
-            [radius(nodes[index]), index]
+          protected = protected_originals(source, protected_indices)
+          graph = source.merge(
+            original_indices: originals.freeze,
+            merged_into: Array(source[:merged_into]).freeze
+          ).freeze
+          # Existing State and large spheres are preferred, then original id.
+          order = (0...initial_nodes.size).sort_by do |i|
+            [-radius(initial_nodes[i]), originals[i] || i, i]
           end
 
-          candidates.each do |index|
-            next unless alive[index]
+          order.each do |original_index|
+            current_origins = graph.fetch(:original_indices)
+            center = current_origins.index(originals[original_index])
+            next unless center
+            nodes = graph.fetch(:nodes)
+            adjacency = neighbors(nodes.length, graph.fetch(:edges))
+            next if !center.zero? && protected.include?(current_origins[center])
 
-            connected = neighbors[index].select { |other| alive[other] }
-            # Preserve graph endpoints, unsupported branches, and islands.
-            next if connected.length < 2
-
-            candidate = nodes[index]
-            candidate_radius = radius(candidate)
-            candidate_center = candidate[:point]
-
-            targets = connected.select do |other|
-              target_radius = radius(nodes[other])
-              next false if target_radius + EPSILON < candidate_radius
-              next false if other > 0 &&
-                            (target_radius - candidate_radius).abs <= EPSILON &&
-                            other > index
-
-              distance(candidate_center, nodes[other][:point]) <= target_radius + EPSILON
-            end.sort_by { |other| [-radius(nodes[other]), other.zero? ? -1 : other] }
-
-            targets.each do |target|
-              other_neighbors = connected.reject { |index2| index2 == target }
-              next if other_neighbors.empty?
-
-              # All affected original graph links must be replaced by
-              # already validated Native LOS edges (no invented shortcuts).
-              next unless other_neighbors.all? { |other| neighbors[target].include?(other) }
-
-              safe_detours = other_neighbors.combination(2).all? do |first, second|
-                # If the original graph already had a direct link, it
-                # survives unchanged and does not need a detour.
-                next true if neighbors[first].include?(second)
-
-                before = distance(nodes[first][:point], candidate_center) +
-                         distance(candidate_center, nodes[second][:point])
-                after = distance(nodes[first][:point], nodes[target][:point]) +
-                        distance(nodes[target][:point], nodes[second][:point])
-                after <= MAX_LOCAL_DETOUR_FACTOR * before + EPSILON
+            members = [center]
+            adjacent = adjacency[center].sort_by { |i| [radius(nodes[i]), current_origins[i] || i] }
+            adjacent.each do |index|
+              next if members.length >= MAX_CLUSTER_SIZE
+              next if index.zero? || protected.include?(current_origins[index])
+              next if adjacency[index].length < 2
+              # Do not contract bridges, isolated ends or meaningful junctions.
+              next unless common_neighbor?(center, index, adjacency)
+              next if meaningful_branch?(index, adjacency)
+              next if radius(nodes[index]) > radius(nodes[center]) + EPSILON
+              d = distance(nodes[center][:point], nodes[index][:point])
+              next if d > CLUSTER_DISTANCE_FACTOR *
+                            [radius(nodes[center]), radius(nodes[index])].min + EPSILON
+              next unless (members + [index]).combination(2).all? do |a, b|
+                distance(nodes[a][:point], nodes[b][:point]) <=
+                  MAX_CLUSTER_DIAMETER_FACTOR *
+                    [radius(nodes[a]), radius(nodes[b])].min + EPSILON
               end
-              next unless safe_detours
-
-              alive[index] = false
-              absorbed << [index, target]
-              break
+              members << index
+            end
+            next if members.length < 2
+            # Retain at least one non-State reference from a component.
+            if center.zero? && members.length == nodes.length
+              members.pop
+            end
+            next if members.length < 2
+            # Attempt the largest compact cluster first, then shrink
+            # deterministically if one external gateway cannot be replaced.
+            while members.length > 1
+              if acceptable_detour?(members, center, nodes, adjacency)
+                checks = prepare_los(members, center, nodes, adjacency, los_batch)
+                if checks
+                  attempt = ReferenceGraphContraction.contract(
+                    graph,
+                    members: members,
+                    representative: center,
+                    protected_indices: current_origins.each_with_index.filter_map do |id, i|
+                      i if protected.include?(id)
+                    end,
+                    los_validator: checks
+                  )
+                  if attempt[:accepted]
+                    graph = attempt[:graph]
+                    break
+                  end
+                end
+              end
+              members.pop
             end
           end
-
-          kept = (0...size).select { |index| alive[index] }
-          snapshot(nodes, edges, kept, absorbed)
+          graph
         end
 
-        def distance(first, second)
-          Math.sqrt(
-            (first.x - second.x)**2 +
-            (first.y - second.y)**2 +
-            (first.z - second.z)**2
-          )
+        def protected_originals(source, explicit)
+          nodes = Array(source.fetch(:nodes))
+          adjacency = neighbors(nodes.size, Array(source.fetch(:edges)))
+          protected = Array(explicit).select { |i| i.is_a?(Integer) && i.between?(0, nodes.size - 1) }
+          protected << 0 unless nodes.empty?
+          nodes.each_with_index do |node, index|
+            protected << index if node[:protected] ||
+                                  %i[door transition junction].include?(node[:semantic_role])
+          end
+          # Certificates are Native-issued against the original BEFORE graph.
+          # Protect ring AND its current external gateways so the certificate
+          # is not silently invalidated before COLLAPSED.
+          Array(source[:loop_candidates]).each do |record|
+            vertices = Array(record[:vertices] || record[:triangle])
+            next unless vertices.length.between?(3, 32) &&
+                        vertices.uniq.length == vertices.length &&
+                        vertices.all? { |i| i.is_a?(Integer) && i.between?(0, nodes.size - 1) }
+            protected.concat(vertices)
+            member_set = vertices.to_h { |i| [i, true] }
+            vertices.each do |index|
+              adjacency[index].each { |neighbor| protected << neighbor unless member_set[neighbor] }
+            end
+          end
+          origins = Array(source[:original_indices] || (0...nodes.size).to_a)
+          protected.map { |i| origins[i] }.compact.uniq.freeze
+        end
+
+        # Protect genuine articulation junctions even if a native shortcut
+        # might be available. Non-articulation dense junctions can be reduced.
+        def meaningful_branch?(index, adjacency)
+          connected = adjacency[index]
+          return false if connected.length <= 2
+          reached = { connected.first => true }
+          queue = [connected.first]
+          head = 0
+          while head < queue.length
+            current = queue[head]
+            head += 1
+            adjacency[current].each do |other|
+              next if other == index || reached[other]
+              reached[other] = true
+              queue << other
+            end
+          end
+          connected.any? { |other| !reached[other] }
+        end
+
+        def common_neighbor?(a, b, adjacency)
+          adjacency[a].any? { |index| index != b && adjacency[b].include?(index) }
+        end
+
+        def neighbors(count, edges)
+          result = Array.new(count) { [] }
+          Array(edges).each do |a, b|
+            next unless a.is_a?(Integer) && b.is_a?(Integer) &&
+                        a.between?(0, count - 1) && b.between?(0, count - 1) && a != b
+            result[a] << b
+            result[b] << a
+          end
+          result.each { |v| v.uniq!; v.sort! }
+          result
+        end
+
+        def acceptable_detour?(members, representative, nodes, adjacency)
+          removed = members.reject { |i| i == representative }
+          removed.all? do |index|
+            outside = adjacency[index].reject { |i| members.include?(i) }
+            outside.combination(2).all? do |a, b|
+              next true if adjacency[a].include?(b)
+              before = distance(nodes[a][:point], nodes[index][:point]) +
+                       distance(nodes[index][:point], nodes[b][:point])
+              after = distance(nodes[a][:point], nodes[representative][:point]) +
+                      distance(nodes[representative][:point], nodes[b][:point])
+              after <= MAX_LOCAL_DETOUR_FACTOR * before + EPSILON
+            end
+          end
+        end
+
+        def prepare_los(members, representative, nodes, adjacency, los_batch)
+          target = (members.reject { |i| i == representative } +
+                    members.flat_map { |i| adjacency[i] }.reject { |i| members.include?(i) }).uniq.sort
+          required = target.reject { |i| adjacency[representative].include?(i) }
+          return nil if required.any? && !los_batch
+          return nil unless los_batch || required.empty?
+          pairs = required.map { |i| [nodes[representative][:point], nodes[i][:point]] }
+          results = pairs.empty? ? [] : Array(los_batch.call(pairs))
+          return nil unless results.length == pairs.length &&
+                            results.all? { |v| v == true }
+          # Every missing edge has been checked in one Native LOS batch.
+          ->(_first, _last) { true }
+        rescue StandardError
+          nil
+        end
+
+        def distance(a, b)
+          Math.sqrt((a.x - b.x)**2 + (a.y - b.y)**2 + (a.z - b.z)**2)
         end
 
         def radius(node)
           node[:radius].to_f
-        end
-
-        def snapshot(nodes, edges, kept, absorbed)
-          reindex = {}
-          kept.each_with_index { |old_index, new_index| reindex[old_index] = new_index }
-
-          result_nodes = kept.map { |index| nodes[index] }.freeze
-          result_edges = edges.filter_map do |first, second|
-            first_new = reindex[first]
-            second_new = reindex[second]
-            next if first_new.nil? || second_new.nil?
-
-            [first_new, second_new].freeze
-          end.freeze
-
-          # Resolve intermediate representatives when a larger disk later
-          # absorbs a representative from an earlier step.
-          parents = absorbed.to_h
-          merged_into = absorbed.map do |from, target|
-            target = parents.fetch(target, target) while parents.key?(target)
-            [from, target].freeze
-          end.freeze
-
-          {
-            nodes: result_nodes,
-            edges: result_edges,
-            original_indices: kept.freeze,
-            merged_into: merged_into
-          }.freeze
         end
       end
     end

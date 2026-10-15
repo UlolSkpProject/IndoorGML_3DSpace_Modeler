@@ -590,12 +590,12 @@ module ULOL
                 store_debug_reference_points(
                   cell_space, graph[:debug_points], kinds: graph[:debug_kinds]
                 )
-                store_debug_reference_graph(
+                stored = store_debug_reference_graph(
                   cell_space, graph[:nodes], graph[:edges], graph[:loop_candidates]
                 )
-                # BEFORE-only experiment: do not calculate AFTER,
-                # COLLAPSED, OPTIMIZED or INTERNAL as a side effect.
-                # The original graph is stored for SketchUp BEFORE mode.
+                # BEFORE stays immutable. While the Native geometry session is
+                # open, precompute AFTER with batched, validated replacement LOS.
+                preload_native_after_graph_for(cell_space, index) if stored
               else
                 clear_debug_reference_points(cell_space)
               end
@@ -700,6 +700,35 @@ module ULOL
             @room_internal_graph_by_cell_id&.delete(cell_space.id)
             @room_internal_connected_by_cell_id&.delete(cell_space.id)
             false
+          end
+
+          # Optional AFTER work must never fail State creation. Its Native
+          # geometry is valid until the enclosing batch closes the session.
+          def preload_native_after_graph_for(cell_space, session_index)
+            return unless cell_space&.valid?
+            source = @debug_reference_graph_by_cell_id&.[](cell_space.id)
+            return unless source
+            los_batch = nil
+            category = cell_space.category_code.to_s
+            if %w[Room Stair].any? { |name| category.casecmp(name).zero? } &&
+               NativeAdjacencyBridge.shared_session_active? &&
+               NativeAdjacencyBridge.room_los_supported?
+              tolerance = Utils::Geometry::ADJACENCY_TOLERANCE
+              los_batch = lambda do |pairs|
+                NativeAdjacencyBridge.validate_room_los_batch_from_open_session(
+                  session_index, pairs, tolerance: tolerance
+                )
+              end
+            end
+            result = ReferenceGraphSimplifier.simplify(source, los_batch: los_batch)
+            (@debug_reference_graph_simplified_by_cell_id ||= {})[cell_space.id] = result
+            result
+          rescue StandardError => error
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Native AFTER precompute skipped cell=#{cell_space.id}: " \
+              "#{error.class}: #{error.message}"
+            ) if defined?(IndoorCore::Logger)
+            nil
           end
 
           # Lazy, non-destructive reduction. The original Native graph remains
