@@ -193,6 +193,54 @@ module ULOL
             end
           end
 
+          # The bounded neighbor search can leave separate islands if
+          # every nearby cross-component pair is blocked. Complete the
+          # diagnostic graph through geometry-checked component bridges,
+          # explicitly marking blocked links instead of inventing clear LOS.
+          while union.components > 1
+            roots = (0...points.length).map { |i| union.find(i) }
+            closest = {}
+            points.each_with_index do |a, i|
+              ((i + 1)...points.length).each do |j|
+                next if roots[i] == roots[j]
+
+                b = points[j]
+                dx = a.x - b.x
+                dy = a.y - b.y
+                dz = a.z - b.z
+                dist_sq = dx * dx + dy * dy + dz * dz
+                root = roots[i]
+                other = roots[j]
+                [[root, other], [other, root]].each do |first, second|
+                  prior = closest[first]
+                  record = [dist_sq, i, j]
+                  closest[first] = record if prior.nil? ||
+                    (record <=> prior) < 0
+                end
+              end
+            end
+            pair_records = closest.values.uniq.sort_by { |d, a, b| [d, a, b] }
+            break if pair_records.empty?
+            segments = pair_records.map { |_d, a, b| [points[a], points[b]] }
+            results = []
+            segments.each_slice(MAX_PAIRS_PER_BATCH) do |batch|
+              response = los_batch.call(batch)
+              unless response.is_a?(Array) && response.length == batch.length &&
+                     response.all? { |value| value == true || value == false }
+                raise ArgumentError, 'Native LOS batch returned invalid results'
+              end
+              results.concat(response)
+            end
+            attempts += pair_records.length
+            pair_records.each_with_index do |(dist_sq, a, b), index|
+              next unless union.join(a, b)
+
+              kind = results[index] ? :clear : :blocked
+              record = addition(a, b, Math.sqrt(dist_sq), kind)
+              kind == :clear ? clear_additions << record : blocked_additions << record
+            end
+          end
+
           additions = clear_additions + blocked_additions
           edges = (original_edges.map(&:dup) + additions.map { |item| item[:edge] }).map(&:freeze).freeze
           weights = (original_weights + additions.map { |item| item[:length] }).freeze
@@ -203,7 +251,7 @@ module ULOL
         def sparse_nearest_external_pairs(points, union, count)
           # Per-source K-nearest disjoint-component pairs; sort is
           # deterministic, and memory is O(K*N) rather than O(N^2).
-          roots = points.indices.map { |i| union.find(i) }
+          roots = (0...points.length).map { |i| union.find(i) }
           unique = {}
           points.each_with_index do |a, i|
             best = []
@@ -218,7 +266,7 @@ module ULOL
 
               first, last = i < j ? [i, j] : [j, i]
               candidate = [dist_sq, first, last]
-              at = best.bsearch_index { |item| item >= candidate } || best.size
+              at = best.bsearch_index { |item| (item <=> candidate) >= 0 } || best.size
               best.insert(at, candidate)
               best.pop if best.size > count
             end
