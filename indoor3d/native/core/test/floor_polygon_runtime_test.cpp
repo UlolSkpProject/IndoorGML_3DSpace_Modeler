@@ -57,7 +57,7 @@ std::vector<Vec3> rectangle(double x0,double y0,double x1,double y1)
 NormalizedFace normal_face(const std::vector<Vec3>& outer,
                            const std::vector<std::vector<Vec3>>& holes={})
 {
-    const auto result=prepare({0,0,-1},outer,holes,0.001);
+    const auto result=prepare(Vec3{0,0,-1},outer,holes,0.001);
     require(result.face.has_value(),"Test polygon preparation failed");
     return *result.face;
 }
