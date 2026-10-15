@@ -150,7 +150,7 @@ class ReferenceGraphLoopCollapserTest < Minitest::Test
 
     assert_equal 0, result[:collapse_count]
     assert_equal [0, 1, 2, 3, 4], result[:original_indices]
-    assert_equal 2, result[:loop_count] # two smaller triangles
+    assert_equal 0, result[:loop_count] # no Native certificate for this chorded ring
   end
 
   def test_verified_tilted_planar_cycle_can_collapse
@@ -313,7 +313,7 @@ class ReferenceGraphLoopCollapserTest < Minitest::Test
     result = Collapse.collapse(source, [])
 
     assert_equal 0, result[:collapse_count]
-    assert_equal 2, result[:loop_count]
+    assert_equal 0, result[:loop_count] # no certified cycle
     assert_equal source[:edges], result[:edges]
     assert_equal source[:nodes], result[:nodes]
   end
@@ -328,7 +328,7 @@ class ReferenceGraphLoopCollapserTest < Minitest::Test
     result = Collapse.collapse(source, [])
 
     assert_equal 0, result[:collapse_count]
-    assert_equal 1, result[:loop_count]
+    assert_equal 0, result[:loop_count] # no certified cycle
     assert_equal source[:nodes], result[:nodes]
     assert_equal source[:edges], result[:edges]
   end
