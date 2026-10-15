@@ -1034,7 +1034,9 @@ void test_room_and_stair_both_seed_centroids_and_shared_edges()
     {
         const Vec3& a=room_face[i];
         const Vec3& b=stair_face[i];
-        require(length_squared(subtract(a,b))<1.0e-16,
+        require(std::abs(a.x-b.x)<1.0e-9 &&
+                std::abs(a.y-b.y)<1.0e-9 &&
+                std::abs(a.z-b.z)<1.0e-9,
                 "Room and Stair must return precisely the same seed positions");
         require(std::abs(a.z-1000.0/25.4)<1.0e-9,
                 "both seed kinds must retain the +1000mm world-Z lift");
