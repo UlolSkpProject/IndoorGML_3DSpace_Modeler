@@ -294,12 +294,27 @@ bool convex_ccw(const std::vector<Vec2>& ring,double tolerance)
 std::optional<PartitionLeaf> merge_pair(
     const PartitionLeaf& first,const PartitionLeaf& second,double tolerance)
 {
-    if (first.source_face_id!=second.source_face_id ||
-        !first.polygon.holes.empty() || !second.polygon.holes.empty())
+    if (!first.polygon.holes.empty() || !second.polygon.holes.empty())
         return std::nullopt;
     const Frame& frame=first.polygon.frame;
+    const Frame& other=second.polygon.frame;
+    // Face provenance is not a geometric barrier: accept different SketchUp
+    // Floor Faces when their real 3D boundaries share one coplanar domain.
+    // Check the ORIGINAL second-face vertices against the first plane,
+    // rather than projecting onto the second face and lifting back (which
+    // cannot detect a tilted/noncoplanar neighbour).
+    const double normal_alignment=dot(frame.n,other.n);
+    for (Vec2 point:second.polygon.outer.points)
+    {
+        const Vec3 world=other.lift(point);
+        if (std::abs(dot(sub(world,frame.origin),frame.n))>tolerance)
+            return std::nullopt;
+    }
     const std::vector<Vec2> a=ring_in_frame(first,frame);
-    const std::vector<Vec2> b=ring_in_frame(second,frame);
+    std::vector<Vec2> b=ring_in_frame(second,frame);
+    // A face's winding may be reversed even when the material domain
+    // is coplanar. Canonicalize both boundaries in the chosen 2D frame.
+    if (normal_alignment<0.0) std::reverse(b.begin(),b.end());
     const auto bounds=[](const std::vector<Vec2>& ring) {
         Bounds2 result{ring.front(),ring.front()};
         for (Vec2 point:ring)
@@ -318,13 +333,6 @@ std::optional<PartitionLeaf> merge_pair(
         a_bounds.maximum.y<b_bounds.minimum.y-tolerance ||
         b_bounds.maximum.y<a_bounds.minimum.y-tolerance)
         return std::nullopt;
-    for (Vec2 point:b)
-    {
-        const Vec3 world=frame.lift(point);
-        const Vec3 local=second.polygon.frame.lift(
-            second.polygon.frame.project(world));
-        if (distance(world,local)>tolerance) return std::nullopt;
-    }
     const auto a_edges=ring_edges(a),b_edges=ring_edges(b);
     double shared=0.0;
     const auto exposed_a=exposed_segments(a_edges,b_edges,tolerance,&shared);
@@ -347,8 +355,8 @@ std::optional<PartitionLeaf> merge_pair(
     const auto prepared=prepare(first.polygon.plane,world,{},tolerance);
     if (!prepared.face || !prepared.face->holes.empty()) return std::nullopt;
     return PartitionLeaf{
-        first.source_face_id,std::min(first.depth,second.depth),
-        std::move(*prepared.face)
+        std::min(first.source_face_id,second.source_face_id),
+        std::min(first.depth,second.depth),std::move(*prepared.face)
     };
 }
 
@@ -522,6 +530,8 @@ std::vector<PartitionLeaf> coarsen_with_safe_fallback(
     const std::vector<PartitionLeaf>& completed,double tolerance,
     const MergeAcceptance& accept)
 {
+    // Keep previously accepted maximal convex unions unchanged: checking
+    // each smaller pair first can discard a valid larger union.
     CoarsenedPartitions proposed=merge_convex_partitions(completed,tolerance);
     if(proposed.accepted_merges==0) return completed;
     if(!accept) return proposed.leaves;
@@ -532,8 +542,14 @@ std::vector<PartitionLeaf> coarsen_with_safe_fallback(
         return proposed.source_leaf_indices[a].front()<
                proposed.source_leaf_indices[b].front();
     });
+
     std::vector<PartitionLeaf> result;
+    // The safety callback always expects indices in the ORIGINAL completed
+    // batch, even after groups are restored, merged across source Faces,
+    // or contracted repeatedly.
+    std::vector<std::vector<std::size_t>> provenance;
     bool kept_merge=false;
+    bool restored_group=false;
     for(std::size_t i:order)
     {
         const auto& members=proposed.source_leaf_indices[i];
@@ -547,11 +563,13 @@ std::vector<PartitionLeaf> coarsen_with_safe_fallback(
         {
             kept_merge=kept_merge || members.size()>1;
             result.push_back(std::move(proposed.leaves[i]));
+            provenance.push_back(members);
             continue;
         }
 
-        // A rejected maximal union may contain a safe smaller union.
-        // Retry its original leaves and certify EACH pair before committing.
+        restored_group=true;
+        // A rejected maximal union can contain safe smaller unions.
+        // Every pair must pass the SAME Native reference/LOS requirements.
         std::vector<PartitionLeaf> group;
         group.reserve(members.size());
         for(std::size_t j:members)group.push_back(completed[j]);
@@ -567,12 +585,15 @@ std::vector<PartitionLeaf> coarsen_with_safe_fallback(
             });
         if(partial.accepted_merges==0)
         {
-            // No new safe merge: preserve exactly the original rollback.
-            for(std::size_t j:members)result.push_back(completed[j]);
+            // Exact previous rollback when no smaller safe pair exists.
+            for(std::size_t j:members)
+            {
+                result.push_back(completed[j]);
+                provenance.push_back({j});
+            }
             continue;
         }
         kept_merge=true;
-        // Stable original-leaf ordering also preserves State promotion.
         std::vector<std::size_t> local_order(partial.leaves.size());
         for(std::size_t j=0;j<local_order.size();++j)local_order[j]=j;
         std::sort(local_order.begin(),local_order.end(),
@@ -581,7 +602,53 @@ std::vector<PartitionLeaf> coarsen_with_safe_fallback(
                    partial.source_leaf_indices[b].front();
         });
         for(std::size_t j:local_order)
+        {
             result.push_back(std::move(partial.leaves[j]));
+            std::vector<std::size_t> original_members;
+            for(std::size_t index:partial.source_leaf_indices[j])
+                original_members.push_back(members[index]);
+            provenance.push_back(std::move(original_members));
+        }
+    }
+
+    // After recovery, a previously separate group may now have a convex
+    // shared-edge neighbour. Reinspect ALL currently active polygons;
+    // merge_convex_partitions re-enqueues the new polygon against every
+    // surviving neighbour, and this outer loop reaches a fixed point.
+    // Every committed merge decreases the node count, so it terminates.
+    if(restored_group)
+    {
+        while(result.size()>1)
+        {
+            CoarsenedPartitions next=merge_convex_partitions(
+                result,tolerance,
+                [&](const PartitionLeaf& candidate,
+                    const std::vector<std::size_t>& indices) {
+                    std::vector<std::size_t> originals;
+                    for(std::size_t index:indices)
+                        originals.insert(originals.end(),
+                                         provenance[index].begin(),
+                                         provenance[index].end());
+                    std::sort(originals.begin(),originals.end());
+                    return accept(candidate,originals);
+                });
+            if(next.accepted_merges==0) break;
+            kept_merge=true;
+            std::vector<std::vector<std::size_t>> next_provenance;
+            next_provenance.reserve(next.leaves.size());
+            for(const auto& group:next.source_leaf_indices)
+            {
+                std::vector<std::size_t> originals;
+                for(std::size_t index:group)
+                    originals.insert(originals.end(),
+                                     provenance[index].begin(),
+                                     provenance[index].end());
+                std::sort(originals.begin(),originals.end());
+                next_provenance.push_back(std::move(originals));
+            }
+            result=std::move(next.leaves);
+            provenance=std::move(next_provenance);
+        }
     }
     return kept_merge ? result : completed;
 }

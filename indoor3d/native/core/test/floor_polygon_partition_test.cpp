@@ -222,14 +222,81 @@ void test_mismatched_shared_edge_vertices_still_merge()
           "T-junction fragments on a shared edge must cancel before merging");
 }
 
-void test_different_source_faces_are_not_coarsened_together()
+void test_distinct_coplanar_floor_faces_coarsen_together()
 {
-    const auto result=merge_convex_partitions({
+    const std::vector<PartitionLeaf> leaves{
         {10,0,make_face(rectangle(0,0,4,4))},
-        {11,0,make_face(rectangle(4,0,8,4))}
+        {11,0,make_face(rectangle(4,0,8,4))},
+        {12,0,make_face(rectangle(8,0,12,4))}
+    };
+    const auto result=merge_convex_partitions(leaves,0.001);
+    check(result.accepted_merges==2 && result.leaves.size()==1,
+          "Different original SketchUp Faces must merge when coplanar and convex");
+    check(near(result.leaves.front().polygon.outer.signed_area,48.0) &&
+          result.leaves.front().polygon.outer.points.size()==4,
+          "Cross-Face merge must conserve area and form one convex ring");
+    check(result.source_leaf_indices.front()==
+          std::vector<std::size_t>({0,1,2}),
+          "Cross-Face union must retain full original leaf provenance");
+    check(result.leaves.front().source_face_id==10,
+          "Merged source_face_id should remain a deterministic representative");
+    check(leaves[0].source_face_id==10 && leaves[1].source_face_id==11,
+          "Original per-Face provenance must not be modified");
+}
+
+void test_non_coplanar_floor_faces_stay_separate()
+{
+    const auto flat=make_face(rectangle(0,0,4,4));
+    auto raised=rectangle(4,0,8,4);
+    for(Vec3& p:raised)p.z=0.1;
+    const auto elevated=make_face(raised);
+    const auto different_height=merge_convex_partitions(
+        {{10,0,flat},{11,0,elevated}},0.001);
+    check(different_height.accepted_merges==0 &&
+          different_height.leaves.size()==2,
+          "Different parallel floor heights must never be flattened and merged");
+
+    // Both faces are planar individually, but the second slopes about
+    // their shared boundary. A pure local-frame round trip misses this.
+    const std::vector<Vec3> inclined{
+        {4,0,0},{8,0,0},{8,4,0.04},{4,4,0.04}
+    };
+    const auto prepared=prepare(Vec3{0,-0.01,1},inclined,{},0.001);
+    check(bool(prepared.face),"Inclined test polygon must itself be planar");
+    const auto tilted=merge_convex_partitions(
+        {{10,0,flat},{11,0,*prepared.face}},0.001);
+    check(tilted.accepted_merges==0 && tilted.leaves.size()==2,
+          "Coplanar merging must reject a tilted neighbouring Face");
+}
+
+void test_reversed_coplanar_face_winding_is_normalized()
+{
+    const auto first=make_face(rectangle(0,0,4,4));
+    const auto reversed=prepare(Vec3{0,0,-1},
+                                rectangle(4,0,8,4),{},0.001);
+    check(bool(reversed.face),"Reversed Floor Face must be individually valid");
+    const auto result=merge_convex_partitions(
+        {{24,0,first},{25,0,*reversed.face}},0.001);
+    check(result.accepted_merges==1 && result.leaves.size()==1 &&
+          near(result.leaves.front().polygon.outer.signed_area,32.0),
+          "Opposite source winding must not block a genuine coplanar union");
+}
+
+void test_cross_face_overlap_and_corner_touch_are_not_shared_edges()
+{
+    const auto overlapping=merge_convex_partitions({
+        {20,0,make_face(rectangle(0,0,4,4))},
+        {21,0,make_face(rectangle(3,0,8,4))}
     },0.001);
-    check(result.accepted_merges==0 && result.leaves.size()==2,
-          "Coarsening must preserve original SketchUp Floor face ownership");
+    check(overlapping.accepted_merges==0,
+          "Overlapping Floor material must not be merged as shared boundary");
+
+    const auto corner_only=merge_convex_partitions({
+        {22,0,make_face(rectangle(0,0,4,4))},
+        {23,0,make_face(rectangle(4,4,8,8))}
+    },0.001);
+    check(corner_only.accepted_merges==0,
+          "A single touching vertex cannot create a Polygon adjacency edge");
 }
 
 void test_hole_bearing_leaf_is_never_coarsened()
@@ -414,6 +481,81 @@ void test_geometry_merge_guard_applies_before_pair_commit()
           "Committed pair must retain its original membership indices");
 }
 
+void test_safe_global_reinspection_merges_across_recovered_groups()
+{
+    // A--B--C form the large horizontal rectangle. D attaches above C,
+    // so the full A+B+C+D union is concave and its maximal convex
+    // partition is ABC | D. If ABC fails Native verification, the safe
+    // AB partial recovery exposes a NEW C--D candidate across groups.
+    const std::vector<PartitionLeaf> leaves{
+        {40,0,make_face(rectangle(0,0,4,4))},
+        {41,0,make_face(rectangle(4,0,8,4))},
+        {42,0,make_face(rectangle(8,0,12,4))},
+        {43,0,make_face(rectangle(8,4,12,8))}
+    };
+    const auto maximal=merge_convex_partitions(leaves,0.001);
+    check(maximal.leaves.size()==2 &&
+          maximal.source_leaf_indices.size()==2,
+          "Fixture must form an initial greedy maximal group and neighbour");
+    check(std::find(maximal.source_leaf_indices.begin(),
+                    maximal.source_leaf_indices.end(),
+                    std::vector<std::size_t>({0,1,2}))!=
+          maximal.source_leaf_indices.end(),
+          "Fixture must first group ABC while leaving D outside");
+
+    bool saw_recovered_across_group=false;
+    bool provenance_is_original=true;
+    const auto result=coarsen_with_safe_fallback(
+        leaves,0.001,
+        [&](const PartitionLeaf&,
+            const std::vector<std::size_t>& original_indices) {
+            provenance_is_original &=
+                std::is_sorted(original_indices.begin(),original_indices.end()) &&
+                std::all_of(original_indices.begin(),original_indices.end(),
+                            [](std::size_t i) { return i<4; });
+            if(original_indices==std::vector<std::size_t>({2,3}))
+            {
+                saw_recovered_across_group=true;
+                return true;
+            }
+            return original_indices.size()<=2;
+        });
+    check(saw_recovered_across_group && provenance_is_original,
+          "Reinspection must revalidate cross-group unions with ORIGINAL IDs");
+    check(result.size()==2,
+          "Global reinspection must merge C+D after the ABC rollback");
+    double area=0;
+    for(const auto& leaf:result)
+    {
+        area+=leaf.polygon.outer.signed_area;
+        check(near(leaf.polygon.outer.signed_area,32.0),
+              "Result must contain AB and CD, not the rejected ABC");
+    }
+    check(near(area,64.0),
+          "Recovered cross-group partitions must preserve the full floor area");
+}
+
+void test_global_reinspection_fails_closed_on_cross_group_los()
+{
+    const std::vector<PartitionLeaf> leaves{
+        {50,0,make_face(rectangle(0,0,4,4))},
+        {51,0,make_face(rectangle(4,0,8,4))},
+        {52,0,make_face(rectangle(8,0,12,4))},
+        {53,0,make_face(rectangle(8,4,12,8))}
+    };
+    const auto result=coarsen_with_safe_fallback(
+        leaves,0.001,
+        [](const PartitionLeaf&,const std::vector<std::size_t>& ids) {
+            return ids==std::vector<std::size_t>({0,1});
+        });
+    check(result.size()==3,
+          "Blocked Native LOS must retain AB, C and D without unsafe shortcut");
+    double area=0.0;
+    for(const auto& leaf:result)area+=leaf.polygon.outer.signed_area;
+    check(near(area,64.0),
+          "Rejected global candidate must not lose or duplicate floor material");
+}
+
 void test_iterative_convex_grid_coarsens_to_one_polygon()
 {
     const std::vector<PartitionLeaf> leaves{
@@ -445,7 +587,10 @@ int main()
     test_adjacent_partition_rectangles_merge_to_one_convex_leaf();
     test_concave_union_is_not_merged();
     test_mismatched_shared_edge_vertices_still_merge();
-    test_different_source_faces_are_not_coarsened_together();
+    test_distinct_coplanar_floor_faces_coarsen_together();
+    test_non_coplanar_floor_faces_stay_separate();
+    test_cross_face_overlap_and_corner_touch_are_not_shared_edges();
+    test_reversed_coplanar_face_winding_is_normalized();
     test_hole_bearing_leaf_is_never_coarsened();
     test_coarsening_does_not_mutate_input_leaves();
     test_iterative_convex_grid_coarsens_to_one_polygon();
@@ -455,5 +600,7 @@ int main()
     test_safe_fallback_keeps_separate_successful_maximal_groups();
     test_safety_callback_exception_fails_closed();
     test_geometry_merge_guard_applies_before_pair_commit();
+    test_safe_global_reinspection_merges_across_recovered_groups();
+    test_global_reinspection_fails_closed_on_cross_group_los();
     return 0;
 }

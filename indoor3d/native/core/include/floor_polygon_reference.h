@@ -37,16 +37,17 @@ struct CoarsenedPartitions {
 // It can reject a pair before the geometry-only coarsener commits that pair.
 using MergeAcceptance = std::function<bool(
     const PartitionLeaf&, const std::vector<std::size_t>&)>;
-// Deterministic, non-destructive coarsening of completed leaves from the same
-// original Floor face. A pair is merged only when cancelling its shared
-// boundary produces one hole-free convex polygon with conserved area.
+// Deterministic, non-destructive convex coarsening of coplanar Floor leaves,
+// including leaves from DIFFERENT original SketchUp Faces. Face identity
+// never substitutes for shared boundary, hole-free union or area checks.
 CoarsenedPartitions merge_convex_partitions(
     const std::vector<PartitionLeaf>& completed,
     double tolerance,
     const MergeAcceptance& accept={});
 // Preserve previously safe maximal merges. If a maximal union fails the
-// callback, salvage independently verified smaller convex unions instead
-// of restoring every original leaf in that failed group.
+// callback, recover verified smaller convex unions and repeatedly revisit
+// the entire surviving set. The callback always receives ORIGINAL leaf
+// indices, including for unions across previously separate source Faces.
 std::vector<PartitionLeaf> coarsen_with_safe_fallback(
     const std::vector<PartitionLeaf>& completed,
     double tolerance,

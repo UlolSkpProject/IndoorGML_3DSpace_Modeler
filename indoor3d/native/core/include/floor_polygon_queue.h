@@ -17,6 +17,9 @@ struct PartitionFailure {
     bool invalid_child=false;
 };
 struct PartitionLeaf {
+    // Original Floor Face ID on input; after cross-Face coarsening this is
+    // the minimum member Face ID. Full membership remains in
+    // CoarsenedPartitions::source_leaf_indices (while merging).
     std::size_t source_face_id=0;
     std::size_t depth=0;
     NormalizedFace polygon;

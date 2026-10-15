@@ -143,9 +143,10 @@ CellSpaceInteriorPointResult locate_reference_before(
     if (leaves.empty()) return result;
 
     // Remove artificial partition seams only when the exact union remains a
-    // hole-free convex polygon. A merged centroid must also remain a viable
-    // Native reference and see every viable seed it replaces; otherwise that
-    // group falls back to the original completed leaves.
+    // hole-free convex polygon, even across separate coplanar Floor Faces.
+    // The merged centroid must remain a viable Native reference and see the
+    // original viable seeds. Failed maximal unions retain safe partial merges,
+    // then revisit all surviving neighbouring polygons to a fixed point.
     leaves=safely_coarsen(leaves,solid,tolerance);
 
     result.debug_graph.floor_partitions.reserve(leaves.size());
