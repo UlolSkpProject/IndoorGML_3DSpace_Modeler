@@ -953,10 +953,117 @@ void test_3d_sphere_and_vertical_los()
             "3D Room LOS must allow vertical motion only inside its Solid");
 }
 
+// L-shaped prism with matched, constrained floor-mesh edges. The six
+// triangles share exact vertices, including the internal edges at x=1
+// and y=1. Its -90-degree reflex turn forces >=2 final Floor polygons.
+CellData l_partition_prism()
+{
+    const std::array<Vec3,8> ring{{
+        {0,0,0},{1,0,0},{3,0,0},{3,1,0},
+        {1,1,0},{1,3,0},{0,3,0},{0,1,0}
+    }};
+    const std::array<std::array<Vec3,3>,6> mesh{{
+        {{{0,0,0},{1,0,0},{1,1,0}}},
+        {{{0,0,0},{1,1,0},{0,1,0}}},
+        {{{1,0,0},{3,0,0},{3,1,0}}},
+        {{{1,0,0},{3,1,0},{1,1,0}}},
+        {{{0,1,0},{1,1,0},{1,3,0}}},
+        {{{0,1,0},{1,3,0},{0,3,0}}}
+    }};
+    CellData cell;
+    cell.index=0;
+    cell.flags=CELL_FLAG_NEEDS_STATE;
+    cell.category=CellSpaceCategory::Stair;
+    cell.bounds=box(0,0,0,3,3,1);
+    for (const auto& tri : mesh)
+    {
+        const Vec3 at{tri[0].x,tri[0].y,1},
+                   bt{tri[1].x,tri[1].y,1},
+                   ct{tri[2].x,tri[2].y,1};
+        cell.faces.push_back(face({0,0,-1},
+            {triangle(tri[0],tri[2],tri[1])}));
+        cell.faces.push_back(face({0,0,1},
+            {triangle(at,bt,ct)}));
+    }
+    for (std::size_t i=0;i<ring.size();++i)
+    {
+        const Vec3 a=ring[i],b=ring[(i+1)%ring.size()];
+        const Vec3 edge{b.x-a.x,b.y-a.y,0};
+        add_rect_face(cell,{edge.y,-edge.x,0},
+            a,b,{b.x,b.y,1},{a.x,a.y,1});
+    }
+    return cell;
+}
+
+void test_stair_before_uses_final_polygon_shared_edge_midpoints()
+{
+    CellData stair=tall_room(l_partition_prism());
+    stair.category=CellSpaceCategory::Stair;
+    const auto result=locate_cell_space_interior_points(stair,0.001);
+    require(result.state_point.has_value(),
+            "Stair State must not be affected by reference generation");
+    require(result.reference_status==ReferencePointStatus::Succeeded,
+            "Stair reference generation should report a successful attempt");
+
+    std::vector<Vec3> firsts,finals;
+    for (const ReferencePoint& candidate : result.reference_points)
+    {
+        if (candidate.kind==ReferencePointKind::Face)
+            firsts.push_back(candidate.point);
+        if (candidate.kind==ReferencePointKind::Final)
+            finals.push_back(candidate.point);
+    }
+    require(!firsts.empty(),
+            "Stair L floor needs shared-polygon-edge references");
+    require(firsts.size()==finals.size(),
+            "Stair BEFORE should use every valid shared Edge midpoint");
+    require(result.debug_graph.nodes.size()==finals.size()+1,
+            "Stair BEFORE must contain State plus final shared Edge refs");
+    for (const Vec3& p : firsts)
+    {
+        require(std::abs(p.z-1000.0/25.4)<1.0e-9,
+                "Stair shared-edge midpoint must keep the world-Z lift");
+        // The only non-collinear joining boundaries between final L
+        // polygons are portions of x=1 or y=1, ending at the reflex
+        // vertex (1,1). Their midpoint lies strictly inside the floor.
+        require(p.x>0 && p.x<3 && p.y>0 && p.y<3,
+                "Stair shared Edge midpoint must belong to a floor interior");
+    }
+}
+
+void test_stair_single_convex_floor_has_no_shared_edge_seed()
+{
+    CellData stair=tall_room(unit_box_cell());
+    stair.category=CellSpaceCategory::Stair;
+    const auto result=locate_cell_space_interior_points(stair,0.001);
+    require(result.state_point.has_value(),"convex Stair lost State");
+    require(result.reference_status==ReferencePointStatus::Succeeded,
+            "Stair should attempt reference generation even with one polygon");
+    require(result.reference_points.empty(),
+            "Stair must not use internal triangulation edges as polygon seams");
+    require(result.debug_graph.nodes.size()==1,
+            "single-polygon Stair BEFORE must still display its State");
+}
+
+void test_room_still_uses_polygon_centroid_on_identical_geometry()
+{
+    CellData room=tall_room(l_partition_prism());
+    room.category=CellSpaceCategory::Room;
+    const auto result=locate_cell_space_interior_points(room,0.001);
+    require(result.state_point.has_value(),
+            "same geometry must still produce a Room State");
+    require(result.reference_status==ReferencePointStatus::Succeeded,
+            "Room reference generation must remain available");
+    std::size_t count=0;
+    for (const ReferencePoint& candidate : result.reference_points)
+        if (candidate.kind==ReferencePointKind::Face) ++count;
+    require(count>=2,
+            "Room must retain region centroids, not use Stair midpoint policy");
+}
+
 void test_non_room_reference_points_are_empty()
 {
-    const std::array<CellSpaceCategory,4> categories{{
-        CellSpaceCategory::Stair,
+    const std::array<CellSpaceCategory,3> categories{{
         CellSpaceCategory::Elevator,
         CellSpaceCategory::Door,
         CellSpaceCategory::Window
@@ -1007,6 +1114,9 @@ int main()
     test_floor_hole_does_not_create_void_candidates();
     test_single_floor_face_with_hole_keeps_multiple_regions();
     test_3d_sphere_and_vertical_los();
+    test_stair_before_uses_final_polygon_shared_edge_midpoints();
+    test_stair_single_convex_floor_has_no_shared_edge_seed();
+    test_room_still_uses_polygon_centroid_on_identical_geometry();
     test_non_room_reference_points_are_empty();
 
     test_room_visibility_graph_circle_overlap_and_blocked_los();
