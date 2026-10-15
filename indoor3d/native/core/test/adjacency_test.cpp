@@ -390,348 +390,103 @@ void test_state_fixed_z()
     require(std::abs(point->z - 0.25) < 1.0e-9, "fixed-Z State point did not preserve fixed Z");
 }
 
-void test_convex_room_state_only()
+void test_floor_triangles_seed_before_without_native_pruning()
 {
-    CellData cell = unit_box_cell();
-    cell.category = CellSpaceCategory::Room;
-    cell.flags |= CELL_FLAG_HAS_FIXED_Z;
-    cell.fixed_z = 0.25;
-
+    CellData room = tall_room(unit_box_cell());
+    room.category = CellSpaceCategory::Room;
     const CellSpaceInteriorPointResult result =
-        locate_cell_space_interior_points(cell, 0.001);
-    require(result.state_point.has_value(), "Room State point was not found");
-    // A convex Room requires no Reference Points: its State is sufficient.
-    require(
-        result.reference_status == ReferencePointStatus::Succeeded,
-        "Room reference generation status was not successful"
-    );
-    require(result.reference_points.empty(),
-            "convex Room must contain only its State");
-    for (const ReferencePoint& reference : result.reference_points)
-    {
-        const Vec3& point = reference.point;
-        require(
-            std::abs(point.z - result.state_point->z) < 1.0e-9,
-            "Room reference point does not share State height"
-        );
-        require(
-            reference.kind == ReferencePointKind::Face ||
-            reference.kind == ReferencePointKind::Corner ||
-            reference.kind == ReferencePointKind::Merged ||
-            reference.kind == ReferencePointKind::Final,
-            "Room reference point kind is invalid"
-        );
-    }
-}
-
-void test_concave_room_reference_points()
-{
-    CellData cell = tall_room(u_prism_cell());
-    cell.category = CellSpaceCategory::Room;
-    const CellSpaceInteriorPointResult result =
-        locate_cell_space_interior_points(cell, 0.001);
-    require(result.state_point.has_value(), "concave Room State point missing");
-    require(!result.reference_points.empty(), "concave Room references missing");
-
-    std::size_t corner_count = 0;
-    std::size_t final_count = 0;
-    std::vector<Vec3> raw_candidates;
-    std::vector<Vec3> merge_centers;
-    std::vector<Vec3> final_points;
-    for (const ReferencePoint& reference : result.reference_points)
-    {
-        const Vec3& p = reference.point;
-        const bool inside =
-            (p.x > 0.0 && p.x < 1.0 && p.y > 0.0 && p.y < 3.0) ||
-            (p.x > 2.0 && p.x < 3.0 && p.y > 0.0 && p.y < 3.0) ||
-            (p.x > 0.0 && p.x < 3.0 && p.y > 0.0 && p.y < 1.0);
-        require(inside, "concave Room reference fell outside footprint");
-        require(reference.kind != ReferencePointKind::Face,
-                "green Face references must never be generated");
-        if (reference.kind == ReferencePointKind::Corner)
-        {
-            raw_candidates.push_back(p);
-            ++corner_count;
-        }
-        if (reference.kind == ReferencePointKind::Merged)
-        {
-             merge_centers.push_back(p);
-        }
-        if (reference.kind == ReferencePointKind::Final)
-        {
-            ++final_count;
-            final_points.push_back(p);
-        }
-    }
-    require(corner_count > 0, "concave Room must produce reflex Corner candidates");
-    require(final_count > 0, "concave Room final references missing");
-    require(final_count <= raw_candidates.size(),
-            "final Room count exceeds original candidates");
-    for (const Vec3& merged : merge_centers)
-    {
-        // A State-anchored cluster is represented by the existing State
-        // rather than by an extra black Final reference point.
-        const double sdx = merged.x - result.state_point->x;
-        const double sdy = merged.y - result.state_point->y;
-        if (sdx * sdx + sdy * sdy < 1.0e-10) continue;
-
-        bool found = false;
-        for (const Vec3& final_point : final_points)
-        {
-            const double dx = merged.x - final_point.x;
-            const double dy = merged.y - final_point.y;
-            if (dx * dx + dy * dy < 1.0e-10) found = true;
-        }
-        require(found, "accepted red cluster center is missing its black final point");
-    }
-}
-
-void test_state_anchored_room_reference_cluster()
-{
-    CellData cell = tall_room(shallow_reflex_prism_cell(0.7));
-
-    // Compute a purple Corner position using the same solid with a State far
-    // from the reflex corner. The candidate's position depends on geometry,
-    // not on State XY (only its Z).
-    const Vec3 distant_state{2.0, 0.5, 0.5};
-    const std::vector<ReferencePoint> initial =
-        find_reference_points(cell, distant_state, 0.001);
-
-    std::optional<Vec3> corner;
-    for (const ReferencePoint& reference : initial)
-    {
-        require(reference.kind != ReferencePointKind::Face,
-                "State fixture unexpectedly generated green Face points");
-        if (reference.kind == ReferencePointKind::Corner)
-            corner = reference.point;
-    }
-    require(corner.has_value(), "State merge fixture Corner is missing");
-
-    // Bring the State near the candidate. The resulting cluster must retain
-    // the exact State position and suppress a duplicate final black point.
-    const Vec3 state{corner->x + 0.05, corner->y, corner->z};
-    const std::vector<ReferencePoint> references =
-        find_reference_points(cell, state, 0.001);
-
-    bool found_state_merge_marker = false;
-    bool found_absorbed_corner = false;
-    bool found_absorbed_as_final = false;
-    bool found_duplicate_state_final = false;
-    for (const ReferencePoint& reference : references)
-    {
-        const Vec3& point = reference.point;
-        const bool at_state =
-            std::abs(point.x - state.x) < 1.0e-9 &&
-            std::abs(point.y - state.y) < 1.0e-9 &&
-            std::abs(point.z - state.z) < 1.0e-9;
-        const bool at_corner =
-            std::abs(point.x - corner->x) < 1.0e-9 &&
-            std::abs(point.y - corner->y) < 1.0e-9;
-        require(reference.kind != ReferencePointKind::Face,
-                "green Face candidate must not be emitted");
-        if (reference.kind == ReferencePointKind::Merged && at_state)
-            found_state_merge_marker = true;
-        if (reference.kind == ReferencePointKind::Corner && at_corner)
-            found_absorbed_corner = true;
-        if (reference.kind == ReferencePointKind::Final)
-        {
-            if (at_state) found_duplicate_state_final = true;
-            if (at_corner) found_absorbed_as_final = true;
-        }
-    }
-
-    require(found_absorbed_corner, "State merge must retain purple Corner diagnostic");
-    require(found_state_merge_marker, "State cluster must preserve exact State coordinates");
-    require(!found_absorbed_as_final,
-            "State-merged Corner must be absent from final references");
-    require(!found_duplicate_state_final,
-            "State cluster must not create duplicate black Final reference");
-}
-
-void test_convex_room_uses_state_only()
-{
-    CellData cell = unit_box_cell();
-    cell.category = CellSpaceCategory::Room;
-    cell.flags |= CELL_FLAG_HAS_FIXED_Z;
-    cell.fixed_z = 0.25;
-
-    const CellSpaceInteriorPointResult result =
-        locate_cell_space_interior_points(cell, 0.001);
-    require(result.state_point.has_value(), "convex Room State missing");
+        locate_cell_space_interior_points(room, 0.001);
+    require(result.state_point.has_value(), "tall Room State is missing");
     require(result.reference_status == ReferencePointStatus::Succeeded,
-            "convex Room reference evaluation must succeed");
+            "Floor Reference generation failed");
+
+    // Exactly two triangles cover the lower face of this box.
+    std::vector<Vec3> face_points, final_points;
+    for (const ReferencePoint& ref : result.reference_points)
+    {
+        if (ref.kind == ReferencePointKind::Face)
+            face_points.push_back(ref.point);
+        if (ref.kind == ReferencePointKind::Final)
+            final_points.push_back(ref.point);
+        require(ref.kind == ReferencePointKind::Face ||
+                ref.kind == ReferencePointKind::Final,
+                "Triangle experiment must not create Corner/Merged refs");
+    }
+    require(face_points.size() == 2 && final_points.size() == 2,
+            "each valid floor triangle must generate one primary graph seed");
+    for (std::size_t i = 0; i < face_points.size(); ++i)
+    {
+        const Vec3& p = face_points[i];
+        require(std::abs(p.z - 1000.0/25.4) < 1.0e-9,
+                "floor centroid must move exactly +1000mm in Z");
+        require(std::abs(final_points[i].x - p.x) < 1.0e-9 &&
+                std::abs(final_points[i].y - p.y) < 1.0e-9 &&
+                std::abs(final_points[i].z - p.z) < 1.0e-9,
+                "Final must preserve unmerged primary Face candidate");
+    }
+    const ReferenceGraphDebug& graph = result.debug_graph;
+    require(graph.nodes.size() == 3,
+            "BEFORE must contain State plus all two valid floor candidates");
+    require(graph.loop_candidates.empty(),
+            "3D Hole verification cannot be bypassed by floor triangles");
+}
+
+void test_floor_reference_in_short_room_is_rejected()
+{
+    CellData room = unit_box_cell();
+    room.category = CellSpaceCategory::Room;
+    const auto result = locate_cell_space_interior_points(room, 0.001);
+    require(result.state_point.has_value(), "short Room State was lost");
     require(result.reference_points.empty(),
-            "convex Room must use State alone (no reference or merged points)");
-
-    // A noncentral State must not change convex eligibility.
-    const std::vector<ReferencePoint> offcenter =
-        find_reference_points(cell, {0.35, 0.42, 0.25}, 0.001);
-    require(offcenter.empty(), "convex Room incorrectly generated references");
+            "+1000mm points outside a short Solid must be rejected");
+    require(result.debug_graph.nodes.size() == 1,
+            "State-only BEFORE graph must still be returned for a short Room");
 }
 
-void test_signed_corner_turn_accumulation()
+void test_inclined_floor_uses_world_z_not_surface_normal()
 {
-    // Reflex negative, convex positive, straight parallel walls zero.
-    RoomSignedTurnAccumulator run(15.0);
-    require(!run.advance(0.0) && run.accumulated_degrees() == 0.0,
-            "parallel faces must yield zero signed curvature");
-    require(!run.advance(-9.0), "first sub-threshold reflex must not emit");
-    require(!run.advance(+4.0), "convex offset must not immediately terminate the run");
-    require(std::abs(run.accumulated_degrees() + 5.0) < 1.0e-9,
-            "convex turn must offset the accumulated reflex magnitude");
-    require(!run.advance(-8.0), "net -13 degrees must not emit");
-    require(run.advance(-2.0), "net -15 degrees must emit a reflex point");
-    require(run.accumulated_degrees() == 0.0,
-            "accumulation must reset after a reference is emitted");
-
-    require(!run.advance(-12.0), "new reflex run must begin below threshold");
-    require(!run.advance(+12.0), "zero-net bend must not emit");
-    require(run.accumulated_degrees() == 0.0,
-            "accumulation must reset once the net bend is nonnegative");
-    require(!run.advance(+25.0), "standalone convex bend must never emit");
-    require(run.accumulated_degrees() == 0.0,
-            "standalone convex turns must not be carried into a reflex run");
-    require(!run.advance(-14.0), "negative net turn below threshold must wait");
-    require(run.advance(-1.0), "subsequent net -15 degrees must emit");
-
-    RoomSignedTurnAccumulator cancellation(15.0);
-    require(!cancellation.advance(-10.0), "short reflex run expected");
-    require(!cancellation.advance(+15.0), "convex overshoot must reset the run");
-    require(!cancellation.advance(-9.0),
-            "old reflex deficit must not survive a convex net positive turn");
-    require(cancellation.advance(-6.0), "new -15 degree run must emit");
-
-    // The production 30-degree threshold still offsets convex turns.
-    RoomSignedTurnAccumulator production(30.0);
-    require(!production.advance(-20.0), "20-degree reflex must wait");
-    require(!production.advance(+6.0), "convex offset must not emit");
-    require(!production.advance(-15.0), "net 29-degree reflex must wait");
-    require(production.advance(-1.0), "net 30-degree reflex must emit");
-}
-
-void test_room_reflex_threshold_30_degree_turn()
-{
-    const Vec3 state{2.0, 1.5, 0.5};
-    // Depths 0.25, 0.5 and 0.7 produce approximately 14.25,
-    // 28.07 and 38.58 degrees of reflex turn.
-    const CellData shallow = tall_room(shallow_reflex_prism_cell(0.25));
-    const CellData medium = tall_room(shallow_reflex_prism_cell(0.5));
-    const CellData deep = tall_room(shallow_reflex_prism_cell(0.7));
-
-    require(find_reference_points(shallow, state, 0.001).empty(),
-            "a 14-degree reflex turn must not generate a reference");
-    require(find_reference_points(medium, state, 0.001).empty(),
-            "a 28-degree reflex turn must not generate a reference");
-
-    const std::vector<ReferencePoint> deep_points =
-        find_reference_points(deep, state, 0.001);
-    bool found_corner = false;
-    for (const ReferencePoint& point : deep_points)
+    CellData room = tall_room(unit_box_cell());
+    room.category = CellSpaceCategory::Room;
+    // Tilt the entire closed prism, including triangles and polygon rings.
+    // Only floor/ceiling normals need to change; all four walls stay vertical.
+    for (FaceData& face : room.faces)
     {
-        require(point.kind != ReferencePointKind::Face,
-                "green Face candidates must remain disabled");
-        if (point.kind == ReferencePointKind::Corner) found_corner = true;
+        for (Vec3& p : face.outer_points) p.z += 0.2 * p.x;
+        for (Triangle& t : face.triangles)
+            for (Vec3& p : t.points) p.z += 0.2 * p.x;
     }
-    require(found_corner,
-            "a 38-degree reflex turn must generate a purple reference");
+    room.faces[0].normal = {0.2, 0, -1.0};
+    room.faces[1].normal = {-0.2, 0, 1.0};
+    room.bounds.maximum.z += 0.2;
+
+    const auto references = find_reference_points(room, {0.5,0.5,40}, 0.001);
+    std::size_t floor_count = 0;
+    for (const ReferencePoint& ref : references)
+    {
+        if (ref.kind != ReferencePointKind::Face) continue;
+        require(std::abs(ref.point.z -
+                (1000.0/25.4 + 0.2 * ref.point.x)) < 1.0e-8,
+                "sloped floor triangle must be moved along world Z");
+        ++floor_count;
+    }
+    require(floor_count == 2,
+            "inclined Floor must be triangulated without a horizontal slice");
 }
 
-void test_room_reference_corner_uses_55_percent_wall_distance()
+void test_floor_hole_does_not_create_void_candidates()
 {
-    // Symmetric notch vertex (2, 3.3) has an inward bisector toward Y=0.
-    // The opposite-wall distance is 3.3, so the Corner candidate must
-    // lie at Y=3.3 - (0.55 * 3.3) = 1.485.
-    const CellData room = tall_room(shallow_reflex_prism_cell(0.7));
-    const std::vector<ReferencePoint> refs =
-        find_reference_points(room, {2.0, 0.5, 0.5}, 0.001);
-    bool matched = false;
-    for (const ReferencePoint& ref : refs)
+    CellData room = tall_room(ring_prism_cell());
+    const auto references = find_reference_points(room, {1,1,40}, 0.001);
+    std::size_t count = 0;
+    for (const auto& ref : references)
     {
-        if (ref.kind != ReferencePointKind::Corner) continue;
-        require(std::abs(ref.point.z - 1000.0 / 25.4) < 1.0e-9,
-                "Room Corner Z must be exactly shared Edge minimum + 1000mm");
-        if (std::abs(ref.point.x - 2.0) < 1.0e-6 &&
-            std::abs(ref.point.y - 1.485) < 1.0e-6)
-            matched = true;
+        if (ref.kind != ReferencePointKind::Face) continue;
+        require(!(ref.point.x > 4.9 && ref.point.x < 5.1 &&
+                  ref.point.y > 4.9 && ref.point.y < 5.1),
+                "Floor triangulation generated a point over a hole");
+        ++count;
     }
-    require(matched,
-            "Room reflex Corner reference must use 55% inward wall distance");
-}
-
-void test_cumulative_reflex_turn_on_curved_wall()
-{
-    const CellData cell = tall_room(gradual_reflex_arc());
-    const std::vector<ReferencePoint> points =
-        find_reference_points(cell, {3,2,0.5}, 0.001);
-    bool has_corner = false;
-    for (const ReferencePoint& point : points)
-    {
-        require(point.kind != ReferencePointKind::Face,
-                "cumulative curve must not generate Face midpoint candidates");
-        if (point.kind == ReferencePointKind::Corner) has_corner = true;
-    }
-    require(has_corner,
-            "multiple 180-200 degree reflex corners must generate a purple reference");
-}
-
-void test_local_width_limits_cluster_radius()
-{
-    const CellData cell = tall_room(shallow_reflex_prism_cell(0.7));
-    const std::vector<ReferencePoint> initial =
-        find_reference_points(cell, {2,0.5,0.5}, 0.001);
-    std::optional<Vec3> corner;
-    for (const ReferencePoint& p : initial)
-        if (p.kind == ReferencePointKind::Corner) corner = p.point;
-    require(corner.has_value(), "local-width fixture Corner missing");
-
-    // Previously 0.18 * AABB short side (4) = 0.72, so 0.6 merged.
-    // The narrower local cross-section now sets a stricter limit.
-    const Vec3 state{corner->x+0.6, corner->y, corner->z};
-    const std::vector<ReferencePoint> points =
-        find_reference_points(cell, state, 0.001);
-    bool has_final_corner = false;
-    bool merged_with_state = false;
-    for (const ReferencePoint& p : points)
-    {
-        if (p.kind == ReferencePointKind::Final &&
-            std::abs(p.point.x-corner->x) < 1.0e-9 &&
-            std::abs(p.point.y-corner->y) < 1.0e-9)
-            has_final_corner = true;
-        if (p.kind == ReferencePointKind::Merged &&
-            std::abs(p.point.x-state.x) < 1.0e-9 &&
-            std::abs(p.point.y-state.y) < 1.0e-9)
-            merged_with_state = true;
-    }
-    require(has_final_corner, "local-radius test lost unmerged final Corner");
-    require(!merged_with_state, "local-radius test incorrectly absorbed Corner into State");
-}
-
-void test_smooth_concave_wall_retains_safe_navigation_candidates()
-{
-    const CellData room = tall_room(smooth_concave_wall_room());
-    const Vec3 state{20,6,0.5};
-    const std::vector<ReferencePoint> points =
-        find_reference_points(room,state,0.001);
-
-    std::size_t corner_count = 0;
-    for (const ReferencePoint& item : points)
-    {
-        const Vec3& point = item.point;
-        // All debug and final points must remain inside the footprint.
-        const double dx = point.x - 20.0;
-        require(point.x > 0.0 && point.x < 40.0 &&
-                point.y > 0.0 && point.y < 20.0 + 0.05 * dx * dx,
-                "smooth Room reference escaped its interior after simplification");
-        require(item.kind != ReferencePointKind::Face,
-                "simplification reintroduced green Face candidates");
-        if (item.kind == ReferencePointKind::Corner) ++corner_count;
-    }
-    require(corner_count >= 2,
-            "smooth concave wall lost the navigation candidates along its curve");
-    // A gradual turn needs fewer 30-degree seeds. The simplifier must
-    // not generate further nodes or duplicate source candidates.
-    require(corner_count <= 8,
-            "smooth concave wall produced excessive purple candidates");
+    require(count > 0, "Room containing a Hole lost all floor candidates");
 }
 
 void test_room_visibility_graph_circle_overlap_and_blocked_los()
@@ -938,25 +693,8 @@ void test_room_reference_shortcut_los_rejects_wall_crossing()
             "Room LOS must reject non-Room requests");
 }
 
-void test_reference_shared_edge_1000mm_and_3d_spheres()
+void test_3d_sphere_and_vertical_los()
 {
-    // Never extrapolate an Edge shorter than 1000mm.
-    const CellData short_room = shallow_reflex_prism_cell(0.7);
-    require(find_reference_points(short_room, {2,0.5,0.5}, 0.001).empty(),
-            "a short Edge must not generate extrapolated reference coordinates");
-
-    const CellData tall = tall_room(shallow_reflex_prism_cell(0.7));
-    const auto references = find_reference_points(tall, {2,0.5,0.5}, 0.001);
-    bool has_corner = false;
-    for (const ReferencePoint& reference : references)
-        if (reference.kind == ReferencePointKind::Corner)
-        {
-            require(std::abs(reference.point.z - 1000.0 / 25.4) < 1.0e-8,
-                    "Corner must lie exactly 1000mm above the shared Edge minimum");
-            has_corner = true;
-        }
-    require(has_corner, "tall reflex Room must generate a reference candidate");
-
     CellData room = unit_box_cell();
     room.category = CellSpaceCategory::Room;
     const std::vector<ReferencePoint> points{
@@ -1011,18 +749,23 @@ int main()
     test_state_volume_centroid_on_box();
     test_state_concave_u_uses_bvh_fallback();
     test_state_fixed_z();
-    test_convex_room_state_only();
-    test_convex_room_uses_state_only();
-    test_signed_corner_turn_accumulation();
-    test_room_reflex_threshold_30_degree_turn();
-    test_room_reference_corner_uses_55_percent_wall_distance();
-    test_cumulative_reflex_turn_on_curved_wall();
-    test_smooth_concave_wall_retains_safe_navigation_candidates();
-    test_local_width_limits_cluster_radius();
-    test_concave_room_reference_points();
-    test_state_anchored_room_reference_cluster();
+
+
+
+
+
+
+
+
+
+
+    test_floor_triangles_seed_before_without_native_pruning();
+    test_floor_reference_in_short_room_is_rejected();
+    test_inclined_floor_uses_world_z_not_surface_normal();
+    test_floor_hole_does_not_create_void_candidates();
+    test_3d_sphere_and_vertical_los();
     test_non_room_reference_points_are_empty();
-    test_reference_shared_edge_1000mm_and_3d_spheres();
+
     test_room_visibility_graph_circle_overlap_and_blocked_los();
     test_room_reference_shortcut_los_rejects_wall_crossing();
     test_triangle_loop_candidates_are_validated_in_native();
