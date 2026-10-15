@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
-#include <map>
 #include <numeric>
 #include <optional>
 #include <queue>
@@ -22,26 +21,14 @@ using namespace IndoorGMLAdjacencyNative;
 constexpr double EPSILON = 1.0e-12;
 constexpr std::size_t BVH_LEAF_TRIANGLES = 6;
 constexpr std::size_t MAX_SEARCH_NODES = 200000;
-// Room-only reference heuristics; State and Adjacency are unchanged.
-// Signed local exterior turn: reflex < 0, convex > 0, straight = 0.
-// Ignore numerical angle noise and emit at a cumulative -30 degree turn.
-constexpr double ROOM_REFLEX_NOISE_DEGREES = 0.25;
-constexpr double ROOM_CUMULATIVE_TURN_DEGREES = 30.0;
-// Maximum |normal.z| / hypot(normal.x, normal.y) for a Room wall.
-// Classifies Face topology directly, without any horizontal wall slicing.
-constexpr double ROOM_WALL_MAX_NORMAL_Z_XY_RATIO = 0.1;
-// Fraction of the inward corner ray to the first opposite vertical wall.
-// 0.55 places the purple Corner candidate 55% of the way from the corner.
-constexpr double ROOM_REFERENCE_INWARD_DISTANCE_FRACTION = 0.55;
-// Only remove a middle candidate when a direct shortcut deviates by at most
-// 15% of the smallest local corridor width and retains wall clearance.
-constexpr double ROOM_SHORTCUT_MAX_DEVIATION_WIDTH_FRACTION = 0.15;
-constexpr double ROOM_SHORTCUT_MIN_CLEARANCE_FRACTION = 0.35;
-// Each cluster radius is 15% of the local XY corridor width.
-constexpr double ROOM_LOCAL_WIDTH_CLUSTER_FRACTION = 0.15;
+// Room floor triangulation experiment; State and Adjacency stay unchanged.
+// The same threshold as the SFO diagnostic: normal.z <= -0.1 for a
+// normalized outward-facing solid Face. Inclined floors are included.
+constexpr double ROOM_FLOOR_MIN_NEGATIVE_NORMAL_Z = 0.1;
+// SketchUp/native coordinates are inches; +1000 mm in world Z.
+constexpr double ROOM_REFERENCE_FLOOR_OFFSET = 1000.0 / 25.4;
+// Protect the Native V7 reference/debug serialization size bound.
 constexpr std::size_t MAX_ROOM_REFERENCE_POINTS = 4096;
-// Additional debug records (red merged + black final) do not consume the
-// original Face/Corner sampling cap.
 constexpr std::size_t MAX_ROOM_REFERENCE_DEBUG_POINTS =
     MAX_ROOM_REFERENCE_POINTS * 3;
 
@@ -736,216 +723,14 @@ bool clear_path(
     return true;
 }
 
-struct CornerVertex
-{
-    Vec3 point;
-    std::vector<Vec3> rays;
-    // Two actual 3D wall faces meeting along a shared SketchUp edge.
-    // Empty for the preserved legacy State-Z debug graph path.
-    std::vector<std::size_t> incident_faces;
-};
-
-// Match exact solid boundary edges in 3D (quantized only to tolerate tiny
-// transformed-coordinate noise). XY coincidence alone is NOT adjacency.
-using TopologyVertexKey = std::array<std::int64_t, 3>;
-using TopologyEdgeKey = std::pair<TopologyVertexKey, TopologyVertexKey>;
-struct TopologyFaceEdge
-{
-    std::size_t face_index = 0;
-    Vec3 first;
-    Vec3 second;
-};
-
-std::optional<TopologyVertexKey> topology_vertex_key(
-    const Vec3& point, double epsilon
-)
-{
-    const auto quantize = [epsilon](double v) -> std::optional<std::int64_t> {
-        const double scaled = v / epsilon;
-        if (!std::isfinite(scaled) ||
-            std::abs(scaled) >= static_cast<double>(
-                std::numeric_limits<std::int64_t>::max() / 2))
-            return std::nullopt;
-        return static_cast<std::int64_t>(std::llround(scaled));
-    };
-    const auto x = quantize(point.x);
-    const auto y = quantize(point.y);
-    const auto z = quantize(point.z);
-    if (!x || !y || !z) return std::nullopt;
-    return TopologyVertexKey{*x, *y, *z};
-}
-
-// At a wall/wall shared edge, each planar face supplies the horizontal
-// direction pointing from that edge INTO the face, not along the shared edge.
-// The XY-projected normal defines the wall tangent; the polygon centroid
-// chooses its correct sign. Vertical tilts cannot generate a fake XY turn.
-std::optional<Vec3> topology_wall_ray(
-    const FaceData& face, const Vec3& first, const Vec3& second
-)
-{
-    const double horizontal = std::hypot(face.normal.x, face.normal.y);
-    if (horizontal <= EPSILON) return std::nullopt;
-    const Vec3 tangent{-face.normal.y / horizontal,
-                        face.normal.x / horizontal, 0.0};
-    const Vec3 midpoint = multiply(add(first, second), 0.5);
-    double projected = 0.0;
-    for (const Vec3& point : face.outer_points)
-        projected += dot(subtract(point, midpoint), tangent);
-    if (std::abs(projected) <= EPSILON * face.outer_points.size())
-        return std::nullopt;
-    return projected > 0.0 ? tangent : multiply(tangent, -1.0);
-}
-
-// The corner graph is built from SHARED 3D FACE EDGES, not from the
-// accidental meeting of equal-Z wall-slice endpoints.
-std::vector<CornerVertex> topology_wall_corners(
-    const CellData& cell,
-    double tolerance,
-    double geometry_epsilon
-)
-{
-    std::map<TopologyEdgeKey, std::vector<TopologyFaceEdge>> edge_faces;
-    const double z_epsilon = std::max(tolerance * 0.01, 1.0e-9);
-    const double edge_epsilon = std::max(geometry_epsilon, 1.0e-9);
-    const auto near_3d = [edge_epsilon](const Vec3& a, const Vec3& b) {
-        return length_squared(subtract(a, b)) <=
-               edge_epsilon * edge_epsilon;
-    };
-    for (std::size_t face_index = 0; face_index < cell.faces.size(); ++face_index)
-    {
-        const FaceData& face = cell.faces[face_index];
-        const double normal_xy = std::hypot(face.normal.x, face.normal.y);
-        if (normal_xy <= EPSILON ||
-            std::abs(face.normal.z) >
-                normal_xy * ROOM_WALL_MAX_NORMAL_Z_XY_RATIO ||
-            face.outer_points.size() < 3)
-            continue;
-
-        const std::vector<Vec3>& ring = face.outer_points;
-        for (std::size_t i = 0; i < ring.size(); ++i)
-        {
-            const Vec3& first = ring[i];
-            const Vec3& second = ring[(i + 1) % ring.size()];
-            // Only an edge with at least 1000 mm of vertical extent
-            // has a valid reference anchor. Never extrapolate its ends.
-            if (std::abs(second.z - first.z) <
-                ROOM_REFERENCE_EDGE_OFFSET - z_epsilon)
-                continue;
-
-            const auto first_key = topology_vertex_key(first, edge_epsilon);
-            const auto second_key = topology_vertex_key(second, edge_epsilon);
-            if (!first_key || !second_key || *first_key == *second_key)
-                continue;
-            const TopologyEdgeKey key = *first_key < *second_key ?
-                TopologyEdgeKey{*first_key, *second_key} :
-                TopologyEdgeKey{*second_key, *first_key};
-            edge_faces[key].push_back({face_index, first, second});
-        }
-    }
-
-    std::vector<CornerVertex> corners;
-    for (const auto& item : edge_faces)
-    {
-        const std::vector<TopologyFaceEdge>& shared = item.second;
-        // A manifold wall edge is incident to precisely two faces.
-        // Higher-degree/nonmanifold junctions are not guessed.
-        if (shared.size() != 2 ||
-            shared[0].face_index == shared[1].face_index)
-            continue;
-        const TopologyFaceEdge& first = shared[0];
-        const TopologyFaceEdge& second = shared[1];
-        if (!((near_3d(first.first, second.first) &&
-               near_3d(first.second, second.second)) ||
-              (near_3d(first.first, second.second) &&
-               near_3d(first.second, second.first))))
-            continue;
-
-        const double dz = first.second.z - first.first.z;
-        if (std::abs(dz) < ROOM_REFERENCE_EDGE_OFFSET - z_epsilon)
-            continue;
-        const double anchor_z = std::min(first.first.z, first.second.z) +
-                                ROOM_REFERENCE_EDGE_OFFSET;
-        const double fraction = (anchor_z - first.first.z) / dz;
-        if (fraction < -1.0e-8 || fraction > 1.0 + 1.0e-8)
-            continue;
-        const Vec3 anchor = add(first.first,
-            multiply(subtract(first.second, first.first),
-                     std::max(0.0, std::min(1.0, fraction))));
-        const FaceData& face_a = cell.faces[first.face_index];
-        const FaceData& face_b = cell.faces[second.face_index];
-        const auto ray_a = topology_wall_ray(
-            face_a, first.first, first.second);
-        const auto ray_b = topology_wall_ray(
-            face_b, second.first, second.second);
-        if (!ray_a || !ray_b) continue;
-
-        Vec3 a = *ray_a;
-        Vec3 b = *ray_b;
-        const double n1 = std::hypot(face_a.normal.x, face_a.normal.y);
-        const double n2 = std::hypot(face_b.normal.x, face_b.normal.y);
-        if (n1 <= EPSILON || n2 <= EPSILON) continue;
-        const double normal_dot =
-            (face_a.normal.x * face_b.normal.x +
-             face_a.normal.y * face_b.normal.y) / (n1 * n2);
-        if (normal_dot > std::cos(
-                ROOM_REFLEX_NOISE_DEGREES * 3.14159265358979323846 / 180.0))
-        {
-            // Coplanar/seam edges bridge boundary continuity, but they
-            // accumulate ZERO turning even when their 3D tilt changes.
-            b = multiply(a, -1.0);
-        }
-        else if (normal_dot < -1.0 + 1.0e-8)
-        {
-            // Opposed normals are geometrically ambiguous as a Room corner.
-            continue;
-        }
-
-        // Two separate shared edges may hit the same slice XY coordinate
-        // (mesh seams). Keep the true face-pair incidences, not a synthetic
-        // degree-two corner made by XY-only merging.
-        corners.push_back({anchor, {a, b},
-                           {first.face_index, second.face_index}});
-    }
-    return corners;
-}
 } // namespace
 
-// Geometric candidate pruning in 3D: an existing safe route is never
-// discarded unless a direct 3D chord has verified clearance and LOS.
-bool redundant_corner_candidate_3d(
-    const TriangleBvh& bvh, const Vec3& previous,
-    const Vec3& middle, const Vec3& next, double tolerance
-)
-{
-    const Vec3 chord = subtract(next, previous);
-    const double chord_sq = length_squared(chord);
-    if (chord_sq <= tolerance * tolerance) return false;
-    const double t = dot(subtract(middle, previous), chord) / chord_sq;
-    if (t <= 0.0 || t >= 1.0) return false;
-    const Vec3 foot = add(previous, multiply(chord, t));
-    const double deviation = length(subtract(middle, foot));
-    const double clearance = std::min({
-        bvh.nearest_distance(previous),
-        bvh.nearest_distance(middle),
-        bvh.nearest_distance(next)
-    });
-    if (!std::isfinite(clearance) || clearance <= tolerance * 2.0 ||
-        deviation > std::max(tolerance,
-                             2.0 * ROOM_SHORTCUT_MAX_DEVIATION_WIDTH_FRACTION * clearance))
-        return false;
-    if (!clear_path(bvh, previous, next, tolerance)) return false;
-    const double min_allowed = std::max(
-        tolerance * 2.0, ROOM_SHORTCUT_MIN_CLEARANCE_FRACTION * clearance
-    );
-    for (std::size_t step=1; step<8; ++step)
-    {
-        const Vec3 sample = add(previous, multiply(chord, step / 8.0));
-        if (bvh.nearest_distance(sample) < min_allowed)
-            return false;
-    }
-    return true;
-}
-
+// Floor-triangle experiment: every floor face is already triangulated in the
+// native geometry snapshot (FaceData::triangles), including holes and slopes.
+// An eligible triangle's arithmetic centroid is moved exactly +1000 mm along
+// WORLD Z, not along the triangle normal. Only valid points inside the whole
+// CellSpace Solid are retained. Do not merge/prune seeds here: BEFORE must
+// show the complete candidate set, and AFTER onward owns graph reduction.
 std::vector<ReferencePoint> find_reference_points(
     const CellData& cell,
     const Vec3& state_point,
@@ -953,318 +738,61 @@ std::vector<ReferencePoint> find_reference_points(
 )
 {
     if (!(tolerance > 0.0) || !std::isfinite(tolerance)) return {};
-    const double width = cell.bounds.maximum.x - cell.bounds.minimum.x;
-    const double height = cell.bounds.maximum.y - cell.bounds.minimum.y;
-    if (width <= tolerance || height <= tolerance) return {};
-    const double short_span = std::min(width, height);
-    const double long_span = std::max(width, height);
-    const double geometry_epsilon = std::max(tolerance * 0.05, long_span * 1.0e-9);
 
-    const std::vector<const Triangle*> triangles = triangle_pointers(cell);
-    if (triangles.empty()) return {};
-    TriangleBvh bvh(triangles);
+    const std::vector<const Triangle*> solid_triangles = triangle_pointers(cell);
+    if (solid_triangles.empty()) return {};
+    TriangleBvh bvh(solid_triangles);
     if (bvh.empty()) return {};
 
-    std::vector<CornerVertex> vertices = topology_wall_corners(
-        cell, tolerance, geometry_epsilon);
-    const std::size_t vertex_count = vertices.size();
-    if (vertex_count == 0) return {};
-
-    // The XY component of each face's directed tangent measures ONLY
-    // horizontal turning. The edge's Z slope contributes no angular turn.
-    std::vector<double> signed_turn(vertex_count, 0.0);
-    std::vector<Vec3> inward(vertex_count, Vec3{0, 0, 0});
-    std::vector<bool> blocked(vertex_count, true);
-    for (std::size_t i = 0; i < vertex_count; ++i)
-    {
-        const CornerVertex& corner = vertices[i];
-        if (corner.rays.size() != 2) continue;
-        const Vec3 bisector_sum = add(corner.rays[0], corner.rays[1]);
-        if (length_squared(bisector_sum) <= EPSILON)
-        {
-            blocked[i] = false;
-            continue; // Coplanar subdivision seam: zero turn.
-        }
-        const double cosine = std::max(-1.0, std::min(1.0,
-            dot(corner.rays[0], corner.rays[1])));
-        const double small_angle =
-            std::acos(cosine) * 180.0 / 3.14159265358979323846;
-        const Vec3 bisector = normalize(bisector_sum);
-        const double probe = std::max(tolerance * 8.0, short_span * 0.01);
-        const bool small_inside = bvh_inside(
-            bvh, add(corner.point, multiply(bisector, probe)), tolerance);
-        const bool reflex_inside = bvh_inside(
-            bvh, subtract(corner.point, multiply(bisector, probe)), tolerance);
-        if (small_inside == reflex_inside) continue;
-        blocked[i] = false;
-        const double turn = 180.0 - small_angle;
-        if (turn > ROOM_REFLEX_NOISE_DEGREES)
-        {
-            signed_turn[i] = small_inside ? turn : -turn;
-            if (!small_inside) inward[i] = multiply(bisector, -1.0);
-        }
-    }
-
-    // Connected face strips define the order for cumulative turning.
-    std::vector<std::vector<std::size_t>> neighbors(vertex_count);
-    std::vector<std::vector<std::size_t>> face_corners(cell.faces.size());
-    for (std::size_t i = 0; i < vertex_count; ++i)
-        for (std::size_t face : vertices[i].incident_faces)
-            face_corners[face].push_back(i);
-    for (const std::vector<std::size_t>& indices : face_corners)
-        for (std::size_t x = 0; x < indices.size(); ++x)
-            for (std::size_t y = x + 1; y < indices.size(); ++y)
-            {
-                const std::size_t a = indices[x];
-                const std::size_t b = indices[y];
-                if (a == b) continue;
-                if (std::find(neighbors[a].begin(), neighbors[a].end(), b) ==
-                    neighbors[a].end()) neighbors[a].push_back(b);
-                if (std::find(neighbors[b].begin(), neighbors[b].end(), a) ==
-                    neighbors[b].end()) neighbors[b].push_back(a);
-            }
-
-    std::vector<std::size_t> selected;
-    std::vector<std::vector<std::size_t>> selected_chains;
-    std::vector<bool> visited(vertex_count, false);
-    std::vector<bool> ordered(vertex_count, false);
-    for (std::size_t seed=0; seed<vertex_count; ++seed)
-    {
-        if (blocked[seed] || visited[seed]) continue;
-        std::vector<std::size_t> component;
-        std::vector<std::size_t> stack{seed};
-        visited[seed] = true;
-        while (!stack.empty())
-        {
-            const std::size_t v = stack.back();
-            stack.pop_back();
-            component.push_back(v);
-            for (std::size_t neighbor : neighbors[v])
-            {
-                if (blocked[neighbor] || visited[neighbor]) continue;
-                visited[neighbor] = true;
-                stack.push_back(neighbor);
-            }
-        }
-        std::size_t start = component.front();
-        bool endpoint = false;
-        bool simple = true;
-        for (std::size_t v : component)
-        {
-            std::size_t degree = 0;
-            for (std::size_t neighbor : neighbors[v])
-                if (!blocked[neighbor]) ++degree;
-            if (degree > 2) simple = false;
-            if (degree <= 1 && !endpoint)
-            {
-                start = v;
-                endpoint = true;
-            }
-        }
-        if (!simple)
-        {
-            for (std::size_t v : component)
-                if (signed_turn[v] <= -ROOM_CUMULATIVE_TURN_DEGREES)
-                {
-                    selected.push_back(v);
-                    selected_chains.push_back({v});
-                }
-            continue;
-        }
-        std::vector<std::size_t> chain_candidates;
-        const std::size_t none = vertex_count;
-        std::size_t previous = none;
-        std::size_t current = start;
-        RoomSignedTurnAccumulator accumulator(ROOM_CUMULATIVE_TURN_DEGREES);
-        for (std::size_t n=0; n<component.size(); ++n)
-        {
-            if (current == none || ordered[current]) break;
-            ordered[current] = true;
-            if (accumulator.advance(signed_turn[current]))
-            {
-                selected.push_back(current);
-                chain_candidates.push_back(current);
-            }
-            std::size_t next = none;
-            for (std::size_t neighbor : neighbors[current])
-                if (neighbor != previous && !blocked[neighbor] && !ordered[neighbor])
-                {
-                    next = neighbor;
-                    break;
-                }
-            previous = current;
-            current = next;
-        }
-        if (endpoint)
-        {
-            if (!chain_candidates.empty())
-                selected_chains.push_back(std::move(chain_candidates));
-        }
-        else
-            for (std::size_t v : chain_candidates)
-                selected_chains.push_back({v});
-    }
-    if (selected.empty()) return {};
-
     std::vector<ReferencePoint> points;
-    const auto add_candidate = [&](const Vec3& candidate, ReferencePointKind kind)
-    {
-        if (points.size() >= MAX_ROOM_REFERENCE_DEBUG_POINTS ||
-            !safe_reference(bvh, candidate, state_point, tolerance))
-            return;
-        const double duplicate = std::max(tolerance * 2.0, long_span * 1.0e-7);
-        for (const ReferencePoint& existing : points)
-            if (existing.kind == kind &&
-                length_squared(subtract(existing.point, candidate)) <=
-                    duplicate * duplicate)
-                return;
-        points.push_back({candidate, kind});
-    };
+    points.reserve(std::min<std::size_t>(
+        solid_triangles.size() * 2, MAX_ROOM_REFERENCE_DEBUG_POINTS));
 
-    std::vector<std::optional<Vec3>> candidates(vertex_count);
-    for (std::size_t i : selected)
-    {
-        const Vec3& anchor = vertices[i].point;
-        const Vec3 direction = inward[i];
-        if (length_squared(direction) <= EPSILON) continue;
-        const double probe = std::max(tolerance * 8.0, short_span * 0.01);
-        const Vec3 start = add(anchor, multiply(direction, probe));
-        if (!bvh_inside(bvh, start, tolerance)) continue;
-        const double from_start = bvh.first_ray_hit(start, direction, tolerance);
-        if (!std::isfinite(from_start)) continue;
-        const double span = probe + from_start;
-        if (span <= tolerance * 2.0) continue;
-        const Vec3 candidate = add(
-            anchor, multiply(direction, ROOM_REFERENCE_INWARD_DISTANCE_FRACTION * span));
-        if (safe_reference(bvh, candidate, state_point, tolerance) &&
-            clear_path(bvh, start, candidate, tolerance))
-            candidates[i] = candidate;
-    }
+    const double minimum_state_distance_squared = tolerance * tolerance;
+    std::size_t accepted = 0;
 
-    // Retain boundary endpoints, weakly linked chains and geometry that
-    // cannot safely be replaced by a directly visible 3D shortcut.
-    for (const std::vector<std::size_t>& chain : selected_chains)
+    for (const FaceData& face : cell.faces)
     {
-        std::vector<std::size_t> remaining;
-        for (std::size_t v : chain)
-            if (candidates[v]) remaining.push_back(v);
-        std::size_t index = 1;
-        while (index + 1 < remaining.size())
+        const double normal_length = length(face.normal);
+        if (!std::isfinite(normal_length) || normal_length <= EPSILON ||
+            face.normal.z > -ROOM_FLOOR_MIN_NEGATIVE_NORMAL_Z * normal_length)
+            continue;
+
+        for (const Triangle& triangle : face.triangles)
         {
-            const std::size_t a = remaining[index - 1];
-            const std::size_t b = remaining[index];
-            const std::size_t d = remaining[index + 1];
-            if (redundant_corner_candidate_3d(
-                    bvh, *candidates[a], *candidates[b], *candidates[d],
-                    tolerance))
-            {
-                candidates[b] = std::nullopt;
-                remaining.erase(remaining.begin() +
-                                static_cast<std::ptrdiff_t>(index));
-                if (index > 1) --index;
-            }
-            else ++index;
-        }
-    }
+            // Degenerate triangles do not have a usable floor surface.
+            const Vec3 ab = subtract(triangle.points[1], triangle.points[0]);
+            const Vec3 ac = subtract(triangle.points[2], triangle.points[0]);
+            if (length_squared(cross(ab, ac)) <= EPSILON) continue;
 
-    for (std::size_t v : selected)
-        if (candidates[v])
-            add_candidate(*candidates[v], ReferencePointKind::Corner);
-
-    // Clustering uses scaled 3D inscribed-sphere radii rather than XY widths.
-    const std::size_t original_count = points.size();
-    std::vector<bool> merged_sources(original_count, false);
-    if (original_count > 0)
-    {
-        std::vector<std::size_t> state_cluster;
-        std::vector<std::vector<std::size_t>> clusters;
-        const auto cluster_radius = [&](const Vec3& p) {
-            return 2.0 * ROOM_LOCAL_WIDTH_CLUSTER_FRACTION *
-                   std::max(0.0, bvh.nearest_distance(p) - tolerance);
-        };
-        const double state_radius = cluster_radius(state_point);
-        std::vector<double> point_radii(original_count);
-        for (std::size_t i=0; i<original_count; ++i)
-            point_radii[i] = cluster_radius(points[i].point);
-
-        const auto compatible = [&](std::size_t i,
-                                    const std::vector<std::size_t>& members) {
-            for (std::size_t member : members)
-            {
-                const double radius = std::min(point_radii[i], point_radii[member]);
-                if (radius <= tolerance * 4.0 ||
-                    length_squared(subtract(points[i].point, points[member].point)) >
-                        radius * radius ||
-                    !clear_path(bvh, points[i].point, points[member].point, tolerance))
-                    return false;
-            }
-            return true;
-        };
-
-        for (std::size_t i=0; i<original_count; ++i)
-        {
-            const double radius = std::min(state_radius, point_radii[i]);
-            if (radius > tolerance * 4.0 &&
-                length_squared(subtract(points[i].point, state_point)) <=
-                    radius * radius &&
-                clear_path(bvh, points[i].point, state_point, tolerance) &&
-                compatible(i, state_cluster))
-            {
-                state_cluster.push_back(i);
+            Vec3 point = multiply(add(add(triangle.points[0],
+                                          triangle.points[1]),
+                                          triangle.points[2]), 1.0 / 3.0);
+            point.z += ROOM_REFERENCE_FLOOR_OFFSET;
+            if (!std::isfinite(point.x) || !std::isfinite(point.y) ||
+                !std::isfinite(point.z) ||
+                !bvh_inside(bvh, point, tolerance) ||
+                bvh.nearest_distance(point) <= tolerance)
                 continue;
-            }
-            bool added = false;
-            for (auto& cluster : clusters)
-                if (compatible(i, cluster))
-                {
-                    cluster.push_back(i);
-                    added = true;
-                    break;
-                }
-            if (!added) clusters.push_back({i});
-        }
-        if (!state_cluster.empty())
-        {
-            points.push_back({state_point, ReferencePointKind::Merged});
-            for (std::size_t member : state_cluster)
-                merged_sources[member] = true;
-        }
-        for (const auto& cluster : clusters)
-        {
-            if (cluster.size() < 2) continue;
-            Vec3 center{0,0,0};
-            for (std::size_t member : cluster)
-                center = add(center, points[member].point);
-            center = multiply(center, 1.0 / static_cast<double>(cluster.size()));
-            bool valid = safe_reference(bvh, center, state_point, tolerance);
-            for (std::size_t member : cluster)
-                if (valid && !clear_path(bvh, points[member].point, center, tolerance))
-                    valid = false;
-            if (!valid) continue;
-            add_candidate(center, ReferencePointKind::Merged);
-            for (std::size_t member : cluster)
-                merged_sources[member] = true;
-        }
-    }
 
-    const std::size_t diagnostic_count = points.size();
-    for (std::size_t i=0; i<diagnostic_count; ++i)
-    {
-        const bool unmerged_corner = i < original_count && !merged_sources[i];
-        const bool non_state_center =
-            points[i].kind == ReferencePointKind::Merged &&
-            length_squared(subtract(points[i].point, state_point)) >
-                tolerance * tolerance;
-        if (!unmerged_corner && !non_state_center) continue;
-        add_candidate(points[i].point, ReferencePointKind::Final);
+            // Face is the original green 1st-stage diagnostic marker.
+            // Final is the SAME spatial candidate passed into BEFORE.
+            // Only the State position itself is represented by State, to
+            // avoid adding two coincident graph nodes.
+            points.push_back({point, ReferencePointKind::Face});
+            if (length_squared(subtract(point, state_point)) >
+                minimum_state_distance_squared)
+                points.push_back({point, ReferencePointKind::Final});
+            ++accepted;
+            if (accepted >= MAX_ROOM_REFERENCE_POINTS)
+                return points;
+        }
     }
     return points;
 }
 
-// Build a diagnostic visibility graph from State and *final* reference nodes.
-// Each XY disk is bounded by its nearest vertical wall. The local width
-// approximation (2x nearest clearance) must be halved for an inscribed
-// circle; the existing 0.15x reference clustering policy stays unchanged.
+// Graph stage is unchanged: Final markers are the valid floor-triangle
+// candidates; sphere overlap and exact 3D LOS determine BEFORE edges.
 std::vector<bool> validate_room_reference_segments(
     const CellData& cell,
     const std::vector<std::pair<Vec3, Vec3>>& segments,
@@ -1366,8 +894,8 @@ CellSpaceInteriorPointResult locate_cell_space_interior_points(
             // TEMP DEBUG SUPPORT: status is serialized only so Ruby can distinguish
             // a successful empty result from an exception. Remove with debug logging.
             result.reference_status = ReferencePointStatus::Failed;
-            // Single Face-Topology route: 1000 mm above the lowest
-            // endpoint of every eligible wall/wall shared 3D Edge.
+            // Experimental: floor-triangle centroid + world-Z 1000 mm.
+            // No legacy wall-corner candidates or pre-BEFORE clustering.
             result.reference_points = find_reference_points(
                 cell, *result.state_point, tolerance
             );
