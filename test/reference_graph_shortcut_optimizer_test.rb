@@ -88,6 +88,17 @@ class ReferenceGraphShortcutOptimizerTest < Minitest::Test
     )
   end
 
+  def test_3d_projection_allows_vertical_interior_segment
+    a = Point.new(0.0, 0.0, 0.0)
+    b = Point.new(0.0, 0.0, 2.0)
+    c = Point.new(0.0, 0.0, 4.0)
+
+    assert Optimizer.projected_between?(a, b, c),
+           '3D projection must not reject vertical LOS paths'
+    refute Optimizer.projected_between?(a, Point.new(0, 0, 5), c),
+           'projection beyond a 3D segment must remain invalid'
+  end
+
   def test_iterative_two_step_requires_second_segment_los
     original = graph(
       [node(9, 9), node(0, 0), node(1, 0), node(2, 0), node(3, 0)],
