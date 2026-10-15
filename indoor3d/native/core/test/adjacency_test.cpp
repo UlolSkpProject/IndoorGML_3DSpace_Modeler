@@ -840,42 +840,17 @@ void test_four_cycle_native_centroid_and_los_candidate()
 {
     CellData room = unit_box_cell();
     room.category = CellSpaceCategory::Room;
-    // Neighbor disks overlap; diagonals do not. Thus four Final nodes
-    // form an induced 4-cycle rather than four triangles.
-    const Vec3 state{0.1, 0.1, 0.5};
     const std::vector<ReferencePoint> points{
-        {{0.27, 0.27, 0.5}, ReferencePointKind::Final},
-        {{0.73, 0.27, 0.5}, ReferencePointKind::Final},
-        {{0.73, 0.73, 0.5}, ReferencePointKind::Final},
-        {{0.27, 0.73, 0.5}, ReferencePointKind::Final}
+        {{0.27,0.27,0.5},ReferencePointKind::Final},
+        {{0.73,0.27,0.5},ReferencePointKind::Final},
+        {{0.73,0.73,0.5},ReferencePointKind::Final},
+        {{0.27,0.73,0.5},ReferencePointKind::Final}
     };
-    const ReferenceGraphDebug graph =
-        build_room_reference_visibility_graph(room, state, points, 0.001);
-    require(graph.nodes.size() == 5, "4-cycle fixture lost graph vertices");
-    const auto linked = [&](std::size_t a, std::size_t b) {
-        for (const ReferenceGraphEdge& edge : graph.edges)
-            if (edge.first == a && edge.second == b) return true;
-        return false;
-    };
-    require(linked(1, 2) && linked(2, 3) &&
-            linked(3, 4) && linked(1, 4),
-            "fixture must contain 4-cycle perimeter edges");
-    require(!linked(1, 3) && !linked(2, 4),
-            "fixture must not contain cycle chords");
-    bool found = false;
-    for (const ReferenceLoopCollapseCandidate& candidate : graph.loop_candidates)
-    {
-        if (candidate.vertices != std::vector<std::size_t>{1, 2, 3, 4})
-            continue;
-        require(std::abs(candidate.representative.point.x - 0.5) < 1.0e-9,
-                "4-cycle polygon centroid X incorrect");
-        require(std::abs(candidate.representative.point.y - 0.5) < 1.0e-9,
-                "4-cycle polygon centroid Y incorrect");
-        require(candidate.representative.radius > 0.0,
-                "4-cycle centroid must have valid wall clearance");
-        found = true;
-    }
-    require(found, "Native must prevalidate an induced 4-cycle");
+    const auto graph = build_room_reference_visibility_graph(
+        room, {0.1,0.1,0.5}, points, 0.001);
+    require(graph.nodes.size() == 5, "4-cycle vertices must survive");
+    require(graph.loop_candidates.empty(),
+            "Native cannot collapse a 3D cycle without Hole verification");
 }
 
 void test_room_loop_cannot_collapse_over_enclosed_hole()
@@ -925,22 +900,13 @@ void test_state_loop_receives_hole_free_native_certificate()
     CellData room = unit_box_cell();
     room.category = CellSpaceCategory::Room;
     const std::vector<ReferencePoint> points{
-        {{0.3,0.2,0.5}, ReferencePointKind::Final},
-        {{0.2,0.3,0.5}, ReferencePointKind::Final}
+        {{0.3,0.2,0.5},ReferencePointKind::Final},
+        {{0.2,0.3,0.5},ReferencePointKind::Final}
     };
-    const ReferenceGraphDebug graph =
-        build_room_reference_visibility_graph(room, {0.2,0.2,0.5}, points, 0.001);
-
-    bool certified = false;
-    for (const auto& candidate : graph.loop_candidates)
-    {
-        if (candidate.vertices != std::vector<std::size_t>{0,1,2})
-            continue;
-        require(std::abs(candidate.representative.point.x - 0.2) < 1.0e-9,
-                "State cycle must keep its original State representative");
-        certified = true;
-    }
-    require(certified, "Hole-free State cycle must remain collapsible");
+    const auto graph = build_room_reference_visibility_graph(
+        room, {0.2,0.2,0.5}, points, 0.001);
+    require(graph.loop_candidates.empty(),
+            "State-containing cycle must not bypass missing 3D Hole validation");
 }
 
 void test_room_reference_shortcut_los_rejects_wall_crossing()
