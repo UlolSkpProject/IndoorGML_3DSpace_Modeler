@@ -52,7 +52,7 @@ void test_normalize_loop_winding_start_and_duplicate_closing()
         {2,2,0},{4,2,0},{4,4,0},{2,4,0},{2,2,0}
     }); // counterclockwise
     const auto input_outer=outer, input_hole=hole;
-    const auto prepared=prepare({0,0,1},outer,{hole},0.001);
+    const auto prepared=prepare(Vec3{0,0,1},outer,{hole},0.001);
     require(prepared && prepared.error==PreparationError::None,
             "Phase 1 should normalize valid outer + hole boundaries");
     const NormalizedFace& face=*prepared.face;
@@ -116,7 +116,7 @@ void test_inclined_face_and_nonplanar_rejection()
     const auto slope=polygon({
         {0,0,0},{4,0,0},{4,4,4},{0,4,4}
     });
-    const auto prepared=prepare({0,-1,1},slope,{},0.001);
+    const auto prepared=prepare(Vec3{0,-1,1},slope,{},0.001);
     require(prepared,"Inclined planar Face should be accepted");
     const NormalizedFace& face=*prepared.face;
     for (std::size_t i=0;i<face.outer.points.size();++i)
@@ -127,10 +127,10 @@ void test_inclined_face_and_nonplanar_rejection()
     }
     auto warped=slope;
     warped[2].z+=0.1;
-    const auto rejected=prepare({0,-1,1},warped,{},0.001);
+    const auto rejected=prepare(Vec3{0,-1,1},warped,{},0.001);
     require(!rejected && rejected.error==PreparationError::NonPlanarLoop,
             "Non-planar Face cannot enter the 2D partition workflow");
-    const auto zero_normal=prepare({0,0,0},slope,{},0.001);
+    const auto zero_normal=prepare(Vec3{0,0,0},slope,{},0.001);
     require(!zero_normal && zero_normal.error==PreparationError::InvalidNormal,
             "Invalid Normal should fail before a coordinate frame is used");
 }
@@ -146,8 +146,8 @@ void test_inner_loop_order_determinism()
     const auto right=polygon({
         {8,8,0},{8,10,0},{10,10,0},{10,8,0}
     });
-    const auto one=prepare({0,0,1},outer,{right,left},0.001);
-    const auto two=prepare({0,0,1},outer,{left,right},0.001);
+    const auto one=prepare(Vec3{0,0,1},outer,{right,left},0.001);
+    const auto two=prepare(Vec3{0,0,1},outer,{left,right},0.001);
     require(one && two,"Multiple valid Hole boundaries must normalize");
     require(one.face->holes.size()==2 && two.face->holes.size()==2,
             "No Hole may be discarded during normalization");
@@ -171,7 +171,7 @@ void test_outer_reflex_direction_and_threshold()
         {0,0,0},{3,0,0},{3,1,0},
         {1,1,0},{1,3,0},{0,3,0}
     });
-    const auto prepared=prepare({0,0,1},l,{},0.001);
+    const auto prepared=prepare(Vec3{0,0,1},l,{},0.001);
     require(prepared,"L floor preparation failed");
     const auto result=propose_splits(*prepared.face);
     require(result.valid_settings && result.candidates.size()==1,
@@ -197,8 +197,8 @@ void test_outer_reflex_direction_and_threshold()
     const auto strong=polygon({
         {0,0,0},{4,0,0},{4,4,0},{2,3.2,0},{0,4,0}
     });
-    const auto weak_face=prepare({0,0,1},weak,{},0.001);
-    const auto strong_face=prepare({0,0,1},strong,{},0.001);
+    const auto weak_face=prepare(Vec3{0,0,1},weak,{},0.001);
+    const auto strong_face=prepare(Vec3{0,0,1},strong,{},0.001);
     require(weak_face && strong_face,"Notched floors should normalize");
     require(propose_splits(*weak_face.face).candidates.empty(),
             "A single notch below 30 degrees should not split");
@@ -214,7 +214,7 @@ void test_downward_floor_normal_preserves_reflex_direction()
         {0,0,0},{3,0,0},{3,1,0},
         {1,1,0},{1,3,0},{0,3,0}
     });
-    const auto face=prepare({0,0,-1},outline,{},0.001);
+    const auto face=prepare(Vec3{0,0,-1},outline,{},0.001);
     require(face,"Downward-facing Floor should normalize");
     require(face.face->outer.signed_area>0.0,
             "Outer winding must normalize relative to negative Face normal");
@@ -242,7 +242,7 @@ void test_accumulated_small_reflex_turns()
         {0,0,0},{10,0,0},{10,5,0},{8,4.1,0},
         {6,4,0},{4,4.3,0},{2,5,0},{0,5,0}
     });
-    const auto prepared=prepare({0,0,1},ring,{},0.001);
+    const auto prepared=prepare(Vec3{0,0,1},ring,{},0.001);
     require(prepared,"Smooth concave Floor should normalize");
     const auto candidates=propose_splits(*prepared.face);
     bool accumulated=false;
@@ -263,7 +263,7 @@ void test_hole_candidates_and_first_vertex_fallback()
     const auto hole=polygon({
         {3,3,0},{5,3,0},{5,5,0},{3,5,0}
     });
-    const auto prepared=prepare({0,0,1},outer,{hole},0.001);
+    const auto prepared=prepare(Vec3{0,0,1},outer,{hole},0.001);
     require(prepared,"Rectangle with one Hole must normalize");
     const auto normal=propose_splits(*prepared.face,30.0);
     require(normal.valid_settings && normal.candidates.size()==4,
@@ -293,10 +293,10 @@ void test_input_winding_does_not_change_world_split_origin()
         {0,0,0},{3,0,0},{3,1,0},
         {1,1,0},{1,3,0},{0,3,0}
     });
-    const auto first=prepare({0,0,1},l,{},0.001);
+    const auto first=prepare(Vec3{0,0,1},l,{},0.001);
     std::reverse(l.begin(),l.end());
     std::rotate(l.begin(),l.begin()+2,l.end());
-    const auto reversed=prepare({0,0,1},l,{},0.001);
+    const auto reversed=prepare(Vec3{0,0,1},l,{},0.001);
     require(first && reversed,"Both loop windings must be accepted");
     const auto ca=propose_splits(*first.face);
     const auto cb=propose_splits(*reversed.face);
