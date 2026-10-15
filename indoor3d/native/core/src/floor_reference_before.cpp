@@ -62,8 +62,9 @@ CellSpaceInteriorPointResult locate_reference_before(
             source.normal.z> -FLOOR_MIN_NEGATIVE_NORMAL_Z*normal_length)
             continue;
         ++result.diagnostics.floor_faces;
-        const auto prepared=prepare(
-            source.normal,source.outer_loop(),source.holes(),tolerance);
+        const auto prepared=source.has_plane ?
+            prepare(source.plane,source.outer_loop(),source.holes(),tolerance) :
+            prepare(source.normal,source.outer_loop(),source.holes(),tolerance);
         if (!prepared.face) continue;
         ++result.diagnostics.prepared_faces;
         PartitionBatch batch=partition_queue(*prepared.face,i,tolerance);

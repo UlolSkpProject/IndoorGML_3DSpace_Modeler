@@ -115,13 +115,22 @@ void canonicalize(NormalizedLoop& loop, bool clockwise)
     }
 }
 
-std::optional<Frame> make_frame(Vec3 normal, Vec3 origin)
+std::optional<Frame> make_frame(const Plane& plane, Vec3 anchor)
 {
-    if (!finite(normal) || !finite(origin)) return std::nullopt;
+    const Vec3 normal=plane.normal;
+    if (!finite(normal) || !finite(anchor) || !std::isfinite(plane.d))
+        return std::nullopt;
     const double magnitude=norm(normal);
     if (!std::isfinite(magnitude) || magnitude<=EPSILON)
         return std::nullopt;
     const Vec3 n={normal.x/magnitude,normal.y/magnitude,normal.z/magnitude};
+    // Anchor is only a stable local coordinate-system reference.
+    // Project it onto SketchUp's ACTUAL plane; never define a new plane
+    // by assuming the unprojected first vertex lies exactly on it.
+    const double offset=dot(n,anchor)+(plane.d/magnitude);
+    const Vec3 origin={
+        anchor.x-offset*n.x,anchor.y-offset*n.y,anchor.z-offset*n.z
+    };
     // Cross with the coordinate axis LEAST parallel to n, giving a
     // stable orthonormal right-handed frame even for vertical faces.
     const double ax=std::abs(n.x),ay=std::abs(n.y),az=std::abs(n.z);
@@ -296,7 +305,7 @@ Vec3 Frame::lift(const Vec2& point) const
 }
 
 PreparationResult prepare(
-    const Vec3& normal,
+    const Plane& plane,
     const std::vector<Vec3>& outer_loop,
     const std::vector<std::vector<Vec3>>& inner_loops,
     double tolerance
@@ -306,13 +315,16 @@ PreparationResult prepare(
         return {{},PreparationError::InvalidTolerance,0};
     if (outer_loop.empty())
         return {{},PreparationError::InvalidOuterLoop,0};
-    const auto frame=make_frame(normal,outer_loop.front());
+    const auto frame=make_frame(plane,outer_loop.front());
     if (!frame)
         return {{},PreparationError::InvalidNormal,0};
     const LoopResult outer=prepare_loop(
         *frame,outer_loop,false,0,tolerance);
     if (!outer.loop) return {{},outer.error,0};
-    NormalizedFace result{*frame,*outer.loop,{}};
+    const double magnitude=norm(plane.normal);
+    NormalizedFace result{
+        *frame,{frame->n,plane.d/magnitude},*outer.loop,{}
+    };
     result.holes.reserve(inner_loops.size());
     for (std::size_t i=0;i<inner_loops.size();++i)
     {
@@ -330,6 +342,21 @@ PreparationResult prepare(
                   return a.source_loop_index<b.source_loop_index;
               });
     return {std::move(result),PreparationError::None,0};
+}
+
+PreparationResult prepare(
+    const Vec3& normal,
+    const std::vector<Vec3>& outer_loop,
+    const std::vector<std::vector<Vec3>>& inner_loops,
+    double tolerance
+)
+{
+    // Required for Geometry V1-V4 and existing in-memory test fixtures.
+    // Geometry V5 callers provide SketchUp's transformed plane directly.
+    if (outer_loop.empty())
+        return {{},PreparationError::InvalidOuterLoop,0};
+    const Plane derived={normal,-dot(normal,outer_loop.front())};
+    return prepare(derived,outer_loop,inner_loops,tolerance);
 }
 
 CandidateResult propose_splits(

@@ -22,8 +22,13 @@ std::optional<NormalizedFace> normalize_child(
     holes.reserve(child.holes.size());
     for (const RegionLoop& hole:child.holes)
         holes.push_back(world_loop(frame,hole));
-    const auto result=prepare(frame.n,world_loop(frame,child.outer),
-                              holes,tolerance);
+    const Plane authoritative={
+        frame.n,-(frame.n.x*frame.origin.x+
+                  frame.n.y*frame.origin.y+
+                  frame.n.z*frame.origin.z)
+    };
+    const auto result=prepare(authoritative,
+                              world_loop(frame,child.outer),holes,tolerance);
     return result.face;
 }
 } // namespace

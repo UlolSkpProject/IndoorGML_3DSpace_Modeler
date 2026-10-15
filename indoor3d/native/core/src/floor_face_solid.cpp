@@ -99,8 +99,9 @@ FaceSolid::FaceSolid(const CellData& cell,double tolerance)
     {
         // A malformed Face cannot be silently ignored: omitting it
         // would change solid parity and permit LOS across a wall.
-        const auto prepared=FloorPartition::prepare(
-            face.normal,face.outer_loop(),face.holes(),tolerance);
+        const auto prepared=face.has_plane ?
+            FloorPartition::prepare(face.plane,face.outer_loop(),face.holes(),tolerance) :
+            FloorPartition::prepare(face.normal,face.outer_loop(),face.holes(),tolerance);
         if (!prepared.face) return;
         Surface surface;
         surface.face=*prepared.face;

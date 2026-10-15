@@ -51,6 +51,7 @@ struct NormalizedLoop
 struct NormalizedFace
 {
     Frame frame;
+    Plane plane; // authoritative SketchUp plane, normalized and propagated
     NormalizedLoop outer;
     std::vector<NormalizedLoop> holes;
 };
@@ -76,7 +77,18 @@ struct PreparationResult
 };
 
 // Pure boundary normalization: NO changes to FaceData, mesh, or CellSpace.
+// Plane Ax+By+Cz+D=0 is authoritative; its coefficients and vertices
+// must already be expressed in the SAME SketchUp parent coordinates.
 // tolerance is a 3D length in SketchUp/native units (inches).
+PreparationResult prepare(
+    const Plane& plane,
+    const std::vector<Vec3>& outer_loop,
+    const std::vector<std::vector<Vec3>>& inner_loops,
+    double tolerance
+);
+
+// Legacy/synthetic input ONLY. Modern V5 production calls prepare(Plane)
+// and never reconstructs D from a Loop vertex.
 PreparationResult prepare(
     const Vec3& normal,
     const std::vector<Vec3>& outer_loop,
