@@ -110,13 +110,26 @@ module ULOL
         def canonical_snapshot(source)
           hash = Hash(source)
           nodes = Array(hash.fetch(:nodes))
-          hash.merge(
+          edges = Array(hash.fetch(:edges)).map { |pair| Array(pair).dup.freeze }
+          order = (0...edges.length).to_a
+          # Canonical edge ordering is part of the output contract, even if
+          # no certificate survived. Preserve per-edge metadata alignment.
+          if edges.all? { |pair| pair.length == 2 && pair.all? { |i| i.is_a?(Integer) } }
+            order.sort_by! { |index| edges[index] }
+          end
+          updates = {
             nodes: nodes.dup.freeze,
-            edges: Array(hash.fetch(:edges)).map { |pair| Array(pair).dup.freeze }.freeze,
+            edges: order.map { |index| edges[index] }.freeze,
             original_indices: Array(hash.fetch(:original_indices)).dup.freeze,
             merged_into: Array(hash[:merged_into]).map { |pair| Array(pair).dup.freeze }.freeze,
             contraction_history: Array(hash[:contraction_history]).dup.freeze
-          ).freeze
+          }
+          %i[edge_weights edge_metadata].each do |field|
+            next unless hash.key?(field)
+            values = Array(hash[field])
+            updates[field] = order.map { |index| values[index] }.freeze if values.length == edges.length
+          end
+          hash.merge(updates).freeze
         end
 
         def valid_snapshot?(nodes, edges, origins)
