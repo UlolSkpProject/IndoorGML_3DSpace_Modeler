@@ -32,9 +32,16 @@ struct Triangle
 
 struct FaceData
 {
+    // Shared immutable-by-convention source geometry. Consumers of
+    // partitioning use const FaceData&, never mutate this mesh or loops.
     Vec3 normal;
     std::vector<Vec3> outer_points;
+    std::vector<std::vector<Vec3>> inner_loops;
     std::vector<Triangle> triangles;
+
+    // Keep outer_points for existing Exact Adjacency consumers.
+    const std::vector<Vec3>& outer_loop() const noexcept { return outer_points; }
+    const std::vector<std::vector<Vec3>>& holes() const noexcept { return inner_loops; }
 };
 
 enum class CellSpaceCategory : std::uint64_t
