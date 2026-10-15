@@ -146,6 +146,7 @@ indoor_gml_configure_ruby_module(
 if(BUILD_TESTING)
     add_executable(indoor_gml_native_test
         core/test/adjacency_test.cpp
+        core/src/floor_polygon_preparation.cpp
         core/src/adjacency_data.cpp
         core/src/adjacency_checker.cpp
         core/src/cell_space_interior_point_locator.cpp

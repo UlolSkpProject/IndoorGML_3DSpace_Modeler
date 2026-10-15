@@ -353,6 +353,8 @@ PreparationResult prepare(
 {
     // Required for Geometry V1-V4 and existing in-memory test fixtures.
     // Geometry V5 callers provide SketchUp's transformed plane directly.
+    if (!std::isfinite(tolerance) || tolerance<=0.0)
+        return {{},PreparationError::InvalidTolerance,0};
     if (outer_loop.empty())
         return {{},PreparationError::InvalidOuterLoop,0};
     const Plane derived={normal,-dot(normal,outer_loop.front())};

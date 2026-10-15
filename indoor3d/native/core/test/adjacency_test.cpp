@@ -1,5 +1,6 @@
 #include "adjacency_checker.h"
 #include "cell_space_interior_point_locator.h"
+#include "floor_polygon_preparation.h"
 
 #include <algorithm>
 #include <array>

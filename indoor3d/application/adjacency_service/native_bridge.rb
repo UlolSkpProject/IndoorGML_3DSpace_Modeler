@@ -827,7 +827,7 @@ module ULOL
           face = Hash(face)
           # Legacy V1 sends a 3-vector. Geometry V5 sends the full
           # SketchUp-authored plane; never recompute D from a vertex.
-          plane = include_plane ? Array(face.fetch(:plane)) : nil
+          plane = include_plane ? Array(face[:plane]) : nil
           normal = include_plane ? nil : Array(face[:normal] || Array(face.fetch(:plane)).first(3))
           points = Array(face[:points])
           triangles = Array(face[:triangles])
