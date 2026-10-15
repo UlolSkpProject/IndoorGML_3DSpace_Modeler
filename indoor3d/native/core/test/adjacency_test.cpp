@@ -1019,6 +1019,8 @@ void test_stair_before_uses_final_polygon_shared_edge_midpoints()
             "Stair BEFORE should use every valid shared Edge midpoint");
     require(result.debug_graph.nodes.size()==finals.size()+1,
             "Stair BEFORE must contain State plus final shared Edge refs");
+    require(result.debug_graph.loop_candidates.empty(),
+            "Stair must stay BEFORE-only; no Collapse certificates");
     for (const Vec3& p : firsts)
     {
         require(std::abs(p.z-1000.0/25.4)<1.0e-9,
