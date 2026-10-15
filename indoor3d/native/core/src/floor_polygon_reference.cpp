@@ -177,27 +177,36 @@ ReferenceSeeds generate_reference_seeds(
         auto& pieces=entry.second;
         // Merge geometrically collinear touching fragments into a
         // maximal shared line; one midpoint PER maximal boundary.
-        for (std::size_t i=0;i<pieces.size();++i)
-            for (std::size_t j=i+1;j<pieces.size();)
-            {
-                const Vec3 axis=sub(pieces[i].end,pieces[i].start);
-                const double n=length(axis);
-                if (n<=tolerance) { ++j; continue; }
-                const Vec3 d=mul(axis,1.0/n);
-                const Vec3 offset=sub(pieces[j].start,pieces[i].start);
-                const Vec3 end_offset=sub(pieces[j].end,pieces[i].start);
-                if (length(cross(d,offset))>tolerance ||
-                    length(cross(d,end_offset))>tolerance)
-                { ++j;continue; }
-                const double lo=std::min(dot(offset,d),dot(end_offset,d));
-                const double hi=std::max(dot(offset,d),dot(end_offset,d));
-                if (lo>n+tolerance || hi < -tolerance)
-                { ++j;continue; }
-                pieces[i].start=add(pieces[i].start,mul(d,std::min(0.0,lo)));
-                pieces[i].end=add(pieces[i].start,
-                    mul(d,std::max(n,hi)-std::min(0.0,lo)));
-                pieces.erase(pieces.begin()+j);
-            }
+        bool changed=true;
+        while (changed)
+        {
+            changed=false;
+            for (std::size_t i=0;i<pieces.size() && !changed;++i)
+                for (std::size_t j=i+1;j<pieces.size();++j)
+                {
+                    const Vec3 old_start=pieces[i].start;
+                    const Vec3 axis=sub(pieces[i].end,old_start);
+                    const double n=length(axis);
+                    if (n<=tolerance) continue;
+                    const Vec3 d=mul(axis,1.0/n);
+                    const Vec3 offset=sub(pieces[j].start,old_start);
+                    const Vec3 end_offset=sub(pieces[j].end,old_start);
+                    if (length(cross(d,offset))>tolerance ||
+                        length(cross(d,end_offset))>tolerance)
+                        continue;
+                    const double lo=std::min(dot(offset,d),dot(end_offset,d));
+                    const double hi=std::max(dot(offset,d),dot(end_offset,d));
+                    if (lo>n+tolerance || hi < -tolerance)
+                        continue;
+                    const double begin=std::min(0.0,lo);
+                    const double end=std::max(n,hi);
+                    pieces[i].start=add(old_start,mul(d,begin));
+                    pieces[i].end=add(old_start,mul(d,end));
+                    pieces.erase(pieces.begin()+j);
+                    changed=true;
+                    break; // restart: merged fragment can bridge older pieces
+                }
+        }
         for (const SharedSegment& segment:pieces)
         {
             ++result.shared_segments;
