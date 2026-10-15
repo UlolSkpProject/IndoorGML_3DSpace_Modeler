@@ -1084,12 +1084,138 @@ std::vector<FloorRegion> merge_floor_triangles_by_cumulative_turn(
     return regions;
 }
 
+// A Stair Reference anchor is the midpoint of an edge shared by
+// TWO FINAL partition polygons. Mesh edges internal to one final polygon
+// must never generate an anchor.
+struct StairSharedSegment
+{
+    FloorVertexKey first;
+    FloorVertexKey last;
+};
+
+// Return one midpoint per maximal straight shared-edge chain, rather than
+// one per underlying SketchUp triangulation fragment. Junctions and corners
+// deliberately terminate a chain. A nonmanifold edge (>2 owners) is ignored.
+std::vector<Vec3> stair_partition_shared_edge_midpoints(
+    const std::vector<FloorTriangle>& triangles,
+    const std::vector<FloorRegion>& regions,
+    double tolerance
+)
+{
+    std::vector<std::size_t> region_of(triangles.size(),regions.size());
+    for (std::size_t r=0;r<regions.size();++r)
+    {
+        if (!regions[r].active) continue;
+        for (const std::size_t t : regions[r].triangles)
+            region_of[t]=r;
+    }
+
+    std::map<FloorEdgeKey,std::vector<std::size_t>> owners;
+    std::map<FloorVertexKey,Vec3> positions;
+    for (std::size_t t=0;t<triangles.size();++t)
+    {
+        const FloorTriangle& tri=triangles[t];
+        if (!tri.mergeable || region_of[t]>=regions.size()) continue;
+        for (std::size_t j=0;j<3;++j)
+        {
+            positions.emplace(tri.keys[j],tri.vertices[j]);
+            owners[floor_edge_key(tri.keys[j],
+                    tri.keys[(j+1)%3])].push_back(t);
+        }
+    }
+
+    using RegionPair = std::pair<std::size_t,std::size_t>;
+    std::map<RegionPair,std::vector<StairSharedSegment>> shared;
+    for (const auto& entry : owners)
+    {
+        const auto& t=entry.second;
+        if (t.size()!=2 || t[0]==t[1]) continue;
+        const std::size_t a=region_of[t[0]],b=region_of[t[1]];
+        if (a==b || a>=regions.size() || b>=regions.size()) continue;
+        shared[std::minmax(a,b)].push_back(
+            {entry.first.first,entry.first.second});
+    }
+
+    std::vector<Vec3> centers;
+    for (const auto& entry : shared)
+    {
+        const auto& segments=entry.second;
+        std::map<FloorVertexKey,std::vector<std::size_t>> endpoint_edges;
+        for (std::size_t i=0;i<segments.size();++i)
+        {
+            endpoint_edges[segments[i].first].push_back(i);
+            endpoint_edges[segments[i].last].push_back(i);
+        }
+        std::vector<bool> consumed(segments.size(),false);
+        for (std::size_t seed=0;seed<segments.size();++seed)
+        {
+            if (consumed[seed]) continue;
+            consumed[seed]=true;
+            FloorVertexKey first=segments[seed].first;
+            FloorVertexKey last=segments[seed].last;
+            const Vec3 axis=subtract(positions.at(last),positions.at(first));
+            const double axis_length=length(axis);
+            if (axis_length<=tolerance) continue;
+            const Vec3 origin=positions.at(first);
+
+            const auto extend=[&](FloorVertexKey& endpoint)
+            {
+                for (;;)
+                {
+                    const auto it=endpoint_edges.find(endpoint);
+                    // A T-junction, loop, or a corner with more than
+                    // two edges is not a continuation of a straight Edge.
+                    if (it==endpoint_edges.end() ||
+                        it->second.size()!=2) break;
+                    std::size_t next=segments.size();
+                    for (const std::size_t candidate : it->second)
+                        if (!consumed[candidate]) next=candidate;
+                    if (next==segments.size()) break;
+                    const auto& e=segments[next];
+                    const FloorVertexKey other=
+                        e.first==endpoint ? e.last : e.first;
+                    const Vec3 offset=subtract(positions.at(other),origin);
+                    if (length(cross(offset,axis)) >
+                        tolerance*axis_length) break;
+                    consumed[next]=true;
+                    endpoint=other;
+                }
+            };
+            extend(first);
+            extend(last);
+            Vec3 midpoint=multiply(
+                add(positions.at(first),positions.at(last)),0.5);
+            if (!std::isfinite(midpoint.x) ||
+                !std::isfinite(midpoint.y) ||
+                !std::isfinite(midpoint.z)) continue;
+            bool duplicate=false;
+            for (const Vec3& prior : centers)
+                if (length_squared(subtract(prior,midpoint))<=
+                    tolerance*tolerance)
+                {
+                    duplicate=true;
+                    break;
+                }
+            if (!duplicate) centers.push_back(midpoint);
+        }
+    }
+    std::sort(centers.begin(),centers.end(),
+              [](const Vec3& a,const Vec3& b) {
+                  if (a.x!=b.x) return a.x<b.x;
+                  if (a.y!=b.y) return a.y<b.y;
+                  return a.z<b.z;
+              });
+    return centers;
+}
+
 } // namespace
 
-// Per accepted Floor-region: area-weighted surface centroid + 1000 mm on
-// world Z. If a merged region's elevated centroid is not inside the
-// Solid, fall back to its original triangles, preserving valid references.
-// Native does not pre-merge final graph nodes; AFTER continues to do that.
+// Shared Floor partition logic for Room and Stair. Room seeds are area
+// centroids of final polygons, Stair seeds are midpoints of the common
+// edges between two DIFFERENT final polygons. The established +1000mm
+// world-Z lift and BVH interior validation are unchanged for BOTH types.
+// A rejected merged Room centroid falls back to original mesh triangles.
+// This function only produces BEFORE seeds; later phases are untouched.
 std::vector<ReferencePoint> find_reference_points(
     const CellData& cell,
     const Vec3& state_point,
@@ -1175,7 +1301,7 @@ std::vector<ReferencePoint> find_reference_points(
 
     std::vector<ReferencePoint> points;
     points.reserve(std::min<std::size_t>(
-        survivors.size() * 2, MAX_ROOM_REFERENCE_DEBUG_POINTS));
+        floor_triangles.size() * 2, MAX_ROOM_REFERENCE_DEBUG_POINTS));
     std::size_t accepted = 0;
     const auto add_region_point = [&](Vec3 point) -> bool
     {
@@ -1193,6 +1319,20 @@ std::vector<ReferencePoint> find_reference_points(
         ++accepted;
         return true;
     };
+
+    if (cell.category == CellSpaceCategory::Stair)
+    {
+        // No Stair fallback to polygon centroids or triangulation
+        // edges: these would violate the requested shared-edge rule.
+        const std::vector<Vec3> middle = stair_partition_shared_edge_midpoints(
+            floor_triangles, regions, edge_tolerance);
+        for (const Vec3& position : middle)
+        {
+            if (accepted >= MAX_ROOM_REFERENCE_POINTS) break;
+            add_region_point(position);
+        }
+        return points;
+    }
 
     for (const std::size_t region_id : survivors)
     {
@@ -1803,7 +1943,24 @@ CellSpaceInteriorPointResult locate_cell_space_interior_points(
             }
             break;
         case CellSpaceCategory::Stair:
-            // TODO: Generate Stair reference points using the State-to-floor distance scale.
+            // Stair uses the SAME cumulative-turn floor partition as Room,
+            // but its BEFORE seeds come from the shared polygon edges.
+            // Do not change Room-specific AFTER/INTERNAL processing here.
+            result.reference_status = ReferencePointStatus::Failed;
+            result.reference_points = find_reference_points(
+                cell, *result.state_point, tolerance
+            );
+            result.reference_status = ReferencePointStatus::Succeeded;
+            try
+            {
+                result.debug_graph = build_room_reference_visibility_graph(
+                    cell, *result.state_point, result.reference_points, tolerance
+                );
+            }
+            catch (...)
+            {
+                result.debug_graph = {};
+            }
             break;
         case CellSpaceCategory::Elevator:
         case CellSpaceCategory::Door:
