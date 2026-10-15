@@ -71,6 +71,7 @@ add_library(indoor_gml_native MODULE
     core/include/adjacency_checker.h
     core/include/adjacency_session.h
     core/include/cell_space_interior_point_locator.h
+    core/include/state_exit_code.h
     core/include/floor_polygon_preparation.h
     core/src/floor_polygon_preparation.cpp
     core/include/floor_polygon_intersections.h

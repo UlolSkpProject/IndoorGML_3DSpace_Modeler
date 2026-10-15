@@ -573,6 +573,18 @@ module ULOL
                 )
               end
 
+              if diagnostics[:failed_polygons].to_i.positive? ||
+                 diagnostics[:floor_faces].to_i > diagnostics[:prepared_faces].to_i ||
+                 diagnostics[:rejected_outside].to_i.positive? ||
+                 diagnostics[:rejected_clearance].to_i.positive? ||
+                 diagnostics[:rejected_centroids].to_i.positive?
+                details = diagnostics.map { |key, value| "#{key}=#{value}" }.join(', ')
+                IndoorCore::Logger.puts(
+                  "[IndoorGML] Native State partial for #{cell_space.id}: " \
+                  "ExitCode=0 (success); #{details}"
+                ) if defined?(IndoorCore::Logger)
+              end
+
               graph = outcome[:graph]
               if graph
                 store_debug_reference_points(

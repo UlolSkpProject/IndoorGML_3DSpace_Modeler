@@ -496,6 +496,11 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
         const bool success = result.exit_code == StateExitCode::Success;
         if (success != result.point.has_value())
             throw std::invalid_argument("State/ExitCode consistency violation");
+        if (!success && (!result.reference_points.empty() ||
+                         !result.graph_node_points.empty() ||
+                         !result.graph_edge_indices.empty() ||
+                         !result.graph_loop_candidates.empty()))
+            throw std::invalid_argument("failed State must have no Graph data");
         writer.append_u64(checked_u64(result.cell_index, "state cell index"));
         writer.append_u64(static_cast<std::uint64_t>(result.exit_code));
         if (success)
