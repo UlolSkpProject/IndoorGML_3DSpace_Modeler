@@ -1210,12 +1210,13 @@ std::vector<Vec3> stair_partition_shared_edge_midpoints(
 
 } // namespace
 
-// Shared Floor partition logic for Room and Stair. Room seeds are area
-// centroids of final polygons, Stair seeds are midpoints of the common
-// edges between two DIFFERENT final polygons. The established +1000mm
-// world-Z lift and BVH interior validation are unchanged for BOTH types.
-// A rejected merged Room centroid falls back to original mesh triangles.
-// This function only produces BEFORE seeds; later phases are untouched.
+// Shared BEFORE seed policy for BOTH Room and Stair:
+// (1) area-weighted centroid of each final Floor polygon;
+// (2) midpoint of each shared straight boundary between distinct final
+//     polygons (never the internal triangulation edges).
+// Both candidate types retain +1000 mm WORLD-Z and BVH Solid checks.
+// If a region centroid is invalid, retain the existing triangle fallback
+// rather than silently losing previously valid interior candidates.
 std::vector<ReferencePoint> find_reference_points(
     const CellData& cell,
     const Vec3& state_point,
@@ -1320,20 +1321,7 @@ std::vector<ReferencePoint> find_reference_points(
         return true;
     };
 
-    if (cell.category == CellSpaceCategory::Stair)
-    {
-        // No Stair fallback to polygon centroids or triangulation
-        // edges: these would violate the requested shared-edge rule.
-        const std::vector<Vec3> middle = stair_partition_shared_edge_midpoints(
-            floor_triangles, regions, edge_tolerance);
-        for (const Vec3& position : middle)
-        {
-            if (accepted >= MAX_ROOM_REFERENCE_POINTS) break;
-            add_region_point(position);
-        }
-        return points;
-    }
-
+    // Room and Stair share the exact same region-centroid path.
     for (const std::size_t region_id : survivors)
     {
         if (accepted >= MAX_ROOM_REFERENCE_POINTS) break;
@@ -1348,11 +1336,26 @@ std::vector<ReferencePoint> find_reference_points(
             add_region_point(floor_triangles[triangle_id].centroid);
         }
     }
+
+    // Add shared-edge midpoint candidates for BOTH categories after the
+    // polygon centers. A single-region Floor has no shared seam.
+    if (accepted < MAX_ROOM_REFERENCE_POINTS)
+    {
+        const std::vector<Vec3> midpoints =
+            stair_partition_shared_edge_midpoints(
+                floor_triangles, regions, edge_tolerance);
+        for (const Vec3& midpoint : midpoints)
+        {
+            if (accepted >= MAX_ROOM_REFERENCE_POINTS) break;
+            add_region_point(midpoint);
+        }
+    }
     return points;
 }
 
-// Graph stage is unchanged: Final markers are the valid floor-triangle
-// candidates; sphere overlap and exact 3D LOS determine BEFORE edges.
+// Graph stage is unchanged: Final markers are the accepted Floor-region
+// centroid/shared-boundary midpoint seeds. Sphere overlap and exact 3D LOS
+// determine BEFORE edges.
 std::vector<bool> validate_room_reference_segments(
     const CellData& cell,
     const std::vector<std::pair<Vec3, Vec3>>& segments,
@@ -1927,8 +1930,8 @@ CellSpaceInteriorPointResult locate_cell_space_interior_points(
             // TEMP DEBUG SUPPORT: status is serialized only so Ruby can distinguish
             // a successful empty result from an exception. Remove with debug logging.
             result.reference_status = ReferencePointStatus::Failed;
-            // Experimental: floor-triangle centroid + world-Z 1000 mm.
-            // No legacy wall-corner candidates or pre-BEFORE clustering.
+            // Experiment: final polygon centroids plus shared-edge
+            // midpoints, both raised +1000 mm in world Z.
             result.reference_points = find_reference_points(
                 cell, *result.state_point, tolerance
             );
@@ -1946,9 +1949,9 @@ CellSpaceInteriorPointResult locate_cell_space_interior_points(
             }
             break;
         case CellSpaceCategory::Stair:
-            // Stair uses the SAME cumulative-turn floor partition as Room,
-            // but its BEFORE seeds come from the shared polygon edges.
-            // Do not change Room-specific AFTER/INTERNAL processing here.
+            // Stair shares the Room seed policy (final polygon centroids
+            // AND shared-edge midpoints). Stair stays BEFORE-only; do not
+            // enable Room-specific AFTER/INTERNAL native processing here.
             result.reference_status = ReferencePointStatus::Failed;
             result.reference_points = find_reference_points(
                 cell, *result.state_point, tolerance
