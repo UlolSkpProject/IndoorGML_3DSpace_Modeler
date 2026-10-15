@@ -292,6 +292,23 @@ CellData smooth_concave_wall_room()
     return cell;
 }
 
+// Room reference fixtures need wall shared edges >= 1000 mm.
+// Keep the existing small State and adjacency fixtures unchanged.
+CellData tall_room(CellData cell)
+{
+    constexpr double Z_SCALE = 80.0;
+    cell.bounds.minimum.z *= Z_SCALE;
+    cell.bounds.maximum.z *= Z_SCALE;
+    if (cell.has_fixed_z()) cell.fixed_z *= Z_SCALE;
+    for (FaceData& face : cell.faces)
+    {
+        for (Vec3& point : face.outer_points) point.z *= Z_SCALE;
+        for (Triangle& triangle : face.triangles)
+            for (Vec3& point : triangle.points) point.z *= Z_SCALE;
+    }
+    return cell;
+}
+
 void test_z_sweep_matches_bruteforce()
 {
     std::vector<CellData> cells(5);
@@ -409,7 +426,7 @@ void test_convex_room_state_only()
 
 void test_concave_room_reference_points()
 {
-    CellData cell = u_prism_cell();
+    CellData cell = tall_room(u_prism_cell());
     cell.category = CellSpaceCategory::Room;
     const CellSpaceInteriorPointResult result =
         locate_cell_space_interior_points(cell, 0.001);
@@ -471,7 +488,7 @@ void test_concave_room_reference_points()
 
 void test_state_anchored_room_reference_cluster()
 {
-    CellData cell = shallow_reflex_prism_cell(0.7);
+    CellData cell = tall_room(shallow_reflex_prism_cell(0.7));
 
     // Compute a purple Corner position using the same solid with a State far
     // from the reflex corner. The candidate's position depends on geometry,
@@ -597,9 +614,9 @@ void test_room_reflex_threshold_30_degree_turn()
     const Vec3 state{2.0, 1.5, 0.5};
     // Depths 0.25, 0.5 and 0.7 produce approximately 14.25,
     // 28.07 and 38.58 degrees of reflex turn.
-    const CellData shallow = shallow_reflex_prism_cell(0.25);
-    const CellData medium = shallow_reflex_prism_cell(0.5);
-    const CellData deep = shallow_reflex_prism_cell(0.7);
+    const CellData shallow = tall_room(shallow_reflex_prism_cell(0.25));
+    const CellData medium = tall_room(shallow_reflex_prism_cell(0.5));
+    const CellData deep = tall_room(shallow_reflex_prism_cell(0.7));
 
     require(find_reference_points(shallow, state, 0.001).empty(),
             "a 14-degree reflex turn must not generate a reference");
@@ -624,15 +641,15 @@ void test_room_reference_corner_uses_55_percent_wall_distance()
     // Symmetric notch vertex (2, 3.3) has an inward bisector toward Y=0.
     // The opposite-wall distance is 3.3, so the Corner candidate must
     // lie at Y=3.3 - (0.55 * 3.3) = 1.485.
-    const CellData room = shallow_reflex_prism_cell(0.7);
+    const CellData room = tall_room(shallow_reflex_prism_cell(0.7));
     const std::vector<ReferencePoint> refs =
         find_reference_points(room, {2.0, 0.5, 0.5}, 0.001);
     bool matched = false;
     for (const ReferencePoint& ref : refs)
     {
         if (ref.kind != ReferencePointKind::Corner) continue;
-        require(std::abs(ref.point.z - 0.5) < 1.0e-9,
-                "Room reference must retain State Z");
+        require(std::abs(ref.point.z - 1000.0 / 25.4) < 1.0e-9,
+                "Room Corner Z must be exactly shared Edge minimum + 1000mm");
         if (std::abs(ref.point.x - 2.0) < 1.0e-6 &&
             std::abs(ref.point.y - 1.485) < 1.0e-6)
             matched = true;
@@ -643,7 +660,7 @@ void test_room_reference_corner_uses_55_percent_wall_distance()
 
 void test_cumulative_reflex_turn_on_curved_wall()
 {
-    const CellData cell = gradual_reflex_arc();
+    const CellData cell = tall_room(gradual_reflex_arc());
     const std::vector<ReferencePoint> points =
         find_reference_points(cell, {3,2,0.5}, 0.001);
     bool has_corner = false;
@@ -659,7 +676,7 @@ void test_cumulative_reflex_turn_on_curved_wall()
 
 void test_local_width_limits_cluster_radius()
 {
-    const CellData cell = shallow_reflex_prism_cell(0.7);
+    const CellData cell = tall_room(shallow_reflex_prism_cell(0.7));
     const std::vector<ReferencePoint> initial =
         find_reference_points(cell, {2,0.5,0.5}, 0.001);
     std::optional<Vec3> corner;
@@ -691,7 +708,7 @@ void test_local_width_limits_cluster_radius()
 
 void test_smooth_concave_wall_retains_safe_navigation_candidates()
 {
-    const CellData room = smooth_concave_wall_room();
+    const CellData room = tall_room(smooth_concave_wall_room());
     const Vec3 state{20,6,0.5};
     const std::vector<ReferencePoint> points =
         find_reference_points(room,state,0.001);
