@@ -373,7 +373,7 @@ void test_state_fixed_z()
     require(std::abs(point->z - 0.25) < 1.0e-9, "fixed-Z State point did not preserve fixed Z");
 }
 
-void test_room_reference_points_share_state_height()
+void test_convex_room_state_only()
 {
     CellData cell = unit_box_cell();
     cell.category = CellSpaceCategory::Room;
@@ -1064,7 +1064,7 @@ int main()
     test_state_volume_centroid_on_box();
     test_state_concave_u_uses_bvh_fallback();
     test_state_fixed_z();
-    test_room_reference_points_share_state_height();
+    test_convex_room_state_only();
     test_convex_room_uses_state_only();
     test_signed_corner_turn_accumulation();
     test_room_reflex_threshold_30_degree_turn();
