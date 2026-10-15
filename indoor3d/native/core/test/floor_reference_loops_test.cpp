@@ -80,14 +80,24 @@ void test_shaft_crossing_membrane_rejects_loop()
     require(graph.loop_candidates.empty(),"Shaft boundary crossing membrane MUST reject certificate");
     require(graph.nodes.size()==5&&graph.edges.size()==4,"Rejected loop leaves BEFORE intact");
 }
-void test_chorded_and_nonplanar_loop_rejected()
+void test_chorded_loop_is_certified_after_smaller_cycles()
 {
     FaceSolid solid(room(false),0.001);
     auto chorded=square_graph();
     chorded.edges.push_back({1,3});
     certify_before_reference_loops(solid,chorded,0.001);
+    require(!chorded.loop_candidates.empty() &&
+            chorded.loop_candidates.front().vertices.size()==3,
+            "Triangle certificates must be attempted before larger rings");
+    bool square=false;
     for(const auto& cert:chorded.loop_candidates)
-        require(cert.vertices.size()!=4,"Chorded quadrilateral cannot be certified");
+        square=square || cert.vertices==std::vector<std::size_t>({1,2,3,4});
+    require(square,
+            "A safe quadrilateral may retain an internal chord certificate");
+}
+void test_nonplanar_loop_rejected()
+{
+    FaceSolid solid(room(false),0.001);
     auto warped=square_graph();
     warped.nodes[3].point.z+=2;
     certify_before_reference_loops(solid,warped,0.001);
@@ -108,7 +118,8 @@ int main()
 {
     test_hole_free_square_is_certified();
     test_shaft_crossing_membrane_rejects_loop();
-    test_chorded_and_nonplanar_loop_rejected();
+    test_chorded_loop_is_certified_after_smaller_cycles();
+    test_nonplanar_loop_rejected();
     test_over_415_nodes_does_not_disable_detection();
     std::cout<<"BEFORE Loop certificates: OK\n";
 }

@@ -219,10 +219,9 @@ module ULOL
           return nil unless length.times.all? do |i|
             adjacency[after[i]].include?(after[(i + 1) % length])
           end
-          # Induced ring: precisely two ring-neighbors per member, no chords.
-          return nil unless after.all? do |index|
-            adjacency[index].count { |neighbor| members[neighbor] } == 2
-          end
+          # Native has certified the complete membrane. Any additional edge
+          # whose endpoints are both ring members is an internal chord and is
+          # removed together with those members by graph contraction.
 
           state = ring.include?(0)
           return nil if state && (after.first != 0 || point_key(certificate[:point]) != point_key(nodes[0][:point]))

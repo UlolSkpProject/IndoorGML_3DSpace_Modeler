@@ -104,12 +104,14 @@ class ReferenceGraphLoopCollapserTest < Minitest::Test
     assert_equal [[7, nil], [12, nil], [15, nil]], result[:merged_into]
   end
 
-  def test_chorded_four_cycle_rejected_even_with_certificate
+  def test_chorded_four_cycle_collapses_with_native_certificate
     source = graph([node(20, 20), node(0, 0), node(2, 0), node(2, 2), node(0, 2)],
                    [[1, 2], [2, 3], [3, 4], [1, 4], [1, 3]])
     result = Collapse.collapse(source, [square_cert])
-    assert_equal 0, result[:collapse_count]
-    assert_equal 0, result[:loop_count]
+    assert_equal 1, result[:collapse_count]
+    assert_equal 1, result[:loop_count]
+    assert_equal [0, nil], result[:original_indices]
+    assert_empty result[:edges]
   end
 
   def test_missing_cycle_edge_rejects_certificate

@@ -148,14 +148,10 @@ void certify(const std::vector<std::size_t>& cycle,const FaceSolid& solid,
              ReferenceGraphDebug& graph,
              const std::vector<std::vector<std::size_t>>& adjacent,double tol)
 {
-    // Induced ring: no chord between nonconsecutive original nodes.
-    for(std::size_t i=0;i<cycle.size();++i)
-        for(std::size_t j=i+2;j<cycle.size();++j)
-        {
-            if(i==0&&j+1==cycle.size())continue;
-            const auto& neighbors=adjacent[cycle[i]];
-            if(std::binary_search(neighbors.begin(),neighbors.end(),cycle[j]))return;
-        }
+    // Internal chords disappear with the certified ring members during graph
+    // contraction. They are not a topology barrier; the exact membrane,
+    // interior-node, Solid and external-gateway LOS checks below remain the
+    // authority for whether the complete ring may be collapsed.
     Membrane mesh;
     if(!triangulate(cycle,graph,tol,mesh))return;
     std::vector<bool> in_cycle(graph.nodes.size(),false);
@@ -238,6 +234,7 @@ void certify_before_reference_loops(const FaceSolid& solid,
         std::vector<bool> visited(n,false);
         std::vector<std::size_t> cycle;
         std::size_t steps=0,attempts=0;
+        std::size_t target_size=3;
         std::function<void(std::size_t,std::size_t)> walk;
         walk=[&](std::size_t start,std::size_t current)
         {
@@ -250,19 +247,14 @@ void certify_before_reference_loops(const FaceSolid& solid,
                 if(++steps>MAX_SEARCH_STEPS)return;
                 if(next==start)
                 {
-                    if(cycle.size()>=3&&cycle[1]<cycle.back())
+                    if(cycle.size()==target_size&&cycle[1]<cycle.back())
                     {
                         ++attempts;
                         certify(cycle,solid,graph,adj,tolerance);
                     }
                     continue;
                 }
-                if(next<=start||visited[next]||cycle.size()>=MAX_VERTICES)continue;
-                bool chord=false;
-                for(std::size_t k=1;k+1<cycle.size();++k)
-                    if(std::binary_search(adj[next].begin(),adj[next].end(),cycle[k]))
-                    { chord=true;break; }
-                if(chord)continue;
+                if(next<=start||visited[next]||cycle.size()>=target_size)continue;
                 visited[next]=true;
                 cycle.push_back(next);
                 walk(start,next);
@@ -272,12 +264,20 @@ void certify_before_reference_loops(const FaceSolid& solid,
                    graph.loop_candidates.size()>=MAX_CANDIDATES)break;
             }
         };
-        for(std::size_t start=0;start<n;++start)
+        // Spend the fixed search/certification budgets on the cheapest and
+        // most useful contractions first: every triangle, then every
+        // quadrilateral, followed by progressively larger simple rings.
+        for(target_size=3;target_size<=MAX_VERTICES;++target_size)
         {
-            cycle={start};
-            visited[start]=true;
-            walk(start,start);
-            visited[start]=false;
+            for(std::size_t start=0;start<n;++start)
+            {
+                cycle={start};
+                visited[start]=true;
+                walk(start,start);
+                visited[start]=false;
+                if(steps>MAX_SEARCH_STEPS||attempts>=MAX_CERTIFICATION_ATTEMPTS||
+                   graph.loop_candidates.size()>=MAX_CANDIDATES)break;
+            }
             if(steps>MAX_SEARCH_STEPS||attempts>=MAX_CERTIFICATION_ATTEMPTS||
                graph.loop_candidates.size()>=MAX_CANDIDATES)break;
         }
