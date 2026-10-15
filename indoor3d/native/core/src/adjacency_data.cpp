@@ -21,7 +21,7 @@ constexpr std::uint64_t INPUT_VERSION_V2 = 2;
 constexpr std::uint64_t INPUT_VERSION_V3 = 3;
 constexpr std::uint64_t INPUT_VERSION_V4 = 4;
 constexpr std::uint64_t RESULT_VERSION = 1;
-constexpr std::uint64_t STATE_RESULT_VERSION = 8;
+constexpr std::uint64_t STATE_RESULT_VERSION = 9;
 constexpr std::size_t INPUT_HEADER_SIZE = 32;
 constexpr std::size_t CELL_FIXED_SIZE_V1 = 80;
 constexpr std::size_t CELL_FIXED_SIZE_V2 = 96;
@@ -490,11 +490,15 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
 
     for (const StatePointResult& result : results)
     {
-        // V8 per-cell envelope: index, success, optional XYZ, optional Graph.
-        // No candidate is NOT a native exception.
+        // V9 per-cell envelope: index, integer ExitCode, optional State,
+        // graph flag, nine aggregate diagnostics, optional Graph payload.
+        // A native execution exception is deliberately NOT an ExitCode.
+        const bool success = result.exit_code == StateExitCode::Success;
+        if (success != result.point.has_value())
+            throw std::invalid_argument("State/ExitCode consistency violation");
         writer.append_u64(checked_u64(result.cell_index, "state cell index"));
-        writer.append_u64(result.point ? 1 : 0);
-        if (result.point)
+        writer.append_u64(static_cast<std::uint64_t>(result.exit_code));
+        if (success)
         {
             require_finite(result.point->x, "state point x");
             require_finite(result.point->y, "state point y");
@@ -506,7 +510,17 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
         const bool has_graph = result.point.has_value() &&
             (!result.graph_node_points.empty() || !result.reference_points.empty());
         writer.append_u64(has_graph ? 1 : 0);
-        if (!has_graph) continue; // V8: graph=nil is a valid result.
+        const StateDiagnostics& diag = result.diagnostics;
+        writer.append_u64(diag.floor_faces);
+        writer.append_u64(diag.prepared_faces);
+        writer.append_u64(diag.completed_polygons);
+        writer.append_u64(diag.failed_polygons);
+        writer.append_u64(diag.reference_candidates);
+        writer.append_u64(diag.rejected_centroids);
+        writer.append_u64(diag.rejected_outside);
+        writer.append_u64(diag.rejected_clearance);
+        writer.append_u64(diag.accepted_references);
+        if (!has_graph) continue; // V9: graph=nil is a valid result.
         if (result.reference_points.size() != result.reference_kinds.size())
             throw std::invalid_argument("reference point/kind count mismatch");
         writer.append_u64(checked_u64(result.reference_points.size(), "reference point count"));

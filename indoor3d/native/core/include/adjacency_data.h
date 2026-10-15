@@ -1,6 +1,7 @@
 #pragma once
 
 #include "geometry_data.h"
+#include "state_exit_code.h"
 
 #include <array>
 #include <cstddef>
@@ -16,6 +17,8 @@ struct StatePointResult
     // A record is emitted for EVERY requested Cell. No State candidate
     // is a normal negative result, not an omitted result or an exception.
     std::optional<Vec3> point;
+    StateExitCode exit_code=StateExitCode::LegacyNoState;
+    StateDiagnostics diagnostics;
     std::uint64_t reference_status = 0; // temporary legacy diagnostics
     std::vector<Vec3> reference_points;
     std::vector<std::uint64_t> reference_kinds;

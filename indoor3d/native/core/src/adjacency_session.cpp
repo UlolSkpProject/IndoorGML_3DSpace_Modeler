@@ -144,6 +144,9 @@ void AdjacencySession::state_worker_loop()
             StatePointResult state_result;
             state_result.cell_index = cells_[cell_position].index;
             state_result.point = result.state_point;
+            state_result.exit_code = result.state_point ?
+                StateExitCode::Success : result.exit_code;
+            state_result.diagnostics = result.diagnostics;
             if (result.state_point)
             {
                 state_result.reference_status =

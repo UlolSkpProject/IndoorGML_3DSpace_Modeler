@@ -553,18 +553,24 @@ module ULOL
               cell_space = pending_by_id[entry[:cell_space].id]
               next unless cell_space
 
-              # Ruby only interprets the Native outcome, never how State
-              # or References were constructed. Errors in the native call
-              # itself propagate separately from a valid success=false.
+              # An integer ExitCode identifies normal candidate failure;
+              # native execution and protocol errors still raise separately.
               unless results.key?(index)
                 raise NativeAdjacencyBridge::ProtocolError,
                       "Native Reference result missing for #{cell_space.id}"
               end
               outcome = Hash(results[index])
               coordinates = outcome[:state_point]
-              unless outcome[:success] == true && coordinates
-                raise NativeAdjacencyBridge::StateUnavailableError,
-                      "Native State candidate unavailable for #{cell_space.id}"
+              exit_code = outcome[:exit_code]
+              diagnostics = Hash(outcome[:diagnostics])
+              unless exit_code == 0 && coordinates
+                label = NativeAdjacencyBridge::STATE_EXIT_CODES.fetch(exit_code, :unknown)
+                details = diagnostics.map { |key, value| "#{key}=#{value}" }.join(', ')
+                raise NativeAdjacencyBridge::StateUnavailableError.new(
+                  "Native State unavailable for #{cell_space.id}: " \
+                  "ExitCode=#{exit_code} (#{label}); #{details}",
+                  exit_code: exit_code, diagnostics: diagnostics
+                )
               end
 
               graph = outcome[:graph]

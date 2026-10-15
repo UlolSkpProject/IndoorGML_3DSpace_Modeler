@@ -10,7 +10,7 @@ module ULOL
         PROTOCOL_VERSION = 1
         GEOMETRY_PROTOCOL_VERSION = 4
         REFERENCE_POINTS_RESULT_VERSION = 2
-        STATE_RESULT_VERSION = 8
+        STATE_RESULT_VERSION = 9
         TRIANGLE_RESULT_VERSION = 6
         GRAPH_RESULT_VERSION = 5
         PREVIOUS_STATE_RESULT_VERSION = 4
@@ -49,7 +49,37 @@ module ULOL
         ).freeze
 
         class ProtocolError < StandardError; end
-        class StateUnavailableError < StandardError; end
+        class StateUnavailableError < StandardError
+          attr_reader :exit_code, :diagnostics
+
+          def initialize(message, exit_code: nil, diagnostics: {})
+            @exit_code = exit_code
+            @diagnostics = diagnostics.freeze
+            super(message)
+          end
+        end
+
+        STATE_EXIT_CODES = {
+          0 => :success,
+          10 => :invalid_input,
+          20 => :invalid_solid_geometry,
+          30 => :no_floor_faces,
+          31 => :floor_preparation_failed,
+          40 => :partition_failed,
+          41 => :partition_limit_reached,
+          50 => :no_reference_candidates,
+          51 => :invalid_centroids,
+          60 => :outside_solid,
+          61 => :insufficient_clearance,
+          62 => :mixed_reference_rejections,
+          90 => :legacy_no_state
+        }.freeze
+
+        STATE_DIAGNOSTIC_FIELDS = %i[
+          floor_faces prepared_faces completed_polygons failed_polygons
+          reference_candidates rejected_centroids rejected_outside
+          rejected_clearance accepted_references
+        ].freeze
 
         class BinaryReader
           attr_reader :position
@@ -482,10 +512,9 @@ module ULOL
           buffer
         end
 
-        # V8: one record per requested CellSpace.
-        # { success:, state_point:, graph: } is the entire public result
-        # contract. Debug metadata lives INSIDE graph; Ruby never inspects
-        # native partition/reference creation statuses.
+        # V9: { exit_code: Integer, state_point:, graph:, diagnostics: }.
+        # EXIT_CODE 0 is the only success; partial Face failures stay in
+        # diagnostics even when a valid State exists.
         def decode_state_result(bytes)
           reader = BinaryReader.new(bytes)
           raise ProtocolError, 'native Reference result header is truncated' if reader.remaining < 32
@@ -509,10 +538,11 @@ module ULOL
             end
             previous_index = index
 
-            raw_success = reader.read_u64
-            raise ProtocolError, 'invalid Reference success flag' unless [0, 1].include?(raw_success)
-            success = raw_success == 1
-            coordinates = if success
+            exit_code = checked_count(reader.read_u64, 'Reference exit code')
+            unless STATE_EXIT_CODES.key?(exit_code)
+              raise ProtocolError, "unknown Native Reference exit code #{exit_code}"
+            end
+            coordinates = if exit_code.zero?
                             [
                               finite_f64(reader.read_f64, 'State x'),
                               finite_f64(reader.read_f64, 'State y'),
@@ -521,8 +551,11 @@ module ULOL
                           end
             graph_flag = reader.read_u64
             raise ProtocolError, 'invalid Reference graph flag' unless [0, 1].include?(graph_flag)
-            raise ProtocolError, 'failed State cannot have a Graph' if !success && graph_flag == 1
+            raise ProtocolError, 'failed State cannot have a Graph' if !exit_code.zero? && graph_flag == 1
 
+            diagnostics = STATE_DIAGNOSTIC_FIELDS.to_h do |name|
+              [name, checked_count(reader.read_u64, "Reference #{name}")]
+            end.freeze
             graph = nil
             if graph_flag == 1
               reference_count = checked_count(reader.read_u64, 'debug reference count')
@@ -593,7 +626,12 @@ module ULOL
               }.freeze
             end
 
-            results[index] = { success: success, state_point: coordinates, graph: graph }.freeze
+            results[index] = {
+              exit_code: exit_code,
+              state_point: coordinates,
+              graph: graph,
+              diagnostics: diagnostics
+            }.freeze
           end
 
           raise ProtocolError, 'native Reference result has trailing bytes' unless reader.finished?

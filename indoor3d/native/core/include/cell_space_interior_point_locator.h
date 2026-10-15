@@ -1,6 +1,7 @@
 #pragma once
 
 #include "adjacency_data.h"
+#include "state_exit_code.h"
 
 #include <array>
 #include <cstdint>
@@ -105,6 +106,8 @@ struct ReferenceGraphDebug
 struct CellSpaceInteriorPointResult
 {
     std::optional<Vec3> state_point;
+    StateExitCode exit_code=StateExitCode::LegacyNoState;
+    StateDiagnostics diagnostics;
     std::vector<ReferencePoint> reference_points;
     ReferenceGraphDebug debug_graph;
     StateSearchMetrics state_metrics;
