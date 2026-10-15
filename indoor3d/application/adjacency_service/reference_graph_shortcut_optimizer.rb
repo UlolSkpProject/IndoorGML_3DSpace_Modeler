@@ -156,7 +156,7 @@ module ULOL
           graph = source.merge(
             nodes: raw_nodes.map { |node| ReferenceGraphContraction.duplicate_node(node) }.freeze,
             edges: order.map { |i| normalized[i].freeze }.freeze,
-            original_indices: origins.freeze,
+            original_indices: origins.dup.freeze,
             merged_into: Array(source[:merged_into]).map { |entry| Array(entry).dup.freeze }.freeze,
             contraction_history: Array(source[:contraction_history]).dup.freeze
           )

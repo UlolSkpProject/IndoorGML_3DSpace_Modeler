@@ -360,3 +360,19 @@ class ReferenceGraphShortcutOptimizerTest
     count
   end
 end
+
+class ReferenceGraphShortcutOptimizerTest
+  def test_mutable_input_index_array_does_not_get_frozen_as_a_side_effect
+    origins = [0, 1, 2, 3]
+    source = {
+      nodes: [Fixture.node(99), Fixture.node(0), Fixture.node(1), Fixture.node(2)],
+      edges: [[1, 2], [2, 3]],
+      original_indices: origins
+    }
+    result = Optimizer.optimize(source)
+    refute origins.frozen?
+    assert_equal [0, 1, 2, 3], origins
+    refute_same origins, result[:original_indices]
+    assert result[:original_indices].frozen?
+  end
+end
