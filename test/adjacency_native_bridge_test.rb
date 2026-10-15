@@ -20,7 +20,7 @@ class AdjacencyNativeBridgeTest < Minitest::Test
   end
 
   def test_geometry_v4_serializes_hole_loops_and_keeps_triangle_payload
-    snapshots = sample_snapshots
+    snapshots = Marshal.load(Marshal.dump(sample_snapshots))
     hole = [
       [1.0, 0.2, 0.2], [1.0, 0.8, 0.2],
       [1.0, 0.8, 0.8], [1.0, 0.2, 0.8]
@@ -54,7 +54,7 @@ class AdjacencyNativeBridgeTest < Minitest::Test
   end
 
   def test_legacy_v1_encoding_ignores_hole_metadata_and_remains_byte_identical
-    snapshots = sample_snapshots
+    snapshots = Marshal.load(Marshal.dump(sample_snapshots))
     snapshots[0][:faces][0][:inner_loops] = [
       [[1.0, 0.2, 0.2], [1.0, 0.8, 0.2], [1.0, 0.8, 0.8]]
     ]
