@@ -45,6 +45,27 @@ class ReferenceGraphPipelineIntegrationTest < Minitest::Test
     end
   end
 
+  class PreloadHarness
+    include Lifecycle
+
+    attr_reader :calls
+
+    def initialize(after_result)
+      @after_result = after_result
+      @calls = []
+    end
+
+    def preload_native_after_graph_for(cell, session_index)
+      @calls << [:after, cell.id, session_index]
+      @after_result
+    end
+
+    def preload_native_shortcuts_for(cell, session_index)
+      @calls << [:optimized, cell.id, session_index]
+      :optimized
+    end
+  end
+
   def point(x, y)
     Point.new(x.to_f, y.to_f, 0.5)
   end
@@ -112,5 +133,23 @@ class ReferenceGraphPipelineIntegrationTest < Minitest::Test
     end
   ensure
     capture_io { Mode.before! }
+  end
+
+  def test_native_preload_connects_after_to_collapsed_and_optimized
+    cell = Cell.new('cell-1')
+    lifecycle = PreloadHarness.new(:after)
+
+    result = lifecycle.send(:preload_native_reference_graph_stages_for, cell, 7)
+
+    assert_equal :optimized, result
+    assert_equal [[:after, 'cell-1', 7], [:optimized, 'cell-1', 7]], lifecycle.calls
+  end
+
+  def test_native_preload_does_not_optimize_when_after_failed
+    cell = Cell.new('cell-1')
+    lifecycle = PreloadHarness.new(nil)
+
+    assert_nil lifecycle.send(:preload_native_reference_graph_stages_for, cell, 7)
+    assert_equal [[:after, 'cell-1', 7]], lifecycle.calls
   end
 end

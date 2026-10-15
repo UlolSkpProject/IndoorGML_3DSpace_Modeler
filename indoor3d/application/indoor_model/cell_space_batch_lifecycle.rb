@@ -606,8 +606,9 @@ module ULOL
                   graph[:floor_partitions]
                 )
                 # BEFORE stays immutable. While the Native geometry session is
-                # open, precompute AFTER with batched, validated replacement LOS.
-                preload_native_after_graph_for(cell_space, index) if stored
+                # open, precompute AFTER and then COLLAPSED/OPTIMIZED with
+                # validated replacement LOS.
+                preload_native_reference_graph_stages_for(cell_space, index) if stored
               else
                 clear_debug_reference_points(cell_space)
               end
@@ -762,6 +763,13 @@ module ULOL
               "#{error.class}: #{error.message}"
             ) if defined?(IndoorCore::Logger)
             nil
+          end
+
+          def preload_native_reference_graph_stages_for(cell_space, session_index)
+            after = preload_native_after_graph_for(cell_space, session_index)
+            return unless after
+
+            preload_native_shortcuts_for(cell_space, session_index)
           end
 
           # Lazy, non-destructive reduction. The original Native graph remains
