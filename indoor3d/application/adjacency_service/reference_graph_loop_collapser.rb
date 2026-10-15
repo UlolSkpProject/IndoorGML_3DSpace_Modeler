@@ -34,13 +34,70 @@ module ULOL
             return unchanged(source, records.length)
           end
 
+          plan = candidate_plan(source, records,
+                                los_validator: los_validator,
+                                point_validator: point_validator)
+          discovered = plan.fetch(:discovered)
+          eligible = plan.fetch(:eligible)
+          selected = plan.fetch(:selected)
+
+          current = source
+          completed = 0
+          selected.each do |candidate|
+            # Re-resolve CURRENT indices through stable BEFORE original ids.
+            # Original local AFTER indices are never reused after reindexing.
+            outcome = apply_candidate(current, candidate,
+                                      los_validator: los_validator,
+                                      point_validator: point_validator)
+            next unless outcome[:accepted]
+            current = outcome.fetch(:graph)
+            completed += 1
+          end
+
+          stats = {
+            collapse_count: completed,
+            loop_count: discovered.size,
+            eligible_count: eligible.size,
+            rejected_count: records.size - completed,
+            triangle_count: discovered.count { |candidate| candidate[:original_vertices].size == 3 }
+          }
+          current.merge(stats).freeze
+        end
+
+        # BEFORE protection must cover only candidates that COLLAPSED can
+        # actually select together. Protecting every overlapping Native
+        # certificate makes their vertices and gateway neighborhoods expand
+        # across a dense graph and prevents useful AFTER contraction.
+        def selected_protected_originals(before_graph, verified_candidates = nil)
+          hash = Hash(before_graph)
+          nodes = Array(hash.fetch(:nodes))
+          origins = Array(hash[:original_indices])
+          origins = (0...nodes.length).to_a if origins.empty?
+          source = canonical_snapshot(hash.merge(original_indices: origins.freeze))
+          return [] unless valid_snapshot?(source[:nodes], source[:edges], source[:original_indices])
+
+          records = verified_candidates || hash[:loop_candidates]
+          selected = candidate_plan(source, Array(records),
+                                    los_validator: nil,
+                                    point_validator: nil).fetch(:selected)
+          selected.flat_map do |candidate|
+            candidate.fetch(:after_vertices) + candidate.fetch(:boundary_indices)
+          end.map { |index| source[:original_indices][index] }.compact.uniq.sort.freeze
+        rescue KeyError, TypeError
+          [].freeze
+        end
+
+        def candidate_plan(source, records, los_validator:, point_validator:)
+          nodes = source.fetch(:nodes)
+          edges = source.fetch(:edges)
+          origins = source.fetch(:original_indices)
           adjacency = adjacency_for(nodes.length, edges)
           index_of = {}
           origins.each_with_index { |original, index| index_of[original] = index unless original.nil? }
 
-          # Detect and evaluate EVERY candidate from the same frozen AFTER
-          # snapshot; never synthesize a Ruby Hole certificate or new cycle.
-          discovered = records.filter_map do |record|
+          # Detect and evaluate EVERY candidate from the same frozen snapshot;
+          # never synthesize a Ruby Hole certificate or new cycle.
+          discovered = Array(records).filter_map do |record|
             normalized = normalize_certificate(record, nodes.first[:point])
             next unless normalized
             candidate = candidate_for(normalized, nodes, origins, index_of, adjacency)
@@ -50,9 +107,7 @@ module ULOL
           discovered.sort_by! { |candidate| candidate.fetch(:priority) }
 
           # If duplicate records disagree, prefer the deterministic record
-          # ordering. Preflight against the original snapshot before selecting
-          # mutually exclusive contractions, so a failed candidate cannot
-          # prevent a later independent candidate from being selected.
+          # ordering. Preflight before selecting mutually exclusive groups.
           eligible = []
           seen_rings = {}
           discovered.each do |candidate|
@@ -83,28 +138,8 @@ module ULOL
             selected << candidate
             vertices.each { |index| reserved[index] = true }
           end
-
-          current = source
-          completed = 0
-          selected.each do |candidate|
-            # Re-resolve CURRENT indices through stable BEFORE original ids.
-            # Original local AFTER indices are never reused after reindexing.
-            outcome = apply_candidate(current, candidate,
-                                      los_validator: los_validator,
-                                      point_validator: point_validator)
-            next unless outcome[:accepted]
-            current = outcome.fetch(:graph)
-            completed += 1
-          end
-
-          stats = {
-            collapse_count: completed,
-            loop_count: discovered.size,
-            eligible_count: eligible.size,
-            rejected_count: records.size - completed,
-            triangle_count: discovered.count { |candidate| candidate[:original_vertices].size == 3 }
-          }
-          current.merge(stats).freeze
+          { discovered: discovered.freeze, eligible: eligible.freeze,
+            selected: selected.freeze }.freeze
         end
 
         def canonical_snapshot(source)

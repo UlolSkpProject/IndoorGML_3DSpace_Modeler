@@ -34,6 +34,27 @@ class ReferenceGraphSimplifierProtectedTest < Minitest::Test
     assert_equal [[1, 2], [1, 3], [2, 3]], graph[:edges].select { |a, b| [1,2,3].include?(a) && [1,2,3].include?(b) }.sort
   end
 
+  def test_only_simultaneously_selectable_loops_expand_protection
+    graph = source(
+      [n(50, 50, 5), n(0, 0, 1), n(2, 0, 1), n(1, 2, 1),
+       n(10, 0, 1), n(14, 0, 1), n(12, 4, 1), n(18, 4, 1)],
+      [[1, 2], [1, 3], [2, 3], [3, 4],
+       [4, 5], [4, 6], [5, 6], [6, 7]],
+      [
+        { vertices: [1, 2, 3], point: Point.new(1, 0.7, 5),
+          radius: 0.5, visible_neighbors: [4] },
+        { vertices: [4, 5, 6], point: Point.new(12, 1.3, 5),
+          radius: 0.5, visible_neighbors: [3, 7] }
+      ]
+    )
+
+    # The cross-edge 3-4 prevents both representatives from being created
+    # without a new representative-to-representative LOS. The smaller first
+    # loop is selected, so protect its ring and gateway 4, but do not let the
+    # rejected second certificate extend protection through 5, 6 and 7.
+    assert_equal [0, 1, 2, 3, 4], Simplify.protected_originals(graph, [])
+  end
+
   def test_compact_cluster_uses_shared_contraction_and_keeps_original
     graph = source(
       [n(0, 0, 5), n(0.5, 0, 0.5), n(0, 0.6, 0.5), n(0.8, 0.6, 0.5)],

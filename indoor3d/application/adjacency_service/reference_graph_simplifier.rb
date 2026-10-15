@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'reference_graph_contraction'
+require_relative 'reference_graph_loop_collapser'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -89,29 +90,16 @@ module ULOL
 
         def protected_originals(source, explicit)
           nodes = Array(source.fetch(:nodes))
-          adjacency = neighbors(nodes.size, Array(source.fetch(:edges)))
           protected = Array(explicit).select { |i| i.is_a?(Integer) && i.between?(0, nodes.size - 1) }
           protected << 0 unless nodes.empty?
           nodes.each_with_index do |node, index|
             protected << index if node[:protected] ||
                                   %i[door transition junction].include?(node[:semantic_role])
           end
-          # Certificates are Native-issued against the original BEFORE graph.
-          # Protect ring AND its current external gateways so the certificate
-          # is not silently invalidated before COLLAPSED.
-          Array(source[:loop_candidates]).each do |record|
-            vertices = Array(record[:vertices] || record[:triangle])
-            next unless vertices.length.between?(3, 32) &&
-                        vertices.uniq.length == vertices.length &&
-                        vertices.all? { |i| i.is_a?(Integer) && i.between?(0, nodes.size - 1) }
-            protected.concat(vertices)
-            member_set = vertices.to_h { |i| [i, true] }
-            vertices.each do |index|
-              adjacency[index].each { |neighbor| protected << neighbor unless member_set[neighbor] }
-            end
-          end
           origins = Array(source[:original_indices] || (0...nodes.size).to_a)
-          protected.map { |i| origins[i] }.compact.uniq.freeze
+          local = protected.map { |i| origins[i] }.compact
+          selected = ReferenceGraphLoopCollapser.selected_protected_originals(source)
+          (local + selected).uniq.freeze
         end
 
         # Protect genuine articulation junctions even if a native shortcut

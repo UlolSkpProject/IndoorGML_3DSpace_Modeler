@@ -58,7 +58,8 @@ class ReferencePointProtectedOverlayTest < Minitest::Test
     graph = {
       nodes: nodes.freeze,
       edges: [[0, 1], [1, 2], [1, 3], [2, 3], [3, 4]].map(&:freeze).freeze,
-      loop_candidates: [{ vertices: [1, 2, 3] }].freeze
+      loop_candidates: [{ vertices: [1, 2, 3], point: [1.5, 1.3, 5.0],
+                          radius: 1.0, visible_neighbors: [0, 4] }.freeze].freeze
     }.freeze
     after = graph.merge(original_indices: (0..5).to_a.freeze).freeze
     originals = graph[:nodes].map { |node| { point: node[:point], kind: 4 }.freeze }
