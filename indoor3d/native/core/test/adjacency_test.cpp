@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <cstdlib>
 #include <iostream>
 #include <optional>
@@ -1101,10 +1103,117 @@ void test_non_room_reference_points_are_empty()
         );
     }
 }
+void append_u64_le(std::vector<std::uint8_t>& bytes,std::uint64_t value)
+{
+    for (int i=0;i<8;++i)
+        bytes.push_back(static_cast<std::uint8_t>((value>>(8*i))&0xff));
+}
+
+void append_f64_le(std::vector<std::uint8_t>& bytes,double value)
+{
+    std::uint64_t bits=0;
+    std::memcpy(&bits,&value,sizeof(bits));
+    append_u64_le(bytes,bits);
+}
+
+void append_vec3_le(std::vector<std::uint8_t>& bytes,Vec3 p)
+{
+    append_f64_le(bytes,p.x);
+    append_f64_le(bytes,p.y);
+    append_f64_le(bytes,p.z);
+}
+
+std::uint64_t read_u64_le(const std::vector<std::uint8_t>& bytes,std::size_t index)
+{
+    require(index+8<=bytes.size(),"Serialized field out of range");
+    std::uint64_t result=0;
+    for (int i=0;i<8;++i)
+        result|=static_cast<std::uint64_t>(bytes[index+i])<<(8*i);
+    return result;
+}
+
+void test_protocol_v4_preserves_holes_and_triangles()
+{
+    std::vector<std::uint8_t> bytes{'I','G','M','L','A','D','J',0};
+    append_u64_le(bytes,4);   // V4
+    append_u64_le(bytes,1);   // One Cell
+    append_u64_le(bytes,0);   // Reserved
+
+    constexpr std::size_t face_size=56+4*24+8+4*24+72;
+    append_u64_le(bytes,104+face_size);
+    append_u64_le(bytes,0);
+    append_u64_le(bytes,CELL_FLAG_NEEDS_STATE|CELL_FLAG_ADJACENCY_TARGET);
+    append_u64_le(bytes,1); // Face count
+    append_u64_le(bytes,0);
+    append_vec3_le(bytes,{0,0,0});
+    append_vec3_le(bytes,{10,10,1});
+    append_f64_le(bytes,0);
+    append_u64_le(bytes,static_cast<std::uint64_t>(CellSpaceCategory::Room));
+
+    append_u64_le(bytes,face_size);
+    append_u64_le(bytes,4); // outer count
+    append_u64_le(bytes,1); // triangle count
+    append_u64_le(bytes,1); // inner LOOP count (was reserved in V3)
+    append_vec3_le(bytes,{0,0,-1});
+    const std::vector<Vec3> outside{{0,0,0},{10,0,0},{10,10,0},{0,10,0}};
+    const std::vector<Vec3> hole{{3,3,0},{3,7,0},{7,7,0},{7,3,0}};
+    for(const Vec3& p:outside)append_vec3_le(bytes,p);
+    append_u64_le(bytes,hole.size());
+    for(const Vec3& p:hole)append_vec3_le(bytes,p);
+    append_vec3_le(bytes,{0,0,0});
+    append_vec3_le(bytes,{10,0,0});
+    append_vec3_le(bytes,{0,10,0});
+
+    const auto cells=parse_input_batch(bytes.data(),bytes.size());
+    require(cells.size()==1 && cells[0].faces.size()==1,
+            "V4 parser lost the Cell/Face");
+    const FaceData& face=cells[0].faces.front();
+    require(face.outer_points.size()==4 && face.inner_loops.size()==1 &&
+            face.inner_loops.front().size()==4 && face.triangles.size()==1,
+            "V4 parser lost Outer, Inner, or immutable Triangle geometry");
+    require(face.inner_loops.front()[2].x==7 &&
+            face.inner_loops.front()[2].y==7 &&
+            face.triangles[0].points[1].x==10,
+            "V4 parser must retain original coordinate payloads");
+}
+
+void test_result_v8_encodes_explicit_state_failure_and_optional_graph()
+{
+    StatePointResult success;
+    success.cell_index=0;
+    success.point=Vec3{1,2,3};
+    success.reference_points.push_back({4,5,6});
+    success.reference_kinds.push_back(4);
+    success.graph_node_points.push_back({1,2,3});
+    success.graph_node_radii.push_back(0.5);
+    StatePointResult no_state;
+    no_state.cell_index=1;
+    const auto bytes=serialize_state_result_batch({success,no_state});
+    require(read_u64_le(bytes,8)==8 && read_u64_le(bytes,16)==2,
+            "State result must use V8 and emit one record per target");
+    require(read_u64_le(bytes,32)==0 && read_u64_le(bytes,40)==1 &&
+            read_u64_le(bytes,72)==1,
+            "V8 success record must include State and Graph");
+    require(read_u64_le(bytes,176)==1 && read_u64_le(bytes,184)==0 &&
+            read_u64_le(bytes,192)==0 && bytes.size()==200,
+            "V8 failure must be an explicit nil-State/nil-Graph record");
+
+    StatePointResult state_only;
+    state_only.cell_index=0;
+    state_only.point=Vec3{2,3,4};
+    const auto only_bytes=serialize_state_result_batch({state_only});
+    require(read_u64_le(only_bytes,40)==1 &&
+            read_u64_le(only_bytes,72)==0 &&
+            only_bytes.size()==80,
+            "State without a Graph must be a successful V8 result");
+}
+
 } // namespace
 
 int main()
 {
+    test_protocol_v4_preserves_holes_and_triangles();
+    test_result_v8_encodes_explicit_state_failure_and_optional_graph();
     test_z_sweep_matches_bruteforce();
     test_shared_face_analysis();
     test_state_volume_centroid_on_box();
