@@ -693,9 +693,6 @@ bool safe_reference(
            bvh.nearest_distance(point) > tolerance;
 }
 
-// Reference anchors are located directly on 3D wall/wall shared edges,
-// 1000 mm above their lowest endpoint (no State-Z or Floor-Z slicing).
-constexpr double ROOM_REFERENCE_EDGE_OFFSET = 1000.0 / 25.4;
 
 bool clear_path(
     const TriangleBvh& bvh,
