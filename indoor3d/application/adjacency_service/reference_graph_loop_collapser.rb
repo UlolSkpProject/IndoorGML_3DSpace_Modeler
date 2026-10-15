@@ -294,6 +294,12 @@ module ULOL
         end
 
         def simple_minimal_loop?(cycle, nodes)
+          # Conservative 3D safety gate: XY polygon tests do NOT certify
+          # a noncoplanar cycle or prove its interior is Hole-free.
+          # Native 3D loop certificates are currently disabled as well.
+          heights = cycle.map { |index| nodes[index][:point]&.z }
+          return false if heights.any?(&:nil?)
+          return false if heights.max - heights.min > GEOMETRY_EPSILON
           return false if loop_area(nodes, cycle).abs <= GEOMETRY_EPSILON
 
           polygon = cycle.map { |index| nodes[index][:point] }
