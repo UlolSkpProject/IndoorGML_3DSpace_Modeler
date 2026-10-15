@@ -126,14 +126,18 @@ module ULOL
           graph.merge(result).freeze
         end
 
-        # No deviation or detour threshold: only a strict interior projection.
+        # Strict 3D interior projection, not a projected XY overlap.
+        # A missing shortcut still requires Native 3D LOS before acceptance.
         def projected_between?(a, b, c)
           dx = c.x - a.x
           dy = c.y - a.y
-          length_sq = dx * dx + dy * dy
+          dz = c.z - a.z
+          length_sq = dx * dx + dy * dy + dz * dz
           return false unless length_sq.finite? && length_sq > EPSILON * EPSILON
 
-          t = ((b.x - a.x) * dx + (b.y - a.y) * dy) / length_sq
+          t = ((b.x - a.x) * dx +
+               (b.y - a.y) * dy +
+               (b.z - a.z) * dz) / length_sq
           t.finite? && t > EPSILON && t < 1.0 - EPSILON
         end
 
