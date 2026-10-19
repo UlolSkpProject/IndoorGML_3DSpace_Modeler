@@ -22,6 +22,12 @@ module ULOL
           raise NotImplementedError, 'Adjacency calculation requires the Native geometry backend'
         end
 
+        def synchronize_dirty(cell_spaces)
+          return if Array(cell_spaces).empty?
+
+          raise NotImplementedError, 'Adjacency calculation requires the Native geometry backend'
+        end
+
         def synchronize_all(transition_builder: nil, transition_eraser: nil, progress: nil)
           reset_run_metrics
           started_at = monotonic_time
