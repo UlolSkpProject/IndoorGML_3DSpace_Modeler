@@ -507,7 +507,8 @@ module ULOL
           def recenter_cell_space_geometry(
             cell_space_entity,
             fixed_z_offset_from_bottom: nil,
-            defer_center: false
+            defer_center: false,
+            state_cell_space: nil
           )
             with_indoor_model_operation('IndoorGML Recenter CellSpace Geometry', transparent: true) do
               prepare_cell_space_geometry_for_state(cell_space_entity)
@@ -515,7 +516,8 @@ module ULOL
 
               recenter_prepared_cell_space_geometry(
                 cell_space_entity,
-                fixed_z_offset_from_bottom: fixed_z_offset_from_bottom
+                fixed_z_offset_from_bottom: fixed_z_offset_from_bottom,
+                state_cell_space: state_cell_space
               )
             end
           end
@@ -529,11 +531,13 @@ module ULOL
 
           def recenter_prepared_cell_space_geometry(
             cell_space_entity,
-            fixed_z_offset_from_bottom: nil
+            fixed_z_offset_from_bottom: nil,
+            state_cell_space: nil
           )
             center = native_state_local_point_for_entity(
               cell_space_entity,
-              fixed_z_offset_from_bottom: fixed_z_offset_from_bottom
+              fixed_z_offset_from_bottom: fixed_z_offset_from_bottom,
+              state_cell_space: state_cell_space
             )
             apply_cell_space_local_center(cell_space_entity, center)
             center
@@ -541,7 +545,8 @@ module ULOL
 
           def native_state_local_point_for_entity(
             cell_space_entity,
-            fixed_z_offset_from_bottom: nil
+            fixed_z_offset_from_bottom: nil,
+            state_cell_space: nil
           )
             unless cell_space_entity&.valid?
               raise ArgumentError, 'CellSpace entity is invalid during Native State calculation'
@@ -561,7 +566,7 @@ module ULOL
                     'CellSpace geometry snapshot is unavailable for Native State calculation'
             end
 
-            runtime_cell_space = find_cell_space_for_entity(cell_space_entity)
+            runtime_cell_space = state_cell_space || find_cell_space_for_entity(cell_space_entity)
             fixed_z = native_state_fixed_parent_z_for_entity(
               cell_space_entity,
               fixed_z_offset_from_bottom
@@ -587,23 +592,43 @@ module ULOL
               }]
             )
             opened = true
-            result = NativeAdjacencyBridge.compute_state_from_open_session
-            coordinates = Hash(result[:points])[0]
-            if runtime_cell_space
-              log_temp_inner_point_result(
-                runtime_cell_space,
-                coordinates,
-                Hash(result[:reference_statuses])[0],
-                Hash(result[:reference_points])[0]
-              )
-              store_debug_reference_points(
-                runtime_cell_space,
-                Hash(result[:reference_points])[0]
+            result = NativeAdjacencyBridge.compute_reference_from_open_session
+            outcome = Hash(Hash(result[:results])[0])
+            coordinates = outcome[:state_point]
+            if outcome[:exit_code] != 0 || !coordinates
+              label = NativeAdjacencyBridge::STATE_EXIT_CODES.fetch(outcome[:exit_code], :unknown)
+              raise NativeAdjacencyBridge::StateUnavailableError.new(
+                "Native State unavailable: ExitCode=#{outcome[:exit_code]} (#{label})",
+                exit_code: outcome[:exit_code], diagnostics: Hash(outcome[:diagnostics])
               )
             end
-            unless coordinates
-              raise NativeAdjacencyBridge::ProtocolError,
-                    'Native State backend did not return an interior point'
+
+            if runtime_cell_space
+              graph = outcome[:graph]
+              if graph
+                store_debug_reference_points(
+                  runtime_cell_space, graph[:debug_points], kinds: graph[:debug_kinds]
+                )
+                stored = store_debug_reference_graph(
+                  runtime_cell_space, graph[:nodes], graph[:edges],
+                  graph[:loop_candidates], graph[:floor_partitions]
+                )
+                if stored
+                  preload_native_reference_graph_stages_for(runtime_cell_space, 0)
+                  optimized = (@debug_reference_graph_optimized_by_cell_id || {})[runtime_cell_space.id]
+                  optimized ||= optimized_debug_reference_graph_for(runtime_cell_space.id)
+                  selection = OptimizedStateSelector.select(
+                    optimized, bounds: snapshot[:bounds]
+                  )
+                  if selection
+                    (@debug_reference_graph_optimized_by_cell_id ||= {})[runtime_cell_space.id] =
+                      selection[:graph]
+                    coordinates = selection[:coordinates]
+                  end
+                end
+              else
+                clear_debug_reference_points(runtime_cell_space)
+              end
             end
 
             values = Array(coordinates).map(&:to_f)
