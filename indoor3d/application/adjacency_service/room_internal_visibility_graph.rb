@@ -32,8 +32,10 @@ module ULOL
           end
 
           originals = Array(optimized.fetch(:original_indices))
-          unless originals.length == nodes.length && originals.first == 0
-            raise ArgumentError, 'Room internal graph must have State at node 0'
+          state_index = optimized.fetch(:state_node_index, 0)
+          unless originals.length == nodes.length && state_index.is_a?(Integer) &&
+                 state_index.between?(0, nodes.length - 1)
+            raise ArgumentError, 'Room internal graph has invalid State index'
           end
           raise ArgumentError, 'Native LOS callback required' unless los_batch.respond_to?(:call)
 
@@ -64,7 +66,7 @@ module ULOL
           end
           if union.components == 1
             return snapshot(nodes, original_edges, original_weights, originals,
-                            [], component_count_before, union.components, 0)
+                            [], component_count_before, union.components, 0, state_index)
           end
 
           # Dense all-pairs allocation is deliberately preserved only for
@@ -73,7 +75,7 @@ module ULOL
           if nodes.size > MAX_EXHAUSTIVE_NODES
             return build_large_graph(
               nodes, original_edges, original_weights, originals,
-              points, union, los_batch
+              points, union, los_batch, state_index
             )
           end
 
@@ -133,7 +135,7 @@ module ULOL
           final_weights = (original_weights + additions.map { |r| r[:length] }).freeze
           snapshot(
             nodes, final_edges, final_weights, originals, additions,
-            component_count_before, union.components, checked_pairs
+            component_count_before, union.components, checked_pairs, state_index
           )
         end
 
@@ -142,7 +144,7 @@ module ULOL
         # O(N^2) list; every new connection still passes Native 3D LOS.
         # A LOS-blocked fallback remains diagnostic only, not navigable.
         def build_large_graph(nodes, original_edges, original_weights,
-                              originals, points, union, los_batch)
+                              originals, points, union, los_batch, state_index)
           before = union.components
           checked = {}
           clear_additions = []
@@ -245,7 +247,7 @@ module ULOL
           edges = (original_edges.map(&:dup) + additions.map { |item| item[:edge] }).map(&:freeze).freeze
           weights = (original_weights + additions.map { |item| item[:length] }).freeze
           snapshot(nodes, edges, weights, originals, additions,
-                   before, union.components, attempts)
+                   before, union.components, attempts, state_index)
         end
 
         def sparse_nearest_external_pairs(points, union, count)
@@ -291,7 +293,7 @@ module ULOL
         end
 
         def snapshot(nodes, edges, weights, originals, additions,
-                     initial_count, final_count, checked)
+                     initial_count, final_count, checked, state_index)
           clean = additions.count { |r| r[:classification] == :clear }
           blocked = additions.length - clean
           {
@@ -299,6 +301,7 @@ module ULOL
             edges: edges.freeze,
             edge_weights: weights.freeze,
             original_indices: originals.freeze,
+            state_node_index: state_index,
             original_edge_count: edges.length - additions.length,
             added_edges: additions.freeze,
             clear_added_count: clean,
