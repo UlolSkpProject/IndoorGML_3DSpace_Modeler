@@ -21,7 +21,9 @@ module ULOL
           original_count = Integer(connected.fetch(:original_edge_count))
           added = Array(connected.fetch(:added_edges))
           origins = Array(connected.fetch(:original_indices))
-          unless nodes.length == origins.length && origins.first == 0 &&
+          state_index = connected.fetch(:state_node_index, 0)
+          unless nodes.length == origins.length &&
+                 state_index.is_a?(Integer) && state_index.between?(0, nodes.length - 1) &&
                  original_count.between?(0, input_edges.length) &&
                  added.length == input_edges.length - original_count
             raise ArgumentError, 'Invalid connected graph metadata'
@@ -60,7 +62,10 @@ module ULOL
           checked_count = 0
 
           loop do
-            candidates = (1...nodes.length).filter_map do |middle|
+            candidates = (0...nodes.length).filter_map do |middle|
+              # State index is selected AFTER OPTIMIZED and may be nonzero.
+              # Keep the Native provisional seed at 0 for compatibility.
+              next if middle == state_index || middle.zero?
               next unless alive[middle] && adjacency[middle].length == 2
 
               first, last = adjacency[middle].keys.sort
@@ -147,6 +152,7 @@ module ULOL
 
           final_nodes = kept.map { |index| nodes[index] }.freeze
           final_origins = kept.map { |index| origins[index] }.freeze
+          final_state_index = remap.fetch(state_index)
           final_added = (surviving_added + surviving_shortcuts).map do |a, b, classification, source|
             edge = [a, b].freeze
             {
@@ -171,6 +177,7 @@ module ULOL
           graph = connected.merge(
             nodes: final_nodes,
             original_indices: final_origins,
+            state_node_index: final_state_index,
             edges: final_edges,
             edge_weights: final_weights,
             original_edge_count: surviving_original.length,
