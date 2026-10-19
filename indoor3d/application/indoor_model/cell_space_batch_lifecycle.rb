@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../adjacency_service/optimized_state_selector'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -655,6 +657,31 @@ module ULOL
                 # open, precompute AFTER and then COLLAPSED/OPTIMIZED with
                 # validated replacement LOS.
                 preload_native_reference_graph_stages_for(cell_space, index) if stored
+                if stored
+                  # Graph stages complete before State placement. Node 0 is
+                  # the Native provisional seed, not the final State index.
+                  # Prefer the nearest *remaining optimized reference* to
+                  # the same parent-coordinate AABB supplied to Native.
+                  optimized = (@debug_reference_graph_optimized_by_cell_id || {})[cell_space.id]
+                  optimized ||= optimized_debug_reference_graph_for(cell_space.id)
+                  selection = OptimizedStateSelector.select(
+                    optimized, bounds: entry[:snapshot][:bounds]
+                  )
+                  if selection
+                    (@debug_reference_graph_optimized_by_cell_id ||= {})[cell_space.id] =
+                      selection[:graph]
+                    coordinates = selection[:coordinates]
+                    IndoorCore::Logger.puts(
+                      "[IndoorGML] State from OPTIMIZED cell=#{cell_space.id} " \
+                      "node=#{selection[:index]} point=#{coordinates.inspect}"
+                    ) if defined?(IndoorCore::Logger)
+                  else
+                    IndoorCore::Logger.puts(
+                      "[IndoorGML] OPTIMIZED State selection unavailable, " \
+                      "retain valid Native State for cell=#{cell_space.id}"
+                    ) if defined?(IndoorCore::Logger)
+                  end
+                end
               else
                 clear_debug_reference_points(cell_space)
               end
