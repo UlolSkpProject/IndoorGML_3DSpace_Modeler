@@ -123,6 +123,10 @@ module ULOL
                 next
               end
 
+              # Accumulate edits until Edit Mode finishes. The finish path
+              # flushes all dirty CellSpaces in one native adjacency batch.
+              next if editing?
+
               flush_dirty_cell_space_sync
             end
           end
@@ -143,24 +147,29 @@ module ULOL
             dirty_topology_queue.unschedule!
             return if pids.empty?
 
-            processing_index = nil
+            # Build one dirty set, then serialize the entire eligible geometry
+            # once. Native V5 marks every dirty index in the same load_batch.
+            dirty_cells = pids.filter_map do |persistent_id|
+              cell_space = @feature_registry.find_cell_space_by_persistent_id(persistent_id)
+              cell_space if cell_space&.valid? && cell_space.duality_state&.valid?
+            end.uniq
+            return if dirty_cells.empty?
+
             with_transparent_cell_space_operation('IndoorGML Dirty CellSpace Sync') do
               sync do
-                pids.each_with_index do |persistent_id, index|
-                  processing_index = index
-                  cell_space = @feature_registry.find_cell_space_by_persistent_id(persistent_id)
-                  next unless cell_space&.valid?
-
-                  synchronize_adjacency_and_transitions_for_cell_space(cell_space)
+                topology_coordinator.synchronize_dirty(dirty_cells)
+                dirty_cells.each do |cell_space|
                   remember_cell_space_change_snapshot(cell_space.sketchup_group)
                 end
               end
             end
-            processing_index = nil
             Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
             invalidate_overlay_transition_points
           rescue StandardError => e
-            requeue_dirty_cell_space_pids(pids, processing_index)
+            # A batch can fail after an individual Transition was applied.
+            # Retrying the entire dirty set restores consistency, rather than
+            # discarding partially processed cells.
+            requeue_dirty_cell_space_pids(pids, nil)
             dirty_topology_queue.unschedule!
             schedule_dirty_cell_space_sync unless dirty_topology_queue.empty?
             IndoorCore::Logger.puts "[IndoorGML] Dirty CellSpace sync failed: #{e.class}: #{e.message}"
