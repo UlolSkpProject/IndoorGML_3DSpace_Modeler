@@ -346,10 +346,22 @@ module ULOL
               if displayed
                 # Existing Stage overlays retain their usual Final points.
                 # Kind 5 identifies protected Reference Points (magenta X);
-                # State index 0 keeps its dedicated State overlay.
+                # The selected State may have any index in OPTIMIZED.
                 displayed_origins = Array(displayed[:original_indices])
+                finalized = (@debug_reference_graph_optimized_by_cell_id || {})[cell_id]
+                finalized_index = finalized && finalized[:state_node_index]
+                finalized_point = if finalized_index.is_a?(Integer)
+                                    Array(finalized[:nodes])[finalized_index]&.[](:point)
+                                  end
                 Array(displayed[:nodes]).each_with_index do |node, index|
-                  next if index.zero?
+                  point = node[:point]
+                  if finalized_point && point &&
+                     [point.x, point.y, point.z] == [
+                       finalized_point.x, finalized_point.y, finalized_point.z
+                     ]
+                    next
+                  end
+                  next if index.zero? && finalized_point.nil?
                   id = displayed_origins.empty? ? index : displayed_origins[index]
                   protected = node[:protected] ||
                               %i[door transition junction].include?(node[:semantic_role]) ||
