@@ -145,7 +145,6 @@ module ULOL
             :get_reference_result_bytes,
             :commit_reference_graph_batch,
             :get_reference_graph,
-            :get_reference_waypoint_anchors,
             :get_reference_transition_curve,
             :get_reference_revision,
             :erase_reference_graphs,
