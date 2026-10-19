@@ -55,6 +55,24 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_equal 0, bytes.byteslice(second_cell + 104 + 24, 8).unpack1('Q<')
   end
 
+  def test_geometry_v5_encodes_moved_and_edited_flags_together
+    # moved: adjacency only (target + dirty)
+    # edited: State/Ref plus adjacency (target + needs_state + dirty)
+    bytes = Bridge.encode_geometry_input(
+      sample_snapshots,
+      [
+        { needs_state: false, adjacency_dirty: true },
+        { needs_state: true, adjacency_dirty: true }
+      ]
+    )
+    first_cell_offset = 32
+    second_cell_offset = first_cell_offset +
+      bytes.byteslice(first_cell_offset, 8).unpack1('Q<')
+
+    assert_equal 10, bytes.byteslice(first_cell_offset + 16, 8).unpack1('Q<')
+    assert_equal 11, bytes.byteslice(second_cell_offset + 16, 8).unpack1('Q<')
+  end
+
   def test_geometry_v5_requires_authoritative_plane_and_ignores_normal_metadata
     snapshot = Marshal.load(Marshal.dump(sample_snapshots.first))
     original = snapshot[:faces].first
