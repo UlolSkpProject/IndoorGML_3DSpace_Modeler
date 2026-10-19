@@ -40,6 +40,8 @@ module ULOL
             context,
             state1_point:,
             state2_point:,
+            cell1_id: nil,
+            cell2_id: nil,
             tolerance:
           )
             raw = Array(context && context[:waypoint_snapshot_candidates])
@@ -54,10 +56,14 @@ module ULOL
               geometry_candidate = geometry_candidate_from_snapshot(candidate)
               next nil unless geometry_candidate
 
+              anchors = reference_waypoint_anchor_points(
+                cell1_id, cell2_id, geometry_candidate[:centroid]
+              )
+
               point = adjusted_waypoint(
                 geometry_candidate,
-                state1_point,
-                state2_point,
+                anchors&.fetch(0, nil) || state1_point,
+                anchors&.fetch(1, nil) || state2_point,
                 tolerance
               )
               next nil unless point.is_a?(Geom::Point3d)

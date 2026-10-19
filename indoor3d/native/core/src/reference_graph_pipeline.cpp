@@ -615,6 +615,29 @@ const ReferenceGraphStageSnapshot& reference_graph_stage(
     return pipeline.optimized;
 }
 
+std::optional<Vec3> closest_reachable_reference_point(
+    const ReferenceGraphPipeline& pipeline,const Vec3& waypoint)
+{
+    const auto& graph=pipeline.optimized;
+    const auto& tree=pipeline.shortest_path_tree;
+    if(graph.nodes.empty() || tree.distances.size()!=graph.nodes.size())
+        return std::nullopt;
+    std::optional<std::size_t> closest;
+    double best=std::numeric_limits<double>::infinity();
+    for(std::size_t i=0;i<graph.nodes.size();++i)
+    {
+        if(!std::isfinite(tree.distances[i])) continue;
+        const double candidate=distance(graph.nodes[i].point,waypoint);
+        if(candidate<best || (candidate==best && (!closest || i<*closest)))
+        {
+            best=candidate;
+            closest=i;
+        }
+    }
+    return closest ? std::optional<Vec3>(graph.nodes[*closest].point) :
+                     std::nullopt;
+}
+
 std::vector<Vec3> reference_transition_polyline(
     const ReferenceGraphPipeline& pipeline,const Vec3& waypoint)
 {

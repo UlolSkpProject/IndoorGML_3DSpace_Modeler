@@ -7,7 +7,7 @@ module ULOL
     module IndoorCore
       class AdjacencyService
         module GeometryQuery
-          def self.common_face_waypoint_candidates(entity1, entity2, state1_point: nil, state2_point: nil, transformation1: nil, transformation2: nil, tolerance: Utils::Geometry::ADJACENCY_TOLERANCE)
+          def self.common_face_waypoint_candidates(entity1, entity2, state1_point: nil, state2_point: nil, cell1_id: nil, cell2_id: nil, transformation1: nil, transformation2: nil, tolerance: Utils::Geometry::ADJACENCY_TOLERANCE)
             return [] unless entity1&.valid? && entity2&.valid?
 
             bounds1 = transformed_bounds(entity1, transformation1)
@@ -20,8 +20,16 @@ module ULOL
             max_area = candidates.map { |candidate| candidate[:area] }.max
             candidates.select { |candidate| (candidate[:area] - max_area).abs <= tolerance.to_f }
                       .map do |candidate|
+                        anchors = reference_waypoint_anchor_points(
+                          cell1_id, cell2_id, candidate[:centroid]
+                        )
                         {
-                          point: adjusted_waypoint(candidate, state1_point, state2_point, tolerance),
+                          point: adjusted_waypoint(
+                            candidate,
+                            anchors&.fetch(0, nil) || state1_point,
+                            anchors&.fetch(1, nil) || state2_point,
+                            tolerance
+                          ),
                           normal1: candidate[:normal1],
                           normal2: candidate[:normal2]
                         }
@@ -103,6 +111,26 @@ module ULOL
             candidate[:centroid]
           end
           private_class_method :adjusted_waypoint
+
+          def self.reference_waypoint_anchor_points(cell1_id, cell2_id, waypoint)
+            return nil if cell1_id.to_s.empty? || cell2_id.to_s.empty?
+            return nil unless waypoint.is_a?(Geom::Point3d)
+            return nil unless defined?(NativeAdjacencyBridge)
+
+            coordinates = NativeAdjacencyBridge.reference_waypoint_anchors(
+              cell1_id, cell2_id, waypoint
+            )
+            points = Array(coordinates).map do |point|
+              values = Array(point)
+              next unless values.length == 3
+
+              Geom::Point3d.new(*values)
+            end.compact
+            points.length == 2 ? points : nil
+          rescue StandardError
+            nil
+          end
+          private_class_method :reference_waypoint_anchor_points
 
           def self.shared_z_range(face1, face2)
             ranges = [face1, face2].map do |face|

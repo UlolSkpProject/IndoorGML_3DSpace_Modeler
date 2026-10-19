@@ -242,6 +242,44 @@ VALUE adjacency_native_get_reference_transition_curve(
     });
 }
 
+VALUE adjacency_native_get_reference_waypoint_anchors(
+    VALUE self,VALUE first_cell_key,VALUE second_cell_key,VALUE waypoint_bytes
+)
+{
+    (void)self;
+    StringValue(first_cell_key);
+    StringValue(second_cell_key);
+    Check_Type(waypoint_bytes,T_STRING);
+    if(RSTRING_LEN(waypoint_bytes)!=static_cast<long>(3*sizeof(double)))
+        rb_raise(rb_eArgError,"Reference waypoint must contain three float64 values");
+    const std::string first(
+        RSTRING_PTR(first_cell_key),static_cast<std::size_t>(RSTRING_LEN(first_cell_key))
+    );
+    const std::string second(
+        RSTRING_PTR(second_cell_key),static_cast<std::size_t>(RSTRING_LEN(second_cell_key))
+    );
+    double values[3];
+    std::memcpy(values,RSTRING_PTR(waypoint_bytes),sizeof(values));
+    for(double value:values) if(!std::isfinite(value))
+        rb_raise(rb_eArgError,"Reference waypoint coordinate is not finite");
+    const Vec3 waypoint{values[0],values[1],values[2]};
+    return protect_native_call([first,second,waypoint]() {
+        const auto anchors=session().get_reference_waypoint_anchors(
+            first,second,waypoint);
+        if(!anchors) return Qnil;
+        VALUE result=rb_ary_new_capa(2);
+        for(const Vec3& item:{anchors->first,anchors->second})
+        {
+            VALUE point=rb_ary_new_capa(3);
+            rb_ary_push(point,DBL2NUM(item.x));
+            rb_ary_push(point,DBL2NUM(item.y));
+            rb_ary_push(point,DBL2NUM(item.z));
+            rb_ary_push(result,point);
+        }
+        return result;
+    });
+}
+
 VALUE adjacency_native_get_reference_revision(VALUE self, VALUE cell_key)
 {
     (void)self;

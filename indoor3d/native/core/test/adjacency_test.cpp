@@ -527,6 +527,28 @@ void test_non_partitioned_state_is_a_single_node_reference_graph()
             "State-only reference graph must route State directly to waypoint");
 }
 
+void test_waypoint_anchor_uses_closest_reachable_optimized_node()
+{
+    ReferenceGraphPipeline pipeline;
+    pipeline.optimized.nodes={
+        {{0.0,0.0,10.0},0.0},
+        {{1.0,0.0,20.0},0.0},
+        {{2.0,0.0,30.0},0.0}
+    };
+    pipeline.shortest_path_tree.root=0;
+    pipeline.shortest_path_tree.distances={
+        0.0,1.0,std::numeric_limits<double>::infinity()
+    };
+    pipeline.shortest_path_tree.previous={
+        std::nullopt,0,std::nullopt
+    };
+
+    const auto closest=closest_reachable_reference_point(
+        pipeline,{2.0,0.0,30.0});
+    require(closest.has_value() && std::abs(closest->z-20.0)<1.0e-9,
+            "Waypoint anchor must ignore a closer OPTIMIZED node unreachable from State");
+}
+
 void test_native_reference_pipeline_optimizes_degree_two_and_collapses_certificate()
 {
     CellData room=tall_room(unit_box_cell());
@@ -1480,6 +1502,7 @@ int main()
 
     test_native_reference_pipeline_bakes_state_tree_and_transition();
     test_non_partitioned_state_is_a_single_node_reference_graph();
+    test_waypoint_anchor_uses_closest_reachable_optimized_node();
     test_native_reference_pipeline_optimizes_degree_two_and_collapses_certificate();
     test_native_optimized_connects_visible_components_to_state();
     test_native_optimized_does_not_bridge_through_hole();

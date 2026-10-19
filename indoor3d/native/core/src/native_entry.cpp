@@ -24,6 +24,7 @@ extern "C" INDOOR_GML_NATIVE_EXPORT void Init_indoor_gml_native()
     rb_define_singleton_method(native_module, "get_reference_result_bytes", adjacency_native_get_state_result_bytes, 0);
     rb_define_singleton_method(native_module, "validate_room_los", adjacency_native_validate_room_los, 3);
     rb_define_singleton_method(native_module, "get_reference_graph", adjacency_native_get_reference_graph, 2);
+    rb_define_singleton_method(native_module, "get_reference_waypoint_anchors", adjacency_native_get_reference_waypoint_anchors, 3);
     rb_define_singleton_method(native_module, "get_reference_transition_curve", adjacency_native_get_reference_transition_curve, 3);
     rb_define_singleton_method(native_module, "get_reference_revision", adjacency_native_get_reference_revision, 1);
     rb_define_singleton_method(native_module, "erase_reference_graphs", adjacency_native_erase_reference_graphs, 1);

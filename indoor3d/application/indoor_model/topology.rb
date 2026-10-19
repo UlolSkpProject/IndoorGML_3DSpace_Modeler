@@ -327,6 +327,8 @@ module ULOL
               transition.cell2.sketchup_group,
               state1_point: state_root_local_position(transition.state1),
               state2_point: state_root_local_position(transition.state2),
+              cell1_id: transition.cell1_id,
+              cell2_id: transition.cell2_id,
               transformation1: cell_space_root_local_transformation(transition.cell1),
               transformation2: cell_space_root_local_transformation(transition.cell2)
             )

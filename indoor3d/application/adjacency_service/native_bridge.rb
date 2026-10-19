@@ -145,6 +145,7 @@ module ULOL
             :get_reference_result_bytes,
             :commit_reference_graph_batch,
             :get_reference_graph,
+            :get_reference_waypoint_anchors,
             :get_reference_transition_curve,
             :get_reference_revision,
             :erase_reference_graphs,
@@ -247,6 +248,34 @@ module ULOL
             [first, second].freeze
           end.freeze
           { nodes: nodes, edges: edges }.freeze
+        end
+
+        # Returns one closest reachable OPTIMIZED reference for each CellSpace.
+        # Only two points cross the Ruby boundary; the full graphs remain Native.
+        def reference_waypoint_anchors(first_cell_id, second_cell_id, waypoint)
+          raise ProtocolError, 'Native Reference Waypoint Anchor API unavailable' unless
+            available? && native.respond_to?(:get_reference_waypoint_anchors)
+          coordinates = waypoint.respond_to?(:to_a) ? Array(waypoint.to_a) : Array(waypoint)
+          unless coordinates.length == 3 &&
+                 coordinates.all? { |number| number.is_a?(Numeric) && number.finite? }
+            raise ProtocolError, 'Reference waypoint is invalid'
+          end
+          result = native.get_reference_waypoint_anchors(
+            first_cell_id.to_s, second_cell_id.to_s,
+            coordinates.map(&:to_f).pack('E*')
+          )
+          return nil if result.nil?
+
+          anchors = Array(result).map do |entry|
+            point = Array(entry)
+            unless point.length == 3 && point.all? { |number| number.is_a?(Numeric) && number.finite? }
+              raise ProtocolError, 'Native Reference Waypoint Anchor is invalid'
+            end
+            point.map(&:to_f).freeze
+          end
+          raise ProtocolError, 'Native Reference Waypoint Anchor pair is incomplete' unless anchors.length == 2
+
+          anchors.freeze
         end
 
         # Native selects the closest reachable gateway and restores the

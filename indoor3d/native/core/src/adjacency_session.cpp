@@ -289,6 +289,24 @@ std::vector<Vec3> AdjacencySession::get_reference_transition_curve(
     return result;
 }
 
+std::optional<std::pair<Vec3,Vec3>>
+AdjacencySession::get_reference_waypoint_anchors(
+    const std::string& first_cell_key,const std::string& second_cell_key,
+    const Vec3& raw_waypoint) const
+{
+    std::lock_guard<std::mutex> lock(reference_graph_mutex_);
+    const auto first=reference_graphs_.find(first_cell_key);
+    const auto second=reference_graphs_.find(second_cell_key);
+    if(first==reference_graphs_.end() || second==reference_graphs_.end())
+        return std::nullopt;
+    const auto first_point=closest_reachable_reference_point(
+        first->second.pipeline,raw_waypoint);
+    const auto second_point=closest_reachable_reference_point(
+        second->second.pipeline,raw_waypoint);
+    if(!first_point || !second_point) return std::nullopt;
+    return std::make_pair(*first_point,*second_point);
+}
+
 std::uint64_t AdjacencySession::get_reference_revision(const std::string& cell_key) const
 {
     std::lock_guard<std::mutex> lock(reference_graph_mutex_);

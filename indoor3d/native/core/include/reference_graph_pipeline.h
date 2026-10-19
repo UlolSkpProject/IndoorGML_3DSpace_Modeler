@@ -65,6 +65,13 @@ const ReferenceGraphStageSnapshot& reference_graph_stage(
     ReferenceGraphStage stage
 );
 
+// Closest OPTIMIZED node that remains reachable from State. The raw shared
+// Face centroid is used as the query before waypoint Z is adjusted.
+std::optional<Vec3> closest_reachable_reference_point(
+    const ReferenceGraphPipeline& pipeline,
+    const Vec3& waypoint
+);
+
 // Returns State -> closest reachable graph gateway -> waypoint. The SPT is
 // baked once when the CellSpace graph is rebuilt; no Dijkstra runs per query.
 std::vector<Vec3> reference_transition_polyline(

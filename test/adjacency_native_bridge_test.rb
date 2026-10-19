@@ -151,6 +151,22 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_equal codes.size, codes.keys.uniq.size
   end
 
+  def test_reference_waypoint_anchors_returns_two_native_points
+    native = Module.new
+    captured = nil
+    native.define_singleton_method(:load_batch) { |_bytes| 0 }
+    native.define_singleton_method(:get_reference_waypoint_anchors) do |first, second, bytes|
+      captured = [first, second, bytes.unpack('E3')]
+      [[1.0, 2.0, 10.0], [3.0, 4.0, 20.0]]
+    end
+    with_adjacency_native(native) do
+      anchors = Bridge.reference_waypoint_anchors('first', 'second', [5.0, 6.0, 7.0])
+      assert_equal [['first', 'second', [5.0, 6.0, 7.0]],
+                    [[1.0, 2.0, 10.0], [3.0, 4.0, 20.0]]],
+                   [captured, anchors]
+    end
+  end
+
   def test_result_decoding_restores_snapshot_face_references
     snapshots = sample_snapshots
     candidate =
@@ -213,6 +229,21 @@ class AdjacencyNativeBridgeTest < Minitest::Test
   end
 
   private
+
+  def with_adjacency_native(native)
+    owner = ULOL::Indoor3DGmlModeler
+    existed = owner.const_defined?(:AdjacencyNative, false)
+    original = owner.const_get(:AdjacencyNative, false) if existed
+    owner.send(:remove_const, :AdjacencyNative) if existed
+    owner.const_set(:AdjacencyNative, native)
+    Bridge.instance_variable_set(:@load_failed, false)
+    yield
+  ensure
+    owner.send(:remove_const, :AdjacencyNative) if
+      owner.const_defined?(:AdjacencyNative, false)
+    owner.const_set(:AdjacencyNative, original) if existed
+    Bridge.instance_variable_set(:@load_failed, false)
+  end
 
   def sample_snapshots
     @sample_snapshots ||= [
