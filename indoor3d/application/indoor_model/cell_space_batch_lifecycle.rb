@@ -109,25 +109,35 @@ module ULOL
             return [] if plan.empty?
 
             created = []
+            created_sources = []
             native_state_cells = []
             with_validation_focus_mutation_batch do
               with_bulk_cell_space_conversion do
                 with_indoor_model_operation(operation_name, force: true) do
                   prepare_cell_space_batch_environment
                   plan.each do |request|
+                    original_source = request[:source]
+                    staged_source = copy_group_under_primal_space(original_source)
                     service = request[:local_grid] ?
                       cell_space_lifecycle_service_local_grid :
                       cell_space_lifecycle_service
                     created_cell = service.create_from_group_deferred(
-                      request[:source],
+                      staged_source,
                       cell_type: request[:cell_type],
                       category_code: request[:category_code],
                       storey: request[:storey]
                     )
                     created << created_cell
+                    created_sources << [created_cell, original_source]
                     native_state_cells << created_cell unless request[:local_grid]
                   end
                   finalize_cell_space_batch(created, state_cells: native_state_cells)
+                  created.select! { |cell_space| cell_space&.valid? }
+                  created_sources.each do |cell_space, original_source|
+                    next unless cell_space&.valid?
+
+                    original_source.erase! if original_source&.valid?
+                  end
                 end
               end
             end
@@ -427,18 +437,29 @@ module ULOL
             valid_cell_spaces = Array(cell_spaces).select { |cell_space| cell_space&.valid? }
             return {} if valid_cell_spaces.empty?
 
-            with_native_state_geometry_session(state_cells) do
-              apply_cell_space_materials_batch(valid_cell_spaces)
+            with_native_state_geometry_session(state_cells) do |state_batch|
+              failures = Array(state_batch&.[](:failures))
+              failed_ids = failures.each_with_object({}) do |failure, output|
+                output[failure[:cell_id].to_s] = true
+                cell_space = failure[:cell_space]
+                cell_space_lifecycle_service.erase(cell_space) if cell_space&.valid?
+              end
+              successful_cell_spaces = valid_cell_spaces.select do |cell_space|
+                cell_space&.valid? && !failed_ids.key?(cell_space.id.to_s)
+              end
+              apply_cell_space_materials_batch(successful_cell_spaces)
               metrics = synchronize_topology ? synchronize_topology_after_bulk_conversion : {}
               apply_indoor_lock_policy() if apply_lock_policy
               clear_bulk_dirty_topology() if clear_dirty_topology
-              metrics || {}
+              Hash(metrics || {}).merge(
+                native_state_failures: failures.map { |failure| native_state_failure_summary(failure) }
+              )
             end
           end
 
           def with_native_state_geometry_session(state_cells, point_applier: nil)
             pending = Array(state_cells).select { |cell_space| cell_space&.valid? }.uniq
-            return yield if pending.empty?
+            return yield({ successful: [].freeze, failures: [].freeze }.freeze) if pending.empty?
 
             unless defined?(NativeAdjacencyBridge) &&
                    NativeAdjacencyBridge.shared_session_supported?
@@ -549,6 +570,8 @@ module ULOL
             end
 
             results = Hash(state_result[:results])
+            successful = []
+            failures = []
             session_entries.each_with_index do |entry, index|
               cell_space = pending_by_id[entry[:cell_space].id]
               next unless cell_space
@@ -566,11 +589,15 @@ module ULOL
               unless exit_code == 0
                 label = NativeAdjacencyBridge::STATE_EXIT_CODES.fetch(exit_code, :unknown)
                 details = diagnostics.map { |key, value| "#{key}=#{value}" }.join(', ')
-                raise NativeAdjacencyBridge::StateUnavailableError.new(
-                  "Native State unavailable for #{cell_space.id}: " \
-                  "ExitCode=#{exit_code} (#{label}); #{details}",
-                  exit_code: exit_code, diagnostics: diagnostics
+                failures << native_state_failure(
+                  cell_space,
+                  exit_code: exit_code,
+                  diagnostics: diagnostics,
+                  reason: "Native State unavailable for #{cell_space.id}: " \
+                          "ExitCode=#{exit_code} (#{label}); #{details}"
                 )
+                clear_reference_graph_overlay_for(cell_space)
+                next
               end
 
               if diagnostics[:failed_polygons].to_i.positive? ||
@@ -588,16 +615,20 @@ module ULOL
               clear_reference_graph_overlay_for(cell_space)
               unless coordinates
                 details = diagnostics.map { |key, value| "#{key}=#{value}" }.join(', ')
-                raise NativeAdjacencyBridge::StateUnavailableError.new(
-                  "Native State result omitted State for #{cell_space.id}; #{details}",
-                  exit_code: 50, diagnostics: diagnostics
+                failures << native_state_failure(
+                  cell_space,
+                  exit_code: 50,
+                  diagnostics: diagnostics,
+                  reason: "Native State result omitted State for #{cell_space.id}; #{details}"
                 )
+                next
               end
               state_point_applier.call(cell_space, coordinates)
+              successful << cell_space
             end
 
             NativeAdjacencyBridge.commit_reference_graph_batch
-            yield
+            yield({ successful: successful.freeze, failures: failures.freeze }.freeze)
           ensure
             if defined?(NativeAdjacencyBridge) &&
                NativeAdjacencyBridge.shared_session_active?
@@ -610,6 +641,29 @@ module ULOL
 
             @debug_reference_graph_overlay_by_cell_id&.delete(cell_space.id)
             true
+          end
+
+          def native_state_failure(cell_space, exit_code:, diagnostics:, reason:)
+            failure = {
+              cell_space: cell_space,
+              cell_id: cell_space.id.to_s,
+              exit_code: exit_code.to_i,
+              diagnostics: Hash(diagnostics).freeze,
+              reason: reason.to_s.freeze
+            }.freeze
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Native State skipped #{cell_space.id}: #{failure[:reason]}"
+            ) if defined?(IndoorCore::Logger)
+            failure
+          end
+
+          def native_state_failure_summary(failure)
+            {
+              cell_id: failure[:cell_id].to_s,
+              exit_code: failure[:exit_code].to_i,
+              diagnostics: Hash(failure[:diagnostics]).freeze,
+              reason: failure[:reason].to_s
+            }.freeze
           end
 
           def native_state_progress_sink

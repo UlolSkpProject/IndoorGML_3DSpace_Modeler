@@ -95,16 +95,23 @@ module ULOL
           end
 
           def clone_group_under_primal_space(sketchup_group)
+            cell_space_entity = copy_group_under_primal_space(sketchup_group)
+            sketchup_group.erase! if sketchup_group.valid?
+            cell_space_entity
+          end
+
+          # Creates the same direct PrimalSpaceFeatures copy as
+          # clone_group_under_primal_space while retaining the source until a
+          # deferred Native State batch confirms this CellSpace succeeded.
+          def copy_group_under_primal_space(sketchup_group)
             local_transformation = @primal_group.transformation.inverse * Utils::Transformation.entity_transformation_for_current_context(sketchup_group)
-            cell_space_entity = EntityCopyHelper.copy_instance(
+            EntityCopyHelper.copy_instance(
               source: sketchup_group,
               target_entities: @primal_group.entities,
               transformation: local_transformation,
               convert_to_group: true,
               make_unique: true
             )
-            sketchup_group.erase! if sketchup_group.valid?
-            cell_space_entity
           end
 
           def align_cell_space_local_axes_to_dominant_walls(cell_space_entity)
@@ -571,7 +578,8 @@ module ULOL
                     'fixed-Z preparation failed for Native State calculation'
             end
 
-            key = if cell_space_entity.respond_to?(:persistent_id)
+            key = runtime_cell_space&.id ||
+                  if cell_space_entity.respond_to?(:persistent_id)
                     cell_space_entity.persistent_id
                   else
                     cell_space_entity.object_id
@@ -587,20 +595,26 @@ module ULOL
               }]
             )
             opened = true
-            result = NativeAdjacencyBridge.compute_state_from_open_session
-            coordinates = Hash(result[:points])[0]
-            if runtime_cell_space
-              log_temp_inner_point_result(
-                runtime_cell_space,
-                coordinates,
-                Hash(result[:reference_statuses])[0],
-                Hash(result[:reference_points])[0]
-              )
-              store_debug_reference_points(
-                runtime_cell_space,
-                Hash(result[:reference_points])[0]
+            result = NativeAdjacencyBridge.compute_reference_from_open_session
+            outcome = Hash(result[:results])[0]
+            unless outcome
+              raise NativeAdjacencyBridge::ProtocolError,
+                    'Native State backend omitted the requested result'
+            end
+            outcome = Hash(outcome)
+            exit_code = outcome[:exit_code].to_i
+            diagnostics = Hash(outcome[:diagnostics])
+            unless exit_code.zero?
+              label = NativeAdjacencyBridge::STATE_EXIT_CODES.fetch(exit_code, :unknown)
+              details = diagnostics.map { |name, value| "#{name}=#{value}" }.join(', ')
+              raise NativeAdjacencyBridge::StateUnavailableError.new(
+                "Native State unavailable: ExitCode=#{exit_code} (#{label}); #{details}",
+                exit_code: exit_code,
+                diagnostics: diagnostics
               )
             end
+
+            coordinates = outcome[:state_point]
             unless coordinates
               raise NativeAdjacencyBridge::ProtocolError,
                     'Native State backend did not return an interior point'
@@ -611,6 +625,9 @@ module ULOL
               raise NativeAdjacencyBridge::ProtocolError,
                     'Native State backend returned invalid coordinates'
             end
+            # Only registered CellSpaces have a stable graph key consumed by
+            # Transition routing. Temporary creation-time probes are discarded.
+            NativeAdjacencyBridge.commit_reference_graph_batch if runtime_cell_space
             parent_point = Geom::Point3d.new(values[0], values[1], values[2])
             parent_point.transform(cell_space_entity.transformation.inverse)
           ensure

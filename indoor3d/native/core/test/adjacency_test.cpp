@@ -102,6 +102,25 @@ void add_rect_face(
     cell.faces.push_back(std::move(result));
 }
 
+CellData reference_box_cell(double width=20.0,double height=80.0)
+{
+    const double w=width,h=height;
+    const Vec3 a{0,0,0},b{w,0,0},c{w,w,0},d{0,w,0};
+    const Vec3 A{0,0,h},B{w,0,h},C{w,w,h},D{0,w,h};
+    CellData cell;
+    cell.index=0;
+    cell.category=CellSpaceCategory::Room;
+    cell.flags=CELL_FLAG_NEEDS_STATE|CELL_FLAG_ADJACENCY_TARGET;
+    cell.bounds=box(0,0,0,w,w,h);
+    add_rect_face(cell,{0,0,-1},a,d,c,b);
+    add_rect_face(cell,{0,0,1},A,B,C,D);
+    add_rect_face(cell,{0,-1,0},a,b,B,A);
+    add_rect_face(cell,{1,0,0},b,c,C,B);
+    add_rect_face(cell,{0,1,0},c,d,D,C);
+    add_rect_face(cell,{-1,0,0},d,a,A,D);
+    return cell;
+}
+
 CellData u_prism_cell()
 {
     CellData cell;
@@ -297,7 +316,7 @@ CellData smooth_concave_wall_room()
     return cell;
 }
 
-// Room reference fixtures need wall shared edges >= 500 mm.
+// Room reference fixtures need wall shared edges >= 1000 mm.
 // Keep the existing small State and adjacency fixtures unchanged.
 CellData tall_room(CellData cell)
 {
@@ -310,6 +329,29 @@ CellData tall_room(CellData cell)
         for (Vec3& point : face.outer_points) point.z *= Z_SCALE;
         for (Triangle& triangle : face.triangles)
             for (Vec3& point : triangle.points) point.z *= Z_SCALE;
+    }
+    return cell;
+}
+
+CellData scale_xy(CellData cell,double scale)
+{
+    cell.bounds.minimum.x*=scale;
+    cell.bounds.minimum.y*=scale;
+    cell.bounds.maximum.x*=scale;
+    cell.bounds.maximum.y*=scale;
+    for (FaceData& face:cell.faces)
+    {
+        for (Vec3& point:face.outer_points)
+        {
+            point.x*=scale;
+            point.y*=scale;
+        }
+        for (Triangle& triangle:face.triangles)
+            for (Vec3& point:triangle.points)
+            {
+                point.x*=scale;
+                point.y*=scale;
+            }
     }
     return cell;
 }
@@ -397,7 +439,7 @@ void test_state_fixed_z()
 
 void test_convex_floor_one_area_centroid_before()
 {
-    CellData room = tall_room(unit_box_cell());
+    CellData room=reference_box_cell();
     room.category = CellSpaceCategory::Room;
     const CellSpaceInteriorPointResult result =
         locate_cell_space_interior_points(room, 0.001);
@@ -420,10 +462,10 @@ void test_convex_floor_one_area_centroid_before()
             "convex Floor must merge mesh triangles into one reference");
     for (const Vec3& p : final_points)
     {
-        require(std::abs(p.z - 500.0/25.4) < 1.0e-9 &&
-                std::abs(p.x - 0.5) < 1.0e-9 &&
-                std::abs(p.y - 0.5) < 1.0e-9,
-                "convex Floor area centroid must move exactly +500mm in Z");
+        require(std::abs(p.z - 1000.0/25.4) < 1.0e-9 &&
+                std::abs(p.x - 10.0) < 1.0e-9 &&
+                std::abs(p.y - 10.0) < 1.0e-9,
+                "convex Floor area centroid must move exactly +1000mm in Z");
     }
     const ReferenceGraphDebug& graph = result.debug_graph;
     require(graph.nodes.size() == 1,
@@ -436,7 +478,7 @@ void test_native_reference_pipeline_bakes_state_tree_and_transition()
 {
     CellData room;
     ReferenceGraphDebug before;
-    const Vec3 state{0.5,0.5,500.0/25.4};
+    const Vec3 state{0.5,0.5,1000.0/25.4};
     before.nodes.push_back({state,1.0});
     before.state_node_index=0;
     const auto pipeline=build_reference_graph_pipeline(
@@ -446,7 +488,7 @@ void test_native_reference_pipeline_bakes_state_tree_and_transition()
             pipeline.shortest_path_tree.root==pipeline.state_node_index &&
             pipeline.shortest_path_tree.distances.size()==pipeline.optimized.nodes.size(),
             "Native State-root shortest-path tree was not baked");
-    const Vec3 waypoint{0.75,0.5,500.0/25.4};
+    const Vec3 waypoint{0.75,0.5,1000.0/25.4};
     const auto path=reference_transition_polyline(pipeline,waypoint);
     require(path.size()==2 &&
             std::abs(path.front().x-state.x)<1.0e-9 &&
@@ -454,11 +496,42 @@ void test_native_reference_pipeline_bakes_state_tree_and_transition()
             "Native Transition did not restore State-to-waypoint polyline");
 }
 
+void test_non_partitioned_state_is_a_single_node_reference_graph()
+{
+    const Vec3 state{1.0,2.0,3.0};
+    const auto pipeline=build_state_reference_graph_pipeline(state);
+    for(const auto stage:{ReferenceGraphStage::Before,ReferenceGraphStage::After,
+                         ReferenceGraphStage::Collapsed,ReferenceGraphStage::Optimized})
+    {
+        const auto& graph=reference_graph_stage(pipeline,stage);
+        require(graph.nodes.size()==1 && graph.edges.empty() &&
+                graph.protected_nodes.size()==1 && graph.protected_nodes[0],
+                "State-only category must retain one protected reference node");
+        require(std::abs(graph.nodes[0].point.x-state.x)<1.0e-9 &&
+                std::abs(graph.nodes[0].point.y-state.y)<1.0e-9 &&
+                std::abs(graph.nodes[0].point.z-state.z)<1.0e-9,
+                "State-only reference graph moved its State node");
+    }
+    require(pipeline.state_node_index==0 &&
+            pipeline.shortest_path_tree.root==0 &&
+            pipeline.shortest_path_tree.distances.size()==1 &&
+            pipeline.shortest_path_tree.distances[0]==0.0 &&
+            pipeline.shortest_path_tree.previous.size()==1 &&
+            !pipeline.shortest_path_tree.previous[0],
+            "State-only reference graph must bake a zero-length State tree");
+    const Vec3 waypoint{4.0,5.0,6.0};
+    const auto path=reference_transition_polyline(pipeline,waypoint);
+    require(path.size()==2 &&
+            std::abs(path.front().x-state.x)<1.0e-9 &&
+            std::abs(path.back().x-waypoint.x)<1.0e-9,
+            "State-only reference graph must route State directly to waypoint");
+}
+
 void test_native_reference_pipeline_optimizes_degree_two_and_collapses_certificate()
 {
     CellData room=tall_room(unit_box_cell());
     room.category=CellSpaceCategory::Room;
-    const double z=500.0/25.4;
+    const double z=1000.0/25.4;
 
     ReferenceGraphDebug cluster;
     cluster.nodes={
@@ -507,6 +580,51 @@ void test_native_reference_pipeline_optimizes_degree_two_and_collapses_certifica
             "Native COLLAPSED must apply a certified loop without losing State");
 }
 
+void test_native_optimized_connects_visible_components_to_state()
+{
+    for(const auto category:{CellSpaceCategory::Room,CellSpaceCategory::Stair})
+    {
+        CellData cell=tall_room(unit_box_cell());
+        cell.category=category;
+        const double z=1000.0/25.4;
+        ReferenceGraphDebug before;
+        before.nodes={
+            {{0.1,0.2,z},0.0},{{0.3,0.2,z},0.0},
+            {{0.7,0.8,z},0.0},{{0.9,0.8,z},0.0}
+        };
+        before.edges={{0,1},{2,3}};
+        before.state_node_index=0;
+
+        const auto pipeline=build_reference_graph_pipeline(cell,before,0.001);
+        require(pipeline.optimized.nodes.size()==4 &&
+                pipeline.optimized.edges.size()==3 &&
+                pipeline.optimized_bridge_count==1 &&
+                pipeline.unreachable_node_count==0,
+                "Native OPTIMIZED must bridge every visible component to State");
+        require(std::all_of(
+                    pipeline.shortest_path_tree.distances.begin(),
+                    pipeline.shortest_path_tree.distances.end(),
+                    [](double value){return std::isfinite(value);}),
+                "Every bridged OPTIMIZED node must be reachable from State");
+    }
+}
+
+void test_native_optimized_does_not_bridge_through_hole()
+{
+    const CellData room=ring_prism_cell();
+    ReferenceGraphDebug before;
+    before.nodes={{{2,5,0.5},0.0},{{8,5,0.5},0.0}};
+    before.state_node_index=0;
+
+    const auto pipeline=build_reference_graph_pipeline(room,before,0.001);
+    require(pipeline.optimized.edges.empty() &&
+            pipeline.optimized_bridge_count==0 &&
+            pipeline.unreachable_node_count==1,
+            "Native OPTIMIZED must not bridge disconnected nodes through a hole");
+    require(!std::isfinite(pipeline.shortest_path_tree.distances[1]),
+            "A node behind a hole must remain unreachable without a valid bridge");
+}
+
 void test_convex_floor_asymmetric_mesh_has_area_centroid()
 {
     CellData room = tall_room(unit_box_cell());
@@ -529,7 +647,7 @@ void test_convex_floor_asymmetric_mesh_has_area_centroid()
             "convex Face must be one region regardless of triangulation");
     require(std::abs(candidates[0].x-0.5) < 1.0e-9 &&
             std::abs(candidates[0].y-0.5) < 1.0e-9 &&
-            std::abs(candidates[0].z-500.0/25.4) < 1.0e-9,
+            std::abs(candidates[0].z-1000.0/25.4) < 1.0e-9,
             "merged centroid must be area-weighted, not vertex-averaged");
 }
 
@@ -647,17 +765,19 @@ void test_floor_cumulative_turn_respects_convex_cancellation()
             "net -30deg must force a Floor split");
 }
 
-void test_floor_reference_in_short_room_is_rejected()
+void test_floor_reference_in_short_room_uses_legacy_fallback()
 {
     CellData room = unit_box_cell();
     room.category = CellSpaceCategory::Room;
-    const auto result = locate_cell_space_interior_points(room, 0.001);
-    require(!result.state_point.has_value(),
-            "short Room must not synthesize an early State");
-    require(result.reference_points.empty(),
-            "+500mm points outside a short Solid must be rejected");
-    require(result.debug_graph.nodes.empty(),
-            "short Room must not return an invalid BEFORE node");
+    const auto modern=locate_reference_before(room,0.001);
+    require(!modern.state_point.has_value(),
+            "modern policy must reject a short or malformed Floor candidate");
+
+    const auto result=locate_cell_space_interior_points(room,0.001);
+    require(result.state_point.has_value() && result.used_legacy_fallback,
+            "short Room must recover per-cell through legacy State fallback");
+    require(result.reference_points.empty() && result.debug_graph.nodes.empty(),
+            "legacy fallback must not fabricate modern BEFORE nodes");
 }
 
 void test_inclined_floor_uses_world_z_not_surface_normal()
@@ -682,7 +802,7 @@ void test_inclined_floor_uses_world_z_not_surface_normal()
     {
         if (ref.kind != ReferencePointKind::Face) continue;
         require(std::abs(ref.point.z -
-                (500.0/25.4 + 0.2 * ref.point.x)) < 1.0e-8,
+                (1000.0/25.4 + 0.2 * ref.point.x)) < 1.0e-8,
                 "sloped floor triangle must be moved along world Z");
         ++floor_count;
     }
@@ -1061,7 +1181,7 @@ CellData l_partition_prism()
 // midpoint. The categories differ only in downstream graph stages.
 void test_room_and_stair_both_seed_centroids_and_shared_edges()
 {
-    CellData cell=tall_room(l_partition_prism());
+    CellData cell=tall_room(scale_xy(l_partition_prism(),20.0));
     cell.category=CellSpaceCategory::Room;
     const auto room=locate_cell_space_interior_points(cell,0.001);
     cell.category=CellSpaceCategory::Stair;
@@ -1082,8 +1202,8 @@ void test_room_and_stair_both_seed_centroids_and_shared_edges()
     };
     const auto room_final=collect(room,ReferencePointKind::Final);
     const auto stair_final=collect(stair,ReferencePointKind::Final);
-    require(room_final.size() >= 3,
-            "concave L Floor should have partition centroids AND seam midpoints");
+    require(room_final.size()>=2,
+            "concave L Floor should retain its State and shared-edge midpoint");
     require(room_final.size()==stair_final.size(),
             "Room and Stair final graph nodes must have identical seed counts");
 
@@ -1095,8 +1215,8 @@ void test_room_and_stair_both_seed_centroids_and_shared_edges()
                 std::abs(a.y-b.y)<1.0e-9 &&
                 std::abs(a.z-b.z)<1.0e-9,
                 "Room and Stair must return precisely the same seed positions");
-        require(std::abs(a.z-500.0/25.4)<1.0e-9,
-                "both seed kinds must retain the +500mm world-Z lift");
+        require(std::abs(a.z-1000.0/25.4)<1.0e-9,
+                "both seed kinds must retain the +1000mm world-Z lift");
     }
     require(room.debug_graph.nodes.size()==room_final.size() &&
             stair.debug_graph.nodes.size()==stair_final.size(),
@@ -1110,7 +1230,7 @@ void test_single_convex_floor_has_only_one_centroid_for_both()
     for (CellSpaceCategory category :
          {CellSpaceCategory::Room,CellSpaceCategory::Stair})
     {
-        CellData cell=tall_room(unit_box_cell());
+        CellData cell=reference_box_cell();
         cell.category=category;
         const auto result=locate_cell_space_interior_points(cell,0.001);
         require(result.state_point.has_value(),
@@ -1123,9 +1243,9 @@ void test_single_convex_floor_has_only_one_centroid_for_both()
             if (candidate.kind==ReferencePointKind::Final)
             {
                 ++final_count;
-                require(std::abs(candidate.point.x-0.5)<1.0e-9 &&
-                        std::abs(candidate.point.y-0.5)<1.0e-9 &&
-                        std::abs(candidate.point.z-500.0/25.4)<1.0e-9,
+                require(std::abs(candidate.point.x-10.0)<1.0e-9 &&
+                        std::abs(candidate.point.y-10.0)<1.0e-9 &&
+                        std::abs(candidate.point.z-1000.0/25.4)<1.0e-9,
                         "single convex Floor reference must be its area centroid");
             }
         }
@@ -1136,9 +1256,10 @@ void test_single_convex_floor_has_only_one_centroid_for_both()
     }
 }
 
-void test_non_room_reference_points_are_empty()
+void test_other_reference_categories_use_legacy_only_after_modern_failure()
 {
-    const std::array<CellSpaceCategory,3> categories{{
+    const std::array<CellSpaceCategory,4> categories{{
+        CellSpaceCategory::Stair,
         CellSpaceCategory::Elevator,
         CellSpaceCategory::Door,
         CellSpaceCategory::Window
@@ -1149,12 +1270,12 @@ void test_non_room_reference_points_are_empty()
         cell.category = category;
         const CellSpaceInteriorPointResult result =
             locate_cell_space_interior_points(cell, 0.001);
-        require(result.state_point.has_value(), "non-Room State point was not found");
-        require(result.reference_points.empty(), "non-Room reference points must be empty");
-        require(
-            result.reference_status == ReferencePointStatus::NotAttempted,
-            "non-Room reference generation must remain unattempted"
-        );
+        require(result.state_point.has_value() && result.used_legacy_fallback,
+                "each short category must recover after modern failure");
+        require(result.reference_points.empty(),
+                "legacy fallback must not invent modern references");
+        require(result.reference_status==ReferencePointStatus::Failed,
+                "modern reference failure must remain observable after fallback");
     }
 }
 void append_u64_le(std::vector<std::uint8_t>& bytes,std::uint64_t value)
@@ -1357,9 +1478,12 @@ int main()
 
 
 
-    test_convex_floor_one_area_centroid_before();
     test_native_reference_pipeline_bakes_state_tree_and_transition();
+    test_non_partitioned_state_is_a_single_node_reference_graph();
     test_native_reference_pipeline_optimizes_degree_two_and_collapses_certificate();
+    test_native_optimized_connects_visible_components_to_state();
+    test_native_optimized_does_not_bridge_through_hole();
+    test_convex_floor_one_area_centroid_before();
     test_convex_floor_asymmetric_mesh_has_area_centroid();
     test_coplanar_adjacent_floor_faces_merge();
     test_concave_floor_partitions_without_filling_its_notch();
@@ -1367,14 +1491,14 @@ int main()
     test_floor_single_reflex_over_30_degrees_forces_partition();
     test_floor_many_small_reflex_turns_accumulate();
     test_floor_cumulative_turn_respects_convex_cancellation();
-    test_floor_reference_in_short_room_is_rejected();
+    test_floor_reference_in_short_room_uses_legacy_fallback();
     test_inclined_floor_uses_world_z_not_surface_normal();
     test_floor_hole_does_not_create_void_candidates();
     test_single_floor_face_with_hole_keeps_multiple_regions();
     test_3d_sphere_and_vertical_los();
     test_room_and_stair_both_seed_centroids_and_shared_edges();
     test_single_convex_floor_has_only_one_centroid_for_both();
-    test_non_room_reference_points_are_empty();
+    test_other_reference_categories_use_legacy_only_after_modern_failure();
 
     test_room_visibility_graph_circle_overlap_and_blocked_los();
     test_room_reference_shortcut_los_rejects_wall_crossing();

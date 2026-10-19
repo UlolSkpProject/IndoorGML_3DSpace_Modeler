@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace
@@ -364,6 +365,159 @@ ReferenceGraphStageSnapshot build_optimized(const CellData& cell,
     return graph;
 }
 
+struct BridgeCandidate
+{
+    std::size_t first;
+    std::size_t second;
+    double squared_distance;
+};
+
+bool bridge_candidate_less(const BridgeCandidate& a,const BridgeCandidate& b)
+{
+    return std::tie(a.squared_distance,a.first,a.second)<
+           std::tie(b.squared_distance,b.first,b.second);
+}
+
+std::vector<bool> reachable_nodes(const ReferenceGraphStageSnapshot& graph,
+                                  std::size_t root)
+{
+    std::vector<bool> reached(graph.nodes.size(),false);
+    if(root>=graph.nodes.size()) return reached;
+    const auto adj=adjacency(graph);
+    std::vector<std::size_t> queue{root};
+    reached[root]=true;
+    for(std::size_t head=0;head<queue.size();++head)
+        for(const auto next:adj[queue[head]])
+        {
+            if(reached[next]) continue;
+            reached[next]=true;
+            queue.push_back(next);
+        }
+    return reached;
+}
+
+std::size_t bridge_key(std::size_t first,std::size_t second,std::size_t count)
+{
+    if(second<first) std::swap(first,second);
+    return first*count+second;
+}
+
+std::vector<BridgeCandidate> nearest_bridge_candidates(
+    const ReferenceGraphStageSnapshot& graph,
+    const std::vector<bool>& reached,
+    const std::unordered_set<std::size_t>& rejected,
+    std::size_t limit)
+{
+    const auto worse_first=[](const BridgeCandidate& a,const BridgeCandidate& b) {
+        return bridge_candidate_less(a,b);
+    };
+    std::priority_queue<BridgeCandidate,std::vector<BridgeCandidate>,
+                        decltype(worse_first)> nearest(worse_first);
+    const std::size_t count=graph.nodes.size();
+    for(std::size_t first=0;first<count;++first)
+    {
+        if(!reached[first]) continue;
+        for(std::size_t second=0;second<count;++second)
+        {
+            if(reached[second]) continue;
+            if(rejected.count(bridge_key(first,second,count))>0) continue;
+            const Vec3& a=graph.nodes[first].point;
+            const Vec3& b=graph.nodes[second].point;
+            const double x=a.x-b.x,y=a.y-b.y,z=a.z-b.z;
+            const double squared_distance=x*x+y*y+z*z;
+            if(!std::isfinite(squared_distance) || squared_distance<=EPSILON*EPSILON)
+                continue;
+            const BridgeCandidate candidate{first,second,squared_distance};
+            if(nearest.size()<limit)
+                nearest.push(candidate);
+            else if(bridge_candidate_less(candidate,nearest.top()))
+            {
+                nearest.pop();
+                nearest.push(candidate);
+            }
+        }
+    }
+    std::vector<BridgeCandidate> result;
+    result.reserve(nearest.size());
+    while(!nearest.empty())
+    {
+        result.push_back(nearest.top());
+        nearest.pop();
+    }
+    std::sort(result.begin(),result.end(),bridge_candidate_less);
+    return result;
+}
+
+struct ConnectivityResult
+{
+    std::size_t added_edges=0;
+    std::size_t unreachable_nodes=0;
+};
+
+ConnectivityResult connect_optimized_to_state(
+    ReferenceGraphStageSnapshot& graph,const CellData& cell,
+    std::size_t state_node_index,double tolerance)
+{
+    constexpr std::size_t INITIAL_CANDIDATE_BATCH=16;
+    ConnectivityResult result;
+    if(state_node_index>=graph.nodes.size())
+    {
+        result.unreachable_nodes=graph.nodes.size();
+        return result;
+    }
+
+    for(;;)
+    {
+        const std::vector<bool> reached=reachable_nodes(graph,state_node_index);
+        const std::size_t reached_count=static_cast<std::size_t>(
+            std::count(reached.begin(),reached.end(),true));
+        if(reached_count==graph.nodes.size()) break;
+
+        std::unordered_set<std::size_t> rejected;
+        std::size_t batch_size=INITIAL_CANDIDATE_BATCH;
+        bool added=false;
+        for(;;)
+        {
+            const auto candidates=nearest_bridge_candidates(
+                graph,reached,rejected,batch_size);
+            if(candidates.empty()) break;
+
+            std::vector<std::pair<Vec3,Vec3>> segments;
+            segments.reserve(candidates.size());
+            for(const auto& candidate:candidates)
+                segments.push_back({graph.nodes[candidate.first].point,
+                                    graph.nodes[candidate.second].point});
+            const auto visible=validate_room_reference_segments(
+                cell,segments,tolerance);
+            if(visible.size()!=candidates.size())
+                throw std::runtime_error("Native Reference bridge LOS result size mismatch");
+            for(std::size_t i=0;i<candidates.size();++i)
+            {
+                if(!visible[i]) continue;
+                graph.edges.push_back({candidates[i].first,candidates[i].second});
+                canonicalize_edges(graph);
+                ++result.added_edges;
+                added=true;
+                break;
+            }
+            if(added) break;
+
+            for(const auto& candidate:candidates)
+                rejected.insert(bridge_key(
+                    candidate.first,candidate.second,graph.nodes.size()));
+            if(candidates.size()<batch_size) break;
+            if(batch_size>std::numeric_limits<std::size_t>::max()/2) break;
+            batch_size*=2;
+        }
+        if(!added)
+        {
+            result.unreachable_nodes=graph.nodes.size()-reached_count;
+            break;
+        }
+    }
+    return result;
+}
+
 ReferenceGraphShortestPathTree bake_tree(const ReferenceGraphStageSnapshot& graph,
                                          std::size_t root)
 {
@@ -400,6 +554,23 @@ ReferenceGraphShortestPathTree bake_tree(const ReferenceGraphStageSnapshot& grap
 
 namespace IndoorGMLAdjacencyNative
 {
+ReferenceGraphPipeline build_state_reference_graph_pipeline(
+    const Vec3& state_point)
+{
+    ReferenceGraphPipeline result;
+    result.before.nodes.push_back({state_point,0.0});
+    result.before.original_indices.push_back(0);
+    result.before.protected_nodes.push_back(true);
+    result.after=result.before;
+    result.collapsed=result.before;
+    result.optimized=result.before;
+    result.state_node_index=0;
+    result.shortest_path_tree.root=0;
+    result.shortest_path_tree.distances.push_back(0.0);
+    result.shortest_path_tree.previous.push_back(std::nullopt);
+    return result;
+}
+
 ReferenceGraphPipeline build_reference_graph_pipeline(
     const CellData& cell,const ReferenceGraphDebug& before,double tolerance)
 {
@@ -423,6 +594,10 @@ ReferenceGraphPipeline build_reference_graph_pipeline(
     if(found==result.optimized.original_indices.end())
         throw std::runtime_error("Reference State node did not survive Native reductions");
     result.state_node_index=static_cast<std::size_t>(found-result.optimized.original_indices.begin());
+    const ConnectivityResult connectivity=connect_optimized_to_state(
+        result.optimized,cell,result.state_node_index,tolerance);
+    result.optimized_bridge_count=connectivity.added_edges;
+    result.unreachable_node_count=connectivity.unreachable_nodes;
     result.shortest_path_tree=bake_tree(result.optimized,result.state_node_index);
     return result;
 }

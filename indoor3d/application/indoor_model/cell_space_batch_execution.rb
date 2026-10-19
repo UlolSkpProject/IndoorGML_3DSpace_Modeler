@@ -103,7 +103,16 @@ module ULOL
               end,
               synchronize_all: proc do
                 state_cells = local_grid ? [] : created
-                with_native_state_geometry_session(state_cells) do
+                with_native_state_geometry_session(state_cells) do |state_batch|
+                  failures = Array(state_batch&.[](:failures))
+                  failed_ids = failures.each_with_object({}) do |failure, output|
+                    output[failure[:cell_id].to_s] = true
+                    cell_space = failure[:cell_space]
+                    lifecycle.erase(cell_space) if cell_space&.valid?
+                  end
+                  created.reject! do |cell_space|
+                    !cell_space&.valid? || failed_ids.key?(cell_space.id.to_s)
+                  end
                   # Persist every newly-created CellSpace once before topology starts,
                   # preserving the old topology-visible attribute state and the
                   # existing IndoorModel snapshot side effects. The batch dedup cache
@@ -117,7 +126,9 @@ module ULOL
                     end
                   end
                   apply_cell_space_materials_batch(created)
-                  synchronize_topology_after_bulk_conversion
+                  Hash(synchronize_topology_after_bulk_conversion || {}).merge(
+                    native_state_failures: failures.map { |failure| native_state_failure_summary(failure) }
+                  )
                 end
               end,
               apply_lock_policy: proc { apply_indoor_lock_policy },

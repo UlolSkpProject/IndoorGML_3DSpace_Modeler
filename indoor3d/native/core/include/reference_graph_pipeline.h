@@ -39,15 +39,25 @@ struct ReferenceGraphPipeline
     ReferenceGraphStageSnapshot collapsed;
     ReferenceGraphStageSnapshot optimized;
     std::size_t state_node_index = 0;
+    std::size_t optimized_bridge_count = 0;
+    std::size_t unreachable_node_count = 0;
     ReferenceGraphShortestPathTree shortest_path_tree;
 };
 
-// All radius-dependent reductions and shortest-path preprocessing are Native.
-// Radius never appears in the public Ruby snapshots returned by native_api.
+// All radius-dependent reductions, LOS-safe OPTIMIZED component bridges and
+// shortest-path preprocessing are Native. Radius never appears in the public
+// Ruby snapshots returned by native_api.
 ReferenceGraphPipeline build_reference_graph_pipeline(
     const CellData& cell,
     const ReferenceGraphDebug& before,
     double tolerance
+);
+
+// A CellSpace recovered by legacy fallback uses its State itself as a one-node
+// reference graph. This keeps transition routing uniform without inventing
+// modern reference points after the category-aware policy failed.
+ReferenceGraphPipeline build_state_reference_graph_pipeline(
+    const Vec3& state_point
 );
 
 const ReferenceGraphStageSnapshot& reference_graph_stage(

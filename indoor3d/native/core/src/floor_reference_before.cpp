@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -20,10 +21,57 @@ double len(Vec3 a) { return std::sqrt(squared(a)); }
 
 constexpr double FLOOR_MIN_NEGATIVE_NORMAL_Z=0.6;
 constexpr std::size_t MAX_FINAL_REFERENCES=4096;
-constexpr double MIN_REFERENCE_RADIUS=150.0/25.4; // 150 mm in SketchUp inches
-constexpr double REFERENCE_HEIGHT=500.0/25.4;
+constexpr double STANDARD_MIN_REFERENCE_RADIUS=150.0/25.4;
+constexpr double THIN_CELL_MIN_REFERENCE_RADIUS=30.0/25.4;
+constexpr double STANDARD_REFERENCE_HEIGHT=1000.0/25.4;
 
-// These seeds are the ONLY Room/Stair BEFORE candidates. State is selected
+struct ReferencePolicy
+{
+    double minimum_radius=STANDARD_MIN_REFERENCE_RADIUS;
+    double fixed_height=STANDARD_REFERENCE_HEIGHT;
+    bool use_half_first_ceiling_height=false;
+};
+
+std::optional<ReferencePolicy> reference_policy(CellSpaceCategory category)
+{
+    switch (category)
+    {
+    case CellSpaceCategory::Room:
+    case CellSpaceCategory::Stair:
+    case CellSpaceCategory::Elevator:
+        return ReferencePolicy{};
+    case CellSpaceCategory::Door:
+        return ReferencePolicy{THIN_CELL_MIN_REFERENCE_RADIUS,
+                               STANDARD_REFERENCE_HEIGHT,false};
+    case CellSpaceCategory::Window:
+        return ReferencePolicy{THIN_CELL_MIN_REFERENCE_RADIUS,0.0,true};
+    default:
+        return std::nullopt;
+    }
+}
+
+ReferenceSeeds positioned_seeds(
+    const std::vector<PartitionLeaf>& leaves,const CellData& cell,
+    const FaceSolid& solid,const ReferencePolicy& policy,double tolerance,
+    std::size_t maximum)
+{
+    ReferenceSeeds seeds=generate_reference_seeds(
+        leaves,tolerance,{policy.fixed_height,maximum});
+    if (!policy.use_half_first_ceiling_height) return seeds;
+
+    const double vertical_span=std::max(
+        tolerance*8.0,
+        cell.bounds.maximum.z-cell.bounds.minimum.z+tolerance*8.0);
+    for (Seed& seed:seeds.points)
+    {
+        const auto ceiling=solid.first_boundary_hit(
+            seed.position,{0.0,0.0,1.0},vertical_span,tolerance);
+        if (ceiling) seed.position.z+=*ceiling*0.5;
+    }
+    return seeds;
+}
+
+// These seeds are the ONLY modern BEFORE candidates. State is selected
 // from all validated centroids and shared-edge midpoints before reductions.
 // Classify clearance BEFORE calling inside(): inside() intentionally
 // rejects boundary-near points and would otherwise hide the cause.
@@ -38,7 +86,8 @@ ReferenceCheck inspect_reference(const FaceSolid& solid,Vec3 point,double tol)
     return ReferenceCheck::Valid;
 }
 
-bool viable_reference(const FaceSolid& solid,Vec3 point,double tolerance)
+bool viable_reference(const FaceSolid& solid,Vec3 point,
+                       double minimum_radius,double tolerance)
 {
     if (inspect_reference(solid,point,tolerance)!=ReferenceCheck::Valid)
         return false;
@@ -46,20 +95,22 @@ bool viable_reference(const FaceSolid& solid,Vec3 point,double tolerance)
     // A Solid without wall-classified Faces has no finite wall constraint.
     if (!std::isfinite(wall_distance)) return true;
     const double radius=std::max(0.0,wall_distance-tolerance);
-    return radius>=MIN_REFERENCE_RADIUS;
+    return radius>=minimum_radius;
 }
 
 bool merged_group_is_safe(
     const PartitionLeaf& merged,
     const std::vector<std::size_t>& members,
     const std::vector<PartitionLeaf>& original,
-    const FaceSolid& solid,double tolerance)
+    const CellData& cell,const FaceSolid& solid,
+    const ReferencePolicy& policy,double tolerance)
 {
-    const ReferenceSeeds representative=generate_reference_seeds(
-        {merged},tolerance,{REFERENCE_HEIGHT,1});
+    const ReferenceSeeds representative=positioned_seeds(
+        {merged},cell,solid,policy,tolerance,1);
     if (representative.points.empty()) return false;
     const Vec3 center=representative.points.front().position;
-    if (!viable_reference(solid,center,tolerance)) return false;
+    if (!viable_reference(
+            solid,center,policy.minimum_radius,tolerance)) return false;
 
     std::vector<PartitionLeaf> replaced;
     replaced.reserve(members.size());
@@ -68,11 +119,12 @@ bool merged_group_is_safe(
         if (index>=original.size()) return false;
         replaced.push_back(original[index]);
     }
-    const ReferenceSeeds old_seeds=generate_reference_seeds(
-        replaced,tolerance,{REFERENCE_HEIGHT,MAX_FINAL_REFERENCES});
+    const ReferenceSeeds old_seeds=positioned_seeds(
+        replaced,cell,solid,policy,tolerance,MAX_FINAL_REFERENCES);
     for (const Seed& seed:old_seeds.points)
     {
-        if (!viable_reference(solid,seed.position,tolerance)) continue;
+        if (!viable_reference(
+                solid,seed.position,policy.minimum_radius,tolerance)) continue;
         if (squared(sub(center,seed.position))<=tolerance*tolerance) continue;
         if (!solid.visible(center,seed.position,tolerance)) return false;
     }
@@ -81,14 +133,15 @@ bool merged_group_is_safe(
 
 std::vector<PartitionLeaf> safely_coarsen(
     const std::vector<PartitionLeaf>& original,
-    const FaceSolid& solid,double tolerance)
+    const CellData& cell,const FaceSolid& solid,
+    const ReferencePolicy& policy,double tolerance)
 {
     return coarsen_with_safe_fallback(
         original,tolerance,
         [&](const PartitionLeaf& candidate,
             const std::vector<std::size_t>& members) {
             return merged_group_is_safe(
-                candidate,members,original,solid,tolerance);
+                candidate,members,original,cell,solid,policy,tolerance);
         });
 }
 } // namespace
@@ -99,8 +152,9 @@ CellSpaceInteriorPointResult locate_reference_before(
     CellSpaceInteriorPointResult result;
     result.exit_code=StateExitCode::InvalidInput;
     if (!std::isfinite(tolerance)||tolerance<=0.0) return result;
-    if (cell.category!=CellSpaceCategory::Room &&
-        cell.category!=CellSpaceCategory::Stair) return result;
+    const auto policy=reference_policy(cell.category);
+    if (!policy) return result;
+    result.reference_status=ReferencePointStatus::Failed;
 
     // Diagnose absent/invalid Floor loops BEFORE constructing the
     // Solid BVH, otherwise invalid Floor geometry is misreported as a
@@ -150,7 +204,7 @@ CellSpaceInteriorPointResult locate_reference_before(
     // The merged centroid must remain a viable Native reference and see the
     // original viable seeds. Failed maximal unions retain safe partial merges,
     // then revisit all surviving neighbouring polygons to a fixed point.
-    leaves=safely_coarsen(leaves,solid,tolerance);
+    leaves=safely_coarsen(leaves,cell,solid,*policy,tolerance);
 
     result.debug_graph.floor_partitions.reserve(leaves.size());
     for (const PartitionLeaf& leaf:leaves)
@@ -172,8 +226,8 @@ CellSpaceInteriorPointResult locate_reference_before(
     }
 
     result.exit_code=StateExitCode::NoReferenceCandidates;
-    const ReferenceSeeds seed_batch=generate_reference_seeds(
-        leaves,tolerance,{REFERENCE_HEIGHT,MAX_FINAL_REFERENCES});
+    const ReferenceSeeds seed_batch=positioned_seeds(
+        leaves,cell,solid,*policy,tolerance,MAX_FINAL_REFERENCES);
     result.diagnostics.rejected_centroids=seed_batch.rejected_centroids;
     if (seed_batch.points.empty())
     {
@@ -182,8 +236,9 @@ CellSpaceInteriorPointResult locate_reference_before(
         return result;
     }
     // Validate every initial seed before choosing State or filtering centroids.
-    // The 150 mm threshold uses wall clearance; full-Solid containment and
-    // clearance remain mandatory for both centroid and shared-edge seeds.
+    // Category-specific wall radius uses 150 mm for Room/Stair/Elevator and
+    // 30 mm for thin Door/Window cells. Full-Solid containment remains
+    // mandatory for every centroid and shared-edge seed.
     struct ValidatedSeed {
         const Seed* seed;
         double radius;
@@ -209,7 +264,8 @@ CellSpaceInteriorPointResult locate_reference_before(
         const double radius=std::isfinite(wall_distance) ?
             std::max(0.0,wall_distance-tolerance) :
             std::numeric_limits<double>::infinity();
-        if (std::isfinite(wall_distance) && radius<MIN_REFERENCE_RADIUS)
+        if (std::isfinite(wall_distance) &&
+            radius<policy->minimum_radius)
         {
             ++result.diagnostics.rejected_clearance;
             continue;

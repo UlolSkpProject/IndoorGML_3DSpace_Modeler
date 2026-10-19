@@ -244,6 +244,35 @@ double FaceSolid::nearest_wall_distance(Vec3 point) const
     return closest(0,point,std::numeric_limits<double>::infinity(),true);
 }
 
+std::optional<double> FaceSolid::first_boundary_hit(
+    Vec3 origin,Vec3 direction,double maximum,double tolerance) const
+{
+    if (!valid_ || !finite(origin) || !finite(direction) ||
+        !std::isfinite(maximum) || maximum<=tolerance ||
+        !std::isfinite(tolerance) || tolerance<=0.0)
+        return std::nullopt;
+    const double direction_length=length(direction);
+    if (!std::isfinite(direction_length) || direction_length<=1.0e-12)
+        return std::nullopt;
+    direction=mul(direction,1.0/direction_length);
+
+    double first=maximum;
+    for (const Surface& surface:surfaces_)
+    {
+        if (!hit_box(surface.box,origin,direction,first,tolerance)) continue;
+        const auto& frame=surface.face.frame;
+        const double denominator=dot(frame.n,direction);
+        if (std::abs(denominator)<1.0e-12) continue;
+        const double distance=dot(frame.n,sub(frame.origin,origin))/denominator;
+        if (distance<=tolerance || distance>=first) continue;
+        const Vec3 hit=add(origin,mul(direction,distance));
+        if (FloorPartition::classify_domain(
+                surface.face,frame.project(hit),tolerance)!=Location::Outside)
+            first=distance;
+    }
+    return first<maximum ? std::optional<double>(first) : std::nullopt;
+}
+
 void FaceSolid::collect_hits(std::size_t node,Vec3 origin,
                              Vec3 direction,double maximum,double tol,
                              std::vector<double>& hits,bool& ambiguous) const

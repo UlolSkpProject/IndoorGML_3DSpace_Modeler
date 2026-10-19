@@ -32,8 +32,8 @@ constexpr double ROOM_FLOOR_MIN_NEGATIVE_NORMAL_Z = 0.6;
 // before it forces a Floor-region partition; convex turns offset the run.
 constexpr double ROOM_FLOOR_CUMULATIVE_REFLEX_DEGREES = 30.0;
 constexpr double ROOM_FLOOR_TURN_NOISE_DEGREES = 0.25;
-// SketchUp/native coordinates are inches; +500 mm in world Z.
-constexpr double ROOM_REFERENCE_FLOOR_OFFSET = 500.0 / 25.4;
+// SketchUp/native coordinates are inches; standard references use +1000 mm.
+constexpr double ROOM_REFERENCE_FLOOR_OFFSET = 1000.0 / 25.4;
 // Protect the Native V7 reference/debug serialization size bound.
 constexpr std::size_t MAX_ROOM_REFERENCE_POINTS = 4096;
 constexpr std::size_t MAX_ROOM_REFERENCE_DEBUG_POINTS =
@@ -1202,7 +1202,7 @@ std::vector<Vec3> floor_partition_shared_edge_midpoints(
 // (1) area-weighted centroid of each final Floor polygon;
 // (2) midpoint of each shared straight boundary between distinct final
 //     polygons (never the internal triangulation edges).
-// Both candidate types retain +500 mm WORLD-Z and BVH Solid checks.
+// Both candidate types retain +1000 mm WORLD-Z and BVH Solid checks.
 // If a region centroid is invalid, retain the existing triangle fallback
 // rather than silently losing previously valid interior candidates.
 std::vector<ReferencePoint> find_reference_points(
@@ -1347,8 +1347,14 @@ std::vector<bool> validate_room_reference_segments(
 )
 {
     std::vector<bool> visible(segments.size(), false);
-    if (cell.category != CellSpaceCategory::Room ||
-        !std::isfinite(tolerance) || tolerance <= 0.0 || segments.empty())
+    const bool reference_category=
+        cell.category==CellSpaceCategory::Room ||
+        cell.category==CellSpaceCategory::Stair ||
+        cell.category==CellSpaceCategory::Elevator ||
+        cell.category==CellSpaceCategory::Door ||
+        cell.category==CellSpaceCategory::Window;
+    if (!reference_category || !std::isfinite(tolerance) ||
+        tolerance <= 0.0 || segments.empty())
         return visible;
     const std::vector<const Triangle*> triangles = triangle_pointers(cell);
     if (triangles.empty()) return visible;
@@ -1893,14 +1899,23 @@ CellSpaceInteriorPointResult locate_cell_space_interior_points(
     double tolerance
 )
 {
-    if (cell.category == CellSpaceCategory::Room ||
-        cell.category == CellSpaceCategory::Stair)
-        return locate_reference_before(cell,tolerance);
+    const bool reference_category=
+        cell.category==CellSpaceCategory::Room ||
+        cell.category==CellSpaceCategory::Stair ||
+        cell.category==CellSpaceCategory::Elevator ||
+        cell.category==CellSpaceCategory::Door ||
+        cell.category==CellSpaceCategory::Window;
+    CellSpaceInteriorPointResult result=reference_category ?
+        locate_reference_before(cell,tolerance) :
+        CellSpaceInteriorPointResult{};
+    if (result.state_point) return result;
 
-    CellSpaceInteriorPointResult result;
-    result.state_point = find_state_point(cell, tolerance, &result.state_metrics);
-    if (result.state_point) result.exit_code=StateExitCode::Success;
-
+    result.state_point=find_state_point(cell,tolerance,&result.state_metrics);
+    if (result.state_point)
+    {
+        result.exit_code=StateExitCode::Success;
+        result.used_legacy_fallback=true;
+    }
     return result;
 }
 

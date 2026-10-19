@@ -149,25 +149,24 @@ void AdjacencySession::state_worker_loop()
         try
         {
             const CellData& cell=cells_[cell_position];
-            // Room/Stair: Polygon -> State/BEFORE -> AFTER -> COLLAPSED ->
-            // OPTIMIZED -> State-root shortest-path tree, all in Native.
-            // Other categories keep their established State strategy
-            // until their own Reference policy exists (no regressions).
-            const CellSpaceInteriorPointResult result =
-                (cell.category==CellSpaceCategory::Room ||
-                 cell.category==CellSpaceCategory::Stair) ?
-                locate_reference_before(cell,state_tolerance_) :
+            // Every supported category first uses the Floor reference policy:
+            // BEFORE -> AFTER -> COLLAPSED -> OPTIMIZED -> State tree.
+            // Only a per-cell modern failure may fall back to the legacy
+            // volumetric State and its complete one-node Reference graph.
+            const CellSpaceInteriorPointResult result=
                 locate_cell_space_interior_points(cell,state_tolerance_);
-            const bool reference_category =
-                cell.category==CellSpaceCategory::Room ||
-                cell.category==CellSpaceCategory::Stair;
-            if (reference_category && result.exit_code==StateExitCode::Success)
+            if (result.exit_code==StateExitCode::Success)
             {
                 if (cell_position>=cell_keys_.size())
                     throw std::runtime_error("CellSpace keys were not registered before Reference build");
-                ReferenceGraphPipeline pipeline=build_reference_graph_pipeline(
-                    cell,result.debug_graph,state_tolerance_
-                );
+                if (!result.state_point)
+                    throw std::runtime_error("Successful State result omitted its point");
+                ReferenceGraphPipeline pipeline=
+                    !result.used_legacy_fallback ?
+                    build_reference_graph_pipeline(
+                        cell,result.debug_graph,state_tolerance_
+                    ) :
+                    build_state_reference_graph_pipeline(*result.state_point);
                 std::lock_guard<std::mutex> graph_lock(reference_graph_mutex_);
                 pending_reference_graphs_[cell_keys_[cell_position]]=std::move(pipeline);
             }

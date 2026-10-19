@@ -122,6 +122,45 @@ module ULOL
           end
           return if cell_space.nil? || !cell_space.valid?
 
+          refresh_cell_space_after_geometry_close_local_grid(cell_space)
+          local_grid_state_refresh_on_close[cell_space.id] = true
+        end
+
+        # Overall Edit Mode finish must not rebuild whole-model runtime/topology
+        # when the runtime registry is still consistent. Geometry-specific local
+        # frame work is already handled by cell_space_closed, and dirty CellSpaces
+        # already have an incremental topology sync path.
+        def finish_editing
+          return super unless local_grid_coordinate_enabled?
+          return false if validation_focus_recheck_running?
+
+          closing_cell_space = @editor_session.editing_cell_space
+          closing_cell_id = closing_cell_space&.id
+          local_grid_state_refresh_on_close.delete(closing_cell_id) if closing_cell_id
+
+          with_guard_flag(:@finishing_editing) do
+            finished = @editor_session.finish()
+            if finished
+              # InstanceObserver#onClose is not guaranteed for every programmatic
+              # active-path close. Guarantee one State/Reference refresh here.
+              refreshed_on_close = closing_cell_id &&
+                                   local_grid_state_refresh_on_close.delete(closing_cell_id)
+              if closing_cell_space&.valid? && !refreshed_on_close
+                refresh_cell_space_after_geometry_close_local_grid(closing_cell_space)
+              end
+              normalize_primal_children_for_finish()
+              finalize_local_grid_runtime_after_edit_finish
+            end
+            finished
+          end
+        ensure
+          local_grid_state_refresh_on_close.delete(closing_cell_id) if closing_cell_id
+        end
+
+        private
+
+        def refresh_cell_space_after_geometry_close_local_grid(cell_space)
+          entity = cell_space.sketchup_group
           with_transparent_cell_space_operation('IndoorGML CellSpace Geometry Close Local Grid') do
             sync do
               finish_cell_space_geometry_local_grid(cell_space)
@@ -138,27 +177,12 @@ module ULOL
           end
 
           remember_cell_space_change_snapshot(cell_space.sketchup_group)
+          true
         end
 
-        # Overall Edit Mode finish must not rebuild whole-model runtime/topology
-        # when the runtime registry is still consistent. Geometry-specific local
-        # frame work is already handled by cell_space_closed, and dirty CellSpaces
-        # already have an incremental topology sync path.
-        def finish_editing
-          return super unless local_grid_coordinate_enabled?
-          return false if validation_focus_recheck_running?
-
-          with_guard_flag(:@finishing_editing) do
-            finished = @editor_session.finish()
-            if finished
-              normalize_primal_children_for_finish()
-              finalize_local_grid_runtime_after_edit_finish
-            end
-            finished
-          end
+        def local_grid_state_refresh_on_close
+          @local_grid_state_refresh_on_close ||= {}
         end
-
-        private
 
         def finalize_local_grid_runtime_after_edit_finish
           if local_grid_runtime_refresh_required_after_edit_finish?

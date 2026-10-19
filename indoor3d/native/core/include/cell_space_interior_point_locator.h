@@ -126,6 +126,9 @@ struct CellSpaceInteriorPointResult
     ReferenceGraphDebug debug_graph;
     StateSearchMetrics state_metrics;
     ReferencePointStatus reference_status = ReferencePointStatus::NotAttempted;
+    // True only when the category-aware Floor reference policy produced no
+    // valid point and the legacy volumetric State search recovered this cell.
+    bool used_legacy_fallback = false;
 };
 
 std::optional<Vec3> find_state_point(
@@ -134,10 +137,12 @@ std::optional<Vec3> find_state_point(
     StateSearchMetrics* metrics = nullptr
 );
 
-// BEFORE seeds for BOTH Room and Stair: the area centroid of EVERY
+// Legacy triangle-backed debug helper for Floor reference seeds. Runtime
+// State generation uses locate_reference_before below.
+// Seeds are the area centroid of EVERY
 // final Floor polygon plus the midpoint of each straight boundary shared
 // by TWO distinct final polygons (never triangulation-internal edges).
-// Retains +500mm world-Z placement and the Solid BVH safety checks.
+// Uses +1000mm world-Z placement and retains the Solid BVH safety checks.
 std::vector<ReferencePoint> find_reference_points(
     const CellData& cell,
     double tolerance
@@ -151,7 +156,7 @@ ReferenceGraphDebug build_room_reference_visibility_graph(
     double tolerance
 );
 
-// Room-only 3D Solid-boundary LOS verification for any point elevations.
+// Category-aware 3D Solid-boundary LOS verification for any point elevations.
 // Uses BVH segment/triangle crossings, not horizontal wall slices.
 std::vector<bool> validate_room_reference_segments(
     const CellData& cell,
@@ -159,9 +164,10 @@ std::vector<bool> validate_room_reference_segments(
     double tolerance
 );
 
-// Room/Stair reference preparation and BEFORE graph. State is the valid
-// Polygon centroid nearest the CellSpace AABB center. The legacy State service
-// remains available for other CellSpace categories.
+// Room/Stair/Door/Elevator/Window reference preparation and BEFORE graph.
+// State is the validated centroid or shared-edge seed nearest the CellSpace
+// AABB center. locate_cell_space_interior_points applies legacy fallback only
+// when this category-aware path yields no valid reference.
 CellSpaceInteriorPointResult locate_reference_before(
     const CellData& cell,
     double tolerance

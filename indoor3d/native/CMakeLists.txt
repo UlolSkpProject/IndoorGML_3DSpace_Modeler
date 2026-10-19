@@ -165,6 +165,7 @@ if(BUILD_TESTING)
         core/src/reference_graph_pipeline.cpp
         core/src/adjacency_data.cpp
         core/src/adjacency_checker.cpp
+        core/src/adjacency_session.cpp
         core/src/cell_space_interior_point_locator.cpp
     )
 

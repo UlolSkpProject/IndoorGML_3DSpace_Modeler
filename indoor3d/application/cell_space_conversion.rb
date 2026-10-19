@@ -232,9 +232,15 @@ module ULOL
       end
 
       class CellSpaceConversionExecutor
-        Result = Struct.new(:converted, :errors, keyword_init: true) do
+        Result = Struct.new(:converted, :errors, :value, :success_finalizer, keyword_init: true) do
           def converted?
             converted == true
+          end
+
+          def finalize_success!
+            finalizer = success_finalizer
+            self.success_finalizer = nil
+            finalizer&.call
           end
         end
 
@@ -268,10 +274,16 @@ module ULOL
           source, erase_original_after_success, cleanup_source_on_failure = prepare_source(job)
           @prepared_source = source
           @cleanup_source_on_failure = cleanup_source_on_failure
-          call_converter(source, target_cell_type, target_category_code, job[:storey])
-          job[:source].erase! if erase_original_after_success && job[:source]&.valid?
-          cleanup_empty_ancestors(job)
-          Result.new(converted: true, errors: [])
+          converted_value = call_converter(source, target_cell_type, target_category_code, job[:storey])
+          Result.new(
+            converted: true,
+            errors: [],
+            value: converted_value,
+            success_finalizer: proc do
+              job[:source].erase! if erase_original_after_success && job[:source]&.valid?
+              cleanup_empty_ancestors(job)
+            end
+          )
         end
 
         private
@@ -565,6 +577,7 @@ module ULOL
           converted_count = 0
           errors = []
           rollback_requested = false
+          converted_results = []
 
           result = @apply_guards.call do
             activate_root_context!
@@ -591,6 +604,7 @@ module ULOL
                 result = executor.execute(job, fallback_target: @fallback_target)
                 if result.converted?
                   converted_count += 1
+                  converted_results << [job, result]
                 else
                   errors.concat(result.errors)
                 end
@@ -615,6 +629,34 @@ module ULOL
               adjacency_started_at = Time.now
               adjacency_metrics = @synchronize_all.call || {}
               adjacency_transition_duration = Time.now - adjacency_started_at
+              state_failures = Array(adjacency_metrics[:native_state_failures])
+              failed_by_id = state_failures.each_with_object({}) do |failure, output|
+                output[failure[:cell_id].to_s] = failure
+              end
+              converted_results.each do |job, conversion|
+                cell_id = conversion.value.respond_to?(:id) ? conversion.value.id.to_s : ''
+                failure = failed_by_id[cell_id]
+                if failure
+                  converted_count -= 1
+                  errors << conversion_error(job, failure[:reason] || 'Native State unavailable')
+                else
+                  conversion.finalize_success!
+                end
+              end
+              if converted_count.zero?
+                rollback_requested = true
+                next [
+                  converted_count,
+                  errors,
+                  {
+                    pair_comparison_count: 0,
+                    adjacency_detailed_computation: 0.0,
+                    transition_apply: 0.0,
+                    cell_space_state_duration: cell_space_state_duration,
+                    adjacency_transition_duration: adjacency_transition_duration
+                  }
+                ]
+              end
               @apply_lock_policy.call
               @clear_dirty_topology.call
 

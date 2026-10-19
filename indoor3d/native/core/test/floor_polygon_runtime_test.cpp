@@ -96,10 +96,10 @@ void test_exit_code_failure_stage_distinctions()
     require(outside.exit_code==StateExitCode::OutsideSolid &&
             outside.diagnostics.reference_candidates>=1 &&
             outside.diagnostics.rejected_outside>=1,
-            "500 mm above a low ceiling should report OUTSIDE_SOLID");
+            "1000 mm above a low ceiling should report OUTSIDE_SOLID");
 
     const auto near_ceiling=locate_reference_before(
-        box(10,500.0/25.4+0.0005),0.001);
+        box(10,1000.0/25.4+0.0005),0.001);
     require(near_ceiling.exit_code==StateExitCode::InsufficientClearance &&
             near_ceiling.diagnostics.rejected_clearance>=1,
             "Boundary-near reference should report insufficient clearance");
@@ -154,14 +154,14 @@ void test_before_radius_ignores_floor_and_ceiling()
     // New circles MUST exceed the floor offset without creating State.
     const CellData room=box(200,80);
     FaceSolid solid(room,0.001);
-    const Vec3 reference{100,100,500.0/25.4};
+    const Vec3 reference{100,100,1000.0/25.4};
     require(solid.inside(reference,0.001),
             "Wall-radius reference must still pass full 3D Solid containment");
     require(solid.nearest_distance(reference)<40,
             "Full Solid clearance should remain floor-limited");
     require(near(solid.nearest_wall_distance(reference),100.0),
             "Wall-only BVH must skip floor and ceiling Faces");
-    require(near(solid.nearest_wall_distance({2,100,500.0/25.4}),2.0),
+    require(near(solid.nearest_wall_distance({2,100,1000.0/25.4}),2.0),
             "Wall-only radius must still respect a nearby vertical wall");
 
     const auto state=locate_reference_before(room,0.001);
@@ -172,9 +172,9 @@ void test_before_radius_ignores_floor_and_ceiling()
     require(near(state.debug_graph.nodes.front().radius,100.0-0.001),
             "BEFORE circle radius must use wall distance rather than floor");
 
-    // 500mm reference lies only 0.02" below the ceiling: still the
+    // 1000mm reference lies only 0.02" below the ceiling: still the
     // identical wall radius; roof clearance is only used for validity.
-    const CellData low_ceiling=box(200,500.0/25.4+0.02);
+    const CellData low_ceiling=box(200,1000.0/25.4+0.02);
     const auto near_roof=locate_reference_before(low_ceiling,0.001);
     require(near_roof.exit_code==StateExitCode::Success &&
             near_roof.debug_graph.nodes.size()==1 &&
@@ -219,7 +219,7 @@ void test_no_wall_solid_keeps_reference_candidate()
     };
 
     FaceSolid solid(cell,0.001);
-    const Vec3 candidate{100,100,500.0/25.4};
+    const Vec3 candidate{100,100,1000.0/25.4};
     require(solid.valid() && solid.inside(candidate,0.001),
             "Sloped no-wall fixture must contain its floor reference");
     require(std::isinf(solid.nearest_wall_distance(candidate)),
@@ -248,8 +248,8 @@ void test_single_convex_floor_reference_only_before()
             "Single Floor produces a one-node BEFORE Graph without AFTER");
     const Vec3& point=result.reference_points.front().point;
     require(near(point.x,10.0) && near(point.y,10.0) &&
-            near(point.z,500.0/25.4),
-            "Reference must be the floor centroid raised by world Z +500mm");
+            near(point.z,1000.0/25.4),
+            "Reference must be the floor centroid raised by world Z +1000mm");
 }
 void test_l_floor_queue_and_state_promoted_without_triangles()
 {
@@ -393,7 +393,7 @@ void test_before_selects_nearest_valid_seed_and_retains_orphan_centroids()
 void test_reference_graph_routes_from_nonzero_state_node()
 {
     const CellData cell=box(20);
-    const double z=500.0/25.4;
+    const double z=1000.0/25.4;
     ReferenceGraphDebug before;
     before.nodes={
         {{6,10,z},6},
@@ -463,6 +463,43 @@ void test_stair_uses_same_first_reference_policy()
     require(result.debug_graph.loop_candidates.empty(),
             "Stair BEFORE must never create collapse certificates");
 }
+void test_category_height_and_radius_policies()
+{
+    for (const CellSpaceCategory category : {
+             CellSpaceCategory::Room,CellSpaceCategory::Stair,
+             CellSpaceCategory::Elevator})
+    {
+        CellData cell=box(20,80);
+        cell.category=category;
+        const auto result=locate_reference_before(cell,0.001);
+        require(result.exit_code==StateExitCode::Success &&
+                result.state_point.has_value() &&
+                near(result.state_point->z,1000.0/25.4),
+                "Room/Stair/Elevator must use the +1000mm Floor policy");
+    }
+
+    CellData narrow_room=box(4,80);
+    narrow_room.category=CellSpaceCategory::Room;
+    require(locate_reference_before(narrow_room,0.001).exit_code==
+                StateExitCode::InsufficientClearance,
+            "Room must retain the 150mm wall-radius threshold");
+
+    CellData door=narrow_room;
+    door.category=CellSpaceCategory::Door;
+    const auto door_result=locate_reference_before(door,0.001);
+    require(door_result.exit_code==StateExitCode::Success &&
+            door_result.state_point.has_value() &&
+            near(door_result.state_point->z,1000.0/25.4),
+            "Door must use +1000mm with the relaxed 30mm radius");
+
+    CellData window=narrow_room;
+    window.category=CellSpaceCategory::Window;
+    const auto window_result=locate_reference_before(window,0.001);
+    require(window_result.exit_code==StateExitCode::Success &&
+            window_result.state_point.has_value() &&
+            near(window_result.state_point->z,40.0),
+            "Window must use half the height to its first ceiling");
+}
 void test_before_rejects_sphere_radius_below_150mm()
 {
     const auto result=locate_reference_before(box(10),0.001);
@@ -476,10 +513,10 @@ void test_before_rejects_sphere_radius_below_150mm()
 }
 void test_short_room_has_no_reference_state()
 {
-    const auto cell=box(10,10); // +500 mm lies ABOVE ceiling
+    const auto cell=box(10,10); // +1000 mm lies ABOVE ceiling
     const auto result=locate_reference_before(cell,0.001);
     require(!result.state_point.has_value(),
-            "No valid 500mm Reference means explicit no-State result");
+            "No valid 1000mm Reference means explicit no-State result");
     require(result.debug_graph.nodes.empty(),
             "Failure must not fabricate a BEFORE Graph");
 }
@@ -514,6 +551,7 @@ int main()
     test_shared_boundary_midpoint_without_matching_tessellation();
     test_shared_edge_with_mismatched_vertex_splits_merges_once();
     test_stair_uses_same_first_reference_policy();
+    test_category_height_and_radius_policies();
     test_before_rejects_sphere_radius_below_150mm();
     test_short_room_has_no_reference_state();
     test_hole_queue_and_failed_diagnostics();
