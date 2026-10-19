@@ -24,7 +24,7 @@ constexpr double MIN_REFERENCE_RADIUS=150.0/25.4; // 150 mm in SketchUp inches
 constexpr double REFERENCE_HEIGHT=500.0/25.4;
 
 // These seeds are the ONLY Room/Stair BEFORE candidates. State is selected
-// from valid Polygon centroids before graph reductions.
+// from all validated centroids and shared-edge midpoints before reductions.
 // Classify clearance BEFORE calling inside(): inside() intentionally
 // rejects boundary-near points and would otherwise hide the cause.
 enum class ReferenceCheck { Valid, Outside, Clearance };
@@ -181,122 +181,43 @@ CellSpaceInteriorPointResult locate_reference_before(
             result.exit_code=StateExitCode::InvalidCentroids;
         return result;
     }
-    // Mark polygons that own a real shared boundary. Their centroids are not
-    // ordinary references; only the State centroid survives that filtering.
-    std::vector<bool> has_adjacent(leaves.size(),false);
-    for (const Seed& seed:seed_batch.points)
-        if (seed.kind==SeedKind::SharedEdgeMidpoint)
-        {
-            if (seed.first_leaf<has_adjacent.size())
-                has_adjacent[seed.first_leaf]=true;
-            if (seed.second_leaf<has_adjacent.size())
-                has_adjacent[seed.second_leaf]=true;
-        }
-
-    // Select State from Polygon centroids only, before candidate validation.
-    // If this exact AABB-nearest centroid later fails Solid/clearance checks,
-    // the CellSpace has no State; a farther centroid is not substituted.
-    const Vec3 aabb_center{
-        (cell.bounds.minimum.x+cell.bounds.maximum.x)*0.5,
-        (cell.bounds.minimum.y+cell.bounds.maximum.y)*0.5,
-        (cell.bounds.minimum.z+cell.bounds.maximum.z)*0.5
+    // Validate every initial seed before choosing State or filtering centroids.
+    // The 150 mm threshold uses wall clearance; full-Solid containment and
+    // clearance remain mandatory for both centroid and shared-edge seeds.
+    struct ValidatedSeed {
+        const Seed* seed;
+        double radius;
     };
-    const Seed* state_seed=nullptr;
-    double state_distance=std::numeric_limits<double>::infinity();
+    std::vector<ValidatedSeed> valid_seeds;
+    valid_seeds.reserve(seed_batch.points.size());
+    result.diagnostics.reference_candidates=seed_batch.points.size();
+
     for (const Seed& seed:seed_batch.points)
     {
-        if (seed.kind!=SeedKind::PolygonCentroid) continue;
-        const double distance=squared(sub(seed.position,aabb_center));
-        if (distance<state_distance)
-        {
-            state_seed=&seed;
-            state_distance=distance;
-        }
-    }
-    if (!state_seed) return result;
-
-    std::vector<const Seed*> candidates;
-    candidates.reserve(seed_batch.points.size()+1);
-    candidates.push_back(state_seed); // State is deterministically node zero.
-    for (const Seed& seed:seed_batch.points)
-    {
-        if (&seed==state_seed) continue;
-        if (seed.kind==SeedKind::SharedEdgeMidpoint ||
-            (seed.kind==SeedKind::PolygonCentroid &&
-             seed.first_leaf<has_adjacent.size() &&
-             !has_adjacent[seed.first_leaf]))
-            candidates.push_back(&seed);
-    }
-    result.diagnostics.reference_candidates=candidates.size();
-
-    for (const Seed* seed_record:candidates)
-    {
-        const Seed& seed=*seed_record;
-        bool duplicate=false;
-        for (const ReferenceGraphNode& node:result.debug_graph.nodes)
-            if (squared(sub(node.point,seed.position))<=tolerance*tolerance)
-            {
-                duplicate=true;break;
-            }
-        if (duplicate) continue;
-        const ReferenceCheck check=inspect_reference(
-            solid,seed.position,tolerance);
+        const ReferenceCheck check=inspect_reference(solid,seed.position,tolerance);
         if (check==ReferenceCheck::Outside)
         {
             ++result.diagnostics.rejected_outside;
-            if (&seed==state_seed)
-            {
-                result.exit_code=StateExitCode::OutsideSolid;
-                return result;
-            }
             continue;
         }
         if (check==ReferenceCheck::Clearance)
         {
             ++result.diagnostics.rejected_clearance;
-            if (&seed==state_seed)
-            {
-                result.exit_code=StateExitCode::InsufficientClearance;
-                return result;
-            }
             continue;
         }
-        // BEFORE circle radii are the distance to WALL Faces only.
-        // The +500 mm floor offset and ceiling must not cap them.
-        // All-boundary containment/clearance was already verified by
-        // inspect_reference() above and remains strictly unchanged.
         const double wall_distance=solid.nearest_wall_distance(seed.position);
         const double radius=std::isfinite(wall_distance) ?
             std::max(0.0,wall_distance-tolerance) :
             std::numeric_limits<double>::infinity();
-        // Reject undersized spheres before BEFORE graph construction, so
-        // downstream edges and loop certificates can never
-        // refer to a candidate whose usable wall radius is below 150 mm.
-        if (std::isfinite(wall_distance) &&
-            radius<MIN_REFERENCE_RADIUS)
+        if (std::isfinite(wall_distance) && radius<MIN_REFERENCE_RADIUS)
         {
             ++result.diagnostics.rejected_clearance;
-            if (&seed==state_seed)
-            {
-                result.exit_code=StateExitCode::InsufficientClearance;
-                return result;
-            }
             continue;
         }
-
-        result.reference_points.push_back({
-            seed.position,ReferencePointKind::Final
-        });
-        result.debug_graph.nodes.push_back({seed.position,radius});
-        if (&seed==state_seed)
-        {
-            result.state_point=seed.position;
-            result.debug_graph.state_node_index=
-                result.debug_graph.nodes.size()-1;
-        }
-        ++result.diagnostics.accepted_references;
+        valid_seeds.push_back({&seed,radius});
     }
-    if (result.debug_graph.nodes.empty())
+
+    if (valid_seeds.empty())
     {
         const bool outside=result.diagnostics.rejected_outside>0;
         const bool clearance=result.diagnostics.rejected_clearance>0;
@@ -306,6 +227,65 @@ CellSpaceInteriorPointResult locate_reference_before(
             clearance ? StateExitCode::InsufficientClearance :
             StateExitCode::NoReferenceCandidates;
         return result;
+    }
+
+    // Any validated seed can be State, including a shared-edge midpoint.
+    // The deterministic first minimum wins a distance tie.
+    const Vec3 aabb_center{
+        (cell.bounds.minimum.x+cell.bounds.maximum.x)*0.5,
+        (cell.bounds.minimum.y+cell.bounds.maximum.y)*0.5,
+        (cell.bounds.minimum.z+cell.bounds.maximum.z)*0.5
+    };
+    std::size_t state_index=0;
+    double state_distance=std::numeric_limits<double>::infinity();
+    for (std::size_t i=0;i<valid_seeds.size();++i)
+    {
+        const double distance=squared(sub(valid_seeds[i].seed->position,aabb_center));
+        if (distance<state_distance)
+        {
+            state_index=i;
+            state_distance=distance;
+        }
+    }
+
+    // A Polygon centroid remains when no VALID shared-edge seed belongs to it.
+    // Invalid shared-edge seeds must not suppress their owners' centroids.
+    std::vector<bool> has_valid_shared(leaves.size(),false);
+    for (const ValidatedSeed& validated:valid_seeds)
+    {
+        const Seed& seed=*validated.seed;
+        if (seed.kind!=SeedKind::SharedEdgeMidpoint) continue;
+        if (seed.first_leaf<has_valid_shared.size())
+            has_valid_shared[seed.first_leaf]=true;
+        if (seed.second_leaf<has_valid_shared.size())
+            has_valid_shared[seed.second_leaf]=true;
+    }
+
+    const auto append_reference=[&](const ValidatedSeed& validated,bool is_state) {
+        const std::size_t index=result.debug_graph.nodes.size();
+        result.reference_points.push_back({
+            validated.seed->position,ReferencePointKind::Final
+        });
+        result.debug_graph.nodes.push_back({validated.seed->position,validated.radius});
+        if (is_state)
+        {
+            result.state_point=validated.seed->position;
+            result.debug_graph.state_node_index=index;
+        }
+        ++result.diagnostics.accepted_references;
+    };
+
+    // Keep State at node zero for existing AFTER / COLLAPSED / OPTIMIZED logic.
+    append_reference(valid_seeds[state_index],true);
+    for (std::size_t i=0;i<valid_seeds.size();++i)
+    {
+        if (i==state_index) continue;
+        const Seed& seed=*valid_seeds[i].seed;
+        if (seed.kind==SeedKind::SharedEdgeMidpoint ||
+            (seed.kind==SeedKind::PolygonCentroid &&
+             seed.first_leaf<has_valid_shared.size() &&
+             !has_valid_shared[seed.first_leaf]))
+            append_reference(valid_seeds[i],false);
     }
     // A successful CellSpace remains SUCCESS even if some of its Faces,
     // child Polygons or reference candidates failed independently.

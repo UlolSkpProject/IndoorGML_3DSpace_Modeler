@@ -684,7 +684,7 @@ ReferenceSeeds generate_reference_seeds(
         result.points.push_back({point,kind,a,b});
     };
     // Centroids first for deterministic reference ordering. State is selected
-    // only from the completed OPTIMIZED graph, never during seed generation.
+    // from validated centroid and shared-edge seeds before BEFORE graph construction.
     for (std::size_t i=0;i<completed.size();++i)
     {
         const auto p=face_centroid(completed[i].polygon,tolerance);

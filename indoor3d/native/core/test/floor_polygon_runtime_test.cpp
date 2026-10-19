@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <vector>
 
 using namespace IndoorGMLAdjacencyNative;
@@ -266,6 +267,119 @@ void test_l_floor_queue_and_state_promoted_without_triangles()
     require(l.size()==6 && l[3].x==2 && l[3].y==2,
             "Queue partitioning must leave source immutable");
 }
+CellData l_shaped_room()
+{
+    const std::vector<Vec3> floor{
+        {0,0,0},{64,0,0},{64,20,0},
+        {20,20,0},{20,64,0},{0,64,0}
+    };
+    CellData cell;
+    cell.category=CellSpaceCategory::Room;
+    cell.flags=CELL_FLAG_NEEDS_STATE;
+    cell.bounds={{0,0,0},{64,64,80}};
+
+    std::vector<Vec3> bottom(floor.rbegin(),floor.rend());
+    cell.faces.push_back(face({0,0,-1},bottom));
+
+    std::vector<Vec3> ceiling;
+    for (Vec3 p:floor) ceiling.push_back({p.x,p.y,80});
+    cell.faces.push_back(face({0,0,1},ceiling));
+    for (std::size_t i=0;i<floor.size();++i)
+    {
+        const Vec3 a=floor[i],b=floor[(i+1)%floor.size()];
+        const Vec3 A{a.x,a.y,80},B{b.x,b.y,80};
+        cell.faces.push_back(face({b.y-a.y,a.x-b.x,0},{a,b,B,A}));
+    }
+    return cell;
+}
+void test_before_selects_nearest_valid_seed_and_retains_orphan_centroids()
+{
+    const CellData cell=l_shaped_room();
+    const double tolerance=0.001;
+    const FaceSolid solid(cell,tolerance);
+    require(solid.valid(),"L-shaped regression fixture must be a valid Solid");
+    const auto result=locate_reference_before(cell,tolerance);
+    require(result.exit_code==StateExitCode::Success &&
+            result.state_point.has_value() &&
+            result.debug_graph.state_node_index==0,
+            "State must exist at BEFORE node zero for a valid concave room");
+
+    // Rebuild seed positions from the recorded final partitions, then apply
+    // the validation and filtering contract independently of BEFORE output.
+    std::vector<PartitionLeaf> leaves;
+    for (const auto& partition:result.debug_graph.floor_partitions)
+    {
+        const auto normalized=prepare(
+            Vec3{0,0,-1},partition.outer,partition.holes,tolerance);
+        require(normalized.face.has_value(),"Recorded polygon must re-prepare");
+        leaves.push_back({0,leaves.size(),*normalized.face});
+    }
+    require(leaves.size()>1,"L-shaped Floor cannot convex-coarsen to one polygon");
+    const auto seeds=generate_reference_seeds(leaves,tolerance);
+    struct Accepted {
+        const Seed* seed;
+    };
+    std::vector<Accepted> accepted;
+    std::vector<bool> has_valid_shared(leaves.size(),false);
+    for (const auto& seed:seeds.points)
+    {
+        const double clearance=solid.nearest_distance(seed.position);
+        if (!std::isfinite(clearance) || clearance<=tolerance ||
+            !solid.inside(seed.position,tolerance)) continue;
+        const double wall=solid.nearest_wall_distance(seed.position);
+        if (std::isfinite(wall) && std::max(0.0,wall-tolerance)<150.0/25.4)
+            continue;
+        accepted.push_back({&seed});
+        if (seed.kind==SeedKind::SharedEdgeMidpoint)
+        {
+            has_valid_shared[seed.first_leaf]=true;
+            has_valid_shared[seed.second_leaf]=true;
+        }
+    }
+    require(!accepted.empty(),"Fixture must have valid reference seeds");
+
+    const Vec3 center{32,32,40};
+    std::size_t state=0;
+    double shortest=std::numeric_limits<double>::infinity();
+    for (std::size_t i=0;i<accepted.size();++i)
+    {
+        const Vec3& p=accepted[i].seed->position;
+        const double squared_distance=
+            (p.x-center.x)*(p.x-center.x)+
+            (p.y-center.y)*(p.y-center.y)+
+            (p.z-center.z)*(p.z-center.z);
+        if (squared_distance<shortest)
+        {
+            shortest=squared_distance;
+            state=i;
+        }
+    }
+
+    std::vector<Vec3> expected{accepted[state].seed->position};
+    for (std::size_t i=0;i<accepted.size();++i)
+    {
+        if (i==state) continue;
+        const Seed& seed=*accepted[i].seed;
+        if (seed.kind==SeedKind::SharedEdgeMidpoint ||
+            (seed.kind==SeedKind::PolygonCentroid &&
+             !has_valid_shared[seed.first_leaf]))
+            expected.push_back(seed.position);
+    }
+    require(result.debug_graph.nodes.size()==expected.size(),
+            "BEFORE must retain exactly State, valid shared and orphan centroids");
+    for (std::size_t i=0;i<expected.size();++i)
+    {
+        const Vec3 actual=result.debug_graph.nodes[i].point;
+        require(near(actual.x,expected[i].x) &&
+                near(actual.y,expected[i].y) &&
+                near(actual.z,expected[i].z),
+                "BEFORE node positions must follow validated seed policy");
+    }
+    require(near(result.state_point->x,expected.front().x) &&
+            near(result.state_point->y,expected.front().y) &&
+            near(result.state_point->z,expected.front().z),
+            "State must be the nearest valid centroid or shared-edge midpoint");
+}
 void test_shared_boundary_midpoint_without_matching_tessellation()
 {
     const auto left=normal_face(rectangle(0,0,4,4));
@@ -355,6 +469,7 @@ int main()
     test_no_wall_solid_keeps_reference_candidate();
     test_single_convex_floor_reference_only_before();
     test_l_floor_queue_and_state_promoted_without_triangles();
+    test_before_selects_nearest_valid_seed_and_retains_orphan_centroids();
     test_shared_boundary_midpoint_without_matching_tessellation();
     test_shared_edge_with_mismatched_vertex_splits_merges_once();
     test_stair_uses_same_first_reference_policy();
