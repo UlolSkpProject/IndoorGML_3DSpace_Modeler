@@ -111,8 +111,9 @@ struct ReferenceGraphDebug
     std::vector<ReferenceGraphEdge> edges;
     std::vector<ReferenceLoopCollapseCandidate> loop_candidates;
     std::vector<ReferenceFloorPartition> floor_partitions;
-    // BEFORE index of the AABB-nearest valid Polygon centroid. It is an
-    // immutable routing anchor and must survive every later graph reduction.
+    // Actual BEFORE index of the AABB-nearest validated reference seed
+    // (Polygon centroid or shared-edge midpoint), independent of node order.
+    // The selected anchor must survive every later graph reduction.
     std::optional<std::size_t> state_node_index;
 };
 

@@ -1,6 +1,7 @@
 #include "floor_polygon_reference.h"
 #include "floor_face_solid.h"
 #include "cell_space_interior_point_locator.h"
+#include "reference_graph_pipeline.h"
 
 #include <algorithm>
 #include <cmath>
@@ -301,8 +302,8 @@ void test_before_selects_nearest_valid_seed_and_retains_orphan_centroids()
     const auto result=locate_reference_before(cell,tolerance);
     require(result.exit_code==StateExitCode::Success &&
             result.state_point.has_value() &&
-            result.debug_graph.state_node_index==0,
-            "State must exist at BEFORE node zero for a valid concave room");
+            result.debug_graph.state_node_index.has_value(),
+            "State must exist with an explicit BEFORE node index");
 
     // Rebuild seed positions from the recorded final partitions, then apply
     // the validation and filtering contract independently of BEFORE output.
@@ -355,16 +356,24 @@ void test_before_selects_nearest_valid_seed_and_retains_orphan_centroids()
         }
     }
 
-    std::vector<Vec3> expected{accepted[state].seed->position};
+    std::vector<Vec3> expected;
+    std::size_t expected_state_index=accepted.size();
     for (std::size_t i=0;i<accepted.size();++i)
     {
-        if (i==state) continue;
         const Seed& seed=*accepted[i].seed;
-        if (seed.kind==SeedKind::SharedEdgeMidpoint ||
+        const bool is_state=i==state;
+        if (is_state || seed.kind==SeedKind::SharedEdgeMidpoint ||
             (seed.kind==SeedKind::PolygonCentroid &&
              !has_valid_shared[seed.first_leaf]))
+        {
+            if (is_state) expected_state_index=expected.size();
             expected.push_back(seed.position);
+        }
     }
+    require(expected_state_index<expected.size(),
+            "The selected State must survive reference filtering");
+    require(result.debug_graph.state_node_index==expected_state_index,
+            "State index must track its filtered node position, not always zero");
     require(result.debug_graph.nodes.size()==expected.size(),
             "BEFORE must retain exactly State, valid shared and orphan centroids");
     for (std::size_t i=0;i<expected.size();++i)
@@ -373,12 +382,43 @@ void test_before_selects_nearest_valid_seed_and_retains_orphan_centroids()
         require(near(actual.x,expected[i].x) &&
                 near(actual.y,expected[i].y) &&
                 near(actual.z,expected[i].z),
-                "BEFORE node positions must follow validated seed policy");
+                "BEFORE must preserve original validated reference ordering");
     }
-    require(near(result.state_point->x,expected.front().x) &&
-            near(result.state_point->y,expected.front().y) &&
-            near(result.state_point->z,expected.front().z),
+    const Vec3 selected=expected[expected_state_index];
+    require(near(result.state_point->x,selected.x) &&
+            near(result.state_point->y,selected.y) &&
+            near(result.state_point->z,selected.z),
             "State must be the nearest valid centroid or shared-edge midpoint");
+}
+void test_reference_graph_routes_from_nonzero_state_node()
+{
+    const CellData cell=box(20);
+    const double z=500.0/25.4;
+    ReferenceGraphDebug before;
+    before.nodes={
+        {{6,10,z},6},
+        {{14,10,z},6}
+    };
+    before.edges={{0,1}};
+    before.state_node_index=1;
+
+    const auto pipeline=build_reference_graph_pipeline(cell,before,0.001);
+    require(pipeline.before.nodes.size()==2 &&
+            pipeline.optimized.nodes.size()==2,
+            "Reducing a protected two-node graph must retain both nodes");
+    require(pipeline.state_node_index==1 &&
+            pipeline.shortest_path_tree.root==1,
+            "Native graph and shortest-path tree must use a nonzero State index");
+    require(pipeline.after.protected_nodes[1] &&
+            pipeline.shortest_path_tree.distances[1]==0.0 &&
+            std::isfinite(pipeline.shortest_path_tree.distances[0]),
+            "Nonzero State must remain protected and reach the other node");
+    const auto path=reference_transition_polyline(
+        pipeline,Vec3{15,11,z});
+    require(path.size()==2 &&
+            near(path.front().x,14.0) &&
+            near(path.back().x,15.0),
+            "Transition routing must start from the selected nonzero State node");
 }
 void test_shared_boundary_midpoint_without_matching_tessellation()
 {
@@ -470,6 +510,7 @@ int main()
     test_single_convex_floor_reference_only_before();
     test_l_floor_queue_and_state_promoted_without_triangles();
     test_before_selects_nearest_valid_seed_and_retains_orphan_centroids();
+    test_reference_graph_routes_from_nonzero_state_node();
     test_shared_boundary_midpoint_without_matching_tessellation();
     test_shared_edge_with_mismatched_vertex_splits_merges_once();
     test_stair_uses_same_first_reference_policy();

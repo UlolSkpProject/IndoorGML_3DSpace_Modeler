@@ -275,17 +275,17 @@ CellSpaceInteriorPointResult locate_reference_before(
         ++result.diagnostics.accepted_references;
     };
 
-    // Keep State at node zero for existing AFTER / COLLAPSED / OPTIMIZED logic.
-    append_reference(valid_seeds[state_index],true);
+    // Preserve the original validated-seed order. State is identified by its
+    // actual node index, not by a privileged position in the node array.
     for (std::size_t i=0;i<valid_seeds.size();++i)
     {
-        if (i==state_index) continue;
         const Seed& seed=*valid_seeds[i].seed;
-        if (seed.kind==SeedKind::SharedEdgeMidpoint ||
+        const bool is_state=i==state_index;
+        if (is_state || seed.kind==SeedKind::SharedEdgeMidpoint ||
             (seed.kind==SeedKind::PolygonCentroid &&
              seed.first_leaf<has_valid_shared.size() &&
              !has_valid_shared[seed.first_leaf]))
-            append_reference(valid_seeds[i],false);
+            append_reference(valid_seeds[i],is_state);
     }
     // A successful CellSpace remains SUCCESS even if some of its Faces,
     // child Polygons or reference candidates failed independently.
