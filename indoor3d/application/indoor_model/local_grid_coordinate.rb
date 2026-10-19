@@ -164,7 +164,8 @@ module ULOL
             frame_report = align_cell_space_local_frame_local_grid(group)
             recenter_report = recenter_cell_space_geometry_local_grid(
               group,
-              fixed_z_offset_from_bottom: fixed_state_height_offset(cell_space)
+              fixed_z_offset_from_bottom: fixed_state_height_offset(cell_space),
+              state_cell_space: cell_space
             )
             log_local_grid_coordinate_report(cell_space, frame_report, recenter_report, normalized: :unchecked)
             true
@@ -320,11 +321,13 @@ module ULOL
 
           def recenter_cell_space_geometry_local_grid(
             cell_space_entity,
-            fixed_z_offset_from_bottom: nil
+            fixed_z_offset_from_bottom: nil,
+            state_cell_space: nil
           )
             raw_center = native_state_local_point_for_entity(
               cell_space_entity,
-              fixed_z_offset_from_bottom: fixed_z_offset_from_bottom
+              fixed_z_offset_from_bottom: fixed_z_offset_from_bottom,
+              state_cell_space: state_cell_space
             )
             return local_grid_recenter_report(false, raw_center, raw_center) if
               raw_center.distance(ORIGIN) <= 0.001
