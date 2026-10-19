@@ -90,23 +90,23 @@ void test_exit_code_failure_stage_distinctions()
             invalid_solid.diagnostics.prepared_faces==1,
             "Invalid nonfloor Face must report the Solid geometry stage");
 
-    const auto outside=locate_reference_before(box(10,20),0.001);
+    const auto outside=locate_reference_before(box(10,10),0.001);
     require(outside.exit_code==StateExitCode::OutsideSolid &&
             outside.diagnostics.reference_candidates>=1 &&
             outside.diagnostics.rejected_outside>=1,
-            "1000 mm above a low ceiling should report OUTSIDE_SOLID");
+            "500 mm above a low ceiling should report OUTSIDE_SOLID");
 
     const auto near_ceiling=locate_reference_before(
-        box(10,1000.0/25.4+0.0005),0.001);
+        box(10,500.0/25.4+0.0005),0.001);
     require(near_ceiling.exit_code==StateExitCode::InsufficientClearance &&
             near_ceiling.diagnostics.rejected_clearance>=1,
             "Boundary-near reference should report insufficient clearance");
 
     const auto success=locate_reference_before(box(20),0.001);
     require(success.exit_code==StateExitCode::Success &&
-            !success.state_point.has_value() &&
+            success.state_point.has_value() &&
             success.diagnostics.accepted_references>=1,
-            "Successful BEFORE must defer State and remain exit code 0");
+            "Successful BEFORE must return State and remain exit code 0");
     require(success.debug_graph.floor_partitions.size()==1 &&
             success.debug_graph.floor_partitions.front().outer.size()==4 &&
             success.debug_graph.floor_partitions.front().holes.empty(),
@@ -127,7 +127,7 @@ void test_face_bvh_uses_plane_from_source()
             "Face BVH must accept FaceData.plane with preserved orientation");
     const auto state=locate_reference_before(cell,0.001);
     require(state.exit_code==StateExitCode::Success &&
-            !state.state_point.has_value() &&
+            state.state_point.has_value() &&
             state.debug_graph.nodes.size()==1,
             "Room BEFORE must use authoritative plane path without triangles");
 }
@@ -152,27 +152,27 @@ void test_before_radius_ignores_floor_and_ceiling()
     // New circles MUST exceed the floor offset without creating State.
     const CellData room=box(200,80);
     FaceSolid solid(room,0.001);
-    const Vec3 reference{100,100,1000.0/25.4};
+    const Vec3 reference{100,100,500.0/25.4};
     require(solid.inside(reference,0.001),
             "Wall-radius reference must still pass full 3D Solid containment");
     require(solid.nearest_distance(reference)<40,
             "Full Solid clearance should remain floor-limited");
     require(near(solid.nearest_wall_distance(reference),100.0),
             "Wall-only BVH must skip floor and ceiling Faces");
-    require(near(solid.nearest_wall_distance({2,100,1000.0/25.4}),2.0),
+    require(near(solid.nearest_wall_distance({2,100,500.0/25.4}),2.0),
             "Wall-only radius must still respect a nearby vertical wall");
 
     const auto state=locate_reference_before(room,0.001);
     require(state.exit_code==StateExitCode::Success &&
-            !state.state_point.has_value() &&
+            state.state_point.has_value() &&
             state.debug_graph.nodes.size()==1,
-            "Valid room should produce one BEFORE node and no early State");
+            "Valid room should produce one BEFORE node and State");
     require(near(state.debug_graph.nodes.front().radius,100.0-0.001),
             "BEFORE circle radius must use wall distance rather than floor");
 
-    // 1000mm reference lies only 0.02" below the ceiling: still the
+    // 500mm reference lies only 0.02" below the ceiling: still the
     // identical wall radius; roof clearance is only used for validity.
-    const CellData low_ceiling=box(200,1000.0/25.4+0.02);
+    const CellData low_ceiling=box(200,500.0/25.4+0.02);
     const auto near_roof=locate_reference_before(low_ceiling,0.001);
     require(near_roof.exit_code==StateExitCode::Success &&
             near_roof.debug_graph.nodes.size()==1 &&
@@ -217,7 +217,7 @@ void test_no_wall_solid_keeps_reference_candidate()
     };
 
     FaceSolid solid(cell,0.001);
-    const Vec3 candidate{100,100,1000.0/25.4};
+    const Vec3 candidate{100,100,500.0/25.4};
     require(solid.valid() && solid.inside(candidate,0.001),
             "Sloped no-wall fixture must contain its floor reference");
     require(std::isinf(solid.nearest_wall_distance(candidate)),
@@ -225,19 +225,19 @@ void test_no_wall_solid_keeps_reference_candidate()
 
     const auto result=locate_reference_before(cell,0.001);
     require(result.exit_code==StateExitCode::Success &&
-            !result.state_point.has_value() &&
+            result.state_point.has_value() &&
             result.debug_graph.nodes.size()==1,
             "Missing wall Faces must not reject an otherwise valid reference");
-    require(near(result.debug_graph.nodes.front().radius,0.0),
-            "Missing wall Faces must retain a finite serialized radius");
+    require(std::isinf(result.debug_graph.nodes.front().radius),
+            "Missing wall Faces must retain infinite Native radius");
 }
 
 void test_single_convex_floor_reference_only_before()
 {
     const CellData cell=box(20);
     const auto result=locate_reference_before(cell,0.001);
-    require(!result.state_point.has_value(),
-            "BEFORE must not select State before OPTIMIZED");
+    require(result.state_point.has_value(),
+            "BEFORE must select the valid polygon centroid as State");
     require(result.reference_points.size()==1,
             "Single Floor centroid must remain a reference");
     require(result.debug_graph.nodes.size()==1 &&
@@ -246,8 +246,8 @@ void test_single_convex_floor_reference_only_before()
             "Single Floor produces a one-node BEFORE Graph without AFTER");
     const Vec3& point=result.reference_points.front().point;
     require(near(point.x,10.0) && near(point.y,10.0) &&
-            near(point.z,1000.0/25.4),
-            "Reference must be the floor centroid raised by world Z +1000mm");
+            near(point.z,500.0/25.4),
+            "Reference must be the floor centroid raised by world Z +500mm");
 }
 void test_l_floor_queue_and_state_promoted_without_triangles()
 {
@@ -303,9 +303,9 @@ void test_stair_uses_same_first_reference_policy()
     auto cell=box(20);
     cell.category=CellSpaceCategory::Stair;
     const auto result=locate_reference_before(cell,0.001);
-    require(!result.state_point.has_value() &&
+    require(result.state_point.has_value() &&
             result.debug_graph.nodes.size()==1,
-            "Stair must defer State and follow the same BEFORE policy");
+            "Stair must select State and follow the same BEFORE policy");
     require(result.debug_graph.loop_candidates.empty(),
             "Stair BEFORE must never create collapse certificates");
 }
@@ -313,7 +313,8 @@ void test_before_rejects_sphere_radius_below_150mm()
 {
     const auto result=locate_reference_before(box(10),0.001);
     require(!result.state_point.has_value() &&
-            result.exit_code==StateExitCode::NoReferenceCandidates,
+            result.exit_code==StateExitCode::InsufficientClearance &&
+            result.diagnostics.rejected_clearance==1,
             "Sphere radius below 150mm must be rejected before BEFORE");
     require(result.debug_graph.nodes.empty() &&
             result.diagnostics.accepted_references==0,
@@ -321,10 +322,10 @@ void test_before_rejects_sphere_radius_below_150mm()
 }
 void test_short_room_has_no_reference_state()
 {
-    const auto cell=box(10,20); // +1000 mm lies ABOVE ceiling
+    const auto cell=box(10,10); // +500 mm lies ABOVE ceiling
     const auto result=locate_reference_before(cell,0.001);
     require(!result.state_point.has_value(),
-            "No valid 1000mm Reference means explicit no-State result");
+            "No valid 500mm Reference means explicit no-State result");
     require(result.debug_graph.nodes.empty(),
             "Failure must not fabricate a BEFORE Graph");
 }

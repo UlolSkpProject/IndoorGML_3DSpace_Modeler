@@ -22,7 +22,7 @@ constexpr std::uint64_t INPUT_VERSION_V3 = 3;
 constexpr std::uint64_t INPUT_VERSION_V4 = 4;
 constexpr std::uint64_t INPUT_VERSION_V5 = 5;
 constexpr std::uint64_t RESULT_VERSION = 1;
-constexpr std::uint64_t STATE_RESULT_VERSION = 12;
+constexpr std::uint64_t STATE_RESULT_VERSION = 13;
 constexpr std::size_t INPUT_HEADER_SIZE = 32;
 constexpr std::size_t CELL_FIXED_SIZE_V1 = 80;
 constexpr std::size_t CELL_FIXED_SIZE_V2 = 96;
@@ -514,20 +514,11 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
 
     for (const StatePointResult& result : results)
     {
-        // V12 per-cell envelope: index, integer ExitCode, State flag,
-        // optional State, graph flag, nine aggregate diagnostics and Graph.
-        // Room/Stair graph success intentionally has no State until the
-        // completed OPTIMIZED graph performs final selection.
-        // A native execution exception is deliberately NOT an ExitCode.
-        const bool success = result.exit_code == StateExitCode::Success;
-        if (!success && result.point.has_value())
+        // V13 per-cell envelope: index, integer ExitCode, State flag,
+        // optional State and nine aggregate diagnostics. Reference Graphs and
+        // their private radii live only in the keyed Native repository.
+        if (result.exit_code != StateExitCode::Success && result.point.has_value())
             throw std::invalid_argument("failed result must have no State");
-        if (!success && (!result.reference_points.empty() ||
-                         !result.graph_node_points.empty() ||
-                         !result.graph_edge_indices.empty() ||
-                         !result.graph_loop_candidates.empty() ||
-                         !result.graph_floor_partitions.empty()))
-            throw std::invalid_argument("failed result must have no Graph data");
         writer.append_u64(checked_u64(result.cell_index, "state cell index"));
         writer.append_u64(static_cast<std::uint64_t>(result.exit_code));
         writer.append_u64(result.point.has_value() ? 1 : 0);
@@ -540,10 +531,6 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
             writer.append_double(result.point->y);
             writer.append_double(result.point->z);
         }
-        const bool has_graph = success &&
-            (!result.graph_node_points.empty() || !result.reference_points.empty() ||
-             !result.graph_floor_partitions.empty());
-        writer.append_u64(has_graph ? 1 : 0);
         const StateDiagnostics& diag = result.diagnostics;
         writer.append_u64(diag.floor_faces);
         writer.append_u64(diag.prepared_faces);
@@ -554,126 +541,6 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
         writer.append_u64(diag.rejected_outside);
         writer.append_u64(diag.rejected_clearance);
         writer.append_u64(diag.accepted_references);
-        if (!has_graph) continue; // V12: graph=nil is a valid result.
-        if (result.reference_points.size() != result.reference_kinds.size())
-            throw std::invalid_argument("reference point/kind count mismatch");
-        writer.append_u64(checked_u64(result.reference_points.size(), "reference point count"));
-        for (std::size_t i = 0; i < result.reference_points.size(); ++i)
-        {
-            const Vec3& point = result.reference_points[i];
-            const std::uint64_t kind = result.reference_kinds[i];
-            if (kind < 1 || kind > 4)
-                throw std::invalid_argument("reference point kind is invalid");
-            require_finite(point.x, "reference point x");
-            require_finite(point.y, "reference point y");
-            require_finite(point.z, "reference point z");
-            writer.append_double(point.x);
-            writer.append_double(point.y);
-            writer.append_double(point.z);
-            writer.append_u64(kind);
-        }
-
-        if (result.graph_node_points.size() != result.graph_node_radii.size())
-            throw std::invalid_argument("debug graph node/radius count mismatch");
-        writer.append_u64(checked_u64(result.graph_node_points.size(), "debug graph node count"));
-        for (std::size_t i = 0; i < result.graph_node_points.size(); ++i)
-        {
-            const Vec3& point = result.graph_node_points[i];
-            const double radius = result.graph_node_radii[i];
-            require_finite(point.x, "debug graph node x");
-            require_finite(point.y, "debug graph node y");
-            require_finite(point.z, "debug graph node z");
-            require_finite(radius, "debug graph node radius");
-            if (radius < 0.0)
-                throw std::invalid_argument("negative debug graph node radius");
-            writer.append_double(point.x);
-            writer.append_double(point.y);
-            writer.append_double(point.z);
-            writer.append_double(radius);
-        }
-        if (result.graph_edge_indices.size() % 2 != 0)
-            throw std::invalid_argument("debug graph edge indices must be paired");
-        writer.append_u64(checked_u64(result.graph_edge_indices.size() / 2, "debug graph edge count"));
-        for (std::size_t i = 0; i < result.graph_edge_indices.size(); i += 2)
-        {
-            const std::uint64_t first = result.graph_edge_indices[i];
-            const std::uint64_t second = result.graph_edge_indices[i + 1];
-            if (first >= second || second >= result.graph_node_points.size())
-                throw std::invalid_argument("invalid debug graph edge indices");
-            writer.append_u64(first);
-            writer.append_u64(second);
-        }
-
-        // V7: each geometry-validated simple loop has a VARIABLE number
-        // of ordered vertices (3+), preserving the older V6 body fields.
-        writer.append_u64(checked_u64(result.graph_loop_candidates.size(), "loop candidate count"));
-        for (const StatePointResult::LoopCandidate& candidate : result.graph_loop_candidates)
-        {
-            if (candidate.vertices.size() < 3 || candidate.vertices.size() > 32)
-                throw std::invalid_argument("invalid loop vertex count");
-            writer.append_u64(checked_u64(candidate.vertices.size(), "loop vertex count"));
-            for (std::uint64_t index : candidate.vertices)
-            {
-                if (index >= result.graph_node_points.size())
-                    throw std::invalid_argument("loop vertex index outside graph");
-                writer.append_u64(index);
-            }
-            require_finite(candidate.representative.x, "loop point x");
-            require_finite(candidate.representative.y, "loop point y");
-            require_finite(candidate.representative.z, "loop point z");
-            require_finite(candidate.radius, "loop radius");
-            if (candidate.radius < 0.0)
-                throw std::invalid_argument("loop radius negative");
-            writer.append_double(candidate.representative.x);
-            writer.append_double(candidate.representative.y);
-            writer.append_double(candidate.representative.z);
-            writer.append_double(candidate.radius);
-            writer.append_u64(checked_u64(candidate.visible_neighbors.size(), "loop visible count"));
-            for (const std::uint64_t index : candidate.visible_neighbors)
-            {
-                if (index >= result.graph_node_points.size())
-                    throw std::invalid_argument("loop visible index outside graph");
-                writer.append_u64(index);
-            }
-        }
-
-        writer.append_u64(checked_u64(
-            result.graph_floor_partitions.size(), "floor partition count"));
-        for (const StatePointResult::FloorPartition& partition :
-             result.graph_floor_partitions)
-        {
-            if (partition.outer.size() < 3)
-                throw std::invalid_argument("floor partition outer ring is invalid");
-            writer.append_u64(checked_u64(
-                partition.outer.size(), "floor partition outer point count"));
-            for (const Vec3& point : partition.outer)
-            {
-                require_finite(point.x, "floor partition x");
-                require_finite(point.y, "floor partition y");
-                require_finite(point.z, "floor partition z");
-                writer.append_double(point.x);
-                writer.append_double(point.y);
-                writer.append_double(point.z);
-            }
-            writer.append_u64(checked_u64(
-                partition.holes.size(), "floor partition hole count"));
-            for (const std::vector<Vec3>& hole : partition.holes)
-            {
-                if (hole.size() < 3)
-                    throw std::invalid_argument("floor partition hole ring is invalid");
-                writer.append_u64(checked_u64(
-                    hole.size(), "floor partition hole point count"));
-                for (const Vec3& point : hole)
-                {
-                    require_finite(point.x, "floor partition hole x");
-                    require_finite(point.y, "floor partition hole y");
-                    require_finite(point.z, "floor partition hole z");
-                    writer.append_double(point.x);
-                    writer.append_double(point.y);
-                    writer.append_double(point.z);
-                }
-            }
-        }
     }
     return writer.take();
 }

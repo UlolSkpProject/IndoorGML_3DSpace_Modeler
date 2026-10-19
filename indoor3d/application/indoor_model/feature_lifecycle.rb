@@ -494,6 +494,12 @@ module ULOL
           def unregister_cell_space(cell_space)
             return if cell_space.nil?
 
+            if defined?(NativeAdjacencyBridge) &&
+               !@erasing_native_reference_graph_batch
+              NativeAdjacencyBridge.erase_reference_graphs([cell_space.id])
+            end
+            clear_reference_graph_overlay_for(cell_space) if
+              respond_to?(:clear_reference_graph_overlay_for, true)
             @feature_registry.remove_cell_space(cell_space)
             delete_entity_observer_key(@cell_space_observed_ids, cell_space.sketchup_group)
             remove_validation_focus_highlight_cell(cell_space) if validation_focus_highlight_tracking_active?

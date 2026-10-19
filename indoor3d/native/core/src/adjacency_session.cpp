@@ -42,6 +42,7 @@ std::size_t AdjacencySession::load_batch(const std::uint8_t* data, std::size_t s
 
     std::vector<CellData> parsed = parse_input_batch(data, size);
     cells_ = std::move(parsed);
+    cell_keys_.clear();
     state_targets_.clear();
     for (std::size_t index=0; index<cells_.size(); ++index)
     {
@@ -57,6 +58,19 @@ std::size_t AdjacencySession::load_batch(const std::uint8_t* data, std::size_t s
     failed_.store(false, std::memory_order_relaxed);
     state_.store(SessionState::Ready, std::memory_order_release);
     return cells_.size();
+}
+
+void AdjacencySession::set_cell_keys(std::vector<std::string> keys)
+{
+    if (state_.load(std::memory_order_acquire) != SessionState::Ready)
+        throw std::runtime_error("CellSpace keys require a ready native geometry session");
+    if (keys.size() != cells_.size())
+        throw std::invalid_argument("CellSpace key count does not match native batch");
+    std::vector<std::string> sorted=keys;
+    std::sort(sorted.begin(), sorted.end());
+    if (std::adjacent_find(sorted.begin(), sorted.end()) != sorted.end())
+        throw std::invalid_argument("duplicate CellSpace key in native batch");
+    cell_keys_ = std::move(keys);
 }
 
 bool AdjacencySession::has_state_targets() const
@@ -79,6 +93,11 @@ std::size_t AdjacencySession::start_state_check()
     {
         std::lock_guard<std::mutex> lock(error_mutex_);
         first_error_.clear();
+    }
+    {
+        std::lock_guard<std::mutex> lock(reference_graph_mutex_);
+        pending_reference_graphs_.clear();
+        reference_batch_committed_=false;
     }
 
     phase_.store(ProgressPhase::State, std::memory_order_relaxed);
@@ -130,8 +149,8 @@ void AdjacencySession::state_worker_loop()
         try
         {
             const CellData& cell=cells_[cell_position];
-            // Room/Stair: Polygon->Reference->BEFORE. State is deliberately
-            // absent until the completed OPTIMIZED graph selects it.
+            // Room/Stair: Polygon -> State/BEFORE -> AFTER -> COLLAPSED ->
+            // OPTIMIZED -> State-root shortest-path tree, all in Native.
             // Other categories keep their established State strategy
             // until their own Reference policy exists (no regressions).
             const CellSpaceInteriorPointResult result =
@@ -139,9 +158,21 @@ void AdjacencySession::state_worker_loop()
                  cell.category==CellSpaceCategory::Stair) ?
                 locate_reference_before(cell,state_tolerance_) :
                 locate_cell_space_interior_points(cell,state_tolerance_);
+            const bool reference_category =
+                cell.category==CellSpaceCategory::Room ||
+                cell.category==CellSpaceCategory::Stair;
+            if (reference_category && result.exit_code==StateExitCode::Success)
+            {
+                if (cell_position>=cell_keys_.size())
+                    throw std::runtime_error("CellSpace keys were not registered before Reference build");
+                ReferenceGraphPipeline pipeline=build_reference_graph_pipeline(
+                    cell,result.debug_graph,state_tolerance_
+                );
+                std::lock_guard<std::mutex> graph_lock(reference_graph_mutex_);
+                pending_reference_graphs_[cell_keys_[cell_position]]=std::move(pipeline);
+            }
             const StateSearchMetrics& metrics = result.state_metrics;
-            // Every requested Cell gets an explicit record. A successful
-            // Room/Stair record may contain a graph and no State point.
+            // Every requested Cell gets an explicit State/diagnostic record.
             StatePointResult state_result;
             state_result.cell_index = cells_[cell_position].index;
             state_result.point = result.state_point;
@@ -149,62 +180,8 @@ void AdjacencySession::state_worker_loop()
             state_result.diagnostics = result.diagnostics;
             if (result.exit_code == StateExitCode::Success)
             {
-                state_result.reference_status =
-                    static_cast<std::uint64_t>(result.reference_status);
-                state_result.reference_points.reserve(result.reference_points.size());
-                state_result.reference_kinds.reserve(result.reference_points.size());
-                for (const ReferencePoint& reference : result.reference_points)
-                {
-                    state_result.reference_points.push_back(reference.point);
-                    state_result.reference_kinds.push_back(
-                        static_cast<std::uint64_t>(reference.kind)
-                    );
-                }
-                state_result.graph_node_points.reserve(result.debug_graph.nodes.size());
-                state_result.graph_node_radii.reserve(result.debug_graph.nodes.size());
-                for (const ReferenceGraphNode& node : result.debug_graph.nodes)
-                {
-                    state_result.graph_node_points.push_back(node.point);
-                    state_result.graph_node_radii.push_back(node.radius);
-                }
-                state_result.graph_edge_indices.reserve(result.debug_graph.edges.size() * 2);
-                for (const ReferenceGraphEdge& edge : result.debug_graph.edges)
-                {
-                    state_result.graph_edge_indices.push_back(
-                        static_cast<std::uint64_t>(edge.first)
-                    );
-                    state_result.graph_edge_indices.push_back(
-                        static_cast<std::uint64_t>(edge.second)
-                    );
-                }
-                state_result.graph_loop_candidates.reserve(
-                    result.debug_graph.loop_candidates.size()
-                );
-                for (const ReferenceLoopCollapseCandidate& candidate :
-                     result.debug_graph.loop_candidates)
-                {
-                    StatePointResult::LoopCandidate record;
-                    record.vertices.reserve(candidate.vertices.size());
-                    for (std::size_t index : candidate.vertices)
-                        record.vertices.push_back(static_cast<std::uint64_t>(index));
-                    record.representative = candidate.representative.point;
-                    record.radius = candidate.representative.radius;
-                    record.visible_neighbors.reserve(candidate.visible_neighbors.size());
-                    for (std::size_t index : candidate.visible_neighbors)
-                        record.visible_neighbors.push_back(static_cast<std::uint64_t>(index));
-                    state_result.graph_loop_candidates.push_back(std::move(record));
-                }
-                state_result.graph_floor_partitions.reserve(
-                    result.debug_graph.floor_partitions.size()
-                );
-                for (const ReferenceFloorPartition& partition :
-                     result.debug_graph.floor_partitions)
-                {
-                    StatePointResult::FloorPartition record;
-                    record.outer = partition.outer;
-                    record.holes = partition.holes;
-                    state_result.graph_floor_partitions.push_back(std::move(record));
-                }
+                // Graph/radius data stays in the persistent Native repository.
+                // The State-result protocol intentionally carries no graph.
                 if (metrics.volume_centroid_succeeded)
                     state_volume_centroid_success_count_.fetch_add(1, std::memory_order_relaxed);
             }
@@ -259,6 +236,71 @@ void AdjacencySession::state_worker_loop()
         state_.store(SessionState::StateComplete, std::memory_order_release);
         completed_.store(true, std::memory_order_release);
     }
+}
+
+void AdjacencySession::commit_reference_graph_batch()
+{
+    if(state_.load(std::memory_order_acquire)!=SessionState::StateComplete ||
+       failed_.load(std::memory_order_acquire))
+        throw std::runtime_error("Reference Graph commit requires a successful State batch");
+    std::lock_guard<std::mutex> graph_lock(reference_graph_mutex_);
+    if(reference_batch_committed_)
+        throw std::runtime_error("Reference Graph batch was already committed");
+    for(const std::size_t position:state_targets_)
+        if(position<cell_keys_.size()) reference_graphs_.erase(cell_keys_[position]);
+    for(auto& entry:pending_reference_graphs_)
+        reference_graphs_[entry.first]={
+            std::move(entry.second),next_reference_revision_++
+        };
+    pending_reference_graphs_.clear();
+    reference_batch_committed_=true;
+}
+
+std::optional<ReferenceGraphStageSnapshot> AdjacencySession::get_reference_graph(
+    const std::string& cell_key, ReferenceGraphStage stage
+) const
+{
+    std::lock_guard<std::mutex> lock(reference_graph_mutex_);
+    const auto found=reference_graphs_.find(cell_key);
+    if(found==reference_graphs_.end()) return std::nullopt;
+    return reference_graph_stage(found->second.pipeline,stage);
+}
+
+std::vector<Vec3> AdjacencySession::get_reference_transition_curve(
+    const std::string& first_cell_key,const std::string& second_cell_key,
+    const Vec3& waypoint
+) const
+{
+    std::lock_guard<std::mutex> lock(reference_graph_mutex_);
+    const auto first=reference_graphs_.find(first_cell_key);
+    const auto second=reference_graphs_.find(second_cell_key);
+    if(first==reference_graphs_.end() || second==reference_graphs_.end()) return {};
+    std::vector<Vec3> result=reference_transition_polyline(first->second.pipeline,waypoint);
+    std::vector<Vec3> tail=reference_transition_polyline(second->second.pipeline,waypoint);
+    if(result.empty() || tail.empty()) return {};
+    std::reverse(tail.begin(),tail.end());
+    const Vec3 delta{
+        result.back().x-tail.front().x,
+        result.back().y-tail.front().y,
+        result.back().z-tail.front().z
+    };
+    if(delta.x*delta.x+delta.y*delta.y+delta.z*delta.z<=1.0e-18)
+        tail.erase(tail.begin());
+    result.insert(result.end(),tail.begin(),tail.end());
+    return result;
+}
+
+std::uint64_t AdjacencySession::get_reference_revision(const std::string& cell_key) const
+{
+    std::lock_guard<std::mutex> lock(reference_graph_mutex_);
+    const auto found=reference_graphs_.find(cell_key);
+    return found==reference_graphs_.end() ? 0 : found->second.revision;
+}
+
+void AdjacencySession::erase_reference_graphs(const std::vector<std::string>& cell_keys)
+{
+    std::lock_guard<std::mutex> lock(reference_graph_mutex_);
+    for(const auto& key:cell_keys) reference_graphs_.erase(key);
 }
 
 std::vector<bool> AdjacencySession::validate_room_los(
@@ -530,6 +572,7 @@ void AdjacencySession::clear()
     join_workers();
 
     cells_.clear();
+    cell_keys_.clear();
     state_targets_.clear();
     candidates_.clear();
     {
@@ -540,6 +583,11 @@ void AdjacencySession::clear()
     {
         std::lock_guard<std::mutex> lock(error_mutex_);
         first_error_.clear();
+    }
+    {
+        std::lock_guard<std::mutex> lock(reference_graph_mutex_);
+        pending_reference_graphs_.clear();
+        reference_batch_committed_=false;
     }
 
     state_.store(SessionState::Empty, std::memory_order_release);

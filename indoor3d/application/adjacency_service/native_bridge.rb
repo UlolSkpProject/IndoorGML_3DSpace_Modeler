@@ -10,7 +10,7 @@ module ULOL
         PROTOCOL_VERSION = 1
         GEOMETRY_PROTOCOL_VERSION = 5
         REFERENCE_POINTS_RESULT_VERSION = 2
-        STATE_RESULT_VERSION = 12
+        STATE_RESULT_VERSION = 13
         TRIANGLE_RESULT_VERSION = 6
         GRAPH_RESULT_VERSION = 5
         PREVIOUS_STATE_RESULT_VERSION = 4
@@ -140,8 +140,14 @@ module ULOL
 
           native_module = native
           [
+            :set_cell_keys,
             :start_reference_check,
             :get_reference_result_bytes,
+            :commit_reference_graph_batch,
+            :get_reference_graph,
+            :get_reference_transition_curve,
+            :get_reference_revision,
+            :erase_reference_graphs,
             :start_adjacency_check,
             :get_adjacency_result_bytes
           ].all? { |name| native_module.respond_to?(name) }
@@ -188,6 +194,10 @@ module ULOL
           native_module = native
           parse_started_at = monotonic_time
           loaded_count = native_module.load_batch(input_bytes).to_i
+          unless native_module.respond_to?(:set_cell_keys)
+            raise ProtocolError, 'native extension does not support CellSpace-keyed Reference graphs'
+          end
+          native_module.set_cell_keys(keys.map(&:to_s))
           parse_duration = elapsed_since(parse_started_at)
           unless loaded_count == snapshots.length
             raise ProtocolError,
@@ -210,6 +220,72 @@ module ULOL
           end
           reset_shared_session_state
           raise
+        end
+
+        # Radius-free debug snapshot. Native owns every reduction stage and
+        # only exposes coordinates/edges when the console command asks for it.
+        def reference_graph(cell_id, stage)
+          raise ProtocolError, 'Native Reference Graph API unavailable' unless
+            available? && native.respond_to?(:get_reference_graph)
+          value = native.get_reference_graph(cell_id.to_s, stage.to_sym)
+          return nil if value.nil?
+
+          graph = normalize_hash(value)
+          nodes = Array(graph[:nodes]).map do |coordinates|
+            point = Array(coordinates)
+            unless point.length == 3 && point.all? { |number| number.is_a?(Numeric) && number.finite? }
+              raise ProtocolError, 'Native Reference Graph node is invalid'
+            end
+            point.map(&:to_f).freeze
+          end.freeze
+          edges = Array(graph[:edges]).map do |pair|
+            first, second = Array(pair)
+            unless first.is_a?(Integer) && second.is_a?(Integer) &&
+                   first >= 0 && first < second && second < nodes.length
+              raise ProtocolError, 'Native Reference Graph edge is invalid'
+            end
+            [first, second].freeze
+          end.freeze
+          { nodes: nodes, edges: edges }.freeze
+        end
+
+        # Native selects the closest reachable gateway and restores the
+        # already-baked State-rooted shortest path tree.
+        def reference_transition_curve(first_cell_id, second_cell_id, waypoint)
+          raise ProtocolError, 'Native Reference Transition Curve API unavailable' unless
+            available? && native.respond_to?(:get_reference_transition_curve)
+          coordinates = waypoint.respond_to?(:to_a) ? Array(waypoint.to_a) : Array(waypoint)
+          unless coordinates.length == 3 &&
+                 coordinates.all? { |number| number.is_a?(Numeric) && number.finite? }
+            raise ProtocolError, 'Reference waypoint is invalid'
+          end
+          result = native.get_reference_transition_curve(
+            first_cell_id.to_s, second_cell_id.to_s,
+            coordinates.map(&:to_f).pack('E*')
+          )
+          return nil if result.nil?
+
+          Array(result).map do |entry|
+            point = Array(entry)
+            unless point.length == 3 && point.all? { |number| number.is_a?(Numeric) && number.finite? }
+              raise ProtocolError, 'Native Reference Transition Curve point is invalid'
+            end
+            point.map(&:to_f).freeze
+          end.freeze
+        end
+
+        def reference_revision(cell_id)
+          return 0 unless available? && native.respond_to?(:get_reference_revision)
+
+          native.get_reference_revision(cell_id.to_s).to_i
+        rescue StandardError
+          0
+        end
+
+        def erase_reference_graphs(cell_ids)
+          return false unless available? && native.respond_to?(:erase_reference_graphs)
+
+          native.erase_reference_graphs(Array(cell_ids).map(&:to_s)) == true
         end
 
         # Calls Native LOS using the currently loaded geometry, not the
@@ -292,6 +368,15 @@ module ULOL
           metrics[:state_target_count] = target_count unless metrics.key?(:state_target_count)
           metrics[:state_output_bytes] = output_bytes.bytesize
           decoded.merge(metrics: metrics.freeze).freeze
+        end
+
+        def commit_reference_graph_batch
+          raise ProtocolError, 'native geometry session is not active' unless shared_session_active?
+          unless native.respond_to?(:commit_reference_graph_batch)
+            raise ProtocolError, 'Native Reference Graph batch commit API unavailable'
+          end
+
+          native.commit_reference_graph_batch == true
         end
 
         def close_geometry_session
@@ -513,9 +598,8 @@ module ULOL
           buffer
         end
 
-        # V12: { exit_code: Integer, state_point:, graph:, diagnostics: }.
-        # A successful Room/Stair reference graph has state_point=nil until
-        # State is selected from the completed OPTIMIZED graph.
+        # V13: State and diagnostics only. Reference graphs/radii remain in
+        # Native and are exposed through separate radius-free query methods.
         def decode_state_result(bytes)
           reader = BinaryReader.new(bytes)
           raise ProtocolError, 'native Reference result header is truncated' if reader.remaining < 32
@@ -555,124 +639,13 @@ module ULOL
                               finite_f64(reader.read_f64, 'State z')
                             ].freeze
                           end
-            graph_flag = reader.read_u64
-            raise ProtocolError, 'invalid Reference graph flag' unless [0, 1].include?(graph_flag)
-            raise ProtocolError, 'failed Reference result cannot have a Graph' if !exit_code.zero? && graph_flag == 1
-
             diagnostics = STATE_DIAGNOSTIC_FIELDS.to_h do |name|
               [name, checked_count(reader.read_u64, "Reference #{name}")]
             end.freeze
-            graph = nil
-            if graph_flag == 1
-              reference_count = checked_count(reader.read_u64, 'debug reference count')
-              debug_points = []
-              debug_kinds = []
-              reference_count.times do
-                debug_points << [
-                  finite_f64(reader.read_f64, 'debug reference x'),
-                  finite_f64(reader.read_f64, 'debug reference y'),
-                  finite_f64(reader.read_f64, 'debug reference z')
-                ].freeze
-                kind = checked_count(reader.read_u64, 'debug reference kind')
-                raise ProtocolError, 'invalid debug reference kind' unless (1..4).cover?(kind)
-                debug_kinds << kind
-              end
-
-              node_count = checked_count(reader.read_u64, 'Graph node count')
-              nodes = node_count.times.map do
-                point = [
-                  finite_f64(reader.read_f64, 'Graph node x'),
-                  finite_f64(reader.read_f64, 'Graph node y'),
-                  finite_f64(reader.read_f64, 'Graph node z')
-                ].freeze
-                radius = finite_f64(reader.read_f64, 'Graph radius')
-                raise ProtocolError, 'invalid Graph radius' if radius.negative?
-                { point: point, radius: radius }.freeze
-              end.freeze
-              edge_count = checked_count(reader.read_u64, 'Graph edge count')
-              edges = edge_count.times.map do
-                first = checked_count(reader.read_u64, 'Graph edge first')
-                second = checked_count(reader.read_u64, 'Graph edge second')
-                if first >= second || second >= node_count
-                  raise ProtocolError, 'invalid Graph edge indices'
-                end
-                [first, second].freeze
-              end.freeze
-
-              loop_count = checked_count(reader.read_u64, 'Graph loop count')
-              loop_candidates = loop_count.times.map do
-                length = checked_count(reader.read_u64, 'Graph loop vertex count')
-                raise ProtocolError, 'invalid Graph loop length' unless length.between?(3, 32)
-                vertices = length.times.map do
-                  checked_count(reader.read_u64, 'Graph loop vertex')
-                end.freeze
-                if vertices.uniq.size != length || vertices.any? { |id| id >= node_count }
-                  raise ProtocolError, 'invalid Graph loop vertex'
-                end
-                point = [
-                  finite_f64(reader.read_f64, 'Graph loop center x'),
-                  finite_f64(reader.read_f64, 'Graph loop center y'),
-                  finite_f64(reader.read_f64, 'Graph loop center z')
-                ].freeze
-                radius = finite_f64(reader.read_f64, 'Graph loop radius')
-                raise ProtocolError, 'invalid Graph loop radius' if radius.negative?
-                visible_count = checked_count(reader.read_u64, 'Graph loop visible count')
-                visible = visible_count.times.map do
-                  checked_count(reader.read_u64, 'Graph loop visible neighbor')
-                end.freeze
-                raise ProtocolError, 'invalid Graph loop neighbor' if visible.any? { |id| id >= node_count }
-                { vertices: vertices, triangle: vertices, point: point,
-                  radius: radius, visible_neighbors: visible }.freeze
-              end.freeze
-
-              partition_count = checked_count(reader.read_u64, 'Floor partition count')
-              raise ProtocolError, 'too many Floor partitions' if partition_count > 4096
-              floor_partitions = partition_count.times.map do
-                outer_count = checked_count(
-                  reader.read_u64, 'Floor partition outer point count'
-                )
-                unless outer_count >= 3 && outer_count <= reader.remaining / VEC3_SIZE
-                  raise ProtocolError, 'invalid Floor partition outer ring'
-                end
-                outer = outer_count.times.map do
-                  [
-                    finite_f64(reader.read_f64, 'Floor partition x'),
-                    finite_f64(reader.read_f64, 'Floor partition y'),
-                    finite_f64(reader.read_f64, 'Floor partition z')
-                  ].freeze
-                end.freeze
-                hole_count = checked_count(reader.read_u64, 'Floor partition hole count')
-                raise ProtocolError, 'too many Floor partition holes' if hole_count > 4096
-                holes = hole_count.times.map do
-                  point_count = checked_count(
-                    reader.read_u64, 'Floor partition hole point count'
-                  )
-                  unless point_count >= 3 && point_count <= reader.remaining / VEC3_SIZE
-                    raise ProtocolError, 'invalid Floor partition hole ring'
-                  end
-                  point_count.times.map do
-                    [
-                      finite_f64(reader.read_f64, 'Floor partition hole x'),
-                      finite_f64(reader.read_f64, 'Floor partition hole y'),
-                      finite_f64(reader.read_f64, 'Floor partition hole z')
-                    ].freeze
-                  end.freeze
-                end.freeze
-                { outer: outer, holes: holes }.freeze
-              end.freeze
-              graph = {
-                nodes: nodes, edges: edges,
-                loop_candidates: loop_candidates,
-                floor_partitions: floor_partitions,
-                debug_points: debug_points.freeze,
-                debug_kinds: debug_kinds.freeze
-              }.freeze
-            end
 
             results[index] = {
               exit_code: exit_code,
               state_point: coordinates,
-              graph: graph,
               diagnostics: diagnostics
             }.freeze
           end

@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require_relative '../adjacency_service/reference_graph_transition_router'
-
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -221,7 +219,7 @@ module ULOL
                         cell_type: entry[:cell_type],
                         category_code: entry[:category_code]
                       )
-                      clear_debug_reference_points(entry[:cell_space])
+                      clear_reference_graph_overlay_for(entry[:cell_space])
                       changed << entry[:cell_space]
                     end
                     finalize_cell_space_batch(changed)
@@ -266,90 +264,30 @@ module ULOL
 
           # Runtime-only debug graphs; only active, valid CellSpaces render.
           def debug_reference_graphs
-            selected_mode = ReferenceGraphDebugMode.mode
-            source = @debug_reference_graph_by_cell_id || {}
-            Array(@feature_registry&.cell_spaces).filter_map do |cell_space|
-              next unless cell_space&.valid?
+            return [] if ReferenceGraphDebugMode.mode == :off
 
-              cell_id = cell_space.id
-              case selected_mode
-              when :connected
-                room_internal_connected_graph_for(cell_id)
-              when :internal
-                room_internal_graph_for(cell_id)
-              when :optimized
-                optimized_debug_reference_graph_for(cell_id) ||
-                  collapsed_debug_reference_graph_for(cell_id) ||
-                  simplified_debug_reference_graph_for(cell_id) || source[cell_id]
-              when :collapsed
-                collapsed_debug_reference_graph_for(cell_id) ||
-                  simplified_debug_reference_graph_for(cell_id) || source[cell_id]
-              when :after
-                simplified_debug_reference_graph_for(cell_id) || source[cell_id]
-              else
-                source[cell_id]
-              end
-            end
+            Array((@debug_reference_graph_overlay_by_cell_id || {}).values)
           end
 
           # Native's exact completed Floor partition boundaries. These are
           # independent of the selected graph-reduction stage.
           def debug_floor_partitions
-            source = @debug_reference_graph_by_cell_id || {}
-            Array(@feature_registry&.cell_spaces).flat_map do |cell_space|
-              next [] unless cell_space&.valid?
-
-              Array(source.dig(cell_space.id, :floor_partitions))
-            end
+            []
           end
 
-          # Snapshot after Kruskal, before the extra Shortcut pass.
-          def room_internal_connected_graph_for(cell_id)
-            @room_internal_connected_by_cell_id&.[](cell_id.to_s)
-          end
-
-          # Final per-CellSpace graph after Kruskal + second Shortcut.
-          def room_internal_graph_for(cell_id)
-            @room_internal_graph_by_cell_id&.[](cell_id.to_s)
-          end
-
-          # Public, runtime-only Transition route API. The connected graph
-          # preserves OPTIMIZED node indices; never route on the post-optimizer
-          # graph, which can reindex the selected State node.
-          def reference_graph_route_for(cell_id)
-            id = cell_id.to_s
-            room_internal_connected_graph_for(id) ||
-              optimized_debug_reference_graph_for(id)
-          end
-
-          def reference_graph_state_node_index_for(cell_id)
-            id = cell_id.to_s
-            graph = reference_graph_route_for(id)
-            selection = @reference_graph_state_selection_by_cell_id&.[](id)
-            index = selection&.[](:state_node_index)
-            return nil unless index.is_a?(Integer)
-
-            nodes = Array(graph && graph[:nodes])
-            return nil unless index.between?(0, nodes.length - 1)
-
-            selected_point = selection[:point]
-            graph_point = nodes[index].is_a?(Hash) ? nodes[index][:point] : nil
-            return nil unless selected_point && graph_point &&
-                              [selected_point.x, selected_point.y, selected_point.z] ==
-                              [graph_point.x, graph_point.y, graph_point.z]
-
-            index
-          rescue StandardError
-            nil
-          end
-
-          def reference_graph_path_to_waypoint(cell_id, waypoint)
-            index = reference_graph_state_node_index_for(cell_id)
-            return nil unless index
-
-            ReferenceGraphTransitionRouter.route(
-              reference_graph_route_for(cell_id), index, waypoint
+          def reference_transition_curve(first_cell_id, second_cell_id, waypoint)
+            coordinates = NativeAdjacencyBridge.reference_transition_curve(
+              first_cell_id, second_cell_id, waypoint
             )
+            return nil if coordinates.nil? || coordinates.empty?
+
+            coordinates.map { |point| Geom::Point3d.new(*point) }.freeze
+          rescue StandardError => error
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Native Reference Transition Curve unavailable " \
+              "cells=#{first_cell_id},#{second_cell_id}: #{error.class}: #{error.message}"
+            ) if defined?(IndoorCore::Logger)
+            nil
           end
 
           # Both caches hold immutable snapshots. Object identity changes
@@ -357,99 +295,54 @@ module ULOL
           # revision check catches replacements without relying on overlay
           # invalidation from another subsystem.
           def reference_graph_route_snapshot_key_for(cell_id)
-            id = cell_id.to_s
-            [
-              reference_graph_route_for(id)&.object_id,
-              @reference_graph_state_selection_by_cell_id&.[](id)&.object_id
-            ]
+            NativeAdjacencyBridge.reference_revision(cell_id)
           end
 
           def debug_reference_points_by_kind
-            selected_mode = ReferenceGraphDebugMode.mode
-            originals = @debug_reference_points_by_cell_id || {}
-            by_kind = Hash.new { |hash, key| hash[key] = [] }
+            return {} if ReferenceGraphDebugMode.mode == :off
+
+            points = Array((@debug_reference_graph_overlay_by_cell_id || {}).values).flat_map do |graph|
+              Array(graph[:nodes]).filter_map { |node| node[:point] }
+            end
+            { 4 => points.freeze }
+          end
+
+          # Explicit one-shot console query. No graph or radius is populated by
+          # normal CellSpace refresh; the overlay only owns this display copy.
+          def request_reference_graph_debug(stage)
+            selected = stage.to_sym
+            unless %i[before after collapsed optimized].include?(selected)
+              raise ArgumentError, 'expected :before, :after, :collapsed or :optimized'
+            end
+
+            snapshots = {}
             Array(@feature_registry&.cell_spaces).each do |cell_space|
               next unless cell_space&.valid?
 
-              cell_id = cell_space.id
-              # AFTER protects certified ring nodes, their external gateways
-              # and explicitly marked semantic nodes.
-              # Reuse that exact protection policy for debug colors rather
-              # than reimplementing it in the Overlay renderer.
-              before = @debug_reference_graph_by_cell_id&.[](cell_id)
-              protected_lookup, protected_positions =
-                protected_reference_visuals_for(cell_id, before)
-              # An unavailable Native LOS graph must never masquerade as an
-              # internal graph by falling back to old candidate diagnostics.
-              next if selected_mode == :internal && !room_internal_graph_for(cell_id)
-              next if selected_mode == :connected && !room_internal_connected_graph_for(cell_id)
+              graph = NativeAdjacencyBridge.reference_graph(cell_space.id, selected)
+              next unless graph
 
-              displayed = case selected_mode
-                          when :after then simplified_debug_reference_graph_for(cell_id)
-                          when :collapsed then collapsed_debug_reference_graph_for(cell_id) ||
-                                                 simplified_debug_reference_graph_for(cell_id)
-                          when :optimized then optimized_debug_reference_graph_for(cell_id) ||
-                                                 collapsed_debug_reference_graph_for(cell_id) ||
-                                                 simplified_debug_reference_graph_for(cell_id)
-                          when :internal then room_internal_graph_for(cell_id)
-                          when :connected then room_internal_connected_graph_for(cell_id)
-                          end
-              if displayed
-                # Existing Stage overlays retain their usual reference points.
-                # Kind 5 identifies protected Reference Points (magenta X).
-                displayed_origins = Array(displayed[:original_indices])
-                Array(displayed[:nodes]).each_with_index do |node, index|
-                  id = displayed_origins.empty? ? index : displayed_origins[index]
-                  protected = node[:protected] ||
-                              %i[door transition junction].include?(node[:semantic_role]) ||
-                              (!id.nil? && protected_lookup[id])
-                  by_kind[protected ? 5 : 4] << node[:point]
-                end
-              else
-                Array(originals[cell_id]).each do |entry|
-                  if entry.is_a?(Hash)
-                    kind = entry[:kind].to_i
-                    point = entry[:point]
-                    if kind == 4 && point &&
-                       protected_positions[[point.x, point.y, point.z]]
-                      kind = 5
-                    end
-                    by_kind[kind] << point
-                  else
-                    by_kind[0] << entry # Legacy in-memory data
-                  end
-                end
-              end
+              nodes = Array(graph[:nodes]).map do |coordinates|
+                { point: Geom::Point3d.new(*coordinates) }.freeze
+              end.freeze
+              snapshots[cell_space.id] = {
+                nodes: nodes,
+                edges: Array(graph[:edges]).freeze,
+                stage: selected
+              }.freeze
             end
-            by_kind
+            @debug_reference_graph_overlay_by_cell_id = snapshots
+            @model&.active_view&.invalidate
+            snapshots.length
+          end
+
+          def clear_reference_graph_debug
+            @debug_reference_graph_overlay_by_cell_id = {}
+            @model&.active_view&.invalidate
+            true
           end
 
           private
-
-          # Immutable BEFORE graphs: avoid rebuilding protected adjacency
-          # sets on every SketchUp Overlay frame.
-          def protected_reference_visuals_for(cell_id, source)
-            return [{}, {}] unless source
-
-            cache = (@debug_reference_protection_visuals_by_cell_id ||= {})
-            entry = cache[cell_id]
-            return [entry[:ids], entry[:positions]] if entry && entry[:source].equal?(source)
-
-            protected_ids = ReferenceGraphSimplifier.protected_originals(source, [])
-            lookup = protected_ids.to_h { |id| [id, true] }.freeze
-            origins = Array(source[:original_indices])
-            positions = {}
-            Array(source[:nodes]).each_with_index do |node, index|
-              id = origins.empty? ? index : origins[index]
-              next unless lookup[id]
-
-              point = node[:point]
-              positions[[point.x, point.y, point.z].freeze] = true
-            end
-            positions.freeze
-            cache[cell_id] = { source: source, ids: lookup, positions: positions }.freeze
-            [lookup, positions]
-          end
 
           def cell_space_lifecycle_service
             @cell_space_lifecycle_service ||= CellSpaceLifecycleService.new(
@@ -692,45 +585,18 @@ module ULOL
                 ) if defined?(IndoorCore::Logger)
               end
 
-              graph = outcome[:graph]
-              if graph
-                store_debug_reference_points(
-                  cell_space, graph[:debug_points], kinds: graph[:debug_kinds]
-                )
-                stored = store_debug_reference_graph(
-                  cell_space, graph[:nodes], graph[:edges], graph[:loop_candidates],
-                  graph[:floor_partitions]
-                )
-                # BEFORE stays immutable. While the Native geometry session is
-                # open, precompute AFTER and then COLLAPSED/OPTIMIZED with
-                # validated replacement LOS.
-                preload_native_reference_graph_stages_for(cell_space, index) if stored
-              else
-                clear_debug_reference_points(cell_space)
-              end
-
-              # Room/Stair State is selected only after OPTIMIZED is complete.
-              # The arithmetic mean is not inserted into the graph; the
-              # nearest surviving reference node supplies the exact position.
+              clear_reference_graph_overlay_for(cell_space)
               unless coordinates
-                optimized = optimized_debug_reference_graph_for(cell_space.id)
-                begin
-                  selection = ReferenceGraphStateSelector.select(optimized)
-                rescue StandardError => error
-                  details = diagnostics.map { |key, value| "#{key}=#{value}" }.join(', ')
-                  raise NativeAdjacencyBridge::StateUnavailableError.new(
-                    "Native State unavailable after OPTIMIZED for #{cell_space.id}: " \
-                    "#{error.message}; #{details}",
-                    exit_code: 50, diagnostics: diagnostics
-                  )
-                end
-                (@reference_graph_state_selection_by_cell_id ||= {})[cell_space.id] = selection
-                point = selection.fetch(:point)
-                coordinates = [point.x, point.y, point.z].freeze
+                details = diagnostics.map { |key, value| "#{key}=#{value}" }.join(', ')
+                raise NativeAdjacencyBridge::StateUnavailableError.new(
+                  "Native State result omitted State for #{cell_space.id}; #{details}",
+                  exit_code: 50, diagnostics: diagnostics
+                )
               end
               state_point_applier.call(cell_space, coordinates)
             end
 
+            NativeAdjacencyBridge.commit_reference_graph_batch
             yield
           ensure
             if defined?(NativeAdjacencyBridge) &&
@@ -739,315 +605,10 @@ module ULOL
             end
           end
 
-          def store_debug_reference_points(cell_space, coordinate_sets, kinds: nil)
-            return [] unless cell_space&.valid?
-
-            point_kinds = Array(kinds)
-            points = Array(coordinate_sets).each_with_index.filter_map do |coordinates, index|
-              values = Array(coordinates).map(&:to_f)
-              next unless values.length == 3 && values.all?(&:finite?)
-
-              {
-                point: Geom::Point3d.new(values[0], values[1], values[2]),
-                kind: point_kinds.fetch(index, 0).to_i
-              }.freeze
-            end
-            @debug_reference_points_by_cell_id ||= {}
-            @debug_reference_points_by_cell_id[cell_space.id] = points.freeze
-            points
-          end
-
-          def store_debug_reference_graph(
-            cell_space, node_data, edge_data, collapse_data = nil, partition_data = nil
-          )
-            return false unless cell_space&.valid?
-
-            nodes = Array(node_data).filter_map do |record|
-              raw = Hash(record)
-              coordinates = Array(raw[:point])
-              next unless coordinates.length == 3
-              values = coordinates.map(&:to_f)
-              radius = raw[:radius].to_f
-              next unless values.all?(&:finite?) && radius.finite? && radius >= 0.0
-
-              {
-                point: Geom::Point3d.new(*values),
-                radius: radius
-              }.freeze
-            end
-            edges = Array(edge_data).filter_map do |indices|
-              first, second = Array(indices)
-              next unless first.is_a?(Integer) && second.is_a?(Integer)
-              next unless first >= 0 && first < second && second < nodes.length
-
-              [first, second].freeze
-            end
-            verified = Array(collapse_data).filter_map do |candidate|
-              raw = Hash(candidate)
-              vertices = Array(raw[:vertices] || raw[:triangle])
-              visible = Array(raw[:visible_neighbors])
-              position = Array(raw[:point])
-              radius = raw[:radius].to_f
-              next unless vertices.size.between?(3, 32) &&
-                          vertices.uniq.size == vertices.size
-              next unless (vertices + visible).all? { |index| index.is_a?(Integer) &&
-                                                             index >= 0 && index < nodes.length }
-              next unless position.size == 3 && position.all? { |value| value.to_f.finite? }
-              # Radius is retained for debug metadata, not for accepting
-              # a Native-validated Collapse candidate.
-              radius = 0.0 unless radius.finite? && radius >= 0.0
-
-              {
-                triangle: vertices.freeze,
-                vertices: vertices.freeze,
-                point: Geom::Point3d.new(*position.map(&:to_f)),
-                radius: radius,
-                visible_neighbors: visible.freeze
-              }.freeze
-            end.freeze
-
-            convert_ring = lambda do |ring|
-              points = Array(ring).filter_map do |coordinates|
-                values = Array(coordinates).map(&:to_f)
-                next unless values.length == 3 && values.all?(&:finite?)
-
-                Geom::Point3d.new(*values)
-              end
-              points.length >= 3 ? points.freeze : nil
-            end
-            partitions = Array(partition_data).filter_map do |record|
-              raw = Hash(record)
-              outer = convert_ring.call(raw[:outer])
-              next unless outer
-
-              holes = Array(raw[:holes]).filter_map { |ring| convert_ring.call(ring) }
-              { outer: outer, holes: holes.freeze }.freeze
-            end.freeze
-
-            @debug_reference_graph_by_cell_id ||= {}
-            original = {
-              nodes: nodes.freeze,
-              edges: edges.freeze,
-              loop_candidates: verified,
-              floor_partitions: partitions
-            }.freeze
-            @debug_reference_graph_by_cell_id[cell_space.id] = original
-
-            # Invalidate the lazy reduced cache only when Native supplies
-            # new geometry. Before mode remains at its prior processing cost.
-            @debug_reference_protection_visuals_by_cell_id&.delete(cell_space.id)
-            @debug_reference_graph_simplified_by_cell_id&.delete(cell_space.id)
-            @debug_reference_graph_collapsed_by_cell_id&.delete(cell_space.id)
-            @debug_reference_graph_optimized_by_cell_id&.delete(cell_space.id)
-            @reference_graph_state_selection_by_cell_id&.delete(cell_space.id)
-            @room_internal_graph_by_cell_id&.delete(cell_space.id)
-            @room_internal_connected_by_cell_id&.delete(cell_space.id)
-            true
-          rescue StandardError
-            # Debug rendering must never block the State/CellSpace lifecycle.
-            @debug_reference_graph_by_cell_id&.delete(cell_space.id)
-            @debug_reference_protection_visuals_by_cell_id&.delete(cell_space.id)
-            @debug_reference_graph_simplified_by_cell_id&.delete(cell_space.id)
-            @debug_reference_graph_collapsed_by_cell_id&.delete(cell_space.id)
-            @debug_reference_graph_optimized_by_cell_id&.delete(cell_space.id)
-            @reference_graph_state_selection_by_cell_id&.delete(cell_space.id)
-            @room_internal_graph_by_cell_id&.delete(cell_space.id)
-            @room_internal_connected_by_cell_id&.delete(cell_space.id)
-            false
-          end
-
-          # AFTER is part of State creation because State is selected only
-          # after OPTIMIZED. Native geometry remains available until close.
-          def preload_native_after_graph_for(cell_space, session_index)
-            return unless cell_space&.valid?
-            source = @debug_reference_graph_by_cell_id&.[](cell_space.id)
-            return unless source
-            los_batch = nil
-            category = cell_space.category_code.to_s
-            if %w[Room Stair].any? { |name| category.casecmp(name).zero? } &&
-               NativeAdjacencyBridge.shared_session_active? &&
-               NativeAdjacencyBridge.room_los_supported?
-              tolerance = Utils::Geometry::ADJACENCY_TOLERANCE
-              los_batch = lambda do |pairs|
-                NativeAdjacencyBridge.validate_room_los_batch_from_open_session(
-                  session_index, pairs, tolerance: tolerance
-                )
-              end
-            end
-            result = ReferenceGraphSimplifier.simplify(source, los_batch: los_batch)
-            (@debug_reference_graph_simplified_by_cell_id ||= {})[cell_space.id] = result
-            result
-          rescue StandardError => error
-            IndoorCore::Logger.puts(
-              "[IndoorGML] Native AFTER precompute skipped cell=#{cell_space.id}: " \
-              "#{error.class}: #{error.message}"
-            ) if defined?(IndoorCore::Logger)
-            nil
-          end
-
-          def preload_native_reference_graph_stages_for(cell_space, session_index)
-            after = preload_native_after_graph_for(cell_space, session_index)
-            return unless after
-
-            preload_native_shortcuts_for(cell_space, session_index)
-            preload_room_internal_graph_for(cell_space, session_index)
-          end
-
-          # Lazy, non-destructive reduction. The original Native graph remains
-          # authoritative and is used unmodified in Before mode.
-          def simplified_debug_reference_graph_for(cell_id)
-            cache = (@debug_reference_graph_simplified_by_cell_id ||= {})
-            return cache[cell_id] if cache.key?(cell_id)
-
-            source = @debug_reference_graph_by_cell_id&.[](cell_id)
-            return nil unless source && !Array(source[:nodes]).empty?
-
-            cache[cell_id] = ReferenceGraphSimplifier.simplify(source)
-          rescue StandardError => error
-            # Cache a failed attempt, so repeated overlay frames do not
-            # repeatedly run a potentially expensive simplifier.
-            cache[cell_id] = nil if cache
-            IndoorCore::Logger.puts(
-              "[IndoorGML] Reference graph simplification skipped cell=#{cell_id}: " \
-              "#{error.class}: #{error.message}"
-            ) if defined?(IndoorCore::Logger)
-            nil
-          end
-
-          def collapsed_debug_reference_graph_for(cell_id)
-            cache = (@debug_reference_graph_collapsed_by_cell_id ||= {})
-            return cache[cell_id] if cache.key?(cell_id)
-
-            source = @debug_reference_graph_by_cell_id&.[](cell_id)
-            after = simplified_debug_reference_graph_for(cell_id)
-            return nil unless source && after
-
-            cache[cell_id] = ReferenceGraphLoopCollapser.collapse(
-              after, source[:loop_candidates]
-            )
-          rescue StandardError => error
-            cache[cell_id] = nil if cache
-            IndoorCore::Logger.puts(
-              "[IndoorGML] Reference loop collapse skipped cell=#{cell_id}: " \
-              "#{error.class}: #{error.message}"
-            ) if defined?(IndoorCore::Logger)
-            nil
-          end
-
-          # Optional debug reduction: failure cannot fail a CellSpace or State.
-          def preload_native_shortcuts_for(cell_space, session_index)
-            return unless cell_space&.valid?
-            return unless cell_space.category_code.to_s.casecmp('Room').zero?
-            return unless NativeAdjacencyBridge.shared_session_active?
-            return unless NativeAdjacencyBridge.room_los_supported?
-
-            collapsed = collapsed_debug_reference_graph_for(cell_space.id)
-            return unless collapsed
-
-            # The session preserves local geometry while State results are
-            # assigned. All new A-C edges must pass Native Room LOS.
-            tolerance = Utils::Geometry::ADJACENCY_TOLERANCE
-            validate = lambda do |first, last|
-              NativeAdjacencyBridge.validate_room_los_from_open_session(
-                session_index, first, last, tolerance: tolerance
-              )
-            end
-            cache = (@debug_reference_graph_optimized_by_cell_id ||= {})
-            cache[cell_space.id] = ReferenceGraphShortcutOptimizer.optimize(
-              collapsed, los_validator: validate
-            )
-          rescue StandardError => error
-            @debug_reference_graph_optimized_by_cell_id&.delete(cell_space.id)
-            @reference_graph_state_selection_by_cell_id&.delete(cell_space.id)
-            IndoorCore::Logger.puts(
-              "[IndoorGML] Room shortcut LOS precompute skipped cell=#{cell_space.id}: " \
-              "#{error.class}: #{error.message}"
-            ) if defined?(IndoorCore::Logger)
-            nil
-          end
-
-          # Build after OPTIMIZED, while Native still holds Room geometry.
-          # All-pairs LOS is batched. A failure is isolated from CellSpace
-          # creation, State placement and the original debug graph.
-          def preload_room_internal_graph_for(cell_space, session_index)
-            return unless cell_space&.valid?
-            return unless cell_space.category_code.to_s.casecmp('Room').zero?
-            return unless NativeAdjacencyBridge.shared_session_active?
-            return unless NativeAdjacencyBridge.room_los_supported?
-
-            optimized = @debug_reference_graph_optimized_by_cell_id&.[](cell_space.id)
-            return unless optimized
-
-            tolerance = Utils::Geometry::ADJACENCY_TOLERANCE
-            los_batch = lambda do |pairs|
-              NativeAdjacencyBridge.validate_room_los_batch_from_open_session(
-                session_index, pairs, tolerance: tolerance
-              )
-            end
-            connected = RoomInternalVisibilityGraph.build(
-              optimized, los_batch: los_batch
-            )
-            (@room_internal_connected_by_cell_id ||= {})[cell_space.id] = connected
-
-            # Reapply the same State/degree-2/projection/Native LOS rule
-            # on the connected graph. Preserve the Kruskal snapshot so a
-            # failure in this optional diagnostic step changes nothing else.
-            final = begin
-              RoomInternalGraphPostOptimizer.optimize(
-                connected, los_batch: los_batch
-              )
-            rescue StandardError => error
-              IndoorCore::Logger.puts(
-                "[IndoorGML] Room internal second Shortcut skipped cell=#{cell_space.id}: " \
-                "#{error.class}: #{error.message}"
-              ) if defined?(IndoorCore::Logger)
-              connected.merge(
-                postopt_removed_count: 0,
-                postopt_los_checked_pairs: 0,
-                postopt_failed: true
-              ).freeze
-            end
-            (@room_internal_graph_by_cell_id ||= {})[cell_space.id] = final
-          rescue StandardError => error
-            @room_internal_graph_by_cell_id&.delete(cell_space.id)
-            @room_internal_connected_by_cell_id&.delete(cell_space.id)
-            IndoorCore::Logger.puts(
-              "[IndoorGML] Room internal visibility graph skipped cell=#{cell_space.id}: " \
-              "#{error.class}: #{error.message}"
-            ) if defined?(IndoorCore::Logger)
-            nil
-          end
-
-          # Lazy stage after Collapse, never mutates the previous snapshots.
-          def optimized_debug_reference_graph_for(cell_id)
-            cache = (@debug_reference_graph_optimized_by_cell_id ||= {})
-            return cache[cell_id] if cache.key?(cell_id)
-
-            collapsed = collapsed_debug_reference_graph_for(cell_id)
-            return nil unless collapsed
-
-            cache[cell_id] = ReferenceGraphShortcutOptimizer.optimize(collapsed)
-          rescue StandardError => error
-            cache[cell_id] = nil if cache
-            IndoorCore::Logger.puts(
-              "[IndoorGML] Reference shortcut optimization skipped cell=#{cell_id}: " \
-              "#{error.class}: #{error.message}"
-            ) if defined?(IndoorCore::Logger)
-            nil
-          end
-
-          def clear_debug_reference_points(cell_space)
+          def clear_reference_graph_overlay_for(cell_space)
             return false unless cell_space
 
-            @debug_reference_points_by_cell_id&.delete(cell_space.id)
-            @debug_reference_graph_by_cell_id&.delete(cell_space.id)
-            @debug_reference_protection_visuals_by_cell_id&.delete(cell_space.id)
-            @debug_reference_graph_simplified_by_cell_id&.delete(cell_space.id)
-            @debug_reference_graph_collapsed_by_cell_id&.delete(cell_space.id)
-            @debug_reference_graph_optimized_by_cell_id&.delete(cell_space.id)
-            @reference_graph_state_selection_by_cell_id&.delete(cell_space.id)
-            @room_internal_graph_by_cell_id&.delete(cell_space.id)
-            @room_internal_connected_by_cell_id&.delete(cell_space.id)
+            @debug_reference_graph_overlay_by_cell_id&.delete(cell_space.id)
             true
           end
 

@@ -78,6 +78,26 @@ VALUE adjacency_native_load_batch(VALUE self, VALUE buffer)
     });
 }
 
+VALUE adjacency_native_set_cell_keys(VALUE self, VALUE keys)
+{
+    (void)self;
+    Check_Type(keys,T_ARRAY);
+    return protect_native_call([keys]() {
+        const long count=RARRAY_LEN(keys);
+        std::vector<std::string> values;
+        values.reserve(static_cast<std::size_t>(count));
+        for(long index=0;index<count;++index)
+        {
+            VALUE value=rb_ary_entry(keys,index);
+            StringValue(value);
+            values.emplace_back(RSTRING_PTR(value),static_cast<std::size_t>(RSTRING_LEN(value)));
+            if(values.back().empty()) throw std::invalid_argument("CellSpace key is empty");
+        }
+        session().set_cell_keys(std::move(values));
+        return Qtrue;
+    });
+}
+
 VALUE adjacency_native_start_state_check(VALUE self)
 {
     (void)self;
@@ -91,6 +111,15 @@ VALUE adjacency_native_get_state_result_bytes(VALUE self)
     (void)self;
     return protect_native_call([]() {
         return bytes_to_ruby_string(session().get_state_result_bytes());
+    });
+}
+
+VALUE adjacency_native_commit_reference_graph_batch(VALUE self)
+{
+    (void)self;
+    return protect_native_call([]() {
+        session().commit_reference_graph_batch();
+        return Qtrue;
     });
 }
 
@@ -134,6 +163,111 @@ VALUE adjacency_native_validate_room_los(
         for (bool visible : checked)
             rb_ary_push(result, visible ? Qtrue : Qfalse);
         return result;
+    });
+}
+
+VALUE adjacency_native_get_reference_graph(VALUE self, VALUE cell_key, VALUE stage)
+{
+    (void)self;
+    StringValue(cell_key);
+    const std::string key(RSTRING_PTR(cell_key),static_cast<std::size_t>(RSTRING_LEN(cell_key)));
+    const ID stage_id=SYM2ID(stage);
+    ReferenceGraphStage selected;
+    if(stage_id==rb_intern("before")) selected=ReferenceGraphStage::Before;
+    else if(stage_id==rb_intern("after")) selected=ReferenceGraphStage::After;
+    else if(stage_id==rb_intern("collapsed")) selected=ReferenceGraphStage::Collapsed;
+    else if(stage_id==rb_intern("optimized")) selected=ReferenceGraphStage::Optimized;
+    else rb_raise(rb_eArgError,"unknown Reference Graph stage");
+    return protect_native_call([key,selected]() {
+        const auto graph=session().get_reference_graph(key,selected);
+        if(!graph) return Qnil;
+        VALUE result=rb_hash_new();
+        VALUE nodes=rb_ary_new_capa(static_cast<long>(graph->nodes.size()));
+        for(const auto& node:graph->nodes)
+        {
+            VALUE point=rb_ary_new_capa(3);
+            rb_ary_push(point,DBL2NUM(node.point.x));
+            rb_ary_push(point,DBL2NUM(node.point.y));
+            rb_ary_push(point,DBL2NUM(node.point.z));
+            rb_ary_push(nodes,point);
+        }
+        VALUE edges=rb_ary_new_capa(static_cast<long>(graph->edges.size()));
+        for(const auto& edge:graph->edges)
+        {
+            VALUE pair=rb_ary_new_capa(2);
+            rb_ary_push(pair,ULL2NUM(static_cast<unsigned long long>(edge.first)));
+            rb_ary_push(pair,ULL2NUM(static_cast<unsigned long long>(edge.second)));
+            rb_ary_push(edges,pair);
+        }
+        hash_set(result,"nodes",nodes);
+        hash_set(result,"edges",edges);
+        return result;
+    });
+}
+
+VALUE adjacency_native_get_reference_transition_curve(
+    VALUE self,VALUE first_cell_key,VALUE second_cell_key,VALUE waypoint_bytes
+)
+{
+    (void)self;
+    StringValue(first_cell_key);
+    StringValue(second_cell_key);
+    Check_Type(waypoint_bytes,T_STRING);
+    if(RSTRING_LEN(waypoint_bytes)!=static_cast<long>(3*sizeof(double)))
+        rb_raise(rb_eArgError,"Reference waypoint must contain three float64 values");
+    const std::string first(
+        RSTRING_PTR(first_cell_key),static_cast<std::size_t>(RSTRING_LEN(first_cell_key))
+    );
+    const std::string second(
+        RSTRING_PTR(second_cell_key),static_cast<std::size_t>(RSTRING_LEN(second_cell_key))
+    );
+    double values[3];
+    std::memcpy(values,RSTRING_PTR(waypoint_bytes),sizeof(values));
+    for(double value:values) if(!std::isfinite(value))
+        rb_raise(rb_eArgError,"Reference waypoint coordinate is not finite");
+    const Vec3 waypoint{values[0],values[1],values[2]};
+    return protect_native_call([first,second,waypoint]() {
+        const auto path=session().get_reference_transition_curve(first,second,waypoint);
+        if(path.empty()) return Qnil;
+        VALUE result=rb_ary_new_capa(static_cast<long>(path.size()));
+        for(const auto& item:path)
+        {
+            VALUE point=rb_ary_new_capa(3);
+            rb_ary_push(point,DBL2NUM(item.x));
+            rb_ary_push(point,DBL2NUM(item.y));
+            rb_ary_push(point,DBL2NUM(item.z));
+            rb_ary_push(result,point);
+        }
+        return result;
+    });
+}
+
+VALUE adjacency_native_get_reference_revision(VALUE self, VALUE cell_key)
+{
+    (void)self;
+    StringValue(cell_key);
+    const std::string key(RSTRING_PTR(cell_key),static_cast<std::size_t>(RSTRING_LEN(cell_key)));
+    return protect_native_call([key]() {
+        return ULL2NUM(static_cast<unsigned long long>(session().get_reference_revision(key)));
+    });
+}
+
+VALUE adjacency_native_erase_reference_graphs(VALUE self, VALUE cell_keys)
+{
+    (void)self;
+    Check_Type(cell_keys,T_ARRAY);
+    return protect_native_call([cell_keys]() {
+        std::vector<std::string> keys;
+        const long count=RARRAY_LEN(cell_keys);
+        keys.reserve(static_cast<std::size_t>(count));
+        for(long index=0;index<count;++index)
+        {
+            VALUE key=rb_ary_entry(cell_keys,index);
+            StringValue(key);
+            keys.emplace_back(RSTRING_PTR(key),static_cast<std::size_t>(RSTRING_LEN(key)));
+        }
+        session().erase_reference_graphs(keys);
+        return Qtrue;
     });
 }
 

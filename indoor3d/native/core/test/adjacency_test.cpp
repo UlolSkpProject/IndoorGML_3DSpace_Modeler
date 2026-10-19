@@ -1,6 +1,7 @@
 #include "adjacency_checker.h"
 #include "cell_space_interior_point_locator.h"
 #include "floor_polygon_preparation.h"
+#include "reference_graph_pipeline.h"
 
 #include <algorithm>
 #include <array>
@@ -296,7 +297,7 @@ CellData smooth_concave_wall_room()
     return cell;
 }
 
-// Room reference fixtures need wall shared edges >= 1000 mm.
+// Room reference fixtures need wall shared edges >= 500 mm.
 // Keep the existing small State and adjacency fixtures unchanged.
 CellData tall_room(CellData cell)
 {
@@ -400,8 +401,8 @@ void test_convex_floor_one_area_centroid_before()
     room.category = CellSpaceCategory::Room;
     const CellSpaceInteriorPointResult result =
         locate_cell_space_interior_points(room, 0.001);
-    require(!result.state_point.has_value(),
-            "BEFORE must not select State before OPTIMIZED");
+    require(result.state_point.has_value(),
+            "State must be selected from the AABB-nearest valid polygon centroid");
     require(result.reference_status == ReferencePointStatus::Succeeded,
             "Floor Reference generation failed");
 
@@ -419,16 +420,91 @@ void test_convex_floor_one_area_centroid_before()
             "convex Floor must merge mesh triangles into one reference");
     for (const Vec3& p : final_points)
     {
-        require(std::abs(p.z - 1000.0/25.4) < 1.0e-9 &&
+        require(std::abs(p.z - 500.0/25.4) < 1.0e-9 &&
                 std::abs(p.x - 0.5) < 1.0e-9 &&
                 std::abs(p.y - 0.5) < 1.0e-9,
-                "convex Floor area centroid must move exactly +1000mm in Z");
+                "convex Floor area centroid must move exactly +500mm in Z");
     }
     const ReferenceGraphDebug& graph = result.debug_graph;
     require(graph.nodes.size() == 1,
             "BEFORE must contain only the convex Floor reference");
     require(graph.loop_candidates.empty(),
             "3D Hole verification cannot be bypassed by floor triangles");
+}
+
+void test_native_reference_pipeline_bakes_state_tree_and_transition()
+{
+    CellData room;
+    ReferenceGraphDebug before;
+    const Vec3 state{0.5,0.5,500.0/25.4};
+    before.nodes.push_back({state,1.0});
+    before.state_node_index=0;
+    const auto pipeline=build_reference_graph_pipeline(
+        room,before,0.001
+    );
+    require(pipeline.state_node_index<pipeline.optimized.nodes.size() &&
+            pipeline.shortest_path_tree.root==pipeline.state_node_index &&
+            pipeline.shortest_path_tree.distances.size()==pipeline.optimized.nodes.size(),
+            "Native State-root shortest-path tree was not baked");
+    const Vec3 waypoint{0.75,0.5,500.0/25.4};
+    const auto path=reference_transition_polyline(pipeline,waypoint);
+    require(path.size()==2 &&
+            std::abs(path.front().x-state.x)<1.0e-9 &&
+            std::abs(path.back().x-waypoint.x)<1.0e-9,
+            "Native Transition did not restore State-to-waypoint polyline");
+}
+
+void test_native_reference_pipeline_optimizes_degree_two_and_collapses_certificate()
+{
+    CellData room=tall_room(unit_box_cell());
+    room.category=CellSpaceCategory::Room;
+    const double z=500.0/25.4;
+
+    ReferenceGraphDebug cluster;
+    cluster.nodes={
+        {{0.1,0.1,z},0.0},{{0.2,0.5,z},1.0},
+        {{0.4,0.5,z},0.5},{{0.6,0.5,z},0.0}
+    };
+    cluster.edges={{0,1},{1,2},{2,3}};
+    cluster.state_node_index=0;
+    const auto after=build_reference_graph_pipeline(room,cluster,0.001);
+    require(after.before.nodes.size()==4 && after.after.nodes.size()==3,
+            "Native AFTER must merge a smaller nearby degree-2 node");
+
+    ReferenceGraphDebug chain;
+    chain.nodes={
+        {{0.1,0.5,z},0.0},{{0.5,0.5,z},0.0},{{0.9,0.5,z},0.0}
+    };
+    chain.edges={{0,1},{1,2}};
+    chain.state_node_index=0;
+    const auto optimized=build_reference_graph_pipeline(room,chain,0.001);
+    require(optimized.after.nodes.size()==3 &&
+            optimized.collapsed.nodes.size()==3 &&
+            optimized.optimized.nodes.size()==2 &&
+            optimized.optimized.edges.size()==1,
+            "Native OPTIMIZED must remove a clear degree-2 node");
+    require(optimized.shortest_path_tree.distances.size()==2 &&
+            std::isfinite(optimized.shortest_path_tree.distances[1]),
+            "Native optimized State tree must reach the surviving endpoint");
+
+    ReferenceGraphDebug loop;
+    loop.nodes={
+        {{0.5,0.1,z},0.0},{{0.2,0.2,z},0.0},
+        {{0.8,0.2,z},0.0},{{0.5,0.8,z},0.0}
+    };
+    loop.edges={{0,1},{1,2},{1,3},{2,3}};
+    loop.state_node_index=0;
+    ReferenceLoopCollapseCandidate certificate;
+    certificate.vertices={1,2,3};
+    certificate.representative={{0.5,0.4,z},0.0};
+    certificate.visible_neighbors={0};
+    loop.loop_candidates.push_back(certificate);
+    const auto collapsed=build_reference_graph_pipeline(room,loop,0.001);
+    require(collapsed.after.nodes.size()==4 &&
+            collapsed.collapsed.nodes.size()==2 &&
+            collapsed.optimized.nodes.size()==2 &&
+            collapsed.optimized.edges.size()==1,
+            "Native COLLAPSED must apply a certified loop without losing State");
 }
 
 void test_convex_floor_asymmetric_mesh_has_area_centroid()
@@ -453,7 +529,7 @@ void test_convex_floor_asymmetric_mesh_has_area_centroid()
             "convex Face must be one region regardless of triangulation");
     require(std::abs(candidates[0].x-0.5) < 1.0e-9 &&
             std::abs(candidates[0].y-0.5) < 1.0e-9 &&
-            std::abs(candidates[0].z-1000.0/25.4) < 1.0e-9,
+            std::abs(candidates[0].z-500.0/25.4) < 1.0e-9,
             "merged centroid must be area-weighted, not vertex-averaged");
 }
 
@@ -579,7 +655,7 @@ void test_floor_reference_in_short_room_is_rejected()
     require(!result.state_point.has_value(),
             "short Room must not synthesize an early State");
     require(result.reference_points.empty(),
-            "+1000mm points outside a short Solid must be rejected");
+            "+500mm points outside a short Solid must be rejected");
     require(result.debug_graph.nodes.empty(),
             "short Room must not return an invalid BEFORE node");
 }
@@ -606,7 +682,7 @@ void test_inclined_floor_uses_world_z_not_surface_normal()
     {
         if (ref.kind != ReferencePointKind::Face) continue;
         require(std::abs(ref.point.z -
-                (1000.0/25.4 + 0.2 * ref.point.x)) < 1.0e-8,
+                (500.0/25.4 + 0.2 * ref.point.x)) < 1.0e-8,
                 "sloped floor triangle must be moved along world Z");
         ++floor_count;
     }
@@ -991,8 +1067,8 @@ void test_room_and_stair_both_seed_centroids_and_shared_edges()
     cell.category=CellSpaceCategory::Stair;
     const auto stair=locate_cell_space_interior_points(cell,0.001);
 
-    require(!room.state_point.has_value() && !stair.state_point.has_value(),
-            "Room/Stair must defer State until OPTIMIZED");
+    require(room.state_point.has_value() && stair.state_point.has_value(),
+            "Room/Stair must select State before graph reductions");
     require(room.reference_status==ReferencePointStatus::Succeeded &&
             stair.reference_status==ReferencePointStatus::Succeeded,
             "Room and Stair must both generate BEFORE candidates");
@@ -1019,8 +1095,8 @@ void test_room_and_stair_both_seed_centroids_and_shared_edges()
                 std::abs(a.y-b.y)<1.0e-9 &&
                 std::abs(a.z-b.z)<1.0e-9,
                 "Room and Stair must return precisely the same seed positions");
-        require(std::abs(a.z-1000.0/25.4)<1.0e-9,
-                "both seed kinds must retain the +1000mm world-Z lift");
+        require(std::abs(a.z-500.0/25.4)<1.0e-9,
+                "both seed kinds must retain the +500mm world-Z lift");
     }
     require(room.debug_graph.nodes.size()==room_final.size() &&
             stair.debug_graph.nodes.size()==stair_final.size(),
@@ -1037,8 +1113,8 @@ void test_single_convex_floor_has_only_one_centroid_for_both()
         CellData cell=tall_room(unit_box_cell());
         cell.category=category;
         const auto result=locate_cell_space_interior_points(cell,0.001);
-        require(!result.state_point.has_value(),
-                "convex Room/Stair must defer State until OPTIMIZED");
+        require(result.state_point.has_value(),
+                "convex Room/Stair must use their polygon centroid as State");
         require(result.reference_status==ReferencePointStatus::Succeeded,
                 "both Room and Stair must attempt Floor seeds");
         std::size_t final_count=0;
@@ -1049,7 +1125,7 @@ void test_single_convex_floor_has_only_one_centroid_for_both()
                 ++final_count;
                 require(std::abs(candidate.point.x-0.5)<1.0e-9 &&
                         std::abs(candidate.point.y-0.5)<1.0e-9 &&
-                        std::abs(candidate.point.z-1000.0/25.4)<1.0e-9,
+                        std::abs(candidate.point.z-500.0/25.4)<1.0e-9,
                         "single convex Floor reference must be its area centroid");
             }
         }
@@ -1209,7 +1285,7 @@ void test_protocol_v5_decodes_authoritative_plane_and_derives_normal()
             "Native partition must use authoritative SketchUp D coefficient");
 }
 
-void test_result_v12_encodes_optional_state_graph_and_diagnostics()
+void test_result_v13_encodes_state_and_diagnostics_only()
 {
     StatePointResult success;
     success.cell_index=0;
@@ -1219,61 +1295,32 @@ void test_result_v12_encodes_optional_state_graph_and_diagnostics()
     success.diagnostics.failed_polygons=1;
     success.diagnostics.rejected_outside=2;
     success.diagnostics.accepted_references=9;
-    success.reference_points.push_back({4,5,6});
-    success.reference_kinds.push_back(4);
-    success.graph_node_points.push_back({1,2,3});
-    success.graph_node_radii.push_back(0.5);
-    StatePointResult::FloorPartition partition;
-    partition.outer={{0,0,0},{4,0,0},{4,3,0}};
-    success.graph_floor_partitions.push_back(partition);
-
     StatePointResult no_state;
     no_state.cell_index=1;
     no_state.exit_code=StateExitCode::OutsideSolid;
     no_state.diagnostics.reference_candidates=2;
     no_state.diagnostics.rejected_outside=2;
     const auto bytes=serialize_state_result_batch({success,no_state});
-    require(read_u64_le(bytes,8)==12 && read_u64_le(bytes,16)==2,
-            "Result protocol must use V12 and one record per target");
+    require(read_u64_le(bytes,8)==13 && read_u64_le(bytes,16)==2,
+            "Result protocol must use V13 and one record per target");
     require(read_u64_le(bytes,32)==0 && read_u64_le(bytes,40)==0 &&
-            read_u64_le(bytes,48)==1 && read_u64_le(bytes,80)==1,
-            "V12 success has explicit State and graph flags");
-    require(read_u64_le(bytes,88)==10 &&
-            read_u64_le(bytes,112)==1 &&
-            read_u64_le(bytes,136)==2 &&
-            read_u64_le(bytes,152)==9,
-            "V12 diagnostics must retain partial failures with success");
-    // Body with 1 reference (40 bytes) and 1 node (32 bytes)
-    // plus edge/loop counts (16 bytes), then one triangular Floor
-    // partition (96 bytes including partition/ring/hole counts).
-    require(read_u64_le(bytes,256)==1 && read_u64_le(bytes,264)==3,
-            "V12 must append exact completed Floor partition rings");
-    const std::size_t second=352;
+            read_u64_le(bytes,48)==1,
+            "V13 success has an explicit State flag");
+    require(read_u64_le(bytes,80)==10 &&
+            read_u64_le(bytes,104)==1 &&
+            read_u64_le(bytes,128)==2 &&
+            read_u64_le(bytes,144)==9,
+            "V13 diagnostics must retain partial failures with success");
+
+    const std::size_t second=152;
     require(read_u64_le(bytes,second)==1 &&
             read_u64_le(bytes,second+8)==60 &&
             read_u64_le(bytes,second+16)==0 &&
-            read_u64_le(bytes,second+24)==0 &&
-            read_u64_le(bytes,second+32+4*8)==2 &&
-            bytes.size()==second+32+9*8,
-            "V12 failure must serialize explicit ExitCode and nil State/Graph");
-
-    StatePointResult state_only;
-    state_only.cell_index=0;
-    state_only.exit_code=StateExitCode::Success;
-    state_only.point=Vec3{2,3,4};
-    const auto single=serialize_state_result_batch({state_only});
-    require(read_u64_le(single,40)==0 && read_u64_le(single,48)==1 &&
-            read_u64_le(single,80)==0 && single.size()==160,
-            "A valid State without Graph remains code 0");
-
-    StatePointResult graph_only;
-    graph_only.cell_index=0;
-    graph_only.exit_code=StateExitCode::Success;
-    graph_only.graph_node_points.push_back({2,3,4});
-    graph_only.graph_node_radii.push_back(0.5);
-    const auto deferred=serialize_state_result_batch({graph_only});
-    require(read_u64_le(deferred,48)==0 && read_u64_le(deferred,56)==1,
-            "V12 graph success must allow State to remain deferred");
+            read_u64_le(bytes,second+24+4*8)==2 &&
+            bytes.size()==second+24+9*8,
+            "V13 failure must serialize explicit ExitCode and nil State");
+    require(bytes.size()==248,
+            "V13 State payload must not contain graph nodes or radius");
 
     bool rejected=false;
     try
@@ -1294,7 +1341,7 @@ int main()
 {
     test_protocol_v4_preserves_holes_and_triangles();
     test_protocol_v5_decodes_authoritative_plane_and_derives_normal();
-    test_result_v12_encodes_optional_state_graph_and_diagnostics();
+    test_result_v13_encodes_state_and_diagnostics_only();
     test_z_sweep_matches_bruteforce();
     test_shared_face_analysis();
     test_state_volume_centroid_on_box();
@@ -1311,6 +1358,8 @@ int main()
 
 
     test_convex_floor_one_area_centroid_before();
+    test_native_reference_pipeline_bakes_state_tree_and_transition();
+    test_native_reference_pipeline_optimizes_degree_two_and_collapses_certificate();
     test_convex_floor_asymmetric_mesh_has_area_centroid();
     test_coplanar_adjacent_floor_faces_merge();
     test_concave_floor_partitions_without_filling_its_notch();

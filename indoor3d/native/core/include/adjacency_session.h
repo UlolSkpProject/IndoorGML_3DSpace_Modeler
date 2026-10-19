@@ -3,6 +3,7 @@
 #include "adjacency_checker.h"
 #include "adjacency_data.h"
 #include "cell_space_interior_point_locator.h"
+#include "reference_graph_pipeline.h"
 
 #include <atomic>
 #include <chrono>
@@ -11,6 +12,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -71,14 +73,27 @@ public:
     AdjacencySession& operator=(const AdjacencySession&) = delete;
 
     std::size_t load_batch(const std::uint8_t* data, std::size_t size);
+    void set_cell_keys(std::vector<std::string> keys);
 
     std::size_t start_state_check();
     std::vector<std::uint8_t> get_state_result_bytes();
+    void commit_reference_graph_batch();
     std::vector<bool> validate_room_los(
         std::size_t cell_index,
         const std::vector<std::pair<Vec3, Vec3>>& segments,
         double tolerance
     ) const;
+    std::optional<ReferenceGraphStageSnapshot> get_reference_graph(
+        const std::string& cell_key,
+        ReferenceGraphStage stage
+    ) const;
+    std::vector<Vec3> get_reference_transition_curve(
+        const std::string& first_cell_key,
+        const std::string& second_cell_key,
+        const Vec3& waypoint
+    ) const;
+    std::uint64_t get_reference_revision(const std::string& cell_key) const;
+    void erase_reference_graphs(const std::vector<std::string>& cell_keys);
 
     std::size_t start_adjacency_check(double length_tolerance, double normal_tolerance);
     std::vector<std::uint8_t> get_adjacency_result_bytes();
@@ -105,12 +120,23 @@ private:
     bool has_state_targets() const;
 
     std::vector<CellData> cells_;
+    std::vector<std::string> cell_keys_;
     std::vector<std::size_t> state_targets_;
     std::vector<StatePointResult> state_results_;
     std::vector<PairIndex> candidates_;
     std::vector<PairResult> results_;
 
     mutable std::mutex result_mutex_;
+    struct StoredReferenceGraph
+    {
+        ReferenceGraphPipeline pipeline;
+        std::uint64_t revision = 0;
+    };
+    mutable std::mutex reference_graph_mutex_;
+    std::unordered_map<std::string, StoredReferenceGraph> reference_graphs_;
+    std::unordered_map<std::string, ReferenceGraphPipeline> pending_reference_graphs_;
+    std::uint64_t next_reference_revision_ = 1;
+    bool reference_batch_committed_ = false;
     mutable std::mutex error_mutex_;
     std::vector<std::thread> workers_;
     std::string first_error_;

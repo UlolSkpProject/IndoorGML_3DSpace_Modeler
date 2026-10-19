@@ -78,11 +78,12 @@ module ULOL
 
           root_path = [point1]
           if waypoint
-            first = reference_path(transition.cell1_id, waypoint)
-            second = reference_path(transition.cell2_id, waypoint)
-            root_path.concat(first) if first
-            root_path << waypoint
-            root_path.concat(second.reverse) if second
+            native_curve = reference_curve(
+              transition.cell1_id, transition.cell2_id, waypoint
+            )
+            return { points: [] } unless native_curve
+
+            root_path.concat(native_curve)
           end
           root_path << point2
 
@@ -98,13 +99,15 @@ module ULOL
 
         private
 
-        def reference_path(cell_id, waypoint)
-          return nil unless @indoor_model.respond_to?(:reference_graph_path_to_waypoint)
+        def reference_curve(first_cell_id, second_cell_id, waypoint)
+          return nil unless @indoor_model.respond_to?(:reference_transition_curve)
 
-          path = @indoor_model.reference_graph_path_to_waypoint(cell_id, waypoint)
-          path if path.is_a?(Array) && !path.empty?
+          curve = @indoor_model.reference_transition_curve(
+            first_cell_id, second_cell_id, waypoint
+          )
+          curve if curve.is_a?(Array) && !curve.empty?
         rescue StandardError
-          nil # A missing/bad route affects only its own CellSpace side.
+          nil
         end
 
         def deduplicate_consecutive_points(points)

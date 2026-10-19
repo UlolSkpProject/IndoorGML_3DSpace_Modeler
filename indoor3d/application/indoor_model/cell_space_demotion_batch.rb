@@ -101,7 +101,13 @@ module ULOL
           end
 
           def unregister_cell_spaces_for_demotion_batch(cell_spaces)
-            Array(cell_spaces).each { |cell_space| unregister_cell_space(cell_space) }
+            targets = Array(cell_spaces)
+            NativeAdjacencyBridge.erase_reference_graphs(targets.map(&:id)) if
+              defined?(NativeAdjacencyBridge)
+            @erasing_native_reference_graph_batch = true
+            targets.each { |cell_space| unregister_cell_space(cell_space) }
+          ensure
+            @erasing_native_reference_graph_batch = false
           end
 
           # Attribute cleanup intentionally runs after Transition/State removal.

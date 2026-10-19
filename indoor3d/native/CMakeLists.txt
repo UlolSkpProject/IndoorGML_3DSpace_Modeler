@@ -93,6 +93,8 @@ add_library(indoor_gml_native MODULE
     core/src/floor_face_membrane.cpp
     core/src/floor_reference_loops.cpp
     core/src/floor_reference_before.cpp
+    core/include/reference_graph_pipeline.h
+    core/src/reference_graph_pipeline.cpp
     core/src/native_entry.cpp
     core/src/native_api.cpp
     core/src/adjacency_data.cpp
@@ -149,6 +151,18 @@ if(BUILD_TESTING)
     add_executable(indoor_gml_native_test
         core/test/adjacency_test.cpp
         core/src/floor_polygon_preparation.cpp
+        core/src/floor_polygon_intersections.cpp
+        core/src/floor_polygon_graph.cpp
+        core/src/floor_polygon_cycles.cpp
+        core/src/floor_polygon_regions.cpp
+        core/src/floor_polygon_validation.cpp
+        core/src/floor_polygon_queue.cpp
+        core/src/floor_polygon_reference.cpp
+        core/src/floor_face_solid.cpp
+        core/src/floor_face_membrane.cpp
+        core/src/floor_reference_loops.cpp
+        core/src/floor_reference_before.cpp
+        core/src/reference_graph_pipeline.cpp
         core/src/adjacency_data.cpp
         core/src/adjacency_checker.cpp
         core/src/cell_space_interior_point_locator.cpp
@@ -206,6 +220,7 @@ if(BUILD_TESTING)
         core/src/floor_face_membrane.cpp
         core/src/floor_reference_loops.cpp
         core/src/floor_reference_before.cpp
+        core/src/reference_graph_pipeline.cpp
         core/src/cell_space_interior_point_locator.cpp
     )
 
@@ -239,6 +254,7 @@ if(BUILD_TESTING)
         core/src/floor_face_membrane.cpp
         core/src/floor_reference_loops.cpp
         core/src/floor_reference_before.cpp
+        core/src/reference_graph_pipeline.cpp
         core/src/cell_space_interior_point_locator.cpp
     )
 

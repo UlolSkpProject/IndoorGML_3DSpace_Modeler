@@ -8,17 +8,20 @@ module ULOL
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.after!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.collapsed!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.optimized!
-      # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.internal!
-      # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.connected!
+      # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.clear!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.mode
       #
-      # Controls only the runtime debug overlay. Both graph snapshots remain
-      # intact; no State, Transition, Geometry or undoable model data changes.
+      # Each stage command asks Native for one radius-free display snapshot.
+      # It changes no State, Transition, geometry or undoable model data.
       module ReferenceGraphDebugMode
         module_function
 
         def mode
-          @mode || :before
+          @mode || :off
+        end
+
+        def off?
+          mode == :off
         end
 
         def after?
@@ -31,14 +34,6 @@ module ULOL
 
         def optimized?
           mode == :optimized
-        end
-
-        def connected?
-          mode == :connected
-        end
-
-        def internal?
-          mode == :internal
         end
 
         def before!
@@ -57,24 +52,41 @@ module ULOL
           set_mode(:optimized)
         end
 
-        def connected!
-          set_mode(:connected)
+        def clear!
+          @mode = :off
+          active_indoor_model&.clear_reference_graph_debug
+          puts '[IndoorGML] Reference Graph Overlay: OFF'
+          :off
         end
 
-        def internal!
-          set_mode(:internal)
+        def off!
+          clear!
         end
 
         def set_mode(value)
-          raise ArgumentError, 'expected :before, :after, :collapsed, :optimized, :connected or :internal' unless %i[before after collapsed optimized connected internal].include?(value)
+          return clear! if value.to_sym == :off
+          value = value.to_sym
+          unless %i[before after collapsed optimized].include?(value)
+            raise ArgumentError, 'expected :off, :before, :after, :collapsed or :optimized'
+          end
 
+          count = active_indoor_model&.request_reference_graph_debug(value).to_i
           @mode = value
           if defined?(Sketchup) && Sketchup.respond_to?(:active_model)
             Sketchup.active_model&.active_view&.invalidate
           end
-          puts "[IndoorGML] Reference Graph Overlay: #{value.upcase}"
+          puts "[IndoorGML] Reference Graph Overlay: #{value.upcase} (#{count} CellSpace)"
           value
         end
+
+        def active_indoor_model
+          return nil unless defined?(IndoorModel)
+
+          IndoorModel.current
+        rescue StandardError
+          nil
+        end
+        private_class_method :active_indoor_model
       end
     end
   end

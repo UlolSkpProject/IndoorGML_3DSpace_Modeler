@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -20,9 +21,10 @@ double len(Vec3 a) { return std::sqrt(squared(a)); }
 constexpr double FLOOR_MIN_NEGATIVE_NORMAL_Z=0.6;
 constexpr std::size_t MAX_FINAL_REFERENCES=4096;
 constexpr double MIN_REFERENCE_RADIUS=150.0/25.4; // 150 mm in SketchUp inches
+constexpr double REFERENCE_HEIGHT=500.0/25.4;
 
 // These seeds are the ONLY Room/Stair BEFORE candidates. State is selected
-// later from OPTIMIZED; there is no global State-search fallback.
+// from valid Polygon centroids before graph reductions.
 // Classify clearance BEFORE calling inside(): inside() intentionally
 // rejects boundary-near points and would otherwise hide the cause.
 enum class ReferenceCheck { Valid, Outside, Clearance };
@@ -42,7 +44,6 @@ bool viable_reference(const FaceSolid& solid,Vec3 point,double tolerance)
         return false;
     const double wall_distance=solid.nearest_wall_distance(point);
     // A Solid without wall-classified Faces has no finite wall constraint.
-    // Keep radius zero for the serialized graph, but do not reject the point.
     if (!std::isfinite(wall_distance)) return true;
     const double radius=std::max(0.0,wall_distance-tolerance);
     return radius>=MIN_REFERENCE_RADIUS;
@@ -55,7 +56,7 @@ bool merged_group_is_safe(
     const FaceSolid& solid,double tolerance)
 {
     const ReferenceSeeds representative=generate_reference_seeds(
-        {merged},tolerance,{1000.0/25.4,1});
+        {merged},tolerance,{REFERENCE_HEIGHT,1});
     if (representative.points.empty()) return false;
     const Vec3 center=representative.points.front().position;
     if (!viable_reference(solid,center,tolerance)) return false;
@@ -68,7 +69,7 @@ bool merged_group_is_safe(
         replaced.push_back(original[index]);
     }
     const ReferenceSeeds old_seeds=generate_reference_seeds(
-        replaced,tolerance,{1000.0/25.4,MAX_FINAL_REFERENCES});
+        replaced,tolerance,{REFERENCE_HEIGHT,MAX_FINAL_REFERENCES});
     for (const Seed& seed:old_seeds.points)
     {
         if (!viable_reference(solid,seed.position,tolerance)) continue;
@@ -172,8 +173,7 @@ CellSpaceInteriorPointResult locate_reference_before(
 
     result.exit_code=StateExitCode::NoReferenceCandidates;
     const ReferenceSeeds seed_batch=generate_reference_seeds(
-        leaves,tolerance,{1000.0/25.4,MAX_FINAL_REFERENCES});
-    result.diagnostics.reference_candidates=seed_batch.points.size();
+        leaves,tolerance,{REFERENCE_HEIGHT,MAX_FINAL_REFERENCES});
     result.diagnostics.rejected_centroids=seed_batch.rejected_centroids;
     if (seed_batch.points.empty())
     {
@@ -181,22 +181,57 @@ CellSpaceInteriorPointResult locate_reference_before(
             result.exit_code=StateExitCode::InvalidCentroids;
         return result;
     }
-    // Evaluate every candidate uniformly. BEFORE has references only;
-    // State is selected from the completed OPTIMIZED graph.
+    // Mark polygons that own a real shared boundary. Their centroids are not
+    // ordinary references; only the State centroid survives that filtering.
+    std::vector<bool> has_adjacent(leaves.size(),false);
+    for (const Seed& seed:seed_batch.points)
+        if (seed.kind==SeedKind::SharedEdgeMidpoint)
+        {
+            if (seed.first_leaf<has_adjacent.size())
+                has_adjacent[seed.first_leaf]=true;
+            if (seed.second_leaf<has_adjacent.size())
+                has_adjacent[seed.second_leaf]=true;
+        }
+
+    // Select State from Polygon centroids only, before candidate validation.
+    // If this exact AABB-nearest centroid later fails Solid/clearance checks,
+    // the CellSpace has no State; a farther centroid is not substituted.
+    const Vec3 aabb_center{
+        (cell.bounds.minimum.x+cell.bounds.maximum.x)*0.5,
+        (cell.bounds.minimum.y+cell.bounds.maximum.y)*0.5,
+        (cell.bounds.minimum.z+cell.bounds.maximum.z)*0.5
+    };
+    const Seed* state_seed=nullptr;
+    double state_distance=std::numeric_limits<double>::infinity();
     for (const Seed& seed:seed_batch.points)
     {
-        const ReferenceCheck check=inspect_reference(
-            solid,seed.position,tolerance);
-        if (check==ReferenceCheck::Outside)
+        if (seed.kind!=SeedKind::PolygonCentroid) continue;
+        const double distance=squared(sub(seed.position,aabb_center));
+        if (distance<state_distance)
         {
-            ++result.diagnostics.rejected_outside;
-            continue;
+            state_seed=&seed;
+            state_distance=distance;
         }
-        if (check==ReferenceCheck::Clearance)
-        {
-            ++result.diagnostics.rejected_clearance;
-            continue;
-        }
+    }
+    if (!state_seed) return result;
+
+    std::vector<const Seed*> candidates;
+    candidates.reserve(seed_batch.points.size()+1);
+    candidates.push_back(state_seed); // State is deterministically node zero.
+    for (const Seed& seed:seed_batch.points)
+    {
+        if (&seed==state_seed) continue;
+        if (seed.kind==SeedKind::SharedEdgeMidpoint ||
+            (seed.kind==SeedKind::PolygonCentroid &&
+             seed.first_leaf<has_adjacent.size() &&
+             !has_adjacent[seed.first_leaf]))
+            candidates.push_back(&seed);
+    }
+    result.diagnostics.reference_candidates=candidates.size();
+
+    for (const Seed* seed_record:candidates)
+    {
+        const Seed& seed=*seed_record;
         bool duplicate=false;
         for (const ReferenceGraphNode& node:result.debug_graph.nodes)
             if (squared(sub(node.point,seed.position))<=tolerance*tolerance)
@@ -204,23 +239,61 @@ CellSpaceInteriorPointResult locate_reference_before(
                 duplicate=true;break;
             }
         if (duplicate) continue;
+        const ReferenceCheck check=inspect_reference(
+            solid,seed.position,tolerance);
+        if (check==ReferenceCheck::Outside)
+        {
+            ++result.diagnostics.rejected_outside;
+            if (&seed==state_seed)
+            {
+                result.exit_code=StateExitCode::OutsideSolid;
+                return result;
+            }
+            continue;
+        }
+        if (check==ReferenceCheck::Clearance)
+        {
+            ++result.diagnostics.rejected_clearance;
+            if (&seed==state_seed)
+            {
+                result.exit_code=StateExitCode::InsufficientClearance;
+                return result;
+            }
+            continue;
+        }
         // BEFORE circle radii are the distance to WALL Faces only.
-        // The +1000 mm floor offset and ceiling must not cap them.
+        // The +500 mm floor offset and ceiling must not cap them.
         // All-boundary containment/clearance was already verified by
         // inspect_reference() above and remains strictly unchanged.
         const double wall_distance=solid.nearest_wall_distance(seed.position);
         const double radius=std::isfinite(wall_distance) ?
-            std::max(0.0,wall_distance-tolerance) : 0.0;
+            std::max(0.0,wall_distance-tolerance) :
+            std::numeric_limits<double>::infinity();
         // Reject undersized spheres before BEFORE graph construction, so
         // downstream edges and loop certificates can never
         // refer to a candidate whose usable wall radius is below 150 mm.
         if (std::isfinite(wall_distance) &&
-            radius<MIN_REFERENCE_RADIUS) continue;
+            radius<MIN_REFERENCE_RADIUS)
+        {
+            ++result.diagnostics.rejected_clearance;
+            if (&seed==state_seed)
+            {
+                result.exit_code=StateExitCode::InsufficientClearance;
+                return result;
+            }
+            continue;
+        }
 
         result.reference_points.push_back({
             seed.position,ReferencePointKind::Final
         });
         result.debug_graph.nodes.push_back({seed.position,radius});
+        if (&seed==state_seed)
+        {
+            result.state_point=seed.position;
+            result.debug_graph.state_node_index=
+                result.debug_graph.nodes.size()-1;
+        }
         ++result.diagnostics.accepted_references;
     }
     if (result.debug_graph.nodes.empty())
@@ -244,8 +317,9 @@ CellSpaceInteriorPointResult locate_reference_before(
         for (std::size_t j=i+1;j<nodes.size();++j)
         {
             const double combined=nodes[i].radius+nodes[j].radius;
-            if (combined<=tolerance ||
-                squared(sub(nodes[i].point,nodes[j].point))>combined*combined)
+            if ((std::isfinite(combined) && combined<=tolerance) ||
+                (std::isfinite(combined) &&
+                 squared(sub(nodes[i].point,nodes[j].point))>combined*combined))
                 continue;
             if (solid.visible(nodes[i].point,nodes[j].point,tolerance))
                 result.debug_graph.edges.push_back({i,j});

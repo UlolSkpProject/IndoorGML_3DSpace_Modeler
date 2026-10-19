@@ -13,14 +13,20 @@ extern "C" INDOOR_GML_NATIVE_EXPORT void Init_indoor_gml_native()
     VALUE native_module = rb_define_module_under(modeler_module, "AdjacencyNative");
 
     rb_define_singleton_method(native_module, "load_batch", adjacency_native_load_batch, 1);
+    rb_define_singleton_method(native_module, "set_cell_keys", adjacency_native_set_cell_keys, 1);
 
     rb_define_singleton_method(native_module, "start_state_check", adjacency_native_start_state_check, 0);
     rb_define_singleton_method(native_module, "get_state_result_bytes", adjacency_native_get_state_result_bytes, 0);
+    rb_define_singleton_method(native_module, "commit_reference_graph_batch", adjacency_native_commit_reference_graph_batch, 0);
     // Phase 0 API: stable Reference/State result contract. Internally
     // delegates to the existing State pipeline until phases 9-10.
     rb_define_singleton_method(native_module, "start_reference_check", adjacency_native_start_state_check, 0);
     rb_define_singleton_method(native_module, "get_reference_result_bytes", adjacency_native_get_state_result_bytes, 0);
     rb_define_singleton_method(native_module, "validate_room_los", adjacency_native_validate_room_los, 3);
+    rb_define_singleton_method(native_module, "get_reference_graph", adjacency_native_get_reference_graph, 2);
+    rb_define_singleton_method(native_module, "get_reference_transition_curve", adjacency_native_get_reference_transition_curve, 3);
+    rb_define_singleton_method(native_module, "get_reference_revision", adjacency_native_get_reference_revision, 1);
+    rb_define_singleton_method(native_module, "erase_reference_graphs", adjacency_native_erase_reference_graphs, 1);
 
     rb_define_singleton_method(native_module, "start_adjacency_check", adjacency_native_start_adjacency_check, 2);
     rb_define_singleton_method(native_module, "get_adjacency_result_bytes", adjacency_native_get_adjacency_result_bytes, 0);

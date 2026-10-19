@@ -21,9 +21,9 @@ struct ReferenceSeeds {
     std::size_t limit_reached=0;
 };
 struct ReferenceOptions {
-    // SketchUp core uses inches; existing Room/Stair anchors rise 1000mm
+    // SketchUp core uses inches; Room/Stair anchors rise 500mm
     // along world Z, not along an inclined floor normal.
-    double world_z_offset=1000.0/25.4;
+    double world_z_offset=500.0/25.4;
     std::size_t max_points=4096;
 };
 struct CoarsenedPartitions {

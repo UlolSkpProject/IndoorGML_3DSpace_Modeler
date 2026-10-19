@@ -32,8 +32,8 @@ constexpr double ROOM_FLOOR_MIN_NEGATIVE_NORMAL_Z = 0.6;
 // before it forces a Floor-region partition; convex turns offset the run.
 constexpr double ROOM_FLOOR_CUMULATIVE_REFLEX_DEGREES = 30.0;
 constexpr double ROOM_FLOOR_TURN_NOISE_DEGREES = 0.25;
-// SketchUp/native coordinates are inches; +1000 mm in world Z.
-constexpr double ROOM_REFERENCE_FLOOR_OFFSET = 1000.0 / 25.4;
+// SketchUp/native coordinates are inches; +500 mm in world Z.
+constexpr double ROOM_REFERENCE_FLOOR_OFFSET = 500.0 / 25.4;
 // Protect the Native V7 reference/debug serialization size bound.
 constexpr std::size_t MAX_ROOM_REFERENCE_POINTS = 4096;
 constexpr std::size_t MAX_ROOM_REFERENCE_DEBUG_POINTS =
@@ -1202,7 +1202,7 @@ std::vector<Vec3> floor_partition_shared_edge_midpoints(
 // (1) area-weighted centroid of each final Floor polygon;
 // (2) midpoint of each shared straight boundary between distinct final
 //     polygons (never the internal triangulation edges).
-// Both candidate types retain +1000 mm WORLD-Z and BVH Solid checks.
+// Both candidate types retain +500 mm WORLD-Z and BVH Solid checks.
 // If a region centroid is invalid, retain the existing triangle fallback
 // rather than silently losing previously valid interior candidates.
 std::vector<ReferencePoint> find_reference_points(

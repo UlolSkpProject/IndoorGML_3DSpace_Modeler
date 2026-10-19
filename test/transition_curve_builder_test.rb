@@ -10,16 +10,16 @@ class TransitionCurveBuilderTest < Minitest::Test
                           :cell1_id, :cell2_id, :state1, :state2)
 
   class FakeModel
-    attr_accessor :transitions, :routes, :revisions
+    attr_accessor :transitions, :curve, :revisions
 
     def initialize(transition)
       @transitions = [transition]
-      @routes = {}
+      @curve = nil
       @revisions = {}
     end
 
-    def reference_graph_path_to_waypoint(cell_id, _waypoint)
-      @routes[cell_id]
+    def reference_transition_curve(_first_cell_id, _second_cell_id, _waypoint)
+      @curve
     end
 
     def reference_graph_route_snapshot_key_for(cell_id)
@@ -64,8 +64,7 @@ class TransitionCurveBuilderTest < Minitest::Test
   end
 
   def test_ref_graph_waypoint_paths_render_only_straight_gl_lines
-    @model.routes['A'] = [point(0), point(1)]
-    @model.routes['B'] = [point(4), point(3)]
+    @model.curve = [point(0), point(1), point(2), point(3), point(4)]
     groups = @builder.transition_curve_segments(@transition)
 
     assert_equal [0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0],
@@ -74,41 +73,36 @@ class TransitionCurveBuilderTest < Minitest::Test
     assert_empty groups[:second]
   end
 
-  def test_missing_one_side_uses_only_its_direct_waypoint_segment
-    @model.routes['B'] = [point(4), point(3)]
-    assert_equal [0.0, 2.0, 2.0, 3.0, 3.0, 4.0],
-                 xs(@builder.transition_curve_segments(@transition)[:default])
+  def test_missing_native_curve_fails_closed
+    assert_empty @builder.transition_curve_segments(@transition)[:default]
   end
 
   def test_missing_waypoint_connects_exact_state_endpoints
     @transition.selected_waypoint = nil
-    @model.routes['A'] = [point(0), point(1)]
-    @model.routes['B'] = [point(4), point(3)]
+    @model.curve = [point(0), point(1), point(2), point(3), point(4)]
     assert_equal [0.0, 4.0],
                  xs(@builder.transition_curve_segments(@transition)[:default])
   end
 
   def test_consecutive_duplicate_points_are_removed
-    @model.routes['A'] = [point(0), point(0), point(2)]
-    @model.routes['B'] = [point(4), point(2), point(2)]
+    @model.curve = [point(0), point(0), point(2), point(2), point(4)]
     assert_equal [0.0, 2.0, 2.0, 4.0],
                  xs(@builder.transition_curve_segments(@transition)[:default])
   end
 
   def test_exact_state_endpoints_are_preserved_when_graph_state_is_different
-    @model.routes['A'] = [point(0.25), point(1)]
-    @model.routes['B'] = [point(3.75), point(3)]
+    @model.curve = [point(0.25), point(1), point(2), point(3), point(3.75)]
     assert_equal [0.0, 0.25, 0.25, 1.0, 1.0, 2.0, 2.0, 3.0,
                   3.0, 3.75, 3.75, 4.0],
                  xs(@builder.transition_curve_segments(@transition)[:default])
   end
 
   def test_route_coordinates_change_transition_cache_fingerprint
-    @model.routes['A'] = [point(0), point(1)]
+    @model.curve = [point(0), point(1), point(2), point(4)]
     first_input = @builder.transition_curve_input(@transition)
     original_key = @builder.send(:transition_render_fingerprint, first_input, [:identity])
 
-    @model.routes['A'] = [point(0), point(1.5)]
+    @model.curve = [point(0), point(1.5), point(2), point(4)]
     second_input = @builder.transition_curve_input(@transition)
     changed_key = @builder.send(:transition_render_fingerprint, second_input, [:identity])
 
@@ -116,12 +110,12 @@ class TransitionCurveBuilderTest < Minitest::Test
   end
 
   def test_route_change_rebuilds_assembled_cache_without_explicit_invalidate
-    @model.routes['A'] = [point(0), point(1)]
+    @model.curve = [point(0), point(1), point(2), point(4)]
     @model.revisions['A'] = [:first_graph]
     first = @builder.transition_line_points
     assert_equal [0.0, 1.0, 1.0, 2.0, 2.0, 4.0], xs(first)
 
-    @model.routes['A'] = [point(0), point(1.5)]
+    @model.curve = [point(0), point(1.5), point(2), point(4)]
     @model.revisions['A'] = [:next_graph]
     second = @builder.transition_line_points
     assert_equal [0.0, 1.5, 1.5, 2.0, 2.0, 4.0], xs(second)

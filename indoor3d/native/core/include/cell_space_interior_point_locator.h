@@ -105,12 +105,15 @@ struct ReferenceFloorPartition
 
 struct ReferenceGraphDebug
 {
-    // BEFORE/AFTER/COLLAPSED/OPTIMIZED nodes are ordinary references.
-    // State is selected only after OPTIMIZED and is never a graph input.
+    // Native-only BEFORE graph. Later stages keep their own snapshots in the
+    // keyed Reference repository and never expose radius to Ruby.
     std::vector<ReferenceGraphNode> nodes;
     std::vector<ReferenceGraphEdge> edges;
     std::vector<ReferenceLoopCollapseCandidate> loop_candidates;
     std::vector<ReferenceFloorPartition> floor_partitions;
+    // BEFORE index of the AABB-nearest valid Polygon centroid. It is an
+    // immutable routing anchor and must survive every later graph reduction.
+    std::optional<std::size_t> state_node_index;
 };
 
 struct CellSpaceInteriorPointResult
@@ -133,7 +136,7 @@ std::optional<Vec3> find_state_point(
 // BEFORE seeds for BOTH Room and Stair: the area centroid of EVERY
 // final Floor polygon plus the midpoint of each straight boundary shared
 // by TWO distinct final polygons (never triangulation-internal edges).
-// Retains +1000mm world-Z placement and the Solid BVH safety checks.
+// Retains +500mm world-Z placement and the Solid BVH safety checks.
 std::vector<ReferencePoint> find_reference_points(
     const CellData& cell,
     double tolerance
@@ -155,9 +158,9 @@ std::vector<bool> validate_room_reference_segments(
     double tolerance
 );
 
-// Room/Stair reference preparation and BEFORE graph. State is intentionally
-// absent; the completed OPTIMIZED graph selects it later. The legacy State
-// service remains available for other CellSpace categories.
+// Room/Stair reference preparation and BEFORE graph. State is the valid
+// Polygon centroid nearest the CellSpace AABB center. The legacy State service
+// remains available for other CellSpace categories.
 CellSpaceInteriorPointResult locate_reference_before(
     const CellData& cell,
     double tolerance
