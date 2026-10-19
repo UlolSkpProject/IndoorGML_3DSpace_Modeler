@@ -52,7 +52,7 @@ class ReferenceGraphSimplifierProtectedTest < Minitest::Test
     # without a new representative-to-representative LOS. The smaller first
     # loop is selected, so protect its ring and gateway 4, but do not let the
     # rejected second certificate extend protection through 5, 6 and 7.
-    assert_equal [0, 1, 2, 3, 4], Simplify.protected_originals(graph, [])
+    assert_equal [1, 2, 3, 4], Simplify.protected_originals(graph, [])
   end
 
   def test_compact_cluster_uses_shared_contraction_and_keeps_original
@@ -61,9 +61,9 @@ class ReferenceGraphSimplifierProtectedTest < Minitest::Test
       [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]]
     )
     result = Simplify.simplify(graph)
-    assert_equal [0, 3], result[:original_indices]
-    assert_equal [[1, 0], [2, 0]], result[:merged_into]
-    assert_equal [[0, 1]], result[:edges]
+    assert_equal [0], result[:original_indices]
+    assert_equal [[1, 0], [2, 0], [3, 0]], result[:merged_into]
+    assert_empty result[:edges]
     assert_equal 4, graph[:nodes].size
     assert result[:nodes].frozen?
   end

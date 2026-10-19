@@ -88,7 +88,7 @@ class ReferenceGraphPipelineIntegrationTest < Minitest::Test
       edges: [[1, 2], [1, 3], [1, 4], [2, 3], [2, 5]].map(&:freeze).freeze,
       loop_candidates: [certificate].freeze,
       floor_partitions: partitions,
-      protocol_version: 11
+      protocol_version: 12
     }.freeze
   end
 
@@ -108,7 +108,7 @@ class ReferenceGraphPipelineIntegrationTest < Minitest::Test
     [after, collapsed, optimized].each do |stage|
       assert_equal before[:floor_partitions], stage[:floor_partitions]
       assert_equal before[:loop_candidates], stage[:loop_candidates]
-      assert_equal 11, stage[:protocol_version]
+      assert_equal 12, stage[:protocol_version]
     end
     assert_equal 1, collapsed[:collapse_count]
     representative = collapsed[:nodes].find { |record| record[:protection_reason] == :certified_loop_representative }

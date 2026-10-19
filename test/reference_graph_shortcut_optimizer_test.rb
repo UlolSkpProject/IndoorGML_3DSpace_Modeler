@@ -70,10 +70,10 @@ class ReferenceGraphShortcutOptimizerTest < Minitest::Test
     assert_equal [[1, 2]], result[:shortcut_native_los_edges]
   end
 
-  def test_state_never_removed_even_when_degree_two
+  def test_node_zero_is_removed_when_it_is_degree_two
     original = graph([node(1, 0), node(0, 0), node(2, 0)],
                      [[0, 1], [0, 2]])
-    assert_equal 0, Optimizer.optimize(original, los_validator: ->(*) { true })[:shortcut_removed_count]
+    assert_equal 1, Optimizer.optimize(original, los_validator: ->(*) { true })[:shortcut_removed_count]
   end
 
   def test_branch_endpoints_and_isolated_node_are_protected
@@ -190,12 +190,12 @@ class ReferenceGraphShortcutOptimizerTest
     assert_equal [[1, 2]], result[:shortcut_native_los_edges]
   end
 
-  def test_state_is_preserved_despite_direct_edge_and_degree_two
+  def test_node_zero_is_not_implicitly_preserved
     source = Fixture.graph([Fixture.node(1), Fixture.node(0), Fixture.node(2)],
                            [[0, 1], [0, 2], [1, 2]])
     result = Optimizer.optimize(source)
-    assert_equal [0, 1, 2], result[:original_indices]
-    assert_equal 0, result[:shortcut_removed_count]
+    assert_equal [1, 2], result[:original_indices]
+    assert_equal 1, result[:shortcut_removed_count]
   end
 
   def test_degree_zero_one_and_three_nodes_are_not_removed

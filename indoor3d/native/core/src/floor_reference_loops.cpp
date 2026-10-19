@@ -176,17 +176,12 @@ void certify(const std::vector<std::size_t>& cycle,const FaceSolid& solid,
         for(auto j:adjacent[i])if(!in_cycle[j])boundary.push_back(j);
     std::sort(boundary.begin(),boundary.end());
     boundary.erase(std::unique(boundary.begin(),boundary.end()),boundary.end());
-    std::vector<Vec3> centers;
-    if(in_cycle[0])centers.push_back(graph.nodes[0].point);
-    else
-    {
-        centers.push_back(mesh.centroid);
-        for(const auto& tri:mesh.triangles)
-            centers.push_back(mul(add(add(tri[0],tri[1]),tri[2]),1.0/3.0));
-        std::stable_sort(centers.begin(),centers.end(),[&](Vec3 a,Vec3 b) {
-            return solid.nearest_distance(a)>solid.nearest_distance(b);
-        });
-    }
+    std::vector<Vec3> centers{mesh.centroid};
+    for(const auto& tri:mesh.triangles)
+        centers.push_back(mul(add(add(tri[0],tri[1]),tri[2]),1.0/3.0));
+    std::stable_sort(centers.begin(),centers.end(),[&](Vec3 a,Vec3 b) {
+        return solid.nearest_distance(a)>solid.nearest_distance(b);
+    });
     for(const Vec3 p:centers)
     {
         if(!solid.inside(p,tol))continue;
@@ -194,7 +189,7 @@ void certify(const std::vector<std::size_t>& cycle,const FaceSolid& solid,
         if(!std::isfinite(clearance)||clearance<=0)continue;
         bool valid=true;
         for(auto i:cycle)
-            if(!in_cycle[0] && !solid.visible(p,graph.nodes[i].point,tol))
+            if(!solid.visible(p,graph.nodes[i].point,tol))
             { valid=false;break; }
         if(!valid)continue;
         for(auto i:boundary)
@@ -203,7 +198,7 @@ void certify(const std::vector<std::size_t>& cycle,const FaceSolid& solid,
         if(!valid)continue;
         ReferenceLoopCollapseCandidate candidate;
         candidate.vertices=cycle;
-        candidate.representative=in_cycle[0]?graph.nodes[0]:ReferenceGraphNode{p,clearance};
+        candidate.representative={p,clearance};
         candidate.visible_neighbors=boundary;
         graph.loop_candidates.push_back(std::move(candidate));
         return;
@@ -284,7 +279,7 @@ void certify_before_reference_loops(const FaceSolid& solid,
     }
     catch(...)
     {
-        // Optional certificate discovery never invalidates a successful State.
+        // Optional certificate discovery never invalidates successful BEFORE.
         graph.loop_candidates.clear();
     }
 }

@@ -21,8 +21,8 @@ constexpr double FLOOR_MIN_NEGATIVE_NORMAL_Z=0.6;
 constexpr std::size_t MAX_FINAL_REFERENCES=4096;
 constexpr double MIN_REFERENCE_RADIUS=150.0/25.4; // 150 mm in SketchUp inches
 
-// These seeds are the ONLY candidates eligible to become a Room/Stair
-// State. No volume centroid / spatial search / Triangle BVH fallback.
+// These seeds are the ONLY Room/Stair BEFORE candidates. State is selected
+// later from OPTIMIZED; there is no global State-search fallback.
 // Classify clearance BEFORE calling inside(): inside() intentionally
 // rejects boundary-near points and would otherwise hide the cause.
 enum class ReferenceCheck { Valid, Outside, Clearance };
@@ -181,8 +181,8 @@ CellSpaceInteriorPointResult locate_reference_before(
             result.exit_code=StateExitCode::InvalidCentroids;
         return result;
     }
-    // Evaluate candidate validity BEFORE State selection. The first
-    // available valid seed becomes Node 0 / State, not a duplicate Final.
+    // Evaluate every candidate uniformly. BEFORE has references only;
+    // State is selected from the completed OPTIMIZED graph.
     for (const Seed& seed:seed_batch.points)
     {
         const ReferenceCheck check=inspect_reference(
@@ -211,22 +211,19 @@ CellSpaceInteriorPointResult locate_reference_before(
         const double wall_distance=solid.nearest_wall_distance(seed.position);
         const double radius=std::isfinite(wall_distance) ?
             std::max(0.0,wall_distance-tolerance) : 0.0;
-        // Reject undersized spheres before State promotion and BEFORE graph
-        // construction, so downstream edges and loop certificates can never
+        // Reject undersized spheres before BEFORE graph construction, so
+        // downstream edges and loop certificates can never
         // refer to a candidate whose usable wall radius is below 150 mm.
         if (std::isfinite(wall_distance) &&
             radius<MIN_REFERENCE_RADIUS) continue;
 
-        if (!result.state_point)
-            result.state_point=seed.position;
-        else
-            result.reference_points.push_back({
-                seed.position,ReferencePointKind::Final
-            });
+        result.reference_points.push_back({
+            seed.position,ReferencePointKind::Final
+        });
         result.debug_graph.nodes.push_back({seed.position,radius});
         ++result.diagnostics.accepted_references;
     }
-    if (!result.state_point)
+    if (result.debug_graph.nodes.empty())
     {
         const bool outside=result.diagnostics.rejected_outside>0;
         const bool clearance=result.diagnostics.rejected_clearance>0;
@@ -253,8 +250,8 @@ CellSpaceInteriorPointResult locate_reference_before(
             if (solid.visible(nodes[i].point,nodes[j].point,tolerance))
                 result.debug_graph.edges.push_back({i,j});
         }
-    // Certificate generation is optional and fail-closed. The BEFORE
-    // State, Final points and Native visibility edges are immutable.
+    // Certificate generation is optional and fail-closed. BEFORE references
+    // and Native visibility edges are immutable.
     certify_before_reference_loops(solid,result.debug_graph,tolerance);
     return result;
 }

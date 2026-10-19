@@ -168,7 +168,7 @@ module ULOL
         end
 
         def valid_snapshot?(nodes, edges, origins)
-          return false if nodes.empty? || nodes.size != origins.size || origins.first != 0
+          return false if nodes.empty? || nodes.size != origins.size
           return false unless origins.compact.all? { |id| id.is_a?(Integer) && id >= 0 }
           return false unless origins.compact.uniq.size == origins.compact.size
           return false unless nodes.all? { |record|
@@ -258,9 +258,7 @@ module ULOL
           # whose endpoints are both ring members is an internal chord and is
           # removed together with those members by graph contraction.
 
-          state = ring.include?(0)
-          return nil if state && (after.first != 0 || point_key(certificate[:point]) != point_key(nodes[0][:point]))
-          removed = state ? after.reject(&:zero?) : after
+          removed = after
           boundary = after.flat_map { |index| adjacency[index] }
                           .reject { |index| members[index] }.uniq.sort
           area = loop_area(nodes, after)
@@ -272,7 +270,6 @@ module ULOL
             after_vertices: after.freeze,
             removed_indices: removed.freeze,
             boundary_indices: boundary.freeze,
-            state_loop: state,
             priority: [area, length, ring, point_key(certificate[:point]), certificate[:radius],
                        certificate[:visible_originals].sort].freeze
           )
@@ -298,25 +295,21 @@ module ULOL
           originals.each_with_index { |id, index| current[id] = index unless id.nil? }
           indices = candidate.fetch(:original_vertices).map { |id| current[id] }
           return { accepted: false } if indices.any?(&:nil?)
-          representative = candidate.fetch(:state_loop) ? 0 : :new
-          rep_node = if candidate.fetch(:state_loop)
-                       nil
-                     else
-                       {
-                         point: candidate.fetch(:point),
-                         radius: candidate.fetch(:radius),
-                         protected: true,
-                         protection_reason: :certified_loop_representative
-                       }.freeze
-                     end
+          representative = :new
+          rep_node = {
+            point: candidate.fetch(:point),
+            radius: candidate.fetch(:radius),
+            protected: true,
+            protection_reason: :certified_loop_representative
+          }.freeze
 
           # The certificate is an explicit Native attestation, not a Ruby
-          # geometric guess. Adapter allows exactly the center-to-members
-          # (non-State) and center-to-listed-external-neighbor LOS that Native
+          # geometric guess. Adapter allows exactly the center-to-members and
+          # center-to-listed-external-neighbor LOS that Native
           # certified; all other segments need an actual Native callback.
-          certified_ids = candidate.fetch(:state_loop) ? [] : candidate.fetch(:original_vertices)
+          certified_ids = candidate.fetch(:original_vertices)
           certified_ids += candidate.fetch(:visible_originals)
-          center = candidate.fetch(:state_loop) ? graph[:nodes][0][:point] : candidate.fetch(:point)
+          center = candidate.fetch(:point)
           point_lookup = Hash.new { |map, key| map[key] = [] }
           graph.fetch(:nodes).each_with_index do |node, index|
             point_lookup[point_key(node[:point])] << index

@@ -25,7 +25,7 @@ module ULOL
             nodes = graph.fetch(:nodes)
             adjacency = neighbors(nodes.length, graph.fetch(:edges))
             origins = graph.fetch(:original_indices)
-            candidates = (1...nodes.length).select do |index|
+            candidates = (0...nodes.length).select do |index|
               adjacency[index].length == 2 && !protected_node?(nodes[index])
             end.sort_by { |index| stable_key(index, nodes, origins) }
 
@@ -137,7 +137,7 @@ module ULOL
           raw_nodes = Array(source.fetch(:nodes))
           raw_edges = Array(source.fetch(:edges))
           origins = source.key?(:original_indices) ? Array(source[:original_indices]) : (0...raw_nodes.length).to_a
-          unless origins.length == raw_nodes.length && (raw_nodes.empty? || origins.first == 0)
+          unless origins.length == raw_nodes.length
             raise ArgumentError, 'invalid collapsed original_indices'
           end
           unless raw_nodes.all? { |node| ReferenceGraphContraction.valid_node?(node) }

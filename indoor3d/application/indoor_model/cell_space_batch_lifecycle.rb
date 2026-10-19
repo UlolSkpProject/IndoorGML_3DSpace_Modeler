@@ -319,8 +319,8 @@ module ULOL
               next unless cell_space&.valid?
 
               cell_id = cell_space.id
-              # AFTER protects the State, certified ring nodes, their
-              # external gateways and explicitly marked semantic nodes.
+              # AFTER protects certified ring nodes, their external gateways
+              # and explicitly marked semantic nodes.
               # Reuse that exact protection policy for debug colors rather
               # than reimplementing it in the Overlay renderer.
               before = @debug_reference_graph_by_cell_id&.[](cell_id)
@@ -342,12 +342,10 @@ module ULOL
                           when :connected then room_internal_connected_graph_for(cell_id)
                           end
               if displayed
-                # Existing Stage overlays retain their usual Final points.
-                # Kind 5 identifies protected Reference Points (magenta X);
-                # State index 0 keeps its dedicated State overlay.
+                # Existing Stage overlays retain their usual reference points.
+                # Kind 5 identifies protected Reference Points (magenta X).
                 displayed_origins = Array(displayed[:original_indices])
                 Array(displayed[:nodes]).each_with_index do |node, index|
-                  next if index.zero?
                   id = displayed_origins.empty? ? index : displayed_origins[index]
                   protected = node[:protected] ||
                               %i[door transition junction].include?(node[:semantic_role]) ||
@@ -389,7 +387,6 @@ module ULOL
             origins = Array(source[:original_indices])
             positions = {}
             Array(source[:nodes]).each_with_index do |node, index|
-              next if index.zero?
               id = origins.empty? ? index : origins[index]
               next unless lookup[id]
 
@@ -620,7 +617,7 @@ module ULOL
               coordinates = outcome[:state_point]
               exit_code = outcome[:exit_code]
               diagnostics = Hash(outcome[:diagnostics])
-              unless exit_code == 0 && coordinates
+              unless exit_code == 0
                 label = NativeAdjacencyBridge::STATE_EXIT_CODES.fetch(exit_code, :unknown)
                 details = diagnostics.map { |key, value| "#{key}=#{value}" }.join(', ')
                 raise NativeAdjacencyBridge::StateUnavailableError.new(
@@ -657,6 +654,26 @@ module ULOL
                 preload_native_reference_graph_stages_for(cell_space, index) if stored
               else
                 clear_debug_reference_points(cell_space)
+              end
+
+              # Room/Stair State is selected only after OPTIMIZED is complete.
+              # The arithmetic mean is not inserted into the graph; the
+              # nearest surviving reference node supplies the exact position.
+              unless coordinates
+                optimized = optimized_debug_reference_graph_for(cell_space.id)
+                begin
+                  selection = ReferenceGraphStateSelector.select(optimized)
+                rescue StandardError => error
+                  details = diagnostics.map { |key, value| "#{key}=#{value}" }.join(', ')
+                  raise NativeAdjacencyBridge::StateUnavailableError.new(
+                    "Native State unavailable after OPTIMIZED for #{cell_space.id}: " \
+                    "#{error.message}; #{details}",
+                    exit_code: 50, diagnostics: diagnostics
+                  )
+                end
+                (@reference_graph_state_selection_by_cell_id ||= {})[cell_space.id] = selection
+                point = selection.fetch(:point)
+                coordinates = [point.x, point.y, point.z].freeze
               end
               state_point_applier.call(cell_space, coordinates)
             end
@@ -769,6 +786,7 @@ module ULOL
             @debug_reference_graph_simplified_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_collapsed_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_optimized_by_cell_id&.delete(cell_space.id)
+            @reference_graph_state_selection_by_cell_id&.delete(cell_space.id)
             @room_internal_graph_by_cell_id&.delete(cell_space.id)
             @room_internal_connected_by_cell_id&.delete(cell_space.id)
             true
@@ -779,13 +797,14 @@ module ULOL
             @debug_reference_graph_simplified_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_collapsed_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_optimized_by_cell_id&.delete(cell_space.id)
+            @reference_graph_state_selection_by_cell_id&.delete(cell_space.id)
             @room_internal_graph_by_cell_id&.delete(cell_space.id)
             @room_internal_connected_by_cell_id&.delete(cell_space.id)
             false
           end
 
-          # Optional AFTER work must never fail State creation. Its Native
-          # geometry is valid until the enclosing batch closes the session.
+          # AFTER is part of State creation because State is selected only
+          # after OPTIMIZED. Native geometry remains available until close.
           def preload_native_after_graph_for(cell_space, session_index)
             return unless cell_space&.valid?
             source = @debug_reference_graph_by_cell_id&.[](cell_space.id)
@@ -885,6 +904,7 @@ module ULOL
             )
           rescue StandardError => error
             @debug_reference_graph_optimized_by_cell_id&.delete(cell_space.id)
+            @reference_graph_state_selection_by_cell_id&.delete(cell_space.id)
             IndoorCore::Logger.puts(
               "[IndoorGML] Room shortcut LOS precompute skipped cell=#{cell_space.id}: " \
               "#{error.class}: #{error.message}"
@@ -971,6 +991,7 @@ module ULOL
             @debug_reference_graph_simplified_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_collapsed_by_cell_id&.delete(cell_space.id)
             @debug_reference_graph_optimized_by_cell_id&.delete(cell_space.id)
+            @reference_graph_state_selection_by_cell_id&.delete(cell_space.id)
             @room_internal_graph_by_cell_id&.delete(cell_space.id)
             @room_internal_connected_by_cell_id&.delete(cell_space.id)
             true

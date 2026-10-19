@@ -77,17 +77,16 @@ class ReferencePointProtectedOverlayTest < Minitest::Test
   def test_before_colors_only_protected_final_references
     Core::ReferenceGraphDebugMode.instance_variable_set(:@mode, :before)
     grouped = build_model.debug_reference_points_by_kind
-    assert_equal [p(1, 1), p(2, 1), p(1.5, 2), p(3, 2)], grouped[5]
-    assert_equal [p(0, 0), p(9, 9)], grouped[4]
+    assert_equal [p(0, 0), p(1, 1), p(2, 1), p(1.5, 2), p(3, 2)], grouped[5]
+    assert_equal [p(9, 9)], grouped[4]
     assert_equal [p(10, 10)], grouped[1]
   end
 
   def test_after_uses_original_indices_for_same_protection
     Core::ReferenceGraphDebugMode.instance_variable_set(:@mode, :after)
     grouped = build_model.debug_reference_points_by_kind
-    assert_equal [p(1, 1), p(2, 1), p(1.5, 2), p(3, 2)], grouped[5]
+    assert_equal [p(0, 0), p(1, 1), p(2, 1), p(1.5, 2), p(3, 2)], grouped[5]
     assert_equal [p(9, 9)], grouped[4]
-    refute_includes Array(grouped[5]), p(0, 0)
   end
 
   def test_new_collapsed_representative_is_marked_when_nil_origin
@@ -140,7 +139,7 @@ class ReferencePointProtectedOverlayTest < Minitest::Test
     three = model.send(:protected_reference_visuals_for, 'A', replacement)
     refute_same one[0], three[0]
     refute three[0][2]  # Prior loop vertex is no longer protected.
-    assert three[0][0] # State remains protected.
+    refute three[0][0] # Node zero has no implicit State protection.
   end
 
   def teardown

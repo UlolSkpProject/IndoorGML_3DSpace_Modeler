@@ -105,7 +105,8 @@ struct ReferenceFloorPartition
 
 struct ReferenceGraphDebug
 {
-    // Node zero is always State; all other nodes are Final references.
+    // BEFORE/AFTER/COLLAPSED/OPTIMIZED nodes are ordinary references.
+    // State is selected only after OPTIMIZED and is never a graph input.
     std::vector<ReferenceGraphNode> nodes;
     std::vector<ReferenceGraphEdge> edges;
     std::vector<ReferenceLoopCollapseCandidate> loop_candidates;
@@ -135,7 +136,6 @@ std::optional<Vec3> find_state_point(
 // Retains +1000mm world-Z placement and the Solid BVH safety checks.
 std::vector<ReferencePoint> find_reference_points(
     const CellData& cell,
-    const Vec3& state_point,
     double tolerance
 );
 
@@ -143,7 +143,6 @@ std::vector<ReferencePoint> find_reference_points(
 // polygons or original SketchUp entities are modified here.
 ReferenceGraphDebug build_room_reference_visibility_graph(
     const CellData& cell,
-    const Vec3& state_point,
     const std::vector<ReferencePoint>& reference_points,
     double tolerance
 );
@@ -156,8 +155,9 @@ std::vector<bool> validate_room_reference_segments(
     double tolerance
 );
 
-// Phase 10: Loop-only Room/Stair State selection and BEFORE graph;
- // legacy State service remains available for other CellSpace categories.
+// Room/Stair reference preparation and BEFORE graph. State is intentionally
+// absent; the completed OPTIMIZED graph selects it later. The legacy State
+// service remains available for other CellSpace categories.
 CellSpaceInteriorPointResult locate_reference_before(
     const CellData& cell,
     double tolerance

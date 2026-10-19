@@ -58,12 +58,9 @@ module ULOL
           return rejected(source, :invalid_representative) unless fresh ||
             (representative.is_a?(Integer) && selected.include?(representative))
           return rejected(source, :invalid_representative) if fresh != !new_node.nil?
-          return rejected(source, :state_must_survive) if selected.include?(0) && representative != 0
-
           protected = Array(protected_indices)
           return rejected(source, :invalid_protection) unless protected.all? { |i| i.is_a?(Integer) && i.between?(0, count - 1) }
           protected_set = protected.to_h { |i| [i, true] }
-          protected_set[0] = true
           removed = fresh ? selected : selected.reject { |i| i == representative }
           return rejected(source, :protected_member) if removed.any? { |i| protected_set[i] }
           return rejected(source, :nothing_to_contract) if removed.empty?
@@ -115,7 +112,7 @@ module ULOL
           end
           sorted_edges = result_edges.keys.sort
           origins = source.key?(:original_indices) ? Array(source[:original_indices]) : (0...count).to_a
-          return rejected(source, :invalid_origins, checks, boundary) unless origins.length == count && origins.first == 0
+          return rejected(source, :invalid_origins, checks, boundary) unless origins.length == count
           result_origins = surviving.map { |i| origins[i] }
           result_origins << nil if fresh
           rep_origin = fresh ? nil : origins[representative]

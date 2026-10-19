@@ -21,15 +21,14 @@ module ULOL
           initial_nodes = Array(source.fetch(:nodes))
           initial_edges = Array(source.fetch(:edges))
           originals = Array(source[:original_indices] || (0...initial_nodes.size).to_a)
-          raise ArgumentError, 'invalid source indices' unless originals.length == initial_nodes.length &&
-                                                               (originals.empty? || originals.first == 0)
+          raise ArgumentError, 'invalid source indices' unless originals.length == initial_nodes.length
 
           protected = protected_originals(source, protected_indices)
           graph = source.merge(
             original_indices: originals.freeze,
             merged_into: Array(source[:merged_into]).freeze
           ).freeze
-          # Existing State and large spheres are preferred, then original id.
+          # Large spheres are preferred, then original id.
           order = (0...initial_nodes.size).sort_by do |i|
             [-radius(initial_nodes[i]), originals[i] || i, i]
           end
@@ -40,13 +39,13 @@ module ULOL
             next unless center
             nodes = graph.fetch(:nodes)
             adjacency = neighbors(nodes.length, graph.fetch(:edges))
-            next if !center.zero? && protected.include?(current_origins[center])
+            next if protected.include?(current_origins[center])
 
             members = [center]
             adjacent = adjacency[center].sort_by { |i| [radius(nodes[i]), current_origins[i] || i] }
             adjacent.each do |index|
               next if members.length >= MAX_CLUSTER_SIZE
-              next if index.zero? || protected.include?(current_origins[index])
+              next if protected.include?(current_origins[index])
               next if adjacency[index].length < 2
               # Degree-2 chain nodes no longer need a common neighbor.
               # Preserve meaningful articulation junctions (degree >= 3).
@@ -56,11 +55,6 @@ module ULOL
               # Strict distance to the larger wall-clearance radius.
               next unless d < [radius(nodes[center]), radius(nodes[index])].max
               members << index
-            end
-            next if members.length < 2
-            # Retain at least one non-State reference from a component.
-            if center.zero? && members.length == nodes.length
-              members.pop
             end
             next if members.length < 2
             # Attempt the largest compact cluster first, then shrink
@@ -91,7 +85,6 @@ module ULOL
         def protected_originals(source, explicit)
           nodes = Array(source.fetch(:nodes))
           protected = Array(explicit).select { |i| i.is_a?(Integer) && i.between?(0, nodes.size - 1) }
-          protected << 0 unless nodes.empty?
           nodes.each_with_index do |node, index|
             protected << index if node[:protected] ||
                                   %i[door transition junction].include?(node[:semantic_role])

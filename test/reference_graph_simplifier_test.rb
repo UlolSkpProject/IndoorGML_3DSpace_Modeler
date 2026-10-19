@@ -17,7 +17,7 @@ class ReferenceGraphSimplifierTest < Minitest::Test
     { nodes: nodes.freeze, edges: edges.map(&:freeze).freeze }.freeze
   end
 
-  def test_large_visible_state_absorbs_redundant_centers_but_preserves_endpoint
+  def test_large_visible_reference_absorbs_all_redundant_neighbors
     source = graph(
       [node(0, 0, 5), node(0.5, 0, 0.5),
        node(0, 0.6, 0.5), node(0.8, 0.6, 0.5)],
@@ -28,12 +28,11 @@ class ReferenceGraphSimplifierTest < Minitest::Test
 
     assert_equal 4, source[:nodes].size, 'original snapshot must remain intact'
     assert_equal 6, source[:edges].size, 'original LOS graph must remain intact'
-    assert_equal [0, 3], result[:original_indices]
-    assert_equal [[0, 1]], result[:edges]
-    assert_equal [[1, 0], [2, 0]], result[:merged_into]
+    assert_equal [0], result[:original_indices]
+    assert_empty result[:edges]
+    assert_equal [[1, 0], [2, 0], [3, 0]], result[:merged_into]
     assert_equal source[:nodes][0][:point], result[:nodes][0][:point]
     refute_same source[:nodes][0][:point], result[:nodes][0][:point]
-    assert_equal source[:nodes][3][:point], result[:nodes][1][:point]
   end
 
   def test_articulation_point_on_curved_corridor_cannot_be_removed
@@ -52,7 +51,7 @@ class ReferenceGraphSimplifierTest < Minitest::Test
 
   def test_local_detour_limit_no_longer_blocks_a_los_safe_contraction
     # B bridges the very short C-B-D path; replacing that detour through
-    # State is much longer. Protected endpoints keep this test focused
+    # the larger representative is much longer. Protected endpoints keep this test focused
     # on removing the intervening B without removing C and D.
     # All retained connections already exist.
     source = graph(
@@ -94,17 +93,16 @@ class ReferenceGraphSimplifierTest < Minitest::Test
 
   def test_small_node_radii_no_longer_block_cluster_membership
     # Every removed neighbor has radius 0.1, so the old pairwise 1.6*0.1
-    # constraint rejected all of them despite the large State radius.
-    # Retain one non-State endpoint by the existing State policy.
+    # constraint rejected all of them despite the large reference radius.
     source = graph(
       [node(0, 0, 10), node(1, 0, 0.1),
        node(2, 0, 0.1), node(5, 0, 0.1)],
       [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]]
     )
     result = Simplifier.simplify(source)
-    assert_equal [0, 3], result[:original_indices]
-    assert_equal [[0, 1]], result[:edges]
-    assert_equal [[1, 0], [2, 0]], result[:merged_into]
+    assert_equal [0], result[:original_indices]
+    assert_empty result[:edges]
+    assert_equal [[1, 0], [2, 0], [3, 0]], result[:merged_into]
     assert_equal 4, source[:nodes].size
     assert_equal 6, source[:edges].size
   end
@@ -122,7 +120,7 @@ class ReferenceGraphSimplifierTest < Minitest::Test
     assert_empty result[:merged_into]
   end
 
-  def test_state_and_isolated_candidates_remain_present
+  def test_isolated_candidates_remain_present
     source = graph(
       [node(0, 0, 0.2), node(5, 0, 2), node(10, 0, 0.1)],
       []

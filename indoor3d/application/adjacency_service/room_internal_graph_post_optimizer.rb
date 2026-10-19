@@ -6,8 +6,8 @@ module ULOL
       # A second application of the same degree-two Shortcut rule AFTER
       # LOS-prioritized Kruskal connects the OPTIMIZED graph components.
       #
-      # State is immutable, B must have precisely two neighbors, its 3D
-      # projection must lie strictly inside AC, and AC must have Native LOS.
+      # B must have precisely two neighbors, its 3D projection must lie
+      # strictly inside AC, and AC must have Native LOS.
       # No circle, angle, deviation or detour threshold is introduced.
       #
       # The connected graph is not mutated. Metadata (original/clear/blocked
@@ -21,7 +21,7 @@ module ULOL
           original_count = Integer(connected.fetch(:original_edge_count))
           added = Array(connected.fetch(:added_edges))
           origins = Array(connected.fetch(:original_indices))
-          unless nodes.length == origins.length && origins.first == 0 &&
+          unless nodes.length == origins.length &&
                  original_count.between?(0, input_edges.length) &&
                  added.length == input_edges.length - original_count
             raise ArgumentError, 'Invalid connected graph metadata'
@@ -60,7 +60,7 @@ module ULOL
           checked_count = 0
 
           loop do
-            candidates = (1...nodes.length).filter_map do |middle|
+            candidates = (0...nodes.length).filter_map do |middle|
               next unless alive[middle] && adjacency[middle].length == 2
 
               first, last = adjacency[middle].keys.sort

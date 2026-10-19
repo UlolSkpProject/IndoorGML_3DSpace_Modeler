@@ -118,13 +118,13 @@ class RoomInternalGraphPostOptimizerTest < Minitest::Test
     assert_equal 1, input[:blocked_added_count]
   end
 
-  def test_state_degree_two_is_immutable
+  def test_node_zero_degree_two_is_removed_like_any_reference
     input = graph([node(1), node(0), node(2)], [[0, 1], [0, 2]])
-    result = Post.optimize(input, los_batch: ->(_pairs) { flunk 'State protected' })
+    result = Post.optimize(input, los_batch: ->(pairs) { Array.new(pairs.length, true) })
 
-    assert_equal input[:nodes], result[:nodes]
-    assert_equal 0, result[:postopt_removed_count]
-    assert_same input[:nodes][0], result[:nodes][0]
+    assert_equal [1, 2], result[:original_indices]
+    assert_equal 1, result[:postopt_removed_count]
+    assert_equal [0], result[:postopt_removed_indices]
   end
 
   def test_branch_and_end_nodes_are_not_removed

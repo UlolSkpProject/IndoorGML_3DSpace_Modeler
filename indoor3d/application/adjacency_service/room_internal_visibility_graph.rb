@@ -18,7 +18,7 @@ module ULOL
         # Preserve exhaustive Kruskal behavior for small Room graphs.
         # Floor-triangle seeds may legitimately create thousands of nodes.
         MAX_EXHAUSTIVE_NODES = 192
-        MAX_NODES = 4097 # 4096 floor triangles + the fixed State
+        MAX_NODES = 4096
         MAX_PAIRS_PER_BATCH = 2048
         LARGE_GRAPH_NEIGHBOR_COUNTS = [4, 16, 64, 256].freeze
 
@@ -32,8 +32,8 @@ module ULOL
           end
 
           originals = Array(optimized.fetch(:original_indices))
-          unless originals.length == nodes.length && originals.first == 0
-            raise ArgumentError, 'Room internal graph must have State at node 0'
+          unless originals.length == nodes.length
+            raise ArgumentError, 'Room internal graph has invalid node origins'
           end
           raise ArgumentError, 'Native LOS callback required' unless los_batch.respond_to?(:call)
 

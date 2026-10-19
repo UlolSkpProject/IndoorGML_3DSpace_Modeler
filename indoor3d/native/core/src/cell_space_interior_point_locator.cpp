@@ -23,7 +23,7 @@ using namespace IndoorGMLAdjacencyNative;
 constexpr double EPSILON = 1.0e-12;
 constexpr std::size_t BVH_LEAF_TRIANGLES = 6;
 constexpr std::size_t MAX_SEARCH_NODES = 200000;
-// Room floor triangulation experiment; State and Adjacency stay unchanged.
+// Legacy triangle-based geometry helpers for non-Room/Stair State and tests.
 // A Face is Floor only if its normalized outward normal has Z <= -0.6.
 // Inclined floors are accepted only when they satisfy that same criterion.
 constexpr double ROOM_FLOOR_MIN_NEGATIVE_NORMAL_Z = 0.6;
@@ -688,18 +688,6 @@ std::optional<Vec3> find_state_point(
 
 namespace
 {
-bool safe_reference(
-    const TriangleBvh& bvh,
-    const Vec3& point,
-    const Vec3& state_point,
-    double tolerance
-)
-{
-    return length_squared(subtract(point, state_point)) > tolerance * tolerance &&
-           bvh_inside(bvh, point, tolerance) &&
-           bvh.nearest_distance(point) > tolerance;
-}
-
 
 bool clear_path(
     const TriangleBvh& bvh,
@@ -1219,7 +1207,6 @@ std::vector<Vec3> floor_partition_shared_edge_midpoints(
 // rather than silently losing previously valid interior candidates.
 std::vector<ReferencePoint> find_reference_points(
     const CellData& cell,
-    const Vec3& state_point,
     double tolerance
 )
 {
@@ -1313,10 +1300,7 @@ std::vector<ReferencePoint> find_reference_points(
             bvh.nearest_distance(point) <= tolerance)
             return false;
         points.push_back({point, ReferencePointKind::Face});
-        // State owns its position; do not duplicate it as a Final node.
-        if (length_squared(subtract(point, state_point)) >
-            tolerance * tolerance)
-            points.push_back({point, ReferencePointKind::Final});
+        points.push_back({point, ReferencePointKind::Final});
         ++accepted;
         return true;
     };
@@ -1746,15 +1730,8 @@ void certify_planar_loop(
     if (!membrane_inside_solid(*patch,bvh,solid,tolerance,test_budget))
         return;
 
-    const bool includes_state=is_cycle[0];
     ReferenceLoopCollapseCandidate cert;
     cert.vertices=cycle;
-    if (includes_state)
-    {
-        cert.representative=graph.nodes[0];
-        graph.loop_candidates.push_back(std::move(cert));
-        return;
-    }
 
     // An area centroid can lie outside a concave membrane; use ear
     // centroids as fallback, but each proposed center must have direct
@@ -1856,7 +1833,6 @@ void validate_virtual_mesh_loop_candidates(
 
 ReferenceGraphDebug build_room_reference_visibility_graph(
     const CellData& cell,
-    const Vec3& state_point,
     const std::vector<ReferencePoint>& reference_points,
     double tolerance
 )
@@ -1875,11 +1851,10 @@ ReferenceGraphDebug build_room_reference_visibility_graph(
         // True 3D inscribed sphere: nearest floor, ceiling or wall.
         graph.nodes.push_back({point, clearance - tolerance});
     };
-    add_node(state_point);
-    if (graph.nodes.empty()) return graph;
     for (const ReferencePoint& point : reference_points)
         if (point.kind == ReferencePointKind::Final)
             add_node(point.point);
+    if (graph.nodes.empty()) return graph;
 
     for (std::size_t i=0; i<graph.nodes.size(); ++i)
     {
@@ -1897,8 +1872,8 @@ ReferenceGraphDebug build_room_reference_visibility_graph(
         }
     }
     // Room keeps its existing downstream Collapse certificates.
-    // Stair is intentionally BEFORE-only in this experiment: compute
-    // State/Final nodes and sphere/LOS edges, but NO Collapse candidates.
+    // Stair is intentionally BEFORE-only in this legacy helper: compute
+    // reference nodes and sphere/LOS edges, but NO Collapse candidates.
     if (cell.category == CellSpaceCategory::Room)
     {
         try
@@ -1918,70 +1893,13 @@ CellSpaceInteriorPointResult locate_cell_space_interior_points(
     double tolerance
 )
 {
+    if (cell.category == CellSpaceCategory::Room ||
+        cell.category == CellSpaceCategory::Stair)
+        return locate_reference_before(cell,tolerance);
+
     CellSpaceInteriorPointResult result;
     result.state_point = find_state_point(cell, tolerance, &result.state_metrics);
-    if (!result.state_point) return result;
-
-    try
-    {
-        switch (cell.category)
-        {
-        case CellSpaceCategory::Room:
-            // TEMP DEBUG SUPPORT: status is serialized only so Ruby can distinguish
-            // a successful empty result from an exception. Remove with debug logging.
-            result.reference_status = ReferencePointStatus::Failed;
-            // Experiment: final polygon centroids plus shared-edge
-            // midpoints, both raised +1000 mm in world Z.
-            result.reference_points = find_reference_points(
-                cell, *result.state_point, tolerance
-            );
-            result.reference_status = ReferencePointStatus::Succeeded;
-            // Reference failure is auxiliary; the valid State survives.
-            try
-            {
-                result.debug_graph = build_room_reference_visibility_graph(
-                    cell, *result.state_point, result.reference_points, tolerance
-                );
-            }
-            catch (...)
-            {
-                result.debug_graph = {};
-            }
-            break;
-        case CellSpaceCategory::Stair:
-            // Stair shares the Room seed policy (final polygon centroids
-            // AND shared-edge midpoints). Stair stays BEFORE-only; do not
-            // enable Room-specific AFTER/INTERNAL native processing here.
-            result.reference_status = ReferencePointStatus::Failed;
-            result.reference_points = find_reference_points(
-                cell, *result.state_point, tolerance
-            );
-            result.reference_status = ReferencePointStatus::Succeeded;
-            try
-            {
-                result.debug_graph = build_room_reference_visibility_graph(
-                    cell, *result.state_point, result.reference_points, tolerance
-                );
-            }
-            catch (...)
-            {
-                result.debug_graph = {};
-            }
-            break;
-        case CellSpaceCategory::Elevator:
-        case CellSpaceCategory::Door:
-        case CellSpaceCategory::Window:
-        case CellSpaceCategory::Unknown:
-        default:
-            break;
-        }
-    }
-    catch (...)
-    {
-        // Reference-point generation is strictly auxiliary. A valid State point
-        // must remain usable even when reference-point generation fails.
-        result.reference_points.clear();
-    }
+    if (result.state_point) result.exit_code=StateExitCode::Success;
 
     return result;
 }

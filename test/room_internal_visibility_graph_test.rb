@@ -123,11 +123,10 @@ class RoomInternalVisibilityGraphTest < Minitest::Test
     }
   end
 
-  def test_state_origin_and_node_limit_checked
-    invalid = graph([node(0, 0), node(1, 0)]).merge(original_indices: [3, 4])
-    assert_raises(ArgumentError) do
-      Builder.build(invalid, los_batch: ->(_pairs) { flunk })
-    end
+  def test_arbitrary_origins_are_accepted_and_node_limit_is_checked
+    arbitrary = graph([node(0, 0), node(1, 0)]).merge(original_indices: [3, 4])
+    result = Builder.build(arbitrary, los_batch: ->(pairs) { Array.new(pairs.size, true) })
+    assert_equal [3, 4], result[:original_indices]
 
     oversized = graph(Array.new(Builder::MAX_NODES + 1) { |i| node(i, 0) })
     assert_raises(ArgumentError) do

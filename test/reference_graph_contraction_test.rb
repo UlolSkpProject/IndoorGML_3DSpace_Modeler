@@ -61,11 +61,17 @@ class ReferenceGraphContractionTest < Minitest::Test
     assert_empty result[:new_edges]
   end
 
-  def test_state_is_never_removed_or_moved
+  def test_node_zero_has_no_implicit_state_protection
     source = graph([node(0), node(1), node(2), node(3)],
                    [[0, 1], [0, 2], [1, 2], [1, 3]])
-    refute Contract.contract(source, members: [0, 1], representative: 1,
-                            los_validator: ->(*) { true })[:accepted]
+    moved = Contract.contract(source, members: [0, 1], representative: 1,
+                             los_validator: ->(*) { true })
+    assert moved[:accepted]
+    assert_equal [1, 2, 3], moved[:graph][:original_indices]
+    assert_equal [[0, 1], [0, 2]], moved[:graph][:edges]
+    assert_equal source[:nodes][1][:point], moved[:graph][:nodes][0][:point]
+    assert_equal [[0, 1]], moved[:graph][:merged_into]
+
     ok = Contract.contract(source, members: [0, 1], representative: 0,
                            los_validator: ->(*) { true })
     assert ok[:accepted]

@@ -104,9 +104,9 @@ void test_exit_code_failure_stage_distinctions()
 
     const auto success=locate_reference_before(box(20),0.001);
     require(success.exit_code==StateExitCode::Success &&
-            success.state_point.has_value() &&
+            !success.state_point.has_value() &&
             success.diagnostics.accepted_references>=1,
-            "Existing successful Cell must remain exit code 0");
+            "Successful BEFORE must defer State and remain exit code 0");
     require(success.debug_graph.floor_partitions.size()==1 &&
             success.debug_graph.floor_partitions.front().outer.size()==4 &&
             success.debug_graph.floor_partitions.front().holes.empty(),
@@ -127,8 +127,9 @@ void test_face_bvh_uses_plane_from_source()
             "Face BVH must accept FaceData.plane with preserved orientation");
     const auto state=locate_reference_before(cell,0.001);
     require(state.exit_code==StateExitCode::Success &&
-            state.state_point.has_value(),
-            "Room State must use authoritative plane path without triangles");
+            !state.state_point.has_value() &&
+            state.debug_graph.nodes.size()==1,
+            "Room BEFORE must use authoritative plane path without triangles");
 }
 
 void test_box_face_bvh_without_triangles()
@@ -148,7 +149,7 @@ void test_box_face_bvh_without_triangles()
 void test_before_radius_ignores_floor_and_ceiling()
 {
     // Wide enclosed room: floor is ~39.37" away, walls are 100" away.
-    // New circles MUST exceed the floor offset without changing State.
+    // New circles MUST exceed the floor offset without creating State.
     const CellData room=box(200,80);
     FaceSolid solid(room,0.001);
     const Vec3 reference{100,100,1000.0/25.4};
@@ -163,13 +164,13 @@ void test_before_radius_ignores_floor_and_ceiling()
 
     const auto state=locate_reference_before(room,0.001);
     require(state.exit_code==StateExitCode::Success &&
-            state.state_point.has_value() &&
+            !state.state_point.has_value() &&
             state.debug_graph.nodes.size()==1,
-            "Valid room should still produce the SAME State and BEFORE node");
+            "Valid room should produce one BEFORE node and no early State");
     require(near(state.debug_graph.nodes.front().radius,100.0-0.001),
             "BEFORE circle radius must use wall distance rather than floor");
 
-    // 1000mm State lies only 0.02" below the ceiling: still the
+    // 1000mm reference lies only 0.02" below the ceiling: still the
     // identical wall radius; roof clearance is only used for validity.
     const CellData low_ceiling=box(200,1000.0/25.4+0.02);
     const auto near_roof=locate_reference_before(low_ceiling,0.001);
@@ -178,12 +179,12 @@ void test_before_radius_ignores_floor_and_ceiling()
             near(near_roof.debug_graph.nodes.front().radius,100.0-0.001),
             "Ceiling clearance must NOT shrink an accepted BEFORE circle");
 
-    // Exceeding the ceiling DOES invalidate State; this safety rule
+    // Exceeding the ceiling DOES invalidate the reference; this safety rule
     // is deliberately independent from circle radius selection.
     const auto outside=locate_reference_before(box(200,20),0.001);
     require(outside.exit_code==StateExitCode::OutsideSolid &&
             !outside.state_point,
-            "Wall radius must NOT bypass full-Solid State validation");
+            "Wall radius must NOT bypass full-Solid reference validation");
 }
 void test_no_wall_query_remains_safe()
 {
@@ -224,28 +225,29 @@ void test_no_wall_solid_keeps_reference_candidate()
 
     const auto result=locate_reference_before(cell,0.001);
     require(result.exit_code==StateExitCode::Success &&
-            result.state_point.has_value() &&
+            !result.state_point.has_value() &&
             result.debug_graph.nodes.size()==1,
             "Missing wall Faces must not reject an otherwise valid reference");
     require(near(result.debug_graph.nodes.front().radius,0.0),
             "Missing wall Faces must retain a finite serialized radius");
 }
 
-void test_single_convex_floor_state_only_before()
+void test_single_convex_floor_reference_only_before()
 {
     const CellData cell=box(20);
     const auto result=locate_reference_before(cell,0.001);
-    require(result.state_point.has_value(),"First floor centroid must become State");
-    require(result.reference_points.empty(),
-            "Promoted first Reference must NOT duplicate the State");
+    require(!result.state_point.has_value(),
+            "BEFORE must not select State before OPTIMIZED");
+    require(result.reference_points.size()==1,
+            "Single Floor centroid must remain a reference");
     require(result.debug_graph.nodes.size()==1 &&
             result.debug_graph.edges.empty() &&
             result.debug_graph.loop_candidates.empty(),
             "Single Floor produces a one-node BEFORE Graph without AFTER");
-    require(near(result.state_point->x,10.0) &&
-            near(result.state_point->y,10.0) &&
-            near(result.state_point->z,1000.0/25.4),
-            "State must be the floor centroid raised by world Z +1000mm");
+    const Vec3& point=result.reference_points.front().point;
+    require(near(point.x,10.0) && near(point.y,10.0) &&
+            near(point.z,1000.0/25.4),
+            "Reference must be the floor centroid raised by world Z +1000mm");
 }
 void test_l_floor_queue_and_state_promoted_without_triangles()
 {
@@ -301,9 +303,9 @@ void test_stair_uses_same_first_reference_policy()
     auto cell=box(20);
     cell.category=CellSpaceCategory::Stair;
     const auto result=locate_reference_before(cell,0.001);
-    require(result.state_point.has_value() &&
+    require(!result.state_point.has_value() &&
             result.debug_graph.nodes.size()==1,
-            "Stair State and BEFORE must follow the same Reference policy");
+            "Stair must defer State and follow the same BEFORE policy");
     require(result.debug_graph.loop_candidates.empty(),
             "Stair BEFORE must never create collapse certificates");
 }
@@ -350,7 +352,7 @@ int main()
     test_before_radius_ignores_floor_and_ceiling();
     test_no_wall_query_remains_safe();
     test_no_wall_solid_keeps_reference_candidate();
-    test_single_convex_floor_state_only_before();
+    test_single_convex_floor_reference_only_before();
     test_l_floor_queue_and_state_promoted_without_triangles();
     test_shared_boundary_midpoint_without_matching_tessellation();
     test_shared_edge_with_mismatched_vertex_splits_merges_once();

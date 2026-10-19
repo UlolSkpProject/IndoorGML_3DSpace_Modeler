@@ -46,43 +46,44 @@ class ReferenceGraphLoopCollapserTest < Minitest::Test
     assert_equal 4, source[:nodes].length
   end
 
-  def test_state_triangle_retains_unmodified_state_as_representative
+  def test_node_zero_triangle_is_replaced_by_certified_representative
     source = graph([node(0, 0), node(1, 0), node(0.5, 0.4), node(0, 1)],
                    [[0, 1], [0, 2], [1, 2], [0, 3], [1, 3]])
     cert = certificate([0, 1, 2], point(0, 0), visible: [3])
     result = Collapse.collapse(source, [cert])
     assert_equal 1, result[:collapse_count]
-    assert_equal [0, 3], result[:original_indices]
+    assert_equal [3, nil], result[:original_indices]
     assert_equal [[0, 1]], result[:edges]
-    assert_equal point(0, 0), result[:nodes][0][:point]
-    assert_equal [[1, 0], [2, 0]], result[:merged_into]
-    assert_equal 0, result[:contraction_history][0][:representative_index]
+    assert_equal point(0, 0), result[:nodes][1][:point]
+    assert_equal [[0, nil], [1, nil], [2, nil]], result[:merged_into]
+    assert_equal 1, result[:contraction_history][0][:representative_index]
   end
 
-  def test_state_ring_is_not_replaced_by_certificate_center
+  def test_node_zero_ring_is_replaced_by_certificate_center
     source = graph([node(0, 0), node(1, 0), node(1, 1), node(0, 1)],
                    [[0, 1], [1, 2], [2, 3], [0, 3]])
     fake = certificate([0, 1, 2, 3], point(0.5, 0.5))
     result = Collapse.collapse(source, [fake])
-    assert_equal 0, result[:collapse_count]
-    assert_equal [0, 1, 2, 3], result[:original_indices]
+    assert_equal 1, result[:collapse_count]
+    assert_equal [nil], result[:original_indices]
+    assert_equal point(0.5, 0.5), result[:nodes][0][:point]
   end
 
-  def test_state_four_cycle_requires_missing_internal_los_callback
+  def test_closed_four_cycle_uses_native_certificate_without_extra_los
     source = graph([node(0, 0), node(2, 0), node(2, 2), node(0, 2)],
                    [[0, 1], [1, 2], [2, 3], [0, 3]])
     cert = certificate([0, 1, 2, 3], point(0, 0))
-    reject = Collapse.collapse(source, [cert])
-    assert_equal 0, reject[:collapse_count]
+    accepted = Collapse.collapse(source, [cert])
+    assert_equal 1, accepted[:collapse_count]
+    assert_equal [nil], accepted[:original_indices]
     native_calls = []
     permit = Collapse.collapse(source, [cert], los_validator: lambda { |a, b|
       native_calls << [a, b]
       true
     })
     assert_equal 1, permit[:collapse_count]
-    assert_equal [0], permit[:original_indices]
-    assert_equal 2, native_calls.first.size
-    assert_operator native_calls.size, :>=, 1
+    assert_equal [nil], permit[:original_indices]
+    assert_empty native_calls
   end
 
   def test_missing_loop_member_in_after_rejects_original_native_certificate

@@ -130,7 +130,8 @@ void AdjacencySession::state_worker_loop()
         try
         {
             const CellData& cell=cells_[cell_position];
-            // Room/Stair: new Polygon->Reference->State->BEFORE route.
+            // Room/Stair: Polygon->Reference->BEFORE. State is deliberately
+            // absent until the completed OPTIMIZED graph selects it.
             // Other categories keep their established State strategy
             // until their own Reference policy exists (no regressions).
             const CellSpaceInteriorPointResult result =
@@ -139,15 +140,14 @@ void AdjacencySession::state_worker_loop()
                 locate_reference_before(cell,state_tolerance_) :
                 locate_cell_space_interior_points(cell,state_tolerance_);
             const StateSearchMetrics& metrics = result.state_metrics;
-            // Every requested Cell gets an explicit record, including
-            // successful computation with NO valid State candidate.
+            // Every requested Cell gets an explicit record. A successful
+            // Room/Stair record may contain a graph and no State point.
             StatePointResult state_result;
             state_result.cell_index = cells_[cell_position].index;
             state_result.point = result.state_point;
-            state_result.exit_code = result.state_point ?
-                StateExitCode::Success : result.exit_code;
+            state_result.exit_code = result.exit_code;
             state_result.diagnostics = result.diagnostics;
-            if (result.state_point)
+            if (result.exit_code == StateExitCode::Success)
             {
                 state_result.reference_status =
                     static_cast<std::uint64_t>(result.reference_status);
@@ -501,7 +501,9 @@ MetricsSnapshot AdjacencySession::get_metrics() const
         std::lock_guard<std::mutex> lock(result_mutex_);
         snapshot.state_success_count = static_cast<std::uint64_t>(
         std::count_if(state_results_.begin(), state_results_.end(),
-            [](const StatePointResult& item) { return item.point.has_value(); })
+            [](const StatePointResult& item) {
+                return item.exit_code == StateExitCode::Success;
+            })
     );
         snapshot.adjacent_pair_count = static_cast<std::uint64_t>(results_.size());
     }

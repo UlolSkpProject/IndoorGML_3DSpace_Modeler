@@ -10,7 +10,7 @@ module ULOL
         PROTOCOL_VERSION = 1
         GEOMETRY_PROTOCOL_VERSION = 5
         REFERENCE_POINTS_RESULT_VERSION = 2
-        STATE_RESULT_VERSION = 11
+        STATE_RESULT_VERSION = 12
         TRIANGLE_RESULT_VERSION = 6
         GRAPH_RESULT_VERSION = 5
         PREVIOUS_STATE_RESULT_VERSION = 4
@@ -513,9 +513,9 @@ module ULOL
           buffer
         end
 
-        # V11: { exit_code: Integer, state_point:, graph:, diagnostics: }.
-        # EXIT_CODE 0 is the only success; partial Face failures stay in
-        # diagnostics even when a valid State exists.
+        # V12: { exit_code: Integer, state_point:, graph:, diagnostics: }.
+        # A successful Room/Stair reference graph has state_point=nil until
+        # State is selected from the completed OPTIMIZED graph.
         def decode_state_result(bytes)
           reader = BinaryReader.new(bytes)
           raise ProtocolError, 'native Reference result header is truncated' if reader.remaining < 32
@@ -543,7 +543,12 @@ module ULOL
             unless STATE_EXIT_CODES.key?(exit_code)
               raise ProtocolError, "unknown Native Reference exit code #{exit_code}"
             end
-            coordinates = if exit_code.zero?
+            state_flag = reader.read_u64
+            raise ProtocolError, 'invalid Reference State flag' unless [0, 1].include?(state_flag)
+            if !exit_code.zero? && state_flag == 1
+              raise ProtocolError, 'failed Reference result cannot have a State'
+            end
+            coordinates = if state_flag == 1
                             [
                               finite_f64(reader.read_f64, 'State x'),
                               finite_f64(reader.read_f64, 'State y'),
@@ -552,7 +557,7 @@ module ULOL
                           end
             graph_flag = reader.read_u64
             raise ProtocolError, 'invalid Reference graph flag' unless [0, 1].include?(graph_flag)
-            raise ProtocolError, 'failed State cannot have a Graph' if !exit_code.zero? && graph_flag == 1
+            raise ProtocolError, 'failed Reference result cannot have a Graph' if !exit_code.zero? && graph_flag == 1
 
             diagnostics = STATE_DIAGNOSTIC_FIELDS.to_h do |name|
               [name, checked_count(reader.read_u64, "Reference #{name}")]
