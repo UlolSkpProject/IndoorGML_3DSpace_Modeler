@@ -168,7 +168,8 @@ module ULOL
           cell_space.set_storey(storey)
           @recenter_cell_space_geometry.call(
             cell_space.sketchup_group,
-            fixed_z_offset_from_bottom: @fixed_state_height_offset.call(cell_space)
+            fixed_z_offset_from_bottom: @fixed_state_height_offset.call(cell_space),
+            state_cell_space: cell_space
           )
           @name_cell_space_entity.call(cell_space)
           @apply_cell_space_material.call(cell_space)
