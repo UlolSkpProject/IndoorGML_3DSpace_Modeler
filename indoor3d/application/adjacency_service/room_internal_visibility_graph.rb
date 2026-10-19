@@ -33,7 +33,10 @@ module ULOL
 
           originals = Array(optimized.fetch(:original_indices))
           state_index = optimized.fetch(:state_node_index, 0)
-          unless originals.length == nodes.length && state_index.is_a?(Integer) &&
+          # Original-index provenance still begins with the Native seed 0;
+          # this is NOT the chosen State index.
+          unless originals.length == nodes.length && originals.first == 0 &&
+                 state_index.is_a?(Integer) &&
                  state_index.between?(0, nodes.length - 1)
             raise ArgumentError, 'Room internal graph has invalid State index'
           end
