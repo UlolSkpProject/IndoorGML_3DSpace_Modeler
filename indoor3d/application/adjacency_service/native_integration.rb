@@ -9,6 +9,19 @@ module ULOL
         module NativeAdjacencyIntegration
           def synchronize_for(cell_space)
             return if cell_space.nil? || !cell_space.valid? || !cell_space.duality_state&.valid?
+
+            synchronize_dirty([cell_space])
+          end
+
+          # One Native geometry session for every changed CellSpace in the batch.
+          # Native already supports multiple adjacency_dirty bits in V5; pairs
+          # without a dirty endpoint are excluded from the narrow phase.
+          def synchronize_dirty(cell_spaces)
+            dirty_cells = Array(cell_spaces).compact.uniq.select do |cell_space|
+              cell_space.valid? && cell_space.duality_state&.valid?
+            end
+            return if dirty_cells.empty?
+
             unless NativeAdjacencyBridge.incremental_supported?
               raise NativeAdjacencyBridge::ProtocolError,
                     'Native incremental adjacency backend is unavailable'
@@ -29,16 +42,20 @@ module ULOL
                     'Native incremental adjacency snapshot is incomplete'
             end
 
-            dirty_index = entries.index { |entry| entry[:cell_space] == cell_space }
-            unless dirty_index
-              raise NativeAdjacencyBridge::ProtocolError,
-                    'Native incremental adjacency target is missing from the snapshot'
+            index_by_cell_id = entries.each_with_index.each_with_object({}) do |(entry, index), indices|
+              indices[entry[:cell_space].id] = index
             end
+            missing = dirty_cells.reject { |cell_space| index_by_cell_id.key?(cell_space.id) }
+            unless missing.empty?
+              raise NativeAdjacencyBridge::ProtocolError,
+                    "Native incremental adjacency targets missing from snapshot: #{missing.map(&:id).join(', ')}"
+            end
+            dirty_indices = dirty_cells.map { |cell_space| index_by_cell_id.fetch(cell_space.id) }.uniq.sort
 
             pair_results = begin
               compute_native_incremental_pair_results(
                 entries,
-                dirty_indices: [dirty_index],
+                dirty_indices: dirty_indices,
                 tolerance: Utils::Geometry::ADJACENCY_TOLERANCE
               )
             rescue StandardError => e
@@ -52,19 +69,21 @@ module ULOL
               raise
             end
 
+            # Only transitions incident to dirty cells can become stale. Dedup
+            # pair keys because a dirty-dirty pair belongs to both endpoints.
+            stale_keys = dirty_cells.flat_map { |cell_space| pair_keys_for_incremental_cell(cell_space) }.uniq
             apply_started_at = monotonic_time
             apply_pair_results(
               entries,
               pair_results,
               transition_builder: @transition_builder,
               transition_eraser: @transition_eraser,
-              stale_pair_keys: pair_keys_for_incremental_cell(cell_space)
+              stale_pair_keys: stale_keys
             )
             @last_transition_apply_duration = elapsed_since(apply_started_at)
             @last_metrics = build_metrics(started_at)
             nil
           end
-
           private
 
           def reset_run_metrics
