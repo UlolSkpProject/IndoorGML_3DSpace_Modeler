@@ -124,7 +124,9 @@ module ULOL
               finished = @editor_session.finish()
               if finished
                 normalize_primal_children_for_finish()
-              #   refresh_runtime_data()
+                # Local Grid has its own Edit-finish topology policy. When it
+                # is disabled, the deferred dirty queue still needs one flush.
+                flush_dirty_cell_space_sync unless dirty_topology_queue.empty?
               end
               finished
             end
