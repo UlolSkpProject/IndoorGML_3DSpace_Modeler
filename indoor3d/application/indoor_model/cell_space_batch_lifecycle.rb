@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../adjacency_service/reference_graph_transition_router'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -309,6 +311,57 @@ module ULOL
           # Final per-CellSpace graph after Kruskal + second Shortcut.
           def room_internal_graph_for(cell_id)
             @room_internal_graph_by_cell_id&.[](cell_id.to_s)
+          end
+
+          # Public, runtime-only Transition route API. The connected graph
+          # preserves OPTIMIZED node indices; never route on the post-optimizer
+          # graph, which can reindex the selected State node.
+          def reference_graph_route_for(cell_id)
+            id = cell_id.to_s
+            room_internal_connected_graph_for(id) ||
+              optimized_debug_reference_graph_for(id)
+          end
+
+          def reference_graph_state_node_index_for(cell_id)
+            id = cell_id.to_s
+            graph = reference_graph_route_for(id)
+            selection = @reference_graph_state_selection_by_cell_id&.[](id)
+            index = selection&.[](:state_node_index)
+            return nil unless index.is_a?(Integer)
+
+            nodes = Array(graph && graph[:nodes])
+            return nil unless index.between?(0, nodes.length - 1)
+
+            selected_point = selection[:point]
+            graph_point = nodes[index].is_a?(Hash) ? nodes[index][:point] : nil
+            return nil unless selected_point && graph_point &&
+                              [selected_point.x, selected_point.y, selected_point.z] ==
+                              [graph_point.x, graph_point.y, graph_point.z]
+
+            index
+          rescue StandardError
+            nil
+          end
+
+          def reference_graph_path_to_waypoint(cell_id, waypoint)
+            index = reference_graph_state_node_index_for(cell_id)
+            return nil unless index
+
+            ReferenceGraphTransitionRouter.route(
+              reference_graph_route_for(cell_id), index, waypoint
+            )
+          end
+
+          # Both caches hold immutable snapshots. Object identity changes
+          # whenever a graph or State selection is regenerated; this lightweight
+          # revision check catches replacements without relying on overlay
+          # invalidation from another subsystem.
+          def reference_graph_route_snapshot_key_for(cell_id)
+            id = cell_id.to_s
+            [
+              reference_graph_route_for(id)&.object_id,
+              @reference_graph_state_selection_by_cell_id&.[](id)&.object_id
+            ]
           end
 
           def debug_reference_points_by_kind
@@ -837,6 +890,7 @@ module ULOL
             return unless after
 
             preload_native_shortcuts_for(cell_space, session_index)
+            preload_room_internal_graph_for(cell_space, session_index)
           end
 
           # Lazy, non-destructive reduction. The original Native graph remains
