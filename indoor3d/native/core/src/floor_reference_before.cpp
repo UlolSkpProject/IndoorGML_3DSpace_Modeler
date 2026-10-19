@@ -41,8 +41,10 @@ bool viable_reference(const FaceSolid& solid,Vec3 point,double tolerance)
     if (inspect_reference(solid,point,tolerance)!=ReferenceCheck::Valid)
         return false;
     const double wall_distance=solid.nearest_wall_distance(point);
-    const double radius=std::isfinite(wall_distance) ?
-        std::max(0.0,wall_distance-tolerance) : 0.0;
+    // A Solid without wall-classified Faces has no finite wall constraint.
+    // Keep radius zero for the serialized graph, but do not reject the point.
+    if (!std::isfinite(wall_distance)) return true;
+    const double radius=std::max(0.0,wall_distance-tolerance);
     return radius>=MIN_REFERENCE_RADIUS;
 }
 
@@ -212,7 +214,8 @@ CellSpaceInteriorPointResult locate_reference_before(
         // Reject undersized spheres before State promotion and BEFORE graph
         // construction, so downstream edges and loop certificates can never
         // refer to a candidate whose usable wall radius is below 150 mm.
-        if (radius<MIN_REFERENCE_RADIUS) continue;
+        if (std::isfinite(wall_distance) &&
+            radius<MIN_REFERENCE_RADIUS) continue;
 
         if (!result.state_point)
             result.state_point=seed.position;

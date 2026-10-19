@@ -199,6 +199,37 @@ void test_no_wall_query_remains_safe()
     require(near(solid.nearest_distance({5,5,3}),3),
             "Existing all-face distance must remain unchanged");
 }
+void test_no_wall_solid_keeps_reference_candidate()
+{
+    const Vec3 a{0,0,0},b{200,0,0},c{200,200,0},d{0,200,0};
+    const Vec3 apex{100,100,80};
+    CellData cell;
+    cell.category=CellSpaceCategory::Room;
+    cell.flags=CELL_FLAG_NEEDS_STATE;
+    cell.bounds={{0,0,0},{200,200,80}};
+    cell.faces={
+        face({0,0,-1},{a,d,c,b}),
+        face({0,-16000,20000},{a,b,apex}),
+        face({16000,0,20000},{b,c,apex}),
+        face({0,16000,20000},{c,d,apex}),
+        face({-16000,0,20000},{d,a,apex})
+    };
+
+    FaceSolid solid(cell,0.001);
+    const Vec3 candidate{100,100,1000.0/25.4};
+    require(solid.valid() && solid.inside(candidate,0.001),
+            "Sloped no-wall fixture must contain its floor reference");
+    require(std::isinf(solid.nearest_wall_distance(candidate)),
+            "Steep sloped Faces must not become wall-radius constraints");
+
+    const auto result=locate_reference_before(cell,0.001);
+    require(result.exit_code==StateExitCode::Success &&
+            result.state_point.has_value() &&
+            result.debug_graph.nodes.size()==1,
+            "Missing wall Faces must not reject an otherwise valid reference");
+    require(near(result.debug_graph.nodes.front().radius,0.0),
+            "Missing wall Faces must retain a finite serialized radius");
+}
 
 void test_single_convex_floor_state_only_before()
 {
@@ -318,6 +349,7 @@ int main()
     test_box_face_bvh_without_triangles();
     test_before_radius_ignores_floor_and_ceiling();
     test_no_wall_query_remains_safe();
+    test_no_wall_solid_keeps_reference_candidate();
     test_single_convex_floor_state_only_before();
     test_l_floor_queue_and_state_promoted_without_triangles();
     test_shared_boundary_midpoint_without_matching_tessellation();
