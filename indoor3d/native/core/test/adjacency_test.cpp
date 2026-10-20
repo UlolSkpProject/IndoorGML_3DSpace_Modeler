@@ -528,6 +528,44 @@ void test_non_partitioned_state_is_a_single_node_reference_graph()
             "State-only reference graph must route State directly to waypoint");
 }
 
+void test_reference_short_path_graph_uses_baked_state_tree()
+{
+    ReferenceGraphPipeline pipeline;
+    pipeline.optimized.nodes={
+        {{0,0,0},1.0},
+        {{1,0,0},1.0},
+        {{2,0,0},1.0},
+        {{3,0,0},1.0}
+    };
+    // OPTIMIZED retains an alternate LOS edge; the Dijkstra tree does not.
+    pipeline.optimized.edges={{0,1},{0,2},{1,2}};
+    pipeline.state_node_index=0;
+    pipeline.shortest_path_tree.root=0;
+    pipeline.shortest_path_tree.distances={
+        0.0,1.0,2.0,std::numeric_limits<double>::infinity()
+    };
+    pipeline.shortest_path_tree.previous={
+        std::nullopt,0,1,std::nullopt
+    };
+
+    const auto graph=reference_short_path_graph(pipeline);
+    require(graph.nodes.size()==4 && graph.edges.size()==2,
+            "Shortest path debug graph must preserve every OPTIMIZED node "
+            "and exclude non-tree edges");
+    require(graph.edges[0].first==0 && graph.edges[0].second==1 &&
+            graph.edges[1].first==1 && graph.edges[1].second==2,
+            "Shortest path debug edges must use baked Dijkstra predecessors");
+    require(pipeline.optimized.edges.size()==3 &&
+            !std::isfinite(pipeline.shortest_path_tree.distances[3]),
+            "Debug snapshot must not mutate the OPTIMIZED graph or connect an unreachable node");
+
+    CellData legacy_cell;
+    const auto legacy=build_state_reference_graph_pipeline({4,5,6},legacy_cell,0.001);
+    const auto legacy_graph=reference_short_path_graph(legacy);
+    require(legacy_graph.nodes.size()==1 && legacy_graph.edges.empty(),
+            "Legacy State-only pipeline must display its single State node");
+}
+
 void test_waypoint_anchor_uses_closest_reachable_optimized_node()
 {
     ReferenceGraphPipeline pipeline;
@@ -1503,6 +1541,7 @@ int main()
 
     test_native_reference_pipeline_bakes_state_tree_and_transition();
     test_non_partitioned_state_is_a_single_node_reference_graph();
+    test_reference_short_path_graph_uses_baked_state_tree();
     test_waypoint_anchor_uses_closest_reachable_optimized_node();
     test_native_reference_pipeline_optimizes_degree_two_and_collapses_certificate();
     test_native_optimized_connects_visible_components_to_state();
