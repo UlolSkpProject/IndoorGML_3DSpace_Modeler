@@ -502,9 +502,9 @@ void test_non_partitioned_state_is_a_single_node_reference_graph()
     CellData cell;
     const Vec3 state{1.0,2.0,3.0};
     const auto pipeline=build_state_reference_graph_pipeline(state,cell,0.001);
-    for(const auto stage:{ReferenceGraphStage::Before,ReferenceGraphStage::After,
-                         ReferenceGraphStage::Collapsed,ReferenceGraphStage::Optimized,
-                          ReferenceGraphStage::LosGraph})
+    for(const auto stage:{ReferenceGraphStage::Before,ReferenceGraphStage::Collapsed,
+                          ReferenceGraphStage::Optimized,ReferenceGraphStage::LosGraph,
+                          ReferenceGraphStage::ConnectivityRepair})
     {
         const auto& graph=reference_graph_stage(pipeline,stage);
         require(graph.nodes.size()==1 && graph.edges.empty() &&
@@ -542,6 +542,7 @@ void test_reference_short_path_graph_uses_baked_state_tree()
     // The LOS graph retains an alternate edge; the Dijkstra tree does not.
     pipeline.optimized.edges={{0,1},{0,2},{1,2}};
     pipeline.los_graph=pipeline.optimized;
+    pipeline.repaired_graph=pipeline.los_graph;
     pipeline.state_node_index=0;
     pipeline.shortest_path_tree.root=0;
     pipeline.shortest_path_tree.distances={
@@ -578,6 +579,7 @@ void test_waypoint_anchor_uses_closest_reachable_optimized_node()
         {{2.0,0.0,30.0},0.0}
     };
     pipeline.los_graph=pipeline.optimized;
+    pipeline.repaired_graph=pipeline.los_graph;
     pipeline.shortest_path_tree.root=0;
     pipeline.shortest_path_tree.distances={
         0.0,1.0,std::numeric_limits<double>::infinity()
@@ -606,8 +608,8 @@ void test_native_reference_pipeline_optimizes_degree_two_and_collapses_certifica
     cluster.edges={{0,1},{1,2},{2,3}};
     cluster.state_node_index=0;
     const auto after=build_reference_graph_pipeline(room,cluster,0.001);
-    require(after.before.nodes.size()==4 && after.after.nodes.size()==3,
-            "Native AFTER must merge a smaller nearby degree-2 node");
+    require(after.before.nodes.size()==4 && after.collapsed.nodes.size()==4,
+            "Without AFTER, the uncontracted references must survive COLLAPSED");
 
     ReferenceGraphDebug chain;
     chain.nodes={
@@ -616,7 +618,7 @@ void test_native_reference_pipeline_optimizes_degree_two_and_collapses_certifica
     chain.edges={{0,1},{1,2}};
     chain.state_node_index=0;
     const auto optimized=build_reference_graph_pipeline(room,chain,0.001);
-    require(optimized.after.nodes.size()==3 &&
+    require(optimized.before.nodes.size()==3 &&
             optimized.collapsed.nodes.size()==3 &&
             optimized.optimized.nodes.size()==2 &&
             optimized.optimized.edges.size()==1,
@@ -638,14 +640,14 @@ void test_native_reference_pipeline_optimizes_degree_two_and_collapses_certifica
     certificate.visible_neighbors={0};
     loop.loop_candidates.push_back(certificate);
     const auto collapsed=build_reference_graph_pipeline(room,loop,0.001);
-    require(collapsed.after.nodes.size()==4 &&
+    require(collapsed.before.nodes.size()==4 &&
             collapsed.collapsed.nodes.size()==2 &&
             collapsed.optimized.nodes.size()==2 &&
             collapsed.optimized.edges.size()==1,
             "Native COLLAPSED must apply a certified loop without losing State");
 }
 
-void test_native_optimized_connects_visible_components_to_state()
+void test_full_los_connects_visible_components_to_state()
 {
     for(const auto category:{CellSpaceCategory::Room,CellSpaceCategory::Stair})
     {
@@ -662,10 +664,12 @@ void test_native_optimized_connects_visible_components_to_state()
 
         const auto pipeline=build_reference_graph_pipeline(cell,before,0.001);
         require(pipeline.optimized.nodes.size()==4 &&
-                pipeline.optimized.edges.size()==3 &&
-                pipeline.optimized_bridge_count==1 &&
+                pipeline.optimized.edges.size()==2 &&
+                pipeline.los_graph.edges.size()==6 &&
+                pipeline.repaired_graph.nodes.size()==4 &&
+                pipeline.recovered_node_count==0 &&
                 pipeline.unreachable_node_count==0,
-                "Native OPTIMIZED must bridge every visible component to State");
+                "Full LOS must connect visible components without inserting nodes");
         require(std::all_of(
                     pipeline.shortest_path_tree.distances.begin(),
                     pipeline.shortest_path_tree.distances.end(),
@@ -689,7 +693,7 @@ void test_full_los_graph_ignores_optimized_edges_and_uses_all_visible_pairs()
 
     const auto result=build_reference_graph_pipeline(room,before,0.001);
     require(result.optimized.nodes.size()==4 &&
-            result.optimized.edges.size()==3 &&
+            result.optimized.edges.size()==2 &&
             result.los_graph.nodes.size()==4 &&
             result.los_graph.edges.size()==6,
             "Full LOS must test all node pairs, independent of OPTIMIZED edges or radii");
@@ -706,6 +710,34 @@ void test_full_los_graph_ignores_optimized_edges_and_uses_all_visible_pairs()
     require(tree.nodes.size()==4 && tree.edges.size()==3 &&
             result.los_graph.edges.size()==6,
             "The short-path view must show the tree, without removing full LOS choices");
+}
+
+void test_connectivity_repair_restores_two_hole_detour_nodes()
+{
+    const CellData cell=ring_prism_cell();
+    const double tolerance=0.001;
+    const FaceSolid solid(cell,tolerance);
+    require(solid.valid(),"Repair fixture needs a valid ring Solid");
+    ReferenceGraphStageSnapshot los;
+    los.nodes={{{2,5,0.5},0.0},{{8,5,0.5},0.0}};
+    los.original_indices={0,1};
+    los.protected_nodes={true,false};
+
+    ReferenceGraphStageSnapshot before=los;
+    before.nodes.push_back({{2,8,0.5},0.0});
+    before.nodes.push_back({{8,8,0.5},0.0});
+    before.original_indices={0,1,2,3};
+    before.protected_nodes={true,false,false,false};
+
+    const auto recovered=repair_reference_connectivity(
+        los,before,before,0,solid,tolerance);
+    require(recovered.added_nodes==2 &&
+            recovered.graph.nodes.size()==4,
+            "Disconnected ring components must restore both valid detour references");
+    require(recovered.graph.edges.size()==3,
+            "All recovered edges must be valid LOS segments around the hole");
+    require(recovered.graph.edges[0].first<recovered.graph.nodes.size(),
+            "Repair must preserve original indices and append valid bridge nodes");
 }
 
 void test_full_los_graph_rejects_inherited_edge_through_hole()
@@ -737,7 +769,8 @@ void test_native_optimized_does_not_bridge_through_hole()
 
     const auto pipeline=build_reference_graph_pipeline(room,before,0.001);
     require(pipeline.optimized.edges.empty() &&
-            pipeline.optimized_bridge_count==0 &&
+            pipeline.repaired_graph.edges.empty() &&
+            pipeline.recovered_node_count==0 &&
             pipeline.unreachable_node_count==1,
             "Native OPTIMIZED must not bridge disconnected nodes through a hole");
     require(!std::isfinite(pipeline.shortest_path_tree.distances[1]),
@@ -1602,8 +1635,9 @@ int main()
     test_reference_short_path_graph_uses_baked_state_tree();
     test_waypoint_anchor_uses_closest_reachable_optimized_node();
     test_native_reference_pipeline_optimizes_degree_two_and_collapses_certificate();
-    test_native_optimized_connects_visible_components_to_state();
+    test_full_los_connects_visible_components_to_state();
     test_full_los_graph_ignores_optimized_edges_and_uses_all_visible_pairs();
+    test_connectivity_repair_restores_two_hole_detour_nodes();
     test_full_los_graph_rejects_inherited_edge_through_hole();
     test_native_optimized_does_not_bridge_through_hole();
     test_convex_floor_one_area_centroid_before();
