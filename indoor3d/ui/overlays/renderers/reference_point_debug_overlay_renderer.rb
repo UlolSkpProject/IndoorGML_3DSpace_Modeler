@@ -84,14 +84,13 @@ module ULOL
 
         def render_points_by_kind
           grouped = @indoor_model.debug_reference_points_by_kind
-          grouped.each_with_object({}) do |(kind, root_local_points), result|
-            points = Array(root_local_points)
-            result[kind] =
-              if @transform_context.respond_to?(:overlay_render_points)
-                @transform_context.overlay_render_points(points)
-              else
-                points.map { |point| @transform_context.overlay_render_point(point) }
-              end
+          grouped.each_with_object({}) do |(kind, owned_points), result|
+            result[kind] = Array(owned_points).flat_map do |record|
+              next [] unless record.is_a?(Hash) && record[:cell_id] && record[:point]
+              @transform_context.overlay_cell_reference_points(
+                [record[:point]], record[:cell_id]
+              )
+            end
           end
         rescue StandardError
           {}
