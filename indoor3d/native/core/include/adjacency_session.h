@@ -4,6 +4,7 @@
 #include "adjacency_data.h"
 #include "cell_space_interior_point_locator.h"
 #include "reference_graph_pipeline.h"
+#include <array>
 
 #include <atomic>
 #include <chrono>
@@ -77,7 +78,7 @@ public:
 
     std::size_t start_state_check();
     std::vector<std::uint8_t> get_state_result_bytes();
-    void commit_reference_graph_batch();
+    void commit_reference_graph_batch(const std::vector<std::array<double,16>>& root_to_local);
     std::vector<bool> validate_room_los(
         std::size_t cell_index,
         const std::vector<std::pair<Vec3, Vec3>>& segments,
@@ -87,15 +88,17 @@ public:
         const std::string& cell_key,
         ReferenceGraphStage stage
     ) const;
-    std::vector<Vec3> get_reference_transition_curve(
+    std::pair<std::vector<Vec3>,std::vector<Vec3>> get_reference_transition_curve(
         const std::string& first_cell_key,
         const std::string& second_cell_key,
-        const Vec3& waypoint
+        const Vec3& first_local_waypoint,
+        const Vec3& second_local_waypoint
     ) const;
     std::optional<std::pair<Vec3,Vec3>> get_reference_waypoint_anchors(
         const std::string& first_cell_key,
         const std::string& second_cell_key,
-        const Vec3& raw_waypoint
+        const Vec3& first_local_waypoint,
+        const Vec3& second_local_waypoint
     ) const;
     std::uint64_t get_reference_revision(const std::string& cell_key) const;
     void erase_reference_graphs(const std::vector<std::string>& cell_keys);
