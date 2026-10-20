@@ -55,6 +55,7 @@ class ReferenceGraphDebugOverlayRendererTest < Minitest::Test
       holes: [[Point.new(1, 1, 0), Point.new(2, 1, 0), Point.new(1, 2, 0)]]
     }
     graph = {
+      cell_id: 'A',
       nodes: [
         { point: Point.new(0, 0, 1) },
         { point: Point.new(4, 3, 1) }
@@ -67,6 +68,10 @@ class ReferenceGraphDebugOverlayRendererTest < Minitest::Test
     transform = Object.new
     def transform.overlay_render_points(points)
       points.map { |point| Point.new(point.x + 1, point.y + 2, point.z + 0.5) }
+    end
+    def transform.overlay_cell_reference_points(points, cell_id)
+      raise 'unknown owner' unless cell_id == 'A'
+      points.map { |point| Point.new(point.x + 10, point.y + 20, point.z + 1) }
     end
     @renderer = Renderer.new(indoor_model: model, transform_context: transform)
   end
@@ -111,5 +116,7 @@ class ReferenceGraphDebugOverlayRendererTest < Minitest::Test
     @renderer.draw_edges(view)
     assert_equal 1, view.draw_calls.length
     assert_equal [:draw2d, GL_LINES], view.draw_calls.first.first(2)
+    assert_equal [[100.0, 200.0, 0.0], [140.0, 230.0, 0.0]],
+                 view.draw_calls.first.last.map { |point| [point.x, point.y, point.z] }
   end
 end
