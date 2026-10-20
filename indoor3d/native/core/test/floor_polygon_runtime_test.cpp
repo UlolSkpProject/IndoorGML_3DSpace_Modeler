@@ -520,7 +520,7 @@ void test_reference_local_finalization_uses_actual_post_state_frame()
     auto pipeline=original;
     finalize_reference_graph_local(pipeline,cell,snapped_inverse);
     for(const auto* stage:{&pipeline.before,&pipeline.after,
-                           &pipeline.collapsed,&pipeline.optimized})
+                           &pipeline.collapsed,&pipeline.optimized,&pipeline.los_graph})
     {
         require(!stage->nodes.empty() &&
                 near(stage->nodes[0].point.x,-0.00001,1e-8) &&
@@ -541,7 +541,9 @@ void test_reference_local_finalization_uses_actual_post_state_frame()
     finalize_reference_graph_local(rotated,cell,rotated_inverse);
     require(near(rotated.optimized.nodes[0].point.x,10.0) &&
             near(rotated.optimized.nodes[0].point.y,-10.0) &&
-            rotated.waypoint_solid->inside(rotated.optimized.nodes[0].point,0.001),
+            near(rotated.los_graph.nodes[0].point.x,10.0) &&
+            near(rotated.los_graph.nodes[0].point.y,-10.0) &&
+            rotated.waypoint_solid->inside(rotated.los_graph.nodes[0].point,0.001),
             "CellSpace rotation must transform both the graph and LOS Solid");
     const auto route=reference_transition_polyline(rotated,{10,-20,z});
     require(!route.empty() && near(route.back().y,-20.0),
