@@ -331,19 +331,13 @@ ReferenceGraphStageSnapshot build_full_los_graph(
     return result;
 }
 
-struct ConnectivityRepairResult
-{
-    ReferenceGraphStageSnapshot graph;
-    std::size_t added_nodes=0;
-};
-
-ConnectivityRepairResult repair_connectivity(
+ReferenceConnectivityRepairResult repair_connectivity(
     const ReferenceGraphStageSnapshot& los_graph,
     const ReferenceGraphStageSnapshot& before,
     const ReferenceGraphStageSnapshot& collapsed,
     std::size_t root,const FaceSolid& solid,double tolerance)
 {
-    ConnectivityRepairResult result{los_graph,0};
+    ReferenceConnectivityRepairResult result{los_graph,0};
     if(root>=los_graph.nodes.size() || !solid.valid()) return result;
     const auto reached=reachable_nodes(los_graph,root);
     if(std::all_of(reached.begin(),reached.end(),[](bool b){return b;}))
@@ -470,6 +464,16 @@ ReferenceGraphShortestPathTree bake_tree(const ReferenceGraphStageSnapshot& grap
 
 namespace IndoorGMLAdjacencyNative
 {
+ReferenceConnectivityRepairResult repair_reference_connectivity(
+    const ReferenceGraphStageSnapshot& los_graph,
+    const ReferenceGraphStageSnapshot& before,
+    const ReferenceGraphStageSnapshot& collapsed,
+    std::size_t state_node_index,const FaceSolid& solid,double tolerance)
+{
+    return repair_connectivity(los_graph,before,collapsed,
+                               state_node_index,solid,tolerance);
+}
+
 ReferenceGraphPipeline build_state_reference_graph_pipeline(
     const Vec3& state_point,const CellData& cell,double tolerance)
 {
@@ -531,7 +535,7 @@ ReferenceGraphPipeline build_reference_graph_pipeline(
     result.waypoint_tolerance=tolerance;
     result.los_graph=build_full_los_graph(
         result.optimized,*result.waypoint_solid,tolerance);
-    const auto repaired=repair_connectivity(
+    const auto repaired=repair_reference_connectivity(
         result.los_graph,result.before,result.collapsed,
         result.state_node_index,*result.waypoint_solid,tolerance);
     result.repaired_graph=std::move(repaired.graph);
