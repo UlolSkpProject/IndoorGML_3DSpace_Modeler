@@ -35,6 +35,17 @@ module ULOL
           source_points.map { |point| overlay_render_point(point) }
         end
 
+        # Local -> current owning CellSpace Root-Local -> Primal Model.
+        # Do not bake either transform into stored Reference snapshots.
+        def overlay_cell_reference_points(points, cell_id)
+          cell_frame = @indoor_model.reference_cell_space_transformation(cell_id)
+          return [] unless cell_frame
+
+          root_frame = Utils::Transformation.root_transformation_in_model(@indoor_model.primal_group)
+          model_frame = root_frame * cell_frame
+          Array(points).map { |point| point.transform(model_frame) }
+        end
+
         def overlay_render_vector(vector)
           Utils::Transformation.root_local_vector_to_model(vector, @indoor_model.primal_group)
         rescue StandardError
