@@ -609,6 +609,96 @@ ReferenceGraphPipeline build_reference_graph_pipeline(
     return result;
 }
 
+namespace
+{
+Vec3 frame_point(const std::array<double,16>& m,const Vec3& p)
+{
+    return {m[0]*p.x+m[4]*p.y+m[8]*p.z+m[12],
+            m[1]*p.x+m[5]*p.y+m[9]*p.z+m[13],
+            m[2]*p.x+m[6]*p.y+m[10]*p.z+m[14]};
+}
+Vec3 frame_direction(const std::array<double,16>& m,const Vec3& p)
+{
+    return {m[0]*p.x+m[4]*p.y+m[8]*p.z,
+            m[1]*p.x+m[5]*p.y+m[9]*p.z,
+            m[2]*p.x+m[6]*p.y+m[10]*p.z};
+}
+double frame_dot(const Vec3& a,const Vec3& b)
+{
+    return a.x*b.x+a.y*b.y+a.z*b.z;
+}
+void require_rigid_frame(const std::array<double,16>& m)
+{
+    for(double v:m) if(!std::isfinite(v))
+        throw std::invalid_argument("Reference CellSpace frame must be finite");
+    if(std::abs(m[3])>1e-8 || std::abs(m[7])>1e-8 ||
+       std::abs(m[11])>1e-8 || std::abs(m[15]-1.0)>1e-8)
+        throw std::invalid_argument("Reference CellSpace frame must be affine");
+    const Vec3 x{m[0],m[1],m[2]};
+    const Vec3 y{m[4],m[5],m[6]};
+    const Vec3 z{m[8],m[9],m[10]};
+    if(std::abs(frame_dot(x,x)-1.0)>1e-6 ||
+       std::abs(frame_dot(y,y)-1.0)>1e-6 ||
+       std::abs(frame_dot(z,z)-1.0)>1e-6 ||
+       std::abs(frame_dot(x,y))>1e-6 ||
+       std::abs(frame_dot(y,z))>1e-6 ||
+       std::abs(frame_dot(z,x))>1e-6)
+        throw std::invalid_argument("Scaled/skewed CellSpace invalidates Reference path lengths");
+    const double det=frame_dot(x,{
+        y.y*z.z-y.z*z.y,y.z*z.x-y.x*z.z,y.x*z.y-y.y*z.x});
+    if(std::abs(det-1.0)>1e-6)
+        throw std::invalid_argument("Reference CellSpace frame must preserve orientation");
+}
+CellData localized_cell(const CellData& source,const std::array<double,16>& m)
+{
+    CellData result=source;
+    Vec3 low{std::numeric_limits<double>::infinity(),
+             std::numeric_limits<double>::infinity(),
+             std::numeric_limits<double>::infinity()};
+    Vec3 high{-low.x,-low.y,-low.z};
+    for(int x=0;x<2;++x) for(int y=0;y<2;++y) for(int z=0;z<2;++z)
+    {
+        const Vec3 p=frame_point(m,{
+            x?source.bounds.maximum.x:source.bounds.minimum.x,
+            y?source.bounds.maximum.y:source.bounds.minimum.y,
+            z?source.bounds.maximum.z:source.bounds.minimum.z});
+        low.x=std::min(low.x,p.x);low.y=std::min(low.y,p.y);low.z=std::min(low.z,p.z);
+        high.x=std::max(high.x,p.x);high.y=std::max(high.y,p.y);high.z=std::max(high.z,p.z);
+    }
+    result.bounds={low,high};
+    for(auto& face:result.faces)
+    {
+        for(auto& p:face.outer_points) p=frame_point(m,p);
+        for(auto& loop:face.inner_loops) for(auto& p:loop) p=frame_point(m,p);
+        for(auto& triangle:face.triangles)
+            for(auto& p:triangle.points) p=frame_point(m,p);
+        face.normal=frame_direction(m,face.normal);
+        if(face.has_plane)
+        {
+            face.plane.normal=frame_direction(m,face.plane.normal);
+            face.plane.d=face.plane.d-frame_dot(face.plane.normal,
+                                                   {m[12],m[13],m[14]});
+        }
+    }
+    return result;
+}
+} // namespace
+
+void finalize_reference_graph_local(
+    ReferenceGraphPipeline& pipeline,const CellData& root_cell,
+    const std::array<double,16>& root_to_local)
+{
+    require_rigid_frame(root_to_local);
+    // Preserve radius, edge weights and shortest-path tree for rigid frames.
+    for(auto* stage:{&pipeline.before,&pipeline.after,
+                     &pipeline.collapsed,&pipeline.optimized})
+        for(auto& node:stage->nodes)
+            node.point=frame_point(root_to_local,node.point);
+    const CellData local_cell=localized_cell(root_cell,root_to_local);
+    pipeline.waypoint_solid=std::make_shared<FaceSolid>(
+        local_cell,pipeline.waypoint_tolerance);
+}
+
 const ReferenceGraphStageSnapshot& reference_graph_stage(
     const ReferenceGraphPipeline& pipeline,ReferenceGraphStage stage)
 {
