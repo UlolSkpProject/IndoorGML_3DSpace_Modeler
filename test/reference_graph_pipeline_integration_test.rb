@@ -67,8 +67,8 @@ class ReferenceGraphPipelineIntegrationTest < Minitest::Test
     assert_empty lifecycle.debug_reference_graphs
     assert_empty lifecycle.debug_reference_points_by_kind
 
-    assert_equal 1, lifecycle.request_reference_graph_debug(:after)
-    Mode.instance_variable_set(:@mode, :after)
+    assert_equal 1, lifecycle.request_reference_graph_debug(:collapsed)
+    Mode.instance_variable_set(:@mode, :collapsed)
     graph = lifecycle.debug_reference_graphs.fetch(0)
     assert_equal [[0, 1]], graph[:edges]
     assert_equal 'cell-1', graph[:cell_id]
@@ -77,6 +77,23 @@ class ReferenceGraphPipelineIntegrationTest < Minitest::Test
                  lifecycle.debug_reference_points_by_kind.fetch(4)
     assert graph[:nodes].all? { |node| node.keys == [:point] }
     refute graph[:nodes].any? { |node| node.key?(:radius) }
+  end
+
+  def test_connectivity_repair_stage_preserves_per_cell_debug_ownership
+    lifecycle = Harness.new([Cell.new('cell-1')])
+    active_model = Mode.method(:active_indoor_model)
+    Mode.define_singleton_method(:active_indoor_model) { lifecycle }
+
+    assert_equal :connectivity_repair, RG.connectivity_repair!
+    assert Mode.connectivity_repair?
+    graph = lifecycle.debug_reference_graphs.fetch(0)
+    assert_equal :connectivity_repair, graph[:stage]
+    assert_equal 'cell-1', graph[:cell_id]
+    RG.clear!
+    assert_empty lifecycle.debug_reference_graphs
+  ensure
+    Mode.define_singleton_method(:active_indoor_model) { active_model.call }
+    Mode.singleton_class.send(:private, :active_indoor_model)
   end
 
   def test_los_graph_command_renders_a_separate_native_stage
@@ -132,5 +149,6 @@ class ReferenceGraphPipelineIntegrationTest < Minitest::Test
   def test_only_native_stage_names_are_accepted
     lifecycle = Harness.new([Cell.new('cell-1')])
     assert_raises(ArgumentError) { lifecycle.request_reference_graph_debug(:internal) }
+    assert_raises(ArgumentError) { lifecycle.request_reference_graph_debug(:after) }
   end
 end
