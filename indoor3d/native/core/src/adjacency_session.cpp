@@ -166,7 +166,7 @@ void AdjacencySession::state_worker_loop()
                     build_reference_graph_pipeline(
                         cell,result.debug_graph,state_tolerance_
                     ) :
-                    build_state_reference_graph_pipeline(*result.state_point);
+                    build_state_reference_graph_pipeline(*result.state_point,cell,state_tolerance_);
                 std::lock_guard<std::mutex> graph_lock(reference_graph_mutex_);
                 pending_reference_graphs_[cell_keys_[cell_position]]=std::move(pipeline);
             }
