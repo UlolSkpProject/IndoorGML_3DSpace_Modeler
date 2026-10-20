@@ -330,8 +330,11 @@ module ULOL
               fixed_z_offset_from_bottom: fixed_z_offset_from_bottom
             ) do |center|
               raw_center = center
-              snapped_center = center.distance(ORIGIN) <= 0.001 ?
-                center : snap_local_grid_point(center, LOCAL_GRID_TOLERANCE_MM)
+              snapped_center = if center.distance(ORIGIN) <= 0.001
+                                 center
+                               else
+                                 snap_local_grid_point(center, LOCAL_GRID_TOLERANCE_MM)
+                               end
               applied = snapped_center.distance(ORIGIN) > 0.001
               apply_cell_space_local_center(cell_space_entity, snapped_center) if applied
             end
