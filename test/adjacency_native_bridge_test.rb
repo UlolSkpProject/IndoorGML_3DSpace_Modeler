@@ -3,6 +3,27 @@
 require 'minitest/autorun'
 require_relative '../indoor3d/application/adjacency_service/native_bridge'
 
+unless defined?(Geom::Transformation)
+  module Geom
+    class Transformation
+      attr_reader :dx, :dy, :dz
+      def initialize(dx = 0, dy = 0, dz = 0)
+        @dx, @dy, @dz = dx, dy, dz
+      end
+      def inverse
+        self.class.new(-dx, -dy, -dz)
+      end
+    end
+    Point3d = Struct.new(:x, :y, :z) do
+      def to_a = [x, y, z]
+      def transform(t)
+        self.class.new(x + t.dx, y + t.dy, z + t.dz)
+      end
+    end
+  end
+end
+
+
 class AdjacencyNativeBridgeTest < Minitest::Test
   Bridge = ULOL::Indoor3DGmlModeler::IndoorCore::NativeAdjacencyBridge
 
@@ -151,19 +172,45 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_equal codes.size, codes.keys.uniq.size
   end
 
-  def test_reference_waypoint_anchors_returns_two_native_points
+  def test_reference_waypoint_anchors_use_distinct_cellspace_local_frames
     native = Module.new
     captured = nil
     native.define_singleton_method(:load_batch) { |_bytes| 0 }
     native.define_singleton_method(:get_reference_waypoint_anchors) do |first, second, bytes|
-      captured = [first, second, bytes.unpack('E3')]
+      captured = [first, second, bytes.unpack('E6')]
       [[1.0, 2.0, 10.0], [3.0, 4.0, 20.0]]
     end
     with_adjacency_native(native) do
-      anchors = Bridge.reference_waypoint_anchors('first', 'second', [5.0, 6.0, 7.0])
-      assert_equal [['first', 'second', [5.0, 6.0, 7.0]],
-                    [[1.0, 2.0, 10.0], [3.0, 4.0, 20.0]]],
-                   [captured, anchors]
+      first = Geom::Transformation.new(0, 0, 0)
+      second = Geom::Transformation.new(10, 0, 0)
+      anchors = Bridge.reference_waypoint_anchors(
+        'first', 'second', [5.0, 6.0, 7.0],
+        transformation1: first, transformation2: second
+      )
+      assert_equal ['first', 'second', [5.0, 6.0, 7.0, -5.0, 6.0, 7.0]], captured
+      assert_equal [[1.0, 2.0, 10.0], [13.0, 4.0, 20.0]], anchors
+    end
+  end
+
+  def test_reference_transition_curve_combines_local_paths_in_root_frame
+    native = Module.new
+    native.define_singleton_method(:load_batch) { |_bytes| 0 }
+    native.define_singleton_method(:get_reference_transition_curve) do |_, _, bytes|
+      raise 'local waypoint mismatch' unless bytes.unpack('E6') ==
+        [5.0, 0.0, 0.0, -5.0, 0.0, 0.0]
+      [
+        [[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]],
+        [[0.0, 0.0, 0.0], [-5.0, 0.0, 0.0]]
+      ]
+    end
+    with_adjacency_native(native) do
+      path = Bridge.reference_transition_curve(
+        'A', 'B', [5.0, 0.0, 0.0],
+        transformation1: Geom::Transformation.new(0, 0, 0),
+        transformation2: Geom::Transformation.new(10, 0, 0)
+      )
+      assert_equal [[0.0, 0.0, 0.0], [5.0, 0.0, 0.0],
+                    [10.0, 0.0, 0.0]], path
     end
   end
 
