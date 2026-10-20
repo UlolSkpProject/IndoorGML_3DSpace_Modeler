@@ -518,6 +518,35 @@ ConnectivityResult connect_optimized_to_state(
     return result;
 }
 
+ReferenceGraphStageSnapshot build_full_los_graph(
+    const ReferenceGraphStageSnapshot& optimized,const FaceSolid& solid,
+    double tolerance)
+{
+    // Do not inherit any OPTIMIZED Edge: geometry alone determines visibility.
+    // Keep all nodes, their indices and protected/owner metadata unchanged.
+    ReferenceGraphStageSnapshot result=optimized;
+    result.edges.clear();
+    if(!solid.valid()) return result;
+
+    const std::size_t count=result.nodes.size();
+    std::vector<bool> valid(count,false);
+    for(std::size_t i=0;i<count;++i)
+        valid[i]=solid.inside(result.nodes[i].point,tolerance);
+
+    for(std::size_t i=0;i<count;++i)
+    {
+        if(!valid[i]) continue;
+        for(std::size_t j=i+1;j<count;++j)
+        {
+            if(!valid[j]) continue;
+            if(solid.visible(result.nodes[i].point,result.nodes[j].point,tolerance))
+                result.edges.push_back({i,j});
+        }
+    }
+    // The strictly increasing (i,j) walk already produces canonical edges.
+    return result;
+}
+
 ReferenceGraphShortestPathTree bake_tree(const ReferenceGraphStageSnapshot& graph,
                                          std::size_t root)
 {
@@ -564,6 +593,7 @@ ReferenceGraphPipeline build_state_reference_graph_pipeline(
     result.after=result.before;
     result.collapsed=result.before;
     result.optimized=result.before;
+    result.los_graph=result.optimized;
     result.state_node_index=0;
     result.shortest_path_tree.root=0;
     result.shortest_path_tree.distances.push_back(0.0);
@@ -600,12 +630,18 @@ ReferenceGraphPipeline build_reference_graph_pipeline(
     const ConnectivityResult connectivity=connect_optimized_to_state(
         result.optimized,cell,result.state_node_index,tolerance);
     result.optimized_bridge_count=connectivity.added_edges;
-    result.unreachable_node_count=connectivity.unreachable_nodes;
-    result.shortest_path_tree=bake_tree(result.optimized,result.state_node_index);
-    // clear_session() discards CellData, so retain a self-contained Face BVH
-    // for LOS checks made after the final waypoint coordinates are known.
+    // Build FaceSolid once: the identical 3D visibility contract is used
+    // for full pairwise Ref-Node LOS and the final waypoint gateway check.
     result.waypoint_solid=std::make_shared<FaceSolid>(cell,tolerance);
     result.waypoint_tolerance=tolerance;
+    result.los_graph=build_full_los_graph(
+        result.optimized,*result.waypoint_solid,tolerance);
+    result.shortest_path_tree=bake_tree(result.los_graph,result.state_node_index);
+    result.unreachable_node_count=static_cast<std::size_t>(std::count_if(
+        result.shortest_path_tree.distances.begin(),
+        result.shortest_path_tree.distances.end(),
+        [](double value){return !std::isfinite(value);}));
+
     return result;
 }
 
@@ -691,7 +727,7 @@ void finalize_reference_graph_local(
     require_rigid_frame(root_to_local);
     // Preserve radius, edge weights and shortest-path tree for rigid frames.
     for(auto* stage:{&pipeline.before,&pipeline.after,
-                     &pipeline.collapsed,&pipeline.optimized})
+                     &pipeline.collapsed,&pipeline.optimized,&pipeline.los_graph})
         for(auto& node:stage->nodes)
             node.point=frame_point(root_to_local,node.point);
     const CellData local_cell=localized_cell(root_cell,root_to_local);
@@ -708,6 +744,7 @@ const ReferenceGraphStageSnapshot& reference_graph_stage(
     case ReferenceGraphStage::After:return pipeline.after;
     case ReferenceGraphStage::Collapsed:return pipeline.collapsed;
     case ReferenceGraphStage::Optimized:return pipeline.optimized;
+    case ReferenceGraphStage::LosGraph:return pipeline.los_graph;
     case ReferenceGraphStage::ShortPathGraph:
         throw std::invalid_argument("Short-path graph is a derived snapshot; use reference_short_path_graph");
     }
@@ -717,7 +754,7 @@ const ReferenceGraphStageSnapshot& reference_graph_stage(
 ReferenceGraphStageSnapshot reference_short_path_graph(
     const ReferenceGraphPipeline& pipeline)
 {
-    ReferenceGraphStageSnapshot result=pipeline.optimized;
+    ReferenceGraphStageSnapshot result=pipeline.los_graph;
     result.edges.clear();
     const auto& tree=pipeline.shortest_path_tree;
     const std::size_t count=result.nodes.size();
@@ -743,7 +780,7 @@ ReferenceGraphStageSnapshot reference_short_path_graph(
 std::optional<Vec3> closest_reachable_reference_point(
     const ReferenceGraphPipeline& pipeline,const Vec3& waypoint)
 {
-    const auto& graph=pipeline.optimized;
+    const auto& graph=pipeline.los_graph;
     const auto& tree=pipeline.shortest_path_tree;
     if(graph.nodes.empty() || tree.distances.size()!=graph.nodes.size())
         return std::nullopt;
@@ -795,7 +832,7 @@ bool waypoint_reference_visible(const FaceSolid& solid,const Vec3& node,
 std::vector<Vec3> reference_transition_polyline(
     const ReferenceGraphPipeline& pipeline,const Vec3& waypoint)
 {
-    const auto& graph=pipeline.optimized;
+    const auto& graph=pipeline.los_graph;
     const auto& tree=pipeline.shortest_path_tree;
     if(graph.nodes.empty() || tree.distances.size()!=graph.nodes.size())
         return {};
