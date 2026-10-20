@@ -555,7 +555,7 @@ ReferenceGraphShortestPathTree bake_tree(const ReferenceGraphStageSnapshot& grap
 namespace IndoorGMLAdjacencyNative
 {
 ReferenceGraphPipeline build_state_reference_graph_pipeline(
-    const Vec3& state_point)
+    const Vec3& state_point,const CellData& cell,double tolerance)
 {
     ReferenceGraphPipeline result;
     result.before.nodes.push_back({state_point,0.0});
@@ -568,6 +568,8 @@ ReferenceGraphPipeline build_state_reference_graph_pipeline(
     result.shortest_path_tree.root=0;
     result.shortest_path_tree.distances.push_back(0.0);
     result.shortest_path_tree.previous.push_back(std::nullopt);
+    result.waypoint_solid=std::make_shared<FaceSolid>(cell,tolerance);
+    result.waypoint_tolerance=tolerance;
     return result;
 }
 
@@ -599,6 +601,10 @@ ReferenceGraphPipeline build_reference_graph_pipeline(
     result.optimized_bridge_count=connectivity.added_edges;
     result.unreachable_node_count=connectivity.unreachable_nodes;
     result.shortest_path_tree=bake_tree(result.optimized,result.state_node_index);
+    // clear_session() discards CellData, so retain a self-contained Face BVH
+    // for LOS checks made after the final waypoint coordinates are known.
+    result.waypoint_solid=std::make_shared<FaceSolid>(cell,tolerance);
+    result.waypoint_tolerance=tolerance;
     return result;
 }
 
@@ -638,18 +644,53 @@ std::optional<Vec3> closest_reachable_reference_point(
                      std::nullopt;
 }
 
+namespace
+{
+// A transition waypoint lies on a shared CellSpace Face. FaceSolid::visible
+// correctly rejects boundary endpoints, so verify an interior endpoint
+// a few tolerances before the waypoint along the same segment instead.
+// The original waypoint remains the exact final path point.
+bool waypoint_reference_visible(const FaceSolid& solid,const Vec3& node,
+                                const Vec3& waypoint,double tolerance)
+{
+    const double length=distance(node,waypoint);
+    if(length<=EPSILON) return solid.inside(node,tolerance);
+    if(solid.visible(node,waypoint,tolerance)) return true;
+
+    const double inset=tolerance*8.0;
+    if(!std::isfinite(length) || length<=inset+2.0*tolerance ||
+       !std::isfinite(inset) || inset<=0.0 ||
+       solid.nearest_distance(waypoint)>inset)
+        return false;
+
+    const double t=inset/length;
+    const Vec3 interior{
+        waypoint.x+(node.x-waypoint.x)*t,
+        waypoint.y+(node.y-waypoint.y)*t,
+        waypoint.z+(node.z-waypoint.z)*t
+    };
+    return solid.visible(node,interior,tolerance);
+}
+} // namespace
+
 std::vector<Vec3> reference_transition_polyline(
     const ReferenceGraphPipeline& pipeline,const Vec3& waypoint)
 {
     const auto& graph=pipeline.optimized;
     const auto& tree=pipeline.shortest_path_tree;
-    if(graph.nodes.empty() || tree.distances.size()!=graph.nodes.size()) return {};
+    if(graph.nodes.empty() || tree.distances.size()!=graph.nodes.size() ||
+       !pipeline.waypoint_solid || !pipeline.waypoint_solid->valid())
+        return {};
     std::optional<std::size_t> gateway;
     double best=std::numeric_limits<double>::infinity();
     for(std::size_t i=0;i<graph.nodes.size();++i)
     {
         if(!std::isfinite(tree.distances[i])) continue;
-        const double candidate=distance(graph.nodes[i].point,waypoint);
+        const double direct=distance(graph.nodes[i].point,waypoint);
+        if(!waypoint_reference_visible(*pipeline.waypoint_solid,
+                                       graph.nodes[i].point,waypoint,
+                                       pipeline.waypoint_tolerance)) continue;
+        const double candidate=tree.distances[i]+direct;
         if(candidate<best || (candidate==best && (!gateway || i<*gateway)))
         {best=candidate;gateway=i;}
     }
