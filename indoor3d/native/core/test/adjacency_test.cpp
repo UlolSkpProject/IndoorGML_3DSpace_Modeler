@@ -659,8 +659,8 @@ void test_collapsed_linearizes_sliver_polygon_components()
     ReferenceGraphDebug sliver;
     sliver.nodes={
         {{0.05,0.5,z},0.0},{{0.15,0.5,z},0.0},
-        {{0.30,0.5,z},0.0},{{0.45,0.5,z},0.0},
-        {{0.60,0.5,z},0.0},{{0.75,0.5,z},0.0},
+        {{0.30,0.52,z},0.0},{{0.45,0.49,z},0.0},
+        {{0.60,0.51,z},0.0},{{0.75,0.5,z},0.0},
         {{0.95,0.5,z},0.0}
     };
     sliver.edges={
@@ -696,6 +696,40 @@ void test_collapsed_linearizes_sliver_polygon_components()
     require(preserved.collapsed.nodes.size()==5 &&
             preserved.collapsed.edges.size()==5,
             "COLLAPSED must preserve a sliver polygon without a unique longitudinal order");
+}
+
+void test_collapsed_integrates_nearby_isolated_nodes()
+{
+    CellData room=tall_room(unit_box_cell());
+    room.category=CellSpaceCategory::Room;
+    const double z=1000.0/25.4;
+
+    ReferenceGraphDebug near;
+    near.nodes={
+        {{0.1,0.5,z},0.0},{{0.9,0.5,z},0.0},{{0.5,0.52,z},0.0}
+    };
+    near.edges={{0,1}};
+    near.state_node_index=0;
+    const auto integrated=build_reference_graph_pipeline(room,near,0.001);
+    require(integrated.collapsed.nodes.size()==3 &&
+            integrated.collapsed.edges.size()==2 &&
+            integrated.collapsed.edges[0].first==0 &&
+            integrated.collapsed.edges[0].second==2 &&
+            integrated.collapsed.edges[1].first==1 &&
+            integrated.collapsed.edges[1].second==2,
+            "COLLAPSED must insert a nearby isolated node into the projected edge");
+    require(integrated.optimized.nodes.size()==2 &&
+            integrated.optimized.edges.size()==1,
+            "OPTIMIZED must remove an integrated orphan that is nearly straight");
+
+    ReferenceGraphDebug far=near;
+    far.nodes[2].point.y=0.56;
+    const auto preserved=build_reference_graph_pipeline(room,far,0.001);
+    require(preserved.collapsed.nodes.size()==3 &&
+            preserved.collapsed.edges.size()==1 &&
+            preserved.collapsed.edges[0].first==0 &&
+            preserved.collapsed.edges[0].second==1,
+            "COLLAPSED must preserve an isolated node beyond the five-percent width");
 }
 
 void test_optimized_degree_two_angle_threshold_and_priority_queue()
@@ -757,6 +791,35 @@ void test_optimized_degree_two_angle_threshold_and_priority_queue()
     require(std::abs(ordered_result.optimized.nodes[1].point.x-0.2)<1.0e-9 &&
             std::abs(ordered_result.optimized.nodes[1].point.y-0.1)<1.0e-9,
             "OPTIMIZED must refresh and retain the neighbor that falls below threshold");
+}
+
+void test_visible_loop_neighbors_remain_optimizable()
+{
+    CellData room=tall_room(unit_box_cell());
+    room.category=CellSpaceCategory::Room;
+    const double z=1000.0/25.4;
+
+    ReferenceGraphDebug graph;
+    graph.nodes={
+        {{0.1,0.5,z},0.0},{{0.5,0.5,z},0.0},{{0.9,0.5,z},0.0},
+        {{0.2,0.2,z},0.0},{{0.3,0.2,z},0.0},{{0.25,0.3,z},0.0}
+    };
+    graph.edges={{0,1},{1,2}};
+    graph.state_node_index=0;
+    ReferenceLoopCollapseCandidate unrelated;
+    unrelated.vertices={3,4,5};
+    unrelated.representative={{0.25,0.23,z},0.0};
+    unrelated.visible_neighbors={1};
+    graph.loop_candidates.push_back(unrelated);
+
+    const auto result=build_reference_graph_pipeline(room,graph,0.001);
+    require(result.collapsed.nodes.size()==6 &&
+            result.optimized.nodes.size()==5,
+            "A node merely visible from a loop must remain optimizable");
+    require(std::none_of(result.optimized.original_indices.begin(),
+                         result.optimized.original_indices.end(),
+                         [](const auto& index){return index==std::optional<std::size_t>(1);}),
+            "Loop visibility must not protect an unrelated straight degree-2 node");
 }
 
 void test_full_los_connects_visible_components_to_state()
@@ -1751,7 +1814,9 @@ int main()
     test_waypoint_anchor_uses_closest_reachable_optimized_node();
     test_native_reference_pipeline_optimizes_degree_two_and_collapses_certificate();
     test_collapsed_linearizes_sliver_polygon_components();
+    test_collapsed_integrates_nearby_isolated_nodes();
     test_optimized_degree_two_angle_threshold_and_priority_queue();
+    test_visible_loop_neighbors_remain_optimizable();
     test_full_los_connects_visible_components_to_state();
     test_full_los_graph_ignores_optimized_edges_and_uses_all_visible_pairs();
     test_connectivity_repair_restores_two_hole_detour_nodes();

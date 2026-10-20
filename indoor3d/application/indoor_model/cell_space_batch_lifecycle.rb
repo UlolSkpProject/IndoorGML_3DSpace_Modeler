@@ -326,13 +326,21 @@ module ULOL
           def debug_reference_points_by_kind
             return {} if ReferenceGraphDebugMode.mode == :off
 
-            points = Array((@debug_reference_graph_overlay_by_cell_id || {}).values).flat_map do |graph|
-              Array(graph[:nodes]).filter_map do |node|
+            points_by_kind = {}
+            Array((@debug_reference_graph_overlay_by_cell_id || {}).values).each do |graph|
+              Array(graph[:nodes]).each do |node|
                 point = node[:point]
-                { cell_id: graph[:cell_id], point: point }.freeze if point
+                next unless point
+
+                kind = node[:protected] ? 5 : 4
+                points_by_kind[kind] ||= []
+                points_by_kind[kind] << {
+                  cell_id: graph[:cell_id], point: point
+                }.freeze
               end
             end
-            { 4 => points.freeze }
+            points_by_kind.transform_values!(&:freeze)
+            points_by_kind.freeze
           end
 
           # Explicit one-shot console query. No graph or radius is populated by
@@ -350,8 +358,12 @@ module ULOL
               graph = NativeAdjacencyBridge.reference_graph(cell_space.id, selected)
               next unless graph
 
-              nodes = Array(graph[:nodes]).map do |coordinates|
-                { point: Geom::Point3d.new(*coordinates) }.freeze
+              protected_nodes = Array(graph[:protected_nodes])
+              nodes = Array(graph[:nodes]).each_with_index.map do |coordinates, index|
+                {
+                  point: Geom::Point3d.new(*coordinates),
+                  protected: protected_nodes[index] == true
+                }.freeze
               end.freeze
               snapshots[cell_space.id] = {
                 cell_id: cell_space.id,

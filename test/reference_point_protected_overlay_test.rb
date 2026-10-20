@@ -52,7 +52,10 @@ class ReferencePointProtectedOverlayTest < Minitest::Test
       {
         'A' => {
           cell_id: 'A',
-          nodes: [{ point: p(1, 1) }.freeze, { point: p(2, 2) }.freeze].freeze,
+          nodes: [
+            { point: p(1, 1), protected: false }.freeze,
+            { point: p(2, 2), protected: true }.freeze
+          ].freeze,
           edges: [[0, 1].freeze].freeze
         }.freeze
       }
@@ -65,12 +68,11 @@ class ReferencePointProtectedOverlayTest < Minitest::Test
     assert_empty build_model.debug_reference_points_by_kind
   end
 
-  def test_native_snapshot_points_have_no_radius_or_protected_radius_style
+  def test_native_snapshot_separates_protected_points
     Core::ReferenceGraphDebugMode.instance_variable_set(:@mode, :before)
     grouped = build_model.debug_reference_points_by_kind
-    assert_equal [{ cell_id: 'A', point: p(1, 1) },
-                  { cell_id: 'A', point: p(2, 2) }], grouped[4]
-    refute grouped.key?(5)
+    assert_equal [{ cell_id: 'A', point: p(1, 1) }], grouped[4]
+    assert_equal [{ cell_id: 'A', point: p(2, 2) }], grouped[5]
   end
 
   def test_renderer_draws_radius_free_reference_points
@@ -89,6 +91,26 @@ class ReferencePointProtectedOverlayTest < Minitest::Test
     assert_equal 5, view.points.last[:style]
     assert_equal 8, view.points.last[:size]
     assert_equal [p(2, 1)], view.points.last[:points]
+  end
+
+  def test_renderer_draws_protected_points_as_larger_magenta_x
+    model = Struct.new(:debug_reference_points_by_kind).new(
+      { 5 => [{ cell_id: 'A', point: p(3, 1) }] }
+    )
+    render = Renderer.new(indoor_model: model, transform_context: Object.new.tap do |transform|
+      def transform.overlay_cell_reference_points(points, cell_id)
+        return [] unless cell_id == 'A'
+        points
+      end
+    end)
+    view = View.new
+    render.draw(view)
+
+    assert_equal 1, view.points.length
+    assert_equal 4, view.points.last[:style]
+    assert_equal 14, view.points.last[:size]
+    assert_equal [235, 20, 145], view.points.last[:color].values_at(:red, :green, :blue)
+    assert_equal [p(3, 1)], view.points.last[:points]
   end
 
   def teardown

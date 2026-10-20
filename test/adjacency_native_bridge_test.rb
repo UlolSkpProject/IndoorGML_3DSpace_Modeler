@@ -227,6 +227,47 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     end
   end
 
+  def test_reference_graph_preserves_protected_node_flags
+    native = Module.new
+    native.define_singleton_method(:load_batch) { |_bytes| 0 }
+    native.define_singleton_method(:get_reference_graph) do |_, _|
+      {
+        nodes: [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+        edges: [[0, 1]],
+        protected_nodes: [true, false]
+      }
+    end
+    with_adjacency_native(native) do
+      graph = Bridge.reference_graph('A', :optimized)
+      assert_equal [true, false], graph[:protected_nodes]
+    end
+  end
+
+  def test_reference_graph_defaults_missing_protected_flags_for_loaded_legacy_native
+    native = Module.new
+    native.define_singleton_method(:load_batch) { |_bytes| 0 }
+    native.define_singleton_method(:get_reference_graph) do |_, _|
+      { nodes: [[0.0, 0.0, 0.0]], edges: [] }
+    end
+    with_adjacency_native(native) do
+      graph = Bridge.reference_graph('A', :before)
+      assert_equal [false], graph[:protected_nodes]
+    end
+  end
+
+  def test_reference_graph_rejects_misaligned_protected_node_flags
+    native = Module.new
+    native.define_singleton_method(:load_batch) { |_bytes| 0 }
+    native.define_singleton_method(:get_reference_graph) do |_, _|
+      { nodes: [[0.0, 0.0, 0.0]], edges: [], protected_nodes: [] }
+    end
+    with_adjacency_native(native) do
+      assert_raises(Bridge::ProtocolError) do
+        Bridge.reference_graph('A', :before)
+      end
+    end
+  end
+
   def test_result_decoding_restores_snapshot_face_references
     snapshots = sample_snapshots
     candidate =

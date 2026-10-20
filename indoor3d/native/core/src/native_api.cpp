@@ -211,8 +211,16 @@ VALUE adjacency_native_get_reference_graph(VALUE self, VALUE cell_key, VALUE sta
             rb_ary_push(pair,ULL2NUM(static_cast<unsigned long long>(edge.second)));
             rb_ary_push(edges,pair);
         }
+        VALUE protected_nodes=rb_ary_new_capa(static_cast<long>(graph->nodes.size()));
+        for(std::size_t index=0;index<graph->nodes.size();++index)
+        {
+            const bool protected_node=index<graph->protected_nodes.size() &&
+                                      graph->protected_nodes[index];
+            rb_ary_push(protected_nodes,protected_node ? Qtrue : Qfalse);
+        }
         hash_set(result,"nodes",nodes);
         hash_set(result,"edges",edges);
+        hash_set(result,"protected_nodes",protected_nodes);
         return result;
     });
 }

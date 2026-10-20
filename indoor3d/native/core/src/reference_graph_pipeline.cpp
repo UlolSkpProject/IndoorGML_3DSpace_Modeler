@@ -4,6 +4,7 @@
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <map>
 #include <queue>
 #include <set>
 #include <stdexcept>
@@ -15,7 +16,7 @@ namespace
 {
 using namespace IndoorGMLAdjacencyNative;
 constexpr double EPSILON = 1.0e-9;
-constexpr double SLIVER_MAX_WIDTH_RATIO = 0.01;
+constexpr double SLIVER_MAX_WIDTH_RATIO = 0.05;
 // Degree-2 shortcuts are considered only when the interior angle is at least
 // 150 degrees. Candidates nearest to a straight 180-degree continuation are
 // contracted first.
@@ -78,6 +79,123 @@ struct GraphBlock
     std::vector<std::size_t> vertices;
     std::vector<ReferenceGraphEdge> edges;
 };
+
+struct OrphanEdgeInsertion
+{
+    std::size_t node=0;
+    double projection=0.0;
+    double distance=0.0;
+    double ratio=0.0;
+};
+
+void integrate_isolated_nodes_near_edges(ReferenceGraphStageSnapshot& graph,
+                                         const CellData& cell,
+                                         double tolerance)
+{
+    canonicalize_edges(graph);
+    const auto adjacent=adjacency(graph);
+    std::map<std::pair<std::size_t,std::size_t>,
+             std::vector<OrphanEdgeInsertion>> insertions;
+
+    for(std::size_t node=0;node<graph.nodes.size();++node)
+    {
+        if(!adjacent[node].empty() ||
+           node>=graph.protected_nodes.size() || graph.protected_nodes[node])
+            continue;
+
+        std::optional<std::pair<ReferenceGraphEdge,OrphanEdgeInsertion>> best;
+        const auto& point=graph.nodes[node].point;
+        for(auto edge:graph.edges)
+        {
+            if(edge.second<edge.first) std::swap(edge.first,edge.second);
+            const auto& first=graph.nodes[edge.first].point;
+            const auto& second=graph.nodes[edge.second].point;
+            const double dx=second.x-first.x;
+            const double dy=second.y-first.y;
+            const double dz=second.z-first.z;
+            const double length_squared=dx*dx+dy*dy+dz*dz;
+            if(!std::isfinite(length_squared) ||
+               length_squared<=tolerance*tolerance) continue;
+            const double length=std::sqrt(length_squared);
+            const double px=point.x-first.x;
+            const double py=point.y-first.y;
+            const double pz=point.z-first.z;
+            const double projection=(px*dx+py*dy+pz*dz)/length_squared;
+            if(!std::isfinite(projection) ||
+               projection<=EPSILON || projection>=1.0-EPSILON) continue;
+            const double qx=first.x+projection*dx;
+            const double qy=first.y+projection*dy;
+            const double qz=first.z+projection*dz;
+            const double ox=point.x-qx;
+            const double oy=point.y-qy;
+            const double oz=point.z-qz;
+            const double offset=std::sqrt(ox*ox+oy*oy+oz*oz);
+            const double allowed=std::max(tolerance,
+                                          length*SLIVER_MAX_WIDTH_RATIO);
+            if(!std::isfinite(offset) || offset>allowed+EPSILON) continue;
+            const double endpoint_progress=std::min(projection,1.0-projection)*length;
+            if(endpoint_progress<=std::max(tolerance,2.0*offset)) continue;
+
+            OrphanEdgeInsertion candidate{node,projection,offset,offset/length};
+            if(!best || candidate.ratio<best->second.ratio-EPSILON ||
+               (std::abs(candidate.ratio-best->second.ratio)<=EPSILON &&
+                (candidate.distance<best->second.distance-EPSILON ||
+                 (std::abs(candidate.distance-best->second.distance)<=EPSILON &&
+                  std::tie(edge.first,edge.second)<
+                      std::tie(best->first.first,best->first.second)))))
+                best=std::make_pair(edge,candidate);
+        }
+        if(best) insertions[{best->first.first,best->first.second}].push_back(best->second);
+    }
+
+    for(auto& [edge,items]:insertions)
+    {
+        std::sort(items.begin(),items.end(),[](const auto& a,const auto& b){
+            if(a.projection!=b.projection) return a.projection<b.projection;
+            return a.node<b.node;
+        });
+        const double edge_length=distance(graph.nodes[edge.first].point,
+                                          graph.nodes[edge.second].point);
+        bool ordered=std::isfinite(edge_length) && edge_length>tolerance;
+        double previous_projection=0.0;
+        double previous_offset=0.0;
+        for(const auto& item:items)
+        {
+            const double progress=(item.projection-previous_projection)*edge_length;
+            if(progress<=std::max(tolerance,2.0*std::max(previous_offset,item.distance)))
+            {
+                ordered=false;
+                break;
+            }
+            previous_projection=item.projection;
+            previous_offset=item.distance;
+        }
+        if(ordered)
+        {
+            const double progress=(1.0-previous_projection)*edge_length;
+            if(progress<=std::max(tolerance,2.0*previous_offset)) ordered=false;
+        }
+        if(!ordered) continue;
+
+        std::vector<std::size_t> chain{edge.first};
+        for(const auto& item:items) chain.push_back(item.node);
+        chain.push_back(edge.second);
+        std::vector<std::pair<Vec3,Vec3>> checks;
+        for(std::size_t i=1;i<chain.size();++i)
+            checks.push_back({graph.nodes[chain[i-1]].point,
+                              graph.nodes[chain[i]].point});
+        if(!clear_segments(cell,checks,tolerance)) continue;
+
+        graph.edges.erase(std::remove_if(graph.edges.begin(),graph.edges.end(),
+            [&](ReferenceGraphEdge current){
+                if(current.second<current.first) std::swap(current.first,current.second);
+                return current.first==edge.first && current.second==edge.second;
+            }),graph.edges.end());
+        for(std::size_t i=1;i<chain.size();++i)
+            graph.edges.push_back({chain[i-1],chain[i]});
+    }
+    canonicalize_edges(graph);
+}
 
 std::vector<GraphBlock> cyclic_biconnected_blocks(
     const ReferenceGraphStageSnapshot& graph)
@@ -329,6 +447,10 @@ ReferenceGraphStageSnapshot build_collapsed(const CellData& cell,
                                             ReferenceGraphStageSnapshot graph,
                                             double tolerance)
 {
+    // Attach safe, near-collinear orphan references to existing graph edges so
+    // later degree-2 optimization can evaluate them without mutating BEFORE.
+    integrate_isolated_nodes_near_edges(graph,cell,tolerance);
+
     // A cyclic block whose reference points have one unambiguous longitudinal
     // order is a line with redundant chords, not an area-bearing loop. Reduce
     // it to that path before certified polygon loops are contracted.
@@ -743,15 +865,13 @@ ReferenceGraphPipeline build_reference_graph_pipeline(
     result.before.protected_nodes.assign(before.nodes.size(),false);
     for(std::size_t i=0;i<before.nodes.size();++i) result.before.original_indices.push_back(i);
     canonicalize_edges(result.before);
-    // Preserve the State and certified loop anchors formerly protected by
-    // AFTER. No radius-based reduction is performed here.
+    // Preserve the State and the loop vertices themselves. A node merely
+    // visible from a certified loop representative is not part of that loop
+    // and must remain eligible for ordinary degree-2 optimization.
     result.before.protected_nodes[*before.state_node_index]=true;
     for(const auto& candidate:before.loop_candidates)
     {
         for(const auto index:candidate.vertices)
-            if(index<result.before.nodes.size())
-                result.before.protected_nodes[index]=true;
-        for(const auto index:candidate.visible_neighbors)
             if(index<result.before.nodes.size())
                 result.before.protected_nodes[index]=true;
     }

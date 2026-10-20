@@ -48,6 +48,7 @@ class ReferenceGraphPipelineIntegrationTest < Minitest::Test
       {
         nodes: [[0.0, 0.0, 1.0], [1.0, 0.0, 1.0]].freeze,
         edges: [[0, 1].freeze].freeze,
+        protected_nodes: [false, true].freeze,
         requested_stage: stage
       }.freeze
     end
@@ -72,10 +73,11 @@ class ReferenceGraphPipelineIntegrationTest < Minitest::Test
     graph = lifecycle.debug_reference_graphs.fetch(0)
     assert_equal [[0, 1]], graph[:edges]
     assert_equal 'cell-1', graph[:cell_id]
-    assert_equal [{ cell_id: 'cell-1', point: graph[:nodes][0][:point] },
-                  { cell_id: 'cell-1', point: graph[:nodes][1][:point] }],
+    assert_equal [{ cell_id: 'cell-1', point: graph[:nodes][0][:point] }],
                  lifecycle.debug_reference_points_by_kind.fetch(4)
-    assert graph[:nodes].all? { |node| node.keys == [:point] }
+    assert_equal [{ cell_id: 'cell-1', point: graph[:nodes][1][:point] }],
+                 lifecycle.debug_reference_points_by_kind.fetch(5)
+    assert_equal [false, true], graph[:nodes].map { |node| node[:protected] }
     refute graph[:nodes].any? { |node| node.key?(:radius) }
   end
 
@@ -126,7 +128,8 @@ class ReferenceGraphPipelineIntegrationTest < Minitest::Test
     assert_equal :short_path_graph, graph[:stage]
     assert_equal [[0, 1]], graph[:edges]
     assert_equal 'cell-1', graph[:cell_id]
-    assert_equal 2, lifecycle.debug_reference_points_by_kind.fetch(4).length
+    assert_equal 1, lifecycle.debug_reference_points_by_kind.fetch(4).length
+    assert_equal 1, lifecycle.debug_reference_points_by_kind.fetch(5).length
 
     RG.clear!
     assert_empty lifecycle.debug_reference_graphs

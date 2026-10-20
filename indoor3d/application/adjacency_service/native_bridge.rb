@@ -246,7 +246,19 @@ module ULOL
             end
             [first, second].freeze
           end.freeze
-          { nodes: nodes, edges: edges }.freeze
+          protected_nodes = if graph[:protected_nodes].nil?
+                              # Keep Ruby reloads compatible with a native module
+                              # that was already loaded before this field existed.
+                              Array.new(nodes.length, false).freeze
+                            else
+                              flags = Array(graph[:protected_nodes])
+                              unless flags.length == nodes.length &&
+                                     flags.all? { |flag| flag == true || flag == false }
+                                raise ProtocolError, 'Native Reference Graph protected-node flags are invalid'
+                              end
+                              flags.freeze
+                            end
+          { nodes: nodes, edges: edges, protected_nodes: protected_nodes }.freeze
         end
 
         # All persistent Native Reference graph coordinates are CellSpace Local.
