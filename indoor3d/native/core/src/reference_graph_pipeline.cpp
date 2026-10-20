@@ -9,7 +9,6 @@
 #include <stdexcept>
 #include <tuple>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 
 namespace
@@ -369,8 +368,8 @@ ReferenceConnectivityRepairResult repair_connectivity(
     if(possible.nodes.size()==original_count) return result;
 
     // A temporary full visibility graph finds multi-hop paths through removed
-    // reference nodes. Minimize additional nodes first and travel distance
-    // second, so already successful components never need replacement.
+    // reference nodes. Prefer fewer added nodes, then shorter routes.
+    // All original LOS nodes and edges remain unchanged.
     const auto candidates=build_full_los_graph(possible,solid,tolerance);
     const auto adj=adjacency(candidates);
     using Cost=std::pair<std::size_t,double>;
@@ -669,7 +668,7 @@ ReferenceGraphStageSnapshot reference_short_path_graph(
 
     for(std::size_t index=0;index<count;++index)
     {
-        // Unreachable OPTIMIZED nodes stay visible but have no SPT edge.
+        // Unreachable repaired graph nodes stay visible but have no SPT edge.
         if(index==tree.root || !std::isfinite(tree.distances[index]))
             continue;
         const auto parent=tree.previous[index];
