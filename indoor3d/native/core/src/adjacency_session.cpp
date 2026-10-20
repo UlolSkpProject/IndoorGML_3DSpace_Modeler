@@ -150,7 +150,7 @@ void AdjacencySession::state_worker_loop()
         {
             const CellData& cell=cells_[cell_position];
             // Every supported category first uses the Floor reference policy:
-            // BEFORE -> AFTER -> COLLAPSED -> OPTIMIZED -> State tree.
+            // BEFORE -> AFTER -> COLLAPSED -> OPTIMIZED -> LOS_GRAPH -> State tree.
             // Only a per-cell modern failure may fall back to the legacy
             // volumetric State and its complete one-node Reference graph.
             const CellSpaceInteriorPointResult result=
