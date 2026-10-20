@@ -281,6 +281,44 @@ class TransitionCurveBuilderTest < Minitest::Test
     assert_empty @model.reference_curve_calls
   end
 
+  def test_selected_transition_highlights_only_the_selected_visible_half
+    @model.curve = [point(0), point(1), point(2), point(3), point(4)]
+
+    first = @builder.selected_transition_line_points(selected_cell_ids: { 'A' => true })
+    second = @builder.selected_transition_line_points(selected_cell_ids: { 'B' => true })
+    both = @builder.selected_transition_line_points(selected_cell_ids: { 'A' => true, 'B' => true })
+
+    assert_equal [0.0, 1.0, 1.0, 2.0], xs(first)
+    assert_equal [2.0, 3.0, 3.0, 4.0], xs(second)
+    assert_equal xs(first) + xs(second), xs(both)
+    assert_empty @builder.selected_transition_line_points(selected_cell_ids: {})
+    assert_empty @builder.selected_transition_line_points(selected_cell_ids: { 'C' => true })
+  end
+
+  def test_selected_transition_respects_visibility_and_topology_suppression
+    @model.curve = [point(0), point(1), point(2), point(3), point(4)]
+    @model.state_visibility[:state1] = false
+
+    assert_empty @builder.selected_transition_line_points(selected_cell_ids: { 'A' => true })
+    assert_equal [2.0, 3.0, 3.0, 4.0],
+                 xs(@builder.selected_transition_line_points(selected_cell_ids: { 'B' => true }))
+    assert_empty @builder.selected_transition_line_points(
+      selected_cell_ids: { 'B' => true },
+      excluded_cell_ids: ['A']
+    )
+  end
+
+  def test_selected_transition_reuses_existing_curve_cache
+    @model.curve = [point(0), point(1), point(2), point(3), point(4)]
+
+    assert_equal [0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0],
+                 xs(@builder.transition_line_points)
+    calls_after_base = @model.reference_curve_calls.length
+    assert_equal [0.0, 1.0, 1.0, 2.0],
+                 xs(@builder.selected_transition_line_points(selected_cell_ids: { 'A' => true }))
+    assert_equal calls_after_base, @model.reference_curve_calls.length
+  end
+
   def test_changing_excluded_cells_rebuilds_assembled_transition_list
     other = Transition.new('T2', point(10), point(14), nil, 'C', 'D', :state3, :state4)
     @transition.selected_waypoint = nil
