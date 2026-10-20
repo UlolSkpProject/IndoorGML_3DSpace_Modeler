@@ -331,6 +331,109 @@ ReferenceGraphStageSnapshot build_full_los_graph(
     return result;
 }
 
+struct ConnectivityRepairResult
+{
+    ReferenceGraphStageSnapshot graph;
+    std::size_t added_nodes=0;
+};
+
+ConnectivityRepairResult repair_connectivity(
+    const ReferenceGraphStageSnapshot& los_graph,
+    const ReferenceGraphStageSnapshot& before,
+    const ReferenceGraphStageSnapshot& collapsed,
+    std::size_t root,const FaceSolid& solid,double tolerance)
+{
+    ConnectivityRepairResult result{los_graph,0};
+    if(root>=los_graph.nodes.size() || !solid.valid()) return result;
+    const auto reached=reachable_nodes(los_graph,root);
+    if(std::all_of(reached.begin(),reached.end(),[](bool b){return b;}))
+        return result;
+
+    // Restore only validated references discarded by the reductions, including
+    // original BEFORE nodes and certified COLLAPSED representatives.
+    ReferenceGraphStageSnapshot possible=los_graph;
+    const std::size_t original_count=possible.nodes.size();
+    const auto collect=[&](const ReferenceGraphStageSnapshot& source){
+        for(std::size_t i=0;i<source.nodes.size();++i)
+        {
+            const auto& node=source.nodes[i];
+            if(!solid.inside(node.point,tolerance)) continue;
+            bool duplicate=false;
+            for(const auto& existing:possible.nodes)
+                if(distance(existing.point,node.point)<=tolerance)
+                {duplicate=true;break;}
+            if(duplicate) continue;
+            possible.nodes.push_back(node);
+            possible.original_indices.push_back(
+                i<source.original_indices.size() ? source.original_indices[i] :
+                std::nullopt);
+            possible.protected_nodes.push_back(true);
+        }
+    };
+    collect(before);
+    collect(collapsed);
+    if(possible.nodes.size()==original_count) return result;
+
+    // A temporary full visibility graph finds multi-hop paths through removed
+    // reference nodes. Minimize additional nodes first and travel distance
+    // second, so already successful components never need replacement.
+    const auto candidates=build_full_los_graph(possible,solid,tolerance);
+    const auto adj=adjacency(candidates);
+    using Cost=std::pair<std::size_t,double>;
+    using QueueEntry=std::tuple<std::size_t,double,std::size_t>;
+    const Cost unreachable{
+        std::numeric_limits<std::size_t>::max(),
+        std::numeric_limits<double>::infinity()};
+    std::vector<Cost> best(candidates.nodes.size(),unreachable);
+    std::vector<std::optional<std::size_t>> parent(candidates.nodes.size());
+    std::priority_queue<QueueEntry,std::vector<QueueEntry>,
+                        std::greater<QueueEntry>> queue;
+    best[root]={0,0.0};
+    queue.push({0,0.0,root});
+    while(!queue.empty())
+    {
+        const auto [new_count,length_so_far,current]=queue.top();
+        queue.pop();
+        if(best[current]!=Cost{new_count,length_so_far}) continue;
+        for(const auto next:adj[current])
+        {
+            const Cost candidate{
+                new_count+static_cast<std::size_t>(next>=original_count),
+                length_so_far+distance(candidates.nodes[current].point,
+                                       candidates.nodes[next].point)};
+            if(candidate>=best[next]) continue;
+            best[next]=candidate;
+            parent[next]=current;
+            queue.push({candidate.first,candidate.second,next});
+        }
+    }
+
+    std::vector<bool> restore(candidates.nodes.size(),false);
+    for(std::size_t target=0;target<original_count;++target)
+    {
+        if(reached[target] || best[target].first==unreachable.first) continue;
+        std::size_t current=target;
+        for(std::size_t step=0;step<candidates.nodes.size();++step)
+        {
+            if(current==root) break;
+            if(current>=original_count) restore[current]=true;
+            if(!parent[current]) break;
+            current=*parent[current];
+        }
+    }
+    for(std::size_t i=original_count;i<candidates.nodes.size();++i)
+    {
+        if(!restore[i]) continue;
+        result.graph.nodes.push_back(candidates.nodes[i]);
+        result.graph.original_indices.push_back(candidates.original_indices[i]);
+        result.graph.protected_nodes.push_back(true);
+        ++result.added_nodes;
+    }
+    if(result.added_nodes)
+        result.graph=build_full_los_graph(result.graph,solid,tolerance);
+    return result;
+}
+
 ReferenceGraphShortestPathTree bake_tree(const ReferenceGraphStageSnapshot& graph,
                                          std::size_t root)
 {
