@@ -36,7 +36,7 @@ module ULOL
 
     module IndoorCore
       module NativeAdjacencyBridge
-        def self.reference_waypoint_anchors(_first, _second, _waypoint)
+        def self.reference_waypoint_anchors(_first, _second, _waypoint, **_transforms)
           [[0.0, 0.0, 4.0], [0.0, 10.0, 20.0]]
         end
       end
