@@ -47,6 +47,8 @@ struct ReferenceGraphPipeline
     // Reusable Solid queries for waypoint routing after the geometry batch is cleared.
     std::shared_ptr<const FaceSolid> waypoint_solid;
     double waypoint_tolerance = 0.001;
+    // Preserve the pre-existing State-only route if legacy fallback has no valid Solid.
+    bool legacy_state_only = false;
 };
 
 // All radius-dependent reductions, LOS-safe OPTIMIZED component bridges and
