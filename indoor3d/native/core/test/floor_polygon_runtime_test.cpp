@@ -417,7 +417,7 @@ void test_reference_graph_routes_from_nonzero_state_node()
     require(pipeline.state_node_index==1 &&
             pipeline.shortest_path_tree.root==1,
             "Native graph and shortest-path tree must use a nonzero State index");
-    require(pipeline.after.protected_nodes[1] &&
+    require(pipeline.before.protected_nodes[1] &&
             pipeline.shortest_path_tree.distances[1]==0.0 &&
             std::isfinite(pipeline.shortest_path_tree.distances[0]),
             "Nonzero State must remain protected and reach the other node");
@@ -470,6 +470,7 @@ void test_waypoint_gateway_uses_los_and_total_state_cost()
         {state,0.0},{near_gateway,0.0},{far_gateway,0.0}
     };
     pipeline.los_graph=pipeline.optimized;
+    pipeline.repaired_graph=pipeline.los_graph;
     pipeline.shortest_path_tree.root=0;
     pipeline.shortest_path_tree.distances={0.0,80.0,25.0};
     pipeline.shortest_path_tree.previous={std::nullopt,0,0};
@@ -520,8 +521,8 @@ void test_reference_local_finalization_uses_actual_post_state_frame()
     };
     auto pipeline=original;
     finalize_reference_graph_local(pipeline,cell,snapped_inverse);
-    for(const auto* stage:{&pipeline.before,&pipeline.after,
-                           &pipeline.collapsed,&pipeline.optimized,&pipeline.los_graph})
+    for(const auto* stage:{&pipeline.before,&pipeline.collapsed,
+                           &pipeline.optimized,&pipeline.los_graph,&pipeline.repaired_graph})
     {
         require(!stage->nodes.empty() &&
                 near(stage->nodes[0].point.x,-0.00001,1e-8) &&
@@ -544,6 +545,7 @@ void test_reference_local_finalization_uses_actual_post_state_frame()
             near(rotated.optimized.nodes[0].point.y,-10.0) &&
             near(rotated.los_graph.nodes[0].point.x,10.0) &&
             near(rotated.los_graph.nodes[0].point.y,-10.0) &&
+            near(rotated.repaired_graph.nodes[0].point.y,-10.0) &&
             rotated.waypoint_solid->inside(rotated.los_graph.nodes[0].point,0.001),
             "CellSpace rotation must transform both the graph and LOS Solid");
     const auto route=reference_transition_polyline(rotated,{10,-20,z});
