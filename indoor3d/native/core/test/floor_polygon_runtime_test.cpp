@@ -496,6 +496,57 @@ void test_legacy_state_only_route_survives_invalid_solid()
     require(path.size()==2 && near(path[0].x,1.0) && near(path[1].x,4.0),
             "Invalid legacy Solid must not regress the prior State-only route");
 }
+void test_reference_local_finalization_uses_actual_post_state_frame()
+{
+    const CellData cell=box(20);
+    const double z=1000.0/25.4;
+    ReferenceGraphDebug before;
+    before.nodes={{{10,10,z},6},{{12,10,z},6}};
+    before.edges={{0,1}};
+    before.state_node_index=0;
+    const auto original=build_reference_graph_pipeline(cell,before,0.001);
+    const std::array<double,16> snapped_inverse={
+        1,0,0,0, 0,1,0,0, 0,0,1,0,
+        -10.00001,-10,-z,1
+    };
+    auto pipeline=original;
+    finalize_reference_graph_local(pipeline,cell,snapped_inverse);
+    for(const auto* stage:{&pipeline.before,&pipeline.after,
+                           &pipeline.collapsed,&pipeline.optimized})
+    {
+        require(!stage->nodes.empty() &&
+                near(stage->nodes[0].point.x,-0.00001,1e-8) &&
+                near(stage->nodes[0].point.y,0.0,1e-8),
+                "Every Reference stage must use the final snapped Local frame");
+    }
+    require(pipeline.waypoint_solid->valid() &&
+            pipeline.waypoint_solid->inside(pipeline.optimized.nodes[0].point,0.001),
+            "Waypoint FaceSolid must share the nodes' final Local frame");
+    require(near(pipeline.shortest_path_tree.distances[1],
+                 original.shortest_path_tree.distances[1]),
+            "Rigid recenter must preserve the State shortest-path weights");
+
+    const std::array<double,16> rotated_inverse={
+        0,-1,0,0, 1,0,0,0, 0,0,1,0, 0,0,0,1
+    };
+    auto rotated=original;
+    finalize_reference_graph_local(rotated,cell,rotated_inverse);
+    require(near(rotated.optimized.nodes[0].point.x,10.0) &&
+            near(rotated.optimized.nodes[0].point.y,-10.0) &&
+            rotated.waypoint_solid->inside(rotated.optimized.nodes[0].point,0.001),
+            "CellSpace rotation must transform both the graph and LOS Solid");
+    const auto route=reference_transition_polyline(rotated,{10,-20,z});
+    require(!route.empty() && near(route.back().y,-20.0),
+            "Local waypoint routing must work after CellSpace rotation");
+
+    auto invalid=original;
+    auto scaled=snapped_inverse;
+    scaled[0]=2.0;
+    bool rejected=false;
+    try { finalize_reference_graph_local(invalid,cell,scaled); }
+    catch(const std::invalid_argument&) { rejected=true; }
+    require(rejected,"Non-rigid CellSpace frame must be rejected");
+}
 void test_shared_boundary_midpoint_without_matching_tessellation()
 {
     const auto left=normal_face(rectangle(0,0,4,4));
@@ -626,6 +677,7 @@ int main()
     test_reference_graph_routes_from_nonzero_state_node();
     test_waypoint_gateway_uses_los_and_total_state_cost();
     test_legacy_state_only_route_survives_invalid_solid();
+    test_reference_local_finalization_uses_actual_post_state_frame();
     test_shared_boundary_midpoint_without_matching_tessellation();
     test_shared_edge_with_mismatched_vertex_splits_merges_once();
     test_stair_uses_same_first_reference_policy();
