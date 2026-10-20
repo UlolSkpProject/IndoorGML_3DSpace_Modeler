@@ -16,7 +16,6 @@ namespace
 {
 using namespace IndoorGMLAdjacencyNative;
 constexpr double EPSILON = 1.0e-9;
-constexpr std::size_t MAX_CLUSTER_SIZE = 8;
 
 double distance(const Vec3& a, const Vec3& b)
 {
@@ -56,27 +55,6 @@ bool clear_segments(const CellData& cell,
     const auto checked=validate_room_reference_segments(cell,segments,tolerance);
     return checked.size()==segments.size() &&
         std::all_of(checked.begin(),checked.end(),[](bool value){return value;});
-}
-
-bool meaningful_branch(std::size_t index,
-                       const std::vector<std::vector<std::size_t>>& adj)
-{
-    const auto& connected=adj[index];
-    if(connected.size()<=2) return false;
-    std::vector<bool> reached(adj.size(),false);
-    std::vector<std::size_t> queue{connected.front()};
-    reached[connected.front()]=true;
-    for(std::size_t head=0;head<queue.size();++head)
-    {
-        for(const std::size_t other:adj[queue[head]])
-        {
-            if(other==index || reached[other]) continue;
-            reached[other]=true;
-            queue.push_back(other);
-        }
-    }
-    return std::any_of(connected.begin(),connected.end(),
-        [&](std::size_t other){return !reached[other];});
 }
 
 void canonicalize_edges(ReferenceGraphStageSnapshot& graph)
@@ -217,65 +195,6 @@ double loop_area(const ReferenceGraphStageSnapshot& graph,
     return 0.5*std::sqrt(nx*nx+ny*ny+nz*nz);
 }
 
-ReferenceGraphStageSnapshot build_after(const CellData& cell,
-                                        const ReferenceGraphDebug& before,
-                                        ReferenceGraphStageSnapshot graph,
-                                        double tolerance)
-{
-    // Conservatively protect State and all certified-loop participants. The
-    // reduction may retain more nodes than Ruby's old selector, never fewer
-    // certified anchors.
-    if(before.state_node_index && *before.state_node_index<graph.nodes.size())
-        graph.protected_nodes[*before.state_node_index]=true;
-    for(const auto& candidate:before.loop_candidates)
-    {
-        for(const auto index:candidate.vertices)
-            if(index<graph.nodes.size()) graph.protected_nodes[index]=true;
-        for(const auto index:candidate.visible_neighbors)
-            if(index<graph.nodes.size()) graph.protected_nodes[index]=true;
-    }
-
-    std::vector<std::size_t> order(graph.nodes.size());
-    for(std::size_t i=0;i<order.size();++i) order[i]=i;
-    std::sort(order.begin(),order.end(),[&](std::size_t a,std::size_t b){
-        const double ra=graph.nodes[a].radius,rb=graph.nodes[b].radius;
-        if(ra!=rb) return ra>rb;
-        return a<b;
-    });
-    for(const auto original_center:order)
-    {
-        auto center_it=std::find(graph.original_indices.begin(),graph.original_indices.end(),
-                                 std::optional<std::size_t>(original_center));
-        if(center_it==graph.original_indices.end()) continue;
-        std::size_t center=static_cast<std::size_t>(center_it-graph.original_indices.begin());
-        if(graph.protected_nodes[center]) continue;
-        const auto adj=adjacency(graph);
-        std::vector<std::size_t> candidates=adj[center];
-        std::sort(candidates.begin(),candidates.end(),[&](std::size_t a,std::size_t b){
-            if(graph.nodes[a].radius!=graph.nodes[b].radius)
-                return graph.nodes[a].radius<graph.nodes[b].radius;
-            return a<b;
-        });
-        std::vector<std::size_t> members{center};
-        for(const auto index:candidates)
-        {
-            if(members.size()>=MAX_CLUSTER_SIZE) break;
-            if(graph.protected_nodes[index] || adj[index].size()<2 || meaningful_branch(index,adj))
-                continue;
-            if(graph.nodes[index].radius>graph.nodes[center].radius+EPSILON) continue;
-            if(distance(graph.nodes[center].point,graph.nodes[index].point)>=
-               std::max(graph.nodes[center].radius,graph.nodes[index].radius)) continue;
-            members.push_back(index);
-        }
-        while(members.size()>1)
-        {
-            if(contract_existing(graph,cell,members,center,tolerance)) break;
-            members.pop_back();
-        }
-    }
-    return graph;
-}
-
 ReferenceGraphStageSnapshot build_collapsed(const CellData& cell,
                                             const ReferenceGraphDebug& before,
                                             ReferenceGraphStageSnapshot graph,
@@ -365,19 +284,6 @@ ReferenceGraphStageSnapshot build_optimized(const CellData& cell,
     return graph;
 }
 
-struct BridgeCandidate
-{
-    std::size_t first;
-    std::size_t second;
-    double squared_distance;
-};
-
-bool bridge_candidate_less(const BridgeCandidate& a,const BridgeCandidate& b)
-{
-    return std::tie(a.squared_distance,a.first,a.second)<
-           std::tie(b.squared_distance,b.first,b.second);
-}
-
 std::vector<bool> reachable_nodes(const ReferenceGraphStageSnapshot& graph,
                                   std::size_t root)
 {
@@ -394,128 +300,6 @@ std::vector<bool> reachable_nodes(const ReferenceGraphStageSnapshot& graph,
             queue.push_back(next);
         }
     return reached;
-}
-
-std::size_t bridge_key(std::size_t first,std::size_t second,std::size_t count)
-{
-    if(second<first) std::swap(first,second);
-    return first*count+second;
-}
-
-std::vector<BridgeCandidate> nearest_bridge_candidates(
-    const ReferenceGraphStageSnapshot& graph,
-    const std::vector<bool>& reached,
-    const std::unordered_set<std::size_t>& rejected,
-    std::size_t limit)
-{
-    const auto worse_first=[](const BridgeCandidate& a,const BridgeCandidate& b) {
-        return bridge_candidate_less(a,b);
-    };
-    std::priority_queue<BridgeCandidate,std::vector<BridgeCandidate>,
-                        decltype(worse_first)> nearest(worse_first);
-    const std::size_t count=graph.nodes.size();
-    for(std::size_t first=0;first<count;++first)
-    {
-        if(!reached[first]) continue;
-        for(std::size_t second=0;second<count;++second)
-        {
-            if(reached[second]) continue;
-            if(rejected.count(bridge_key(first,second,count))>0) continue;
-            const Vec3& a=graph.nodes[first].point;
-            const Vec3& b=graph.nodes[second].point;
-            const double x=a.x-b.x,y=a.y-b.y,z=a.z-b.z;
-            const double squared_distance=x*x+y*y+z*z;
-            if(!std::isfinite(squared_distance) || squared_distance<=EPSILON*EPSILON)
-                continue;
-            const BridgeCandidate candidate{first,second,squared_distance};
-            if(nearest.size()<limit)
-                nearest.push(candidate);
-            else if(bridge_candidate_less(candidate,nearest.top()))
-            {
-                nearest.pop();
-                nearest.push(candidate);
-            }
-        }
-    }
-    std::vector<BridgeCandidate> result;
-    result.reserve(nearest.size());
-    while(!nearest.empty())
-    {
-        result.push_back(nearest.top());
-        nearest.pop();
-    }
-    std::sort(result.begin(),result.end(),bridge_candidate_less);
-    return result;
-}
-
-struct ConnectivityResult
-{
-    std::size_t added_edges=0;
-    std::size_t unreachable_nodes=0;
-};
-
-ConnectivityResult connect_optimized_to_state(
-    ReferenceGraphStageSnapshot& graph,const CellData& cell,
-    std::size_t state_node_index,double tolerance)
-{
-    constexpr std::size_t INITIAL_CANDIDATE_BATCH=16;
-    ConnectivityResult result;
-    if(state_node_index>=graph.nodes.size())
-    {
-        result.unreachable_nodes=graph.nodes.size();
-        return result;
-    }
-
-    for(;;)
-    {
-        const std::vector<bool> reached=reachable_nodes(graph,state_node_index);
-        const std::size_t reached_count=static_cast<std::size_t>(
-            std::count(reached.begin(),reached.end(),true));
-        if(reached_count==graph.nodes.size()) break;
-
-        std::unordered_set<std::size_t> rejected;
-        std::size_t batch_size=INITIAL_CANDIDATE_BATCH;
-        bool added=false;
-        for(;;)
-        {
-            const auto candidates=nearest_bridge_candidates(
-                graph,reached,rejected,batch_size);
-            if(candidates.empty()) break;
-
-            std::vector<std::pair<Vec3,Vec3>> segments;
-            segments.reserve(candidates.size());
-            for(const auto& candidate:candidates)
-                segments.push_back({graph.nodes[candidate.first].point,
-                                    graph.nodes[candidate.second].point});
-            const auto visible=validate_room_reference_segments(
-                cell,segments,tolerance);
-            if(visible.size()!=candidates.size())
-                throw std::runtime_error("Native Reference bridge LOS result size mismatch");
-            for(std::size_t i=0;i<candidates.size();++i)
-            {
-                if(!visible[i]) continue;
-                graph.edges.push_back({candidates[i].first,candidates[i].second});
-                canonicalize_edges(graph);
-                ++result.added_edges;
-                added=true;
-                break;
-            }
-            if(added) break;
-
-            for(const auto& candidate:candidates)
-                rejected.insert(bridge_key(
-                    candidate.first,candidate.second,graph.nodes.size()));
-            if(candidates.size()<batch_size) break;
-            if(batch_size>std::numeric_limits<std::size_t>::max()/2) break;
-            batch_size*=2;
-        }
-        if(!added)
-        {
-            result.unreachable_nodes=graph.nodes.size()-reached_count;
-            break;
-        }
-    }
-    return result;
 }
 
 ReferenceGraphStageSnapshot build_full_los_graph(
@@ -590,10 +374,10 @@ ReferenceGraphPipeline build_state_reference_graph_pipeline(
     result.before.nodes.push_back({state_point,0.0});
     result.before.original_indices.push_back(0);
     result.before.protected_nodes.push_back(true);
-    result.after=result.before;
     result.collapsed=result.before;
     result.optimized=result.before;
     result.los_graph=result.optimized;
+    result.repaired_graph=result.los_graph;
     result.state_node_index=0;
     result.shortest_path_tree.root=0;
     result.shortest_path_tree.distances.push_back(0.0);
@@ -616,8 +400,19 @@ ReferenceGraphPipeline build_reference_graph_pipeline(
     result.before.protected_nodes.assign(before.nodes.size(),false);
     for(std::size_t i=0;i<before.nodes.size();++i) result.before.original_indices.push_back(i);
     canonicalize_edges(result.before);
-    result.after=build_after(cell,before,result.before,tolerance);
-    result.collapsed=build_collapsed(cell,before,result.after,tolerance);
+    // Preserve the State and certified loop anchors formerly protected by
+    // AFTER. No radius-based reduction is performed here.
+    result.before.protected_nodes[*before.state_node_index]=true;
+    for(const auto& candidate:before.loop_candidates)
+    {
+        for(const auto index:candidate.vertices)
+            if(index<result.before.nodes.size())
+                result.before.protected_nodes[index]=true;
+        for(const auto index:candidate.visible_neighbors)
+            if(index<result.before.nodes.size())
+                result.before.protected_nodes[index]=true;
+    }
+    result.collapsed=build_collapsed(cell,before,result.before,tolerance);
     result.optimized=build_optimized(cell,result.collapsed,tolerance);
 
     const auto state_original=*before.state_node_index;
@@ -627,16 +422,19 @@ ReferenceGraphPipeline build_reference_graph_pipeline(
     if(found==result.optimized.original_indices.end())
         throw std::runtime_error("Reference State node did not survive Native reductions");
     result.state_node_index=static_cast<std::size_t>(found-result.optimized.original_indices.begin());
-    const ConnectivityResult connectivity=connect_optimized_to_state(
-        result.optimized,cell,result.state_node_index,tolerance);
-    result.optimized_bridge_count=connectivity.added_edges;
     // Build FaceSolid once: the identical 3D visibility contract is used
     // for full pairwise Ref-Node LOS and the final waypoint gateway check.
     result.waypoint_solid=std::make_shared<FaceSolid>(cell,tolerance);
     result.waypoint_tolerance=tolerance;
     result.los_graph=build_full_los_graph(
         result.optimized,*result.waypoint_solid,tolerance);
-    result.shortest_path_tree=bake_tree(result.los_graph,result.state_node_index);
+    const auto repaired=repair_connectivity(
+        result.los_graph,result.before,result.collapsed,
+        result.state_node_index,*result.waypoint_solid,tolerance);
+    result.repaired_graph=std::move(repaired.graph);
+    result.recovered_node_count=repaired.added_nodes;
+    result.shortest_path_tree=bake_tree(
+        result.repaired_graph,result.state_node_index);
     result.unreachable_node_count=static_cast<std::size_t>(std::count_if(
         result.shortest_path_tree.distances.begin(),
         result.shortest_path_tree.distances.end(),
@@ -726,8 +524,8 @@ void finalize_reference_graph_local(
 {
     require_rigid_frame(root_to_local);
     // Preserve radius, edge weights and shortest-path tree for rigid frames.
-    for(auto* stage:{&pipeline.before,&pipeline.after,
-                     &pipeline.collapsed,&pipeline.optimized,&pipeline.los_graph})
+    for(auto* stage:{&pipeline.before,&pipeline.collapsed,
+                     &pipeline.optimized,&pipeline.los_graph,&pipeline.repaired_graph})
         for(auto& node:stage->nodes)
             node.point=frame_point(root_to_local,node.point);
     const CellData local_cell=localized_cell(root_cell,root_to_local);
@@ -741,10 +539,10 @@ const ReferenceGraphStageSnapshot& reference_graph_stage(
     switch(stage)
     {
     case ReferenceGraphStage::Before:return pipeline.before;
-    case ReferenceGraphStage::After:return pipeline.after;
     case ReferenceGraphStage::Collapsed:return pipeline.collapsed;
     case ReferenceGraphStage::Optimized:return pipeline.optimized;
     case ReferenceGraphStage::LosGraph:return pipeline.los_graph;
+    case ReferenceGraphStage::ConnectivityRepair:return pipeline.repaired_graph;
     case ReferenceGraphStage::ShortPathGraph:
         throw std::invalid_argument("Short-path graph is a derived snapshot; use reference_short_path_graph");
     }
@@ -754,7 +552,7 @@ const ReferenceGraphStageSnapshot& reference_graph_stage(
 ReferenceGraphStageSnapshot reference_short_path_graph(
     const ReferenceGraphPipeline& pipeline)
 {
-    ReferenceGraphStageSnapshot result=pipeline.los_graph;
+    ReferenceGraphStageSnapshot result=pipeline.repaired_graph;
     result.edges.clear();
     const auto& tree=pipeline.shortest_path_tree;
     const std::size_t count=result.nodes.size();
@@ -780,7 +578,7 @@ ReferenceGraphStageSnapshot reference_short_path_graph(
 std::optional<Vec3> closest_reachable_reference_point(
     const ReferenceGraphPipeline& pipeline,const Vec3& waypoint)
 {
-    const auto& graph=pipeline.los_graph;
+    const auto& graph=pipeline.repaired_graph;
     const auto& tree=pipeline.shortest_path_tree;
     if(graph.nodes.empty() || tree.distances.size()!=graph.nodes.size())
         return std::nullopt;
@@ -832,7 +630,7 @@ bool waypoint_reference_visible(const FaceSolid& solid,const Vec3& node,
 std::vector<Vec3> reference_transition_polyline(
     const ReferenceGraphPipeline& pipeline,const Vec3& waypoint)
 {
-    const auto& graph=pipeline.los_graph;
+    const auto& graph=pipeline.repaired_graph;
     const auto& tree=pipeline.shortest_path_tree;
     if(graph.nodes.empty() || tree.distances.size()!=graph.nodes.size())
         return {};
