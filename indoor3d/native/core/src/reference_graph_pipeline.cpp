@@ -570,6 +570,7 @@ ReferenceGraphPipeline build_state_reference_graph_pipeline(
     result.shortest_path_tree.previous.push_back(std::nullopt);
     result.waypoint_solid=std::make_shared<FaceSolid>(cell,tolerance);
     result.waypoint_tolerance=tolerance;
+    result.legacy_state_only=true;
     return result;
 }
 
@@ -678,16 +679,20 @@ std::vector<Vec3> reference_transition_polyline(
 {
     const auto& graph=pipeline.optimized;
     const auto& tree=pipeline.shortest_path_tree;
-    if(graph.nodes.empty() || tree.distances.size()!=graph.nodes.size() ||
-       !pipeline.waypoint_solid || !pipeline.waypoint_solid->valid())
+    if(graph.nodes.empty() || tree.distances.size()!=graph.nodes.size())
         return {};
+    const bool has_visibility= pipeline.waypoint_solid && pipeline.waypoint_solid->valid();
+    // The legacy State-only fallback can lack a valid Face Solid. Retain its
+    // existing direct route; every normal Reference graph requires verified LOS.
+    if(!has_visibility && !pipeline.legacy_state_only) return {};
     std::optional<std::size_t> gateway;
     double best=std::numeric_limits<double>::infinity();
     for(std::size_t i=0;i<graph.nodes.size();++i)
     {
         if(!std::isfinite(tree.distances[i])) continue;
         const double direct=distance(graph.nodes[i].point,waypoint);
-        if(!waypoint_reference_visible(*pipeline.waypoint_solid,
+        if(has_visibility &&
+           !waypoint_reference_visible(*pipeline.waypoint_solid,
                                        graph.nodes[i].point,waypoint,
                                        pipeline.waypoint_tolerance)) continue;
         const double candidate=tree.distances[i]+direct;
