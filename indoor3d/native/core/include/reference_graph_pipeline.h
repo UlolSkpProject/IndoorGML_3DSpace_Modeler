@@ -1,9 +1,11 @@
 #pragma once
 
 #include "cell_space_interior_point_locator.h"
+#include "floor_face_solid.h"
 
 #include <cstddef>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -42,6 +44,9 @@ struct ReferenceGraphPipeline
     std::size_t optimized_bridge_count = 0;
     std::size_t unreachable_node_count = 0;
     ReferenceGraphShortestPathTree shortest_path_tree;
+    // Reusable Solid queries for waypoint routing after the geometry batch is cleared.
+    std::shared_ptr<const FaceSolid> waypoint_solid;
+    double waypoint_tolerance = 0.001;
 };
 
 // All radius-dependent reductions, LOS-safe OPTIMIZED component bridges and
@@ -57,7 +62,9 @@ ReferenceGraphPipeline build_reference_graph_pipeline(
 // reference graph. This keeps transition routing uniform without inventing
 // modern reference points after the category-aware policy failed.
 ReferenceGraphPipeline build_state_reference_graph_pipeline(
-    const Vec3& state_point
+    const Vec3& state_point,
+    const CellData& cell,
+    double tolerance
 );
 
 const ReferenceGraphStageSnapshot& reference_graph_stage(
@@ -72,8 +79,9 @@ std::optional<Vec3> closest_reachable_reference_point(
     const Vec3& waypoint
 );
 
-// Returns State -> closest reachable graph gateway -> waypoint. The SPT is
-// baked once when the CellSpace graph is rebuilt; no Dijkstra runs per query.
+// Returns State -> the LOS-visible gateway minimizing
+// (State-to-gateway shortest-path length + gateway-to-waypoint distance)
+// -> waypoint. The SPT is baked once when the CellSpace graph is rebuilt.
 std::vector<Vec3> reference_transition_polyline(
     const ReferenceGraphPipeline& pipeline,
     const Vec3& waypoint
