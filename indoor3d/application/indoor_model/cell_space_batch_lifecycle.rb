@@ -339,8 +339,8 @@ module ULOL
           # normal CellSpace refresh; the overlay only owns this display copy.
           def request_reference_graph_debug(stage)
             selected = stage.to_sym
-            unless %i[before after collapsed optimized los_graph short_path_graph].include?(selected)
-              raise ArgumentError, 'expected :before, :after, :collapsed, :optimized, :los_graph or :short_path_graph'
+            unless %i[before collapsed optimized los_graph connectivity_repair short_path_graph].include?(selected)
+              raise ArgumentError, 'expected :before, :collapsed, :optimized, :los_graph, :connectivity_repair or :short_path_graph'
             end
 
             snapshots = {}
