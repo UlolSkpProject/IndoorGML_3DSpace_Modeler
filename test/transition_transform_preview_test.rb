@@ -182,6 +182,56 @@ class TransitionTransformPreviewTest < Minitest::Test
     assert_empty transition_renderer.last_options[:excluded_cell_ids]
   end
 
+  def test_selected_dual_graph_draw_order_and_live_selection_changes
+    indoor_model = @overlay.instance_variable_get(:@indoor_model)
+    indoor_model.define_singleton_method(:editing?) { true }
+    indoor_model.cell_spaces.first.define_singleton_method(:valid?) { true }
+    second_group = Group.new(30, 20)
+    second_cell = Cell.new('B', second_group)
+    second_cell.define_singleton_method(:valid?) { true }
+    indoor_model.cell_spaces << second_cell
+
+    order = []
+    draw_context = Object.new
+    draw_context.define_singleton_method(:draw) { |*, **_| order << :transition }
+    draw_context.define_singleton_method(:draw_highlight) do |*, **options|
+      order << [:selected_transition, options[:selected_cell_ids].keys.sort, options[:excluded_cell_ids]]
+    end
+    state_context = Object.new
+    state_context.define_singleton_method(:draw) { |*, **_| order << :state }
+    state_context.define_singleton_method(:draw_highlight) do |*, **options|
+      order << [:selected_state, options[:selected_cell_ids].keys.sort]
+    end
+    @overlay.instance_variable_set(:@transition_renderer, draw_context)
+    @overlay.instance_variable_set(:@state_renderer, state_context)
+    @overlay.instance_variable_set(:@reference_graph_debug_renderer, DrawCounter.new)
+    @overlay.instance_variable_set(:@reference_point_debug_renderer, DrawCounter.new)
+    @overlay.define_singleton_method(:draw_dual_overlay?) { true }
+    @overlay.define_singleton_method(:validation_focus_active?) { false }
+    view = View.new(1)
+
+    @overlay.draw(view)
+    assert_equal [:transition, [:selected_transition, ['A'], []], :state,
+                  [:selected_state, ['A']]], order
+
+    order.clear
+    @selection.entities = [@cell_group, second_group]
+    @overlay.draw(view)
+    assert_equal [:transition, [:selected_transition, %w[A B], []], :state,
+                  [:selected_state, %w[A B]]], order
+
+    order.clear
+    @selection.entities = [Group.new(99, 1)]
+    @overlay.draw(view)
+    assert_equal [:transition, :state], order
+
+    order.clear
+    @selection.entities = [@cell_group]
+    indoor_model.define_singleton_method(:editing?) { false }
+    @overlay.draw(view)
+    assert_equal [:transition, :state], order
+  end
+
   def test_abort_releases_transform_suppression
     refute @overlay.send(:update_transition_transform_preview)
     @cell_group.transformation = Transform.new(15)
