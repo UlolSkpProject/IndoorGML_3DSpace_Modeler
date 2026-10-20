@@ -24,6 +24,7 @@ constexpr std::size_t MAX_FINAL_REFERENCES=4096;
 constexpr double STANDARD_MIN_REFERENCE_RADIUS=150.0/25.4;
 constexpr double THIN_CELL_MIN_REFERENCE_RADIUS=30.0/25.4;
 constexpr double STANDARD_REFERENCE_HEIGHT=1000.0/25.4;
+constexpr double SHORT_CELL_MAX_AABB_HEIGHT=1100.0/25.4;
 
 struct ReferencePolicy
 {
@@ -55,8 +56,18 @@ ReferenceSeeds positioned_seeds(
     const FaceSolid& solid,const ReferencePolicy& policy,double tolerance,
     std::size_t maximum)
 {
+    double reference_height=policy.fixed_height;
+    const double aabb_height=cell.bounds.maximum.z-cell.bounds.minimum.z;
+    // A fixed +1000mm reference lands on the ceiling of a 1000mm Solid.
+    // Keep short CellSpaces safely inside by using half their AABB height.
+    if (!policy.use_half_first_ceiling_height &&
+        std::isfinite(aabb_height) && aabb_height>0.0 &&
+        aabb_height<=SHORT_CELL_MAX_AABB_HEIGHT)
+    {
+        reference_height=aabb_height*0.5;
+    }
     ReferenceSeeds seeds=generate_reference_seeds(
-        leaves,tolerance,{policy.fixed_height,maximum});
+        leaves,tolerance,{reference_height,maximum});
     if (!policy.use_half_first_ceiling_height) return seeds;
 
     const double vertical_span=std::max(

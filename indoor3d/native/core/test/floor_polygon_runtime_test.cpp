@@ -92,14 +92,17 @@ void test_exit_code_failure_stage_distinctions()
             invalid_solid.diagnostics.prepared_faces==1,
             "Invalid nonfloor Face must report the Solid geometry stage");
 
-    const auto outside=locate_reference_before(box(10,10),0.001);
+    auto outside_cell=box(10,10);
+    outside_cell.bounds.maximum.z=1200.0/25.4;
+    const auto outside=locate_reference_before(outside_cell,0.001);
     require(outside.exit_code==StateExitCode::OutsideSolid &&
             outside.diagnostics.reference_candidates>=1 &&
             outside.diagnostics.rejected_outside>=1,
             "1000 mm above a low ceiling should report OUTSIDE_SOLID");
 
-    const auto near_ceiling=locate_reference_before(
-        box(10,1000.0/25.4+0.0005),0.001);
+    auto near_ceiling_cell=box(10,1000.0/25.4+0.0005);
+    near_ceiling_cell.bounds.maximum.z=1200.0/25.4;
+    const auto near_ceiling=locate_reference_before(near_ceiling_cell,0.001);
     require(near_ceiling.exit_code==StateExitCode::InsufficientClearance &&
             near_ceiling.diagnostics.rejected_clearance>=1,
             "Boundary-near reference should report insufficient clearance");
@@ -172,18 +175,23 @@ void test_before_radius_ignores_floor_and_ceiling()
     require(near(state.debug_graph.nodes.front().radius,100.0-0.001),
             "BEFORE circle radius must use wall distance rather than floor");
 
-    // 1000mm reference lies only 0.02" below the ceiling: still the
-    // identical wall radius; roof clearance is only used for validity.
+    // A short AABB uses its half-height reference. Floor/ceiling clearance
+    // still does not shrink the wall-only radius.
     const CellData low_ceiling=box(200,1000.0/25.4+0.02);
     const auto near_roof=locate_reference_before(low_ceiling,0.001);
     require(near_roof.exit_code==StateExitCode::Success &&
+            near_roof.state_point.has_value() &&
+            near(near_roof.state_point->z,
+                 (1000.0/25.4+0.02)*0.5) &&
             near_roof.debug_graph.nodes.size()==1 &&
             near(near_roof.debug_graph.nodes.front().radius,100.0-0.001),
-            "Ceiling clearance must NOT shrink an accepted BEFORE circle");
+            "Short-AABB midpoint must retain the wall-only BEFORE radius");
 
-    // Exceeding the ceiling DOES invalidate the reference; this safety rule
-    // is deliberately independent from circle radius selection.
-    const auto outside=locate_reference_before(box(200,20),0.001);
+    // A candidate beyond the actual ceiling remains invalid. The expanded
+    // diagnostic AABB keeps this fixture on the standard +1000mm policy.
+    CellData outside_cell=box(200,20);
+    outside_cell.bounds.maximum.z=1200.0/25.4;
+    const auto outside=locate_reference_before(outside_cell,0.001);
     require(outside.exit_code==StateExitCode::OutsideSolid &&
             !outside.state_point,
             "Wall radius must NOT bypass full-Solid reference validation");
@@ -638,14 +646,31 @@ void test_before_rejects_sphere_radius_below_150mm()
             result.diagnostics.accepted_references==0,
             "Rejected small sphere must not leak into the BEFORE graph");
 }
-void test_short_room_has_no_reference_state()
+void test_short_aabb_uses_half_height_reference()
 {
-    const auto cell=box(10,10); // +1000 mm lies ABOVE ceiling
-    const auto result=locate_reference_before(cell,0.001);
-    require(!result.state_point.has_value(),
-            "No valid 1000mm Reference means explicit no-State result");
-    require(result.debug_graph.nodes.empty(),
-            "Failure must not fabricate a BEFORE Graph");
+    CellData one_meter_door=box(200.0/25.4,1000.0/25.4);
+    one_meter_door.category=CellSpaceCategory::Door;
+    const auto one_meter=locate_reference_before(one_meter_door,0.001);
+    require(one_meter.exit_code==StateExitCode::Success &&
+            one_meter.state_point.has_value() &&
+            near(one_meter.state_point->z,500.0/25.4),
+            "A 1000mm Door AABB must place its Reference at half height");
+
+    CellData threshold_door=box(200.0/25.4,1100.0/25.4);
+    threshold_door.category=CellSpaceCategory::Door;
+    const auto threshold=locate_reference_before(threshold_door,0.001);
+    require(threshold.exit_code==StateExitCode::Success &&
+            threshold.state_point.has_value() &&
+            near(threshold.state_point->z,550.0/25.4),
+            "The inclusive 1100mm threshold must use half AABB height");
+
+    CellData taller_door=box(200.0/25.4,1100.0/25.4+0.01);
+    taller_door.category=CellSpaceCategory::Door;
+    const auto taller=locate_reference_before(taller_door,0.001);
+    require(taller.exit_code==StateExitCode::Success &&
+            taller.state_point.has_value() &&
+            near(taller.state_point->z,1000.0/25.4),
+            "AABB heights above 1100mm must retain the +1000mm policy");
 }
 void test_hole_queue_and_failed_diagnostics()
 {
@@ -683,7 +708,7 @@ int main()
     test_stair_uses_same_first_reference_policy();
     test_category_height_and_radius_policies();
     test_before_rejects_sphere_radius_below_150mm();
-    test_short_room_has_no_reference_state();
+    test_short_aabb_uses_half_height_reference();
     test_hole_queue_and_failed_diagnostics();
     return 0;
 }
