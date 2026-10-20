@@ -64,6 +64,20 @@ ReferenceGraphPipeline build_reference_graph_pipeline(
     double tolerance
 );
 
+// Restore discarded references only when they form genuine LOS paths between
+// disconnected State and target components. Never add an unvalidated Edge.
+struct ReferenceConnectivityRepairResult
+{
+    ReferenceGraphStageSnapshot graph;
+    std::size_t added_nodes=0;
+};
+ReferenceConnectivityRepairResult repair_reference_connectivity(
+    const ReferenceGraphStageSnapshot& los_graph,
+    const ReferenceGraphStageSnapshot& before,
+    const ReferenceGraphStageSnapshot& collapsed,
+    std::size_t state_node_index,const FaceSolid& solid,double tolerance
+);
+
 // A CellSpace recovered by legacy fallback uses its State itself as a one-node
 // reference graph. This keeps transition routing uniform without inventing
 // modern reference points after the category-aware policy failed.
