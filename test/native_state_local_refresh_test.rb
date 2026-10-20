@@ -130,6 +130,7 @@ class NativeStateLocalRefreshTest < Minitest::Test
 
     point = Harness.new(cell, entity).send(:native_state_local_point_for_entity, entity) do |center|
       assert_equal [1.0, 2.0, 3.0], [center.x, center.y, center.z]
+      entity.transformation = FakeTransform.new(:after_state_apply)
     end
 
     assert_equal [1.0, 2.0, 3.0], [point.x, point.y, point.z]
