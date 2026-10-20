@@ -440,8 +440,9 @@ CellData l_shaped_reference_room()
     {
         const Vec3& a=base[i];
         const Vec3& b=base[(i+1)%base.size()];
+        const double wall_length=std::hypot(b.x-a.x,b.y-a.y);
         cell.faces.push_back(face(
-            {b.y-a.y,a.x-b.x,0},
+            {(b.y-a.y)/wall_length,(a.x-b.x)/wall_length,0},
             {a,b,{b.x,b.y,height},{a.x,a.y,height}}
         ));
     }
