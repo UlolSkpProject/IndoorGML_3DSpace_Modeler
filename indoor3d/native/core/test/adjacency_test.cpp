@@ -508,7 +508,8 @@ void test_non_partitioned_state_is_a_single_node_reference_graph()
     {
         const auto& graph=reference_graph_stage(pipeline,stage);
         require(graph.nodes.size()==1 && graph.edges.empty() &&
-                graph.protected_nodes.size()==1 && graph.protected_nodes[0],
+                graph.node_roles.size()==1 &&
+                graph.node_roles[0]==ReferenceNodeRole::State,
                 "State-only category must retain one protected reference node");
         require(std::abs(graph.nodes[0].point.x-state.x)<1.0e-9 &&
                 std::abs(graph.nodes[0].point.y-state.y)<1.0e-9 &&
@@ -643,8 +644,54 @@ void test_native_reference_pipeline_optimizes_degree_two_and_collapses_certifica
     require(collapsed.before.nodes.size()==4 &&
             collapsed.collapsed.nodes.size()==2 &&
             collapsed.optimized.nodes.size()==2 &&
-            collapsed.optimized.edges.size()==1,
-            "Native COLLAPSED must apply a certified loop without losing State");
+            collapsed.optimized.edges.size()==1 &&
+            collapsed.collapsed.node_roles[0]==ReferenceNodeRole::State &&
+            collapsed.collapsed.node_roles[1]==ReferenceNodeRole::CollapseRepresentative &&
+            collapsed.optimized.node_roles[1]==ReferenceNodeRole::CollapseRepresentative,
+            "Certified Loop Collapse must retain State and protected representative");
+}
+
+void test_reference_node_roles_have_stage_scoped_protection()
+{
+    CellData room=tall_room(unit_box_cell());
+    room.category=CellSpaceCategory::Room;
+    const double z=1000.0/25.4;
+
+    // An unused certificate cannot globally pin its vertices or LOS-visible
+    // neighbors. A line has no closed cycle, so Collapse must reject it.
+    ReferenceGraphDebug before;
+    before.nodes={
+        {{0.1,0.5,z},0.0},{{0.2,0.5,z},0.0},
+        {{0.3,0.5,z},0.0},{{0.4,0.5,z},0.0},
+        {{0.5,0.5,z},0.0},{{0.6,0.5,z},0.0}
+    };
+    before.edges={{0,1},{1,2},{2,3},{3,4},{4,5}};
+    before.state_node_index=0;
+    ReferenceLoopCollapseCandidate unused;
+    unused.vertices={1,2,3}; // No closing 3->1 Edge.
+    unused.representative={{0.3,0.5,z},0.1};
+    unused.visible_neighbors={4};
+    before.loop_candidates.push_back(unused);
+
+    const auto result=build_reference_graph_pipeline(room,before,0.001);
+    require(result.before.node_roles.size()==6 &&
+            result.before.node_roles[0]==ReferenceNodeRole::State,
+            "State must be the sole hard-protected BEFORE reference");
+    for(std::size_t i=1;i<6;++i)
+        require(result.before.node_roles[i]==ReferenceNodeRole::Reference,
+                "Candidate vertices and visible neighbors are not node roles");
+    require(result.collapsed.nodes.size()==6,
+            "Unused certificate must leave COLLAPSED nodes unchanged");
+    require(result.optimized.nodes.size()==2 &&
+            result.optimized.node_roles[0]==ReferenceNodeRole::State &&
+            result.optimized.node_roles[1]==ReferenceNodeRole::Reference,
+            "OPTIMIZED must remove unprotected degree-2 candidate neighbors");
+
+    require(reference_node_protected_from_optimization(ReferenceNodeRole::State) &&
+            reference_node_protected_from_optimization(ReferenceNodeRole::CollapseRepresentative) &&
+            !reference_node_protected_from_optimization(ReferenceNodeRole::Reference) &&
+            !reference_node_protected_from_optimization(ReferenceNodeRole::RecoveredReference),
+            "Protection must depend on node role and the optimization Stage");
 }
 
 void test_collapsed_linearizes_sliver_polygon_components()
@@ -833,13 +880,14 @@ void test_connectivity_repair_restores_two_hole_detour_nodes()
     ReferenceGraphStageSnapshot los;
     los.nodes={{{2,5,0.5},0.0},{{8,5,0.5},0.0}};
     los.original_indices={0,1};
-    los.protected_nodes={true,false};
+    los.node_roles={ReferenceNodeRole::State,ReferenceNodeRole::Reference};
 
     ReferenceGraphStageSnapshot before=los;
     before.nodes.push_back({{2,5.15,0.5},0.0});
     before.nodes.push_back({{8,5.15,0.5},0.0});
     before.original_indices={0,1,2,3};
-    before.protected_nodes={true,false,false,false};
+    before.node_roles={ReferenceNodeRole::State,ReferenceNodeRole::Reference,
+                       ReferenceNodeRole::Reference,ReferenceNodeRole::Reference};
 
     const auto recovered=repair_reference_connectivity(
         los,before,before,0,solid,tolerance);
@@ -849,7 +897,11 @@ void test_connectivity_repair_restores_two_hole_detour_nodes()
     require(recovered.graph.edges.size()==3,
             "All recovered edges must be valid LOS segments around the hole");
     require(recovered.graph.original_indices.size()==4 &&
-            recovered.graph.protected_nodes.size()==4 &&
+            recovered.graph.node_roles.size()==4 &&
+            recovered.graph.node_roles[0]==ReferenceNodeRole::State &&
+            recovered.graph.node_roles[1]==ReferenceNodeRole::Reference &&
+            recovered.graph.node_roles[2]==ReferenceNodeRole::RecoveredReference &&
+            recovered.graph.node_roles[3]==ReferenceNodeRole::RecoveredReference &&
             recovered.graph.original_indices[2]==std::optional<std::size_t>(2) &&
             recovered.graph.original_indices[3]==std::optional<std::size_t>(3),
             "Repair must retain valid candidate provenance and graph metadata");
@@ -1750,6 +1802,7 @@ int main()
     test_reference_short_path_graph_uses_baked_state_tree();
     test_waypoint_anchor_uses_closest_reachable_optimized_node();
     test_native_reference_pipeline_optimizes_degree_two_and_collapses_certificate();
+    test_reference_node_roles_have_stage_scoped_protection();
     test_collapsed_linearizes_sliver_polygon_components();
     test_optimized_degree_two_angle_threshold_and_priority_queue();
     test_full_los_connects_visible_components_to_state();
