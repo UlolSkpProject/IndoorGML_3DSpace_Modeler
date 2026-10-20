@@ -237,7 +237,8 @@ void AdjacencySession::state_worker_loop()
     }
 }
 
-void AdjacencySession::commit_reference_graph_batch()
+void AdjacencySession::commit_reference_graph_batch(
+    const std::vector<std::array<double,16>>& root_to_local)
 {
     if(state_.load(std::memory_order_acquire)!=SessionState::StateComplete ||
        failed_.load(std::memory_order_acquire))
@@ -245,12 +246,29 @@ void AdjacencySession::commit_reference_graph_batch()
     std::lock_guard<std::mutex> graph_lock(reference_graph_mutex_);
     if(reference_batch_committed_)
         throw std::runtime_error("Reference Graph batch was already committed");
+    if(root_to_local.size()!=cell_keys_.size() || cell_keys_.size()!=cells_.size())
+        throw std::invalid_argument("Post-State CellSpace frame count mismatch");
+
+    // Finalize into a temporary map first: a bad transform cannot partially
+    // replace already-committed graphs from another CellSpace.
+    std::unordered_map<std::string,StoredReferenceGraph> staged;
+    for(const std::size_t position:state_targets_)
+    {
+        if(position>=cell_keys_.size()) continue;
+        const auto found=pending_reference_graphs_.find(cell_keys_[position]);
+        if(found==pending_reference_graphs_.end()) continue;
+        ReferenceGraphPipeline pipeline=found->second;
+        finalize_reference_graph_local(pipeline,cells_[position],root_to_local[position]);
+        staged.emplace(cell_keys_[position],
+                       StoredReferenceGraph{std::move(pipeline),0});
+    }
     for(const std::size_t position:state_targets_)
         if(position<cell_keys_.size()) reference_graphs_.erase(cell_keys_[position]);
-    for(auto& entry:pending_reference_graphs_)
-        reference_graphs_[entry.first]={
-            std::move(entry.second),next_reference_revision_++
-        };
+    for(auto& entry:staged)
+    {
+        entry.second.revision=next_reference_revision_++;
+        reference_graphs_[entry.first]=std::move(entry.second);
+    }
     pending_reference_graphs_.clear();
     reference_batch_committed_=true;
 }
@@ -265,34 +283,26 @@ std::optional<ReferenceGraphStageSnapshot> AdjacencySession::get_reference_graph
     return reference_graph_stage(found->second.pipeline,stage);
 }
 
-std::vector<Vec3> AdjacencySession::get_reference_transition_curve(
+std::pair<std::vector<Vec3>,std::vector<Vec3>>
+AdjacencySession::get_reference_transition_curve(
     const std::string& first_cell_key,const std::string& second_cell_key,
-    const Vec3& waypoint
+    const Vec3& first_local_waypoint,const Vec3& second_local_waypoint
 ) const
 {
     std::lock_guard<std::mutex> lock(reference_graph_mutex_);
     const auto first=reference_graphs_.find(first_cell_key);
     const auto second=reference_graphs_.find(second_cell_key);
     if(first==reference_graphs_.end() || second==reference_graphs_.end()) return {};
-    std::vector<Vec3> result=reference_transition_polyline(first->second.pipeline,waypoint);
-    std::vector<Vec3> tail=reference_transition_polyline(second->second.pipeline,waypoint);
-    if(result.empty() || tail.empty()) return {};
-    std::reverse(tail.begin(),tail.end());
-    const Vec3 delta{
-        result.back().x-tail.front().x,
-        result.back().y-tail.front().y,
-        result.back().z-tail.front().z
+    return {
+        reference_transition_polyline(first->second.pipeline,first_local_waypoint),
+        reference_transition_polyline(second->second.pipeline,second_local_waypoint)
     };
-    if(delta.x*delta.x+delta.y*delta.y+delta.z*delta.z<=1.0e-18)
-        tail.erase(tail.begin());
-    result.insert(result.end(),tail.begin(),tail.end());
-    return result;
 }
 
 std::optional<std::pair<Vec3,Vec3>>
 AdjacencySession::get_reference_waypoint_anchors(
     const std::string& first_cell_key,const std::string& second_cell_key,
-    const Vec3& raw_waypoint) const
+    const Vec3& first_local_waypoint,const Vec3& second_local_waypoint) const
 {
     std::lock_guard<std::mutex> lock(reference_graph_mutex_);
     const auto first=reference_graphs_.find(first_cell_key);
@@ -300,9 +310,9 @@ AdjacencySession::get_reference_waypoint_anchors(
     if(first==reference_graphs_.end() || second==reference_graphs_.end())
         return std::nullopt;
     const auto first_point=closest_reachable_reference_point(
-        first->second.pipeline,raw_waypoint);
+        first->second.pipeline,first_local_waypoint);
     const auto second_point=closest_reachable_reference_point(
-        second->second.pipeline,raw_waypoint);
+        second->second.pipeline,second_local_waypoint);
     if(!first_point || !second_point) return std::nullopt;
     return std::make_pair(*first_point,*second_point);
 }
