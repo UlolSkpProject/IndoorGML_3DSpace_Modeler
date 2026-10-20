@@ -708,8 +708,36 @@ const ReferenceGraphStageSnapshot& reference_graph_stage(
     case ReferenceGraphStage::After:return pipeline.after;
     case ReferenceGraphStage::Collapsed:return pipeline.collapsed;
     case ReferenceGraphStage::Optimized:return pipeline.optimized;
+    case ReferenceGraphStage::ShortPathGraph:
+        throw std::invalid_argument("Short-path graph is a derived snapshot; use reference_short_path_graph");
     }
-    return pipeline.optimized;
+    throw std::invalid_argument("Unknown Reference Graph stage");
+}
+
+ReferenceGraphStageSnapshot reference_short_path_graph(
+    const ReferenceGraphPipeline& pipeline)
+{
+    ReferenceGraphStageSnapshot result=pipeline.optimized;
+    result.edges.clear();
+    const auto& tree=pipeline.shortest_path_tree;
+    const std::size_t count=result.nodes.size();
+    if(count==0 || tree.root>=count ||
+       tree.previous.size()!=count || tree.distances.size()!=count)
+        return result;
+
+    for(std::size_t index=0;index<count;++index)
+    {
+        // Unreachable OPTIMIZED nodes stay visible but have no SPT edge.
+        if(index==tree.root || !std::isfinite(tree.distances[index]))
+            continue;
+        const auto parent=tree.previous[index];
+        if(!parent || *parent>=count ||
+           !std::isfinite(tree.distances[*parent]) || *parent==index)
+            continue;
+        result.edges.push_back({index,*parent});
+    }
+    canonicalize_edges(result);
+    return result;
 }
 
 std::optional<Vec3> closest_reachable_reference_point(
