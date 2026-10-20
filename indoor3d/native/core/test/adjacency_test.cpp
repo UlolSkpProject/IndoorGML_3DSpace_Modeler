@@ -476,7 +476,8 @@ void test_convex_floor_one_area_centroid_before()
 
 void test_native_reference_pipeline_bakes_state_tree_and_transition()
 {
-    CellData room;
+    CellData room=tall_room(unit_box_cell());
+    room.category=CellSpaceCategory::Room;
     ReferenceGraphDebug before;
     const Vec3 state{0.5,0.5,1000.0/25.4};
     before.nodes.push_back({state,1.0});
@@ -502,7 +503,8 @@ void test_non_partitioned_state_is_a_single_node_reference_graph()
     const Vec3 state{1.0,2.0,3.0};
     const auto pipeline=build_state_reference_graph_pipeline(state,cell,0.001);
     for(const auto stage:{ReferenceGraphStage::Before,ReferenceGraphStage::After,
-                         ReferenceGraphStage::Collapsed,ReferenceGraphStage::Optimized})
+                         ReferenceGraphStage::Collapsed,ReferenceGraphStage::Optimized,
+                          ReferenceGraphStage::LosGraph})
     {
         const auto& graph=reference_graph_stage(pipeline,stage);
         require(graph.nodes.size()==1 && graph.edges.empty() &&
@@ -537,8 +539,9 @@ void test_reference_short_path_graph_uses_baked_state_tree()
         {{2,0,0},1.0},
         {{3,0,0},1.0}
     };
-    // OPTIMIZED retains an alternate LOS edge; the Dijkstra tree does not.
+    // The LOS graph retains an alternate edge; the Dijkstra tree does not.
     pipeline.optimized.edges={{0,1},{0,2},{1,2}};
+    pipeline.los_graph=pipeline.optimized;
     pipeline.state_node_index=0;
     pipeline.shortest_path_tree.root=0;
     pipeline.shortest_path_tree.distances={
@@ -574,6 +577,7 @@ void test_waypoint_anchor_uses_closest_reachable_optimized_node()
         {{1.0,0.0,20.0},0.0},
         {{2.0,0.0,30.0},0.0}
     };
+    pipeline.los_graph=pipeline.optimized;
     pipeline.shortest_path_tree.root=0;
     pipeline.shortest_path_tree.distances={
         0.0,1.0,std::numeric_limits<double>::infinity()
@@ -668,6 +672,60 @@ void test_native_optimized_connects_visible_components_to_state()
                     [](double value){return std::isfinite(value);}),
                 "Every bridged OPTIMIZED node must be reachable from State");
     }
+}
+
+void test_full_los_graph_ignores_optimized_edges_and_uses_all_visible_pairs()
+{
+    CellData room=tall_room(unit_box_cell());
+    room.category=CellSpaceCategory::Room;
+    const double z=1000.0/25.4;
+    ReferenceGraphDebug before;
+    before.nodes={
+        {{0.1,0.2,z},0.0},{{0.3,0.2,z},0.0},
+        {{0.7,0.8,z},0.0},{{0.9,0.8,z},0.0}
+    };
+    before.edges={{0,1},{2,3}};
+    before.state_node_index=0;
+
+    const auto result=build_reference_graph_pipeline(room,before,0.001);
+    require(result.optimized.nodes.size()==4 &&
+            result.optimized.edges.size()==3 &&
+            result.los_graph.nodes.size()==4 &&
+            result.los_graph.edges.size()==6,
+            "Full LOS must test all node pairs, independent of OPTIMIZED edges or radii");
+    require(result.shortest_path_tree.root==result.state_node_index &&
+            result.unreachable_node_count==0,
+            "Full LOS must preserve the existing State and find every reachable node");
+    for(std::size_t i=1;i<4;++i)
+    {
+        require(result.shortest_path_tree.previous[i] &&
+                *result.shortest_path_tree.previous[i]==result.state_node_index,
+                "Full LOS Dijkstra must choose direct State edges when they are shortest");
+    }
+    const auto tree=reference_short_path_graph(result);
+    require(tree.nodes.size()==4 && tree.edges.size()==3 &&
+            result.los_graph.edges.size()==6,
+            "The short-path view must show the tree, without removing full LOS choices");
+}
+
+void test_full_los_graph_rejects_inherited_edge_through_hole()
+{
+    const CellData room=ring_prism_cell();
+    ReferenceGraphDebug before;
+    before.nodes={{{2,5,0.5},0.0},{{8,5,0.5},0.0}};
+    // Deliberately invalid inherited OPTIMIZED edge: a geometry-only LOS
+    // graph must never copy it across a physical cavity.
+    before.edges={{0,1}};
+    before.state_node_index=0;
+
+    const auto result=build_reference_graph_pipeline(room,before,0.001);
+    require(result.optimized.edges.size()==1 &&
+            result.los_graph.edges.empty() &&
+            result.unreachable_node_count==1 &&
+            !std::isfinite(result.shortest_path_tree.distances[1]),
+            "A stale OPTIMIZED edge across a hole must not contaminate LOS routing");
+    require(reference_short_path_graph(result).edges.empty(),
+            "Disconnected nodes must remain isolated in the final State tree");
 }
 
 void test_native_optimized_does_not_bridge_through_hole()
@@ -1545,6 +1603,8 @@ int main()
     test_waypoint_anchor_uses_closest_reachable_optimized_node();
     test_native_reference_pipeline_optimizes_degree_two_and_collapses_certificate();
     test_native_optimized_connects_visible_components_to_state();
+    test_full_los_graph_ignores_optimized_edges_and_uses_all_visible_pairs();
+    test_full_los_graph_rejects_inherited_edge_through_hole();
     test_native_optimized_does_not_bridge_through_hole();
     test_convex_floor_one_area_centroid_before();
     test_convex_floor_asymmetric_mesh_has_area_centroid();
