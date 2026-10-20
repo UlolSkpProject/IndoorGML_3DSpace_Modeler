@@ -3,6 +3,7 @@
 #include "cell_space_interior_point_locator.h"
 #include "floor_face_solid.h"
 
+#include <array>
 #include <cstddef>
 #include <limits>
 #include <memory>
@@ -72,6 +73,14 @@ ReferenceGraphPipeline build_state_reference_graph_pipeline(
 const ReferenceGraphStageSnapshot& reference_graph_stage(
     const ReferenceGraphPipeline& pipeline,
     ReferenceGraphStage stage
+);
+
+// Finalize every persistent stage and LOS Solid in the post-State CellSpace
+// Local frame. root_to_local is a rigid SketchUp column-major 4x4 transform.
+void finalize_reference_graph_local(
+    ReferenceGraphPipeline& pipeline,
+    const CellData& root_cell,
+    const std::array<double,16>& root_to_local
 );
 
 // Closest OPTIMIZED node that remains reachable from State. The raw shared
