@@ -587,6 +587,9 @@ module ULOL
           return unless @editing
 
           @dialog.update_selection(@indoor_model.selected_edit_mode_snapshot)
+          # Selection-only highlight passes must redraw without rebuilding
+          # State positions, Transition routes or Native Ref-Graphs.
+          invalidate_view(@indoor_model.model) if dual_overlay_visible?
         end
 
         def cleanup_before_quit
