@@ -694,6 +694,31 @@ ReferenceGraphStageSnapshot build_full_los_graph(
     return result;
 }
 
+// A sparse OPTIMIZED graph can contain stale or invalid edges (e.g. imported
+// snapshots). Check only its existing edges; do not discover all pairs here.
+ReferenceGraphStageSnapshot validate_sparse_optimized_edges(
+    const ReferenceGraphStageSnapshot& optimized,const FaceSolid& solid,
+    double tolerance)
+{
+    ReferenceGraphStageSnapshot result=optimized;
+    result.edges.clear();
+    if(!solid.valid()) return result;
+    std::vector<bool> inside(optimized.nodes.size(),false);
+    for(std::size_t i=0;i<inside.size();++i)
+        inside[i]=solid.inside(optimized.nodes[i].point,tolerance);
+    for(const auto& edge:optimized.edges)
+    {
+        if(edge.first>=inside.size() || edge.second>=inside.size() ||
+           edge.first==edge.second || !inside[edge.first] || !inside[edge.second])
+            continue;
+        if(solid.visible(optimized.nodes[edge.first].point,
+                         optimized.nodes[edge.second].point,tolerance))
+            result.edges.push_back(edge);
+    }
+    canonicalize_edges(result);
+    return result;
+}
+
 ReferenceConnectivityRepairResult repair_connectivity(
     const ReferenceGraphStageSnapshot& los_graph,
     const ReferenceGraphStageSnapshot& before,
@@ -729,65 +754,98 @@ ReferenceConnectivityRepairResult repair_connectivity(
     };
     collect(before);
     collect(collapsed);
-    if(possible.nodes.size()==original_count) return result;
-
-    // A temporary full visibility graph finds multi-hop paths through removed
-    // reference nodes. Prefer fewer added nodes, then shorter routes.
-    // All original LOS nodes and edges remain unchanged.
+    // Only invoked when the input graph is disconnected. The temporary Full
+    // LOS candidate search stays confined to Repair; it is NOT the routing
+    // graph, and only selected, verified path edges are committed.
     const auto candidates=build_full_los_graph(possible,solid,tolerance);
     const auto adj=adjacency(candidates);
-    using Cost=std::pair<std::size_t,double>;
-    using QueueEntry=std::tuple<std::size_t,double,std::size_t>;
-    const Cost unreachable{
-        std::numeric_limits<std::size_t>::max(),
-        std::numeric_limits<double>::infinity()};
+    const auto existing_adj=adjacency(los_graph);
+    using Cost=std::tuple<std::size_t,std::size_t,double>;
+    using QueueEntry=std::tuple<std::size_t,std::size_t,double,std::size_t>;
+    const std::size_t no_cost=std::numeric_limits<std::size_t>::max();
+    const Cost unreachable{no_cost,no_cost,std::numeric_limits<double>::infinity()};
     std::vector<Cost> best(candidates.nodes.size(),unreachable);
     std::vector<std::optional<std::size_t>> parent(candidates.nodes.size());
     std::priority_queue<QueueEntry,std::vector<QueueEntry>,
                         std::greater<QueueEntry>> queue;
-    best[root]={0,0.0};
-    queue.push({0,0.0,root});
+    best[root]={0,0,0.0};
+    queue.push({0,0,0.0,root});
     while(!queue.empty())
     {
-        const auto [new_count,length_so_far,current]=queue.top();
+        const auto [new_nodes,new_edges,length_so_far,current]=queue.top();
         queue.pop();
-        if(best[current]!=Cost{new_count,length_so_far}) continue;
+        if(best[current]!=Cost{new_nodes,new_edges,length_so_far}) continue;
         for(const auto next:adj[current])
         {
+            const bool existing_edge=current<original_count &&
+                next<original_count && has_edge(existing_adj,current,next);
             const Cost candidate{
-                new_count+static_cast<std::size_t>(next>=original_count),
+                new_nodes+static_cast<std::size_t>(next>=original_count),
+                new_edges+static_cast<std::size_t>(!existing_edge),
                 length_so_far+distance(candidates.nodes[current].point,
                                        candidates.nodes[next].point)};
             if(candidate>=best[next]) continue;
             best[next]=candidate;
             parent[next]=current;
-            queue.push({candidate.first,candidate.second,next});
+            queue.push({std::get<0>(candidate),std::get<1>(candidate),
+                        std::get<2>(candidate),next});
         }
     }
 
     std::vector<bool> restore(candidates.nodes.size(),false);
-    for(std::size_t target=0;target<original_count;++target)
+    std::vector<ReferenceGraphEdge> selected_edges;
+    // Every disconnected component needs only one new validated gateway.
+    // All other original nodes in that component remain connected through
+    // their existing OPTIMIZED edges; do not add redundant LOS shortcuts.
+    std::vector<bool> component_seen(original_count,false);
+    for(std::size_t start=0;start<original_count;++start)
     {
-        if(reached[target] || best[target].first==unreachable.first) continue;
+        if(reached[start] || component_seen[start]) continue;
+        std::vector<std::size_t> component{start};
+        component_seen[start]=true;
+        for(std::size_t head=0;head<component.size();++head)
+            for(const auto other:existing_adj[component[head]])
+            {
+                if(component_seen[other]) continue;
+                component_seen[other]=true;
+                component.push_back(other);
+            }
+        std::size_t target=original_count;
+        for(const auto index:component)
+            if(std::get<0>(best[index])!=no_cost &&
+               (target==original_count || best[index]<best[target]))
+                target=index;
+        if(target==original_count) continue;
+
         std::size_t current=target;
         for(std::size_t step=0;step<candidates.nodes.size();++step)
         {
-            if(current==root) break;
+            if(current==root || !parent[current]) break;
+            const auto predecessor=*parent[current];
             if(current>=original_count) restore[current]=true;
-            if(!parent[current]) break;
-            current=*parent[current];
+            if(predecessor>=original_count) restore[predecessor]=true;
+            selected_edges.push_back({current,predecessor});
+            current=predecessor;
         }
     }
+
+    std::vector<std::size_t> remap(candidates.nodes.size(),no_cost);
+    for(std::size_t i=0;i<original_count;++i) remap[i]=i;
     for(std::size_t i=original_count;i<candidates.nodes.size();++i)
     {
         if(!restore[i]) continue;
+        remap[i]=result.graph.nodes.size();
         result.graph.nodes.push_back(candidates.nodes[i]);
         result.graph.original_indices.push_back(candidates.original_indices[i]);
         result.graph.node_roles.push_back(ReferenceNodeRole::RecoveredReference);
         ++result.added_nodes;
     }
-    if(result.added_nodes)
-        result.graph=build_full_los_graph(result.graph,solid,tolerance);
+    for(const auto& edge:selected_edges)
+    {
+        if(remap[edge.first]==no_cost || remap[edge.second]==no_cost) continue;
+        result.graph.edges.push_back({remap[edge.first],remap[edge.second]});
+    }
+    canonicalize_edges(result.graph);
     return result;
 }
 
@@ -884,12 +942,16 @@ ReferenceGraphPipeline build_reference_graph_pipeline(
     if(found==result.optimized.original_indices.end())
         throw std::runtime_error("Reference State node did not survive Native reductions");
     result.state_node_index=static_cast<std::size_t>(found-result.optimized.original_indices.begin());
-    // Build FaceSolid once: the identical 3D visibility contract is used
-    // for full pairwise Ref-Node LOS and the final waypoint gateway check.
+    // The temporary experiment validates only existing OPTIMIZED edges.
+    // The old Full LOS path remains behind a single switch for easy rollback.
     result.waypoint_solid=std::make_shared<FaceSolid>(cell,tolerance);
     result.waypoint_tolerance=tolerance;
-    result.los_graph=build_full_los_graph(
-        result.optimized,*result.waypoint_solid,tolerance);
+    if(SKIP_PRE_REPAIR_FULL_LOS_FOR_TEST)
+        result.los_graph=validate_sparse_optimized_edges(
+            result.optimized,*result.waypoint_solid,tolerance);
+    else
+        result.los_graph=build_full_los_graph(
+            result.optimized,*result.waypoint_solid,tolerance);
     auto repaired=repair_reference_connectivity(
         result.los_graph,result.before,result.collapsed,
         result.state_node_index,*result.waypoint_solid,tolerance);
