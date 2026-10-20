@@ -88,16 +88,32 @@ module ULOL
 
           update_transition_transform_preview
           state_radius_scale = DualOverlayPreferences.state_radius_scale
+          selected_cell_ids = selected_dual_overlay_cell_ids
           @reference_graph_debug_renderer.draw_partitions(view)
-          unless validation_focus_active?
-            @transition_renderer.draw(
-              view,
-              excluded_cell_ids: transition_transform_excluded_cell_ids
-            )
-          end
           @reference_graph_debug_renderer.draw_edges(view)
           @reference_point_debug_renderer.draw(view)
+
+          # Draw order: Transition -> selected Transition -> State ->
+          # selected State. The additional passes never modify base styling.
+          unless validation_focus_active?
+            excluded_cell_ids = transition_transform_excluded_cell_ids
+            @transition_renderer.draw(view, excluded_cell_ids: excluded_cell_ids)
+            unless selected_cell_ids.empty?
+              @transition_renderer.draw_highlight(
+                view,
+                selected_cell_ids: selected_cell_ids,
+                excluded_cell_ids: excluded_cell_ids
+              )
+            end
+          end
           @state_renderer.draw(view, state_radius_scale: state_radius_scale)
+          unless selected_cell_ids.empty?
+            @state_renderer.draw_highlight(
+              view,
+              selected_cell_ids: selected_cell_ids,
+              state_radius_scale: state_radius_scale
+            )
+          end
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Dual graph overlay draw failed: #{e.class}: #{e.message}"
         ensure
@@ -139,6 +155,32 @@ module ULOL
                :rounded_vector_key
 
         private
+
+        # Selection highlights are only active in Edit Mode. Resolve group
+        # identity from the current SketchUp selection on each draw, so
+        # deselection, multi-selection, and hide/show never require cache edits.
+        def selected_dual_overlay_cell_ids
+          return {} unless @indoor_model.respond_to?(:editing?) && @indoor_model.editing?
+
+          model = @indoor_model.model if @indoor_model.respond_to?(:model)
+          selection = model&.selection
+          return {} unless selection
+
+          selected_group_ids = {}
+          selection.each { |entity| selected_group_ids[entity.object_id] = entity }
+
+          Array(@indoor_model.cell_spaces).each_with_object({}) do |cell, result|
+            next unless cell&.valid?
+
+            group = cell.valid_sketchup_group
+            next unless group && selected_group_ids[group.object_id].equal?(group)
+
+            cell_id = cell.id.to_s
+            result[cell_id] = true unless cell_id.empty?
+          end
+        rescue StandardError
+          {}
+        end
 
         def update_transition_transform_preview
           ensure_transition_transform_state
