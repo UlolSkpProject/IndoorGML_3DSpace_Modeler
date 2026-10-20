@@ -538,17 +538,18 @@ module ULOL
             cell_space_entity,
             fixed_z_offset_from_bottom: nil
           )
-            center = native_state_local_point_for_entity(
+            native_state_local_point_for_entity(
               cell_space_entity,
               fixed_z_offset_from_bottom: fixed_z_offset_from_bottom
-            )
-            apply_cell_space_local_center(cell_space_entity, center)
-            center
+            ) do |center|
+              apply_cell_space_local_center(cell_space_entity, center)
+            end
           end
 
           def native_state_local_point_for_entity(
             cell_space_entity,
-            fixed_z_offset_from_bottom: nil
+            fixed_z_offset_from_bottom: nil,
+            &apply_center
           )
             unless cell_space_entity&.valid?
               raise ArgumentError, 'CellSpace entity is invalid during Native State calculation'
@@ -627,9 +628,20 @@ module ULOL
             end
             # Only registered CellSpaces have a stable graph key consumed by
             # Transition routing. Temporary creation-time probes are discarded.
-            NativeAdjacencyBridge.commit_reference_graph_batch if runtime_cell_space
             parent_point = Geom::Point3d.new(values[0], values[1], values[2])
-            parent_point.transform(cell_space_entity.transformation.inverse)
+            local_point = parent_point.transform(cell_space_entity.transformation.inverse)
+            if runtime_cell_space
+              unless apply_center
+                raise NativeAdjacencyBridge::ProtocolError,
+                      'Persistent Reference graph requires a post-State frame'
+              end
+              apply_center.call(local_point)
+              final_frame = reference_cell_space_transformation(runtime_cell_space.id)
+              NativeAdjacencyBridge.commit_reference_graph_batch([final_frame])
+            else
+              apply_center.call(local_point) if apply_center
+            end
+            local_point
           ensure
             NativeAdjacencyBridge.close_geometry_session if opened
           end
