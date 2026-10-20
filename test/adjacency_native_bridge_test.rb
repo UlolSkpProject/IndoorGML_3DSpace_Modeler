@@ -13,6 +13,9 @@ unless defined?(Geom::Transformation)
       def inverse
         self.class.new(-dx, -dy, -dz)
       end
+      def to_a
+        [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, dx, dy, dz, 1]
+      end
     end
     Point3d = Struct.new(:x, :y, :z) do
       def to_a = [x, y, z]
@@ -211,6 +214,16 @@ class AdjacencyNativeBridgeTest < Minitest::Test
       )
       assert_equal [[0.0, 0.0, 0.0], [5.0, 0.0, 0.0],
                     [10.0, 0.0, 0.0]], path
+    end
+  end
+
+  def test_reference_routing_rejects_nonuniform_cellspace_scale
+    scaled = Geom::Transformation.new
+    def scaled.to_a
+      [2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+    end
+    assert_raises(Bridge::ProtocolError) do
+      Bridge.require_rigid_reference_frame!(scaled)
     end
   end
 
