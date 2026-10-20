@@ -101,7 +101,7 @@ module ULOL
   end
 end
 
-// Short alias for the SketchUp Ruby Console. Never overwrite another extension's RG.
+# Short alias for the SketchUp Ruby Console. Never overwrite another extension's RG.
 unless Object.const_defined?(:RG, false)
   Object.const_set(:RG, ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode)
 end
