@@ -647,6 +647,118 @@ void test_native_reference_pipeline_optimizes_degree_two_and_collapses_certifica
             "Native COLLAPSED must apply a certified loop without losing State");
 }
 
+void test_collapsed_linearizes_sliver_polygon_components()
+{
+    CellData room=tall_room(unit_box_cell());
+    room.category=CellSpaceCategory::Room;
+    const double z=1000.0/25.4;
+
+    // Three overlapping degenerate triangles form one five-node cyclic block.
+    // COLLAPSED must retain every node and external edge, but replace all
+    // internal chords with the unambiguous projected chain.
+    ReferenceGraphDebug sliver;
+    sliver.nodes={
+        {{0.05,0.5,z},0.0},{{0.15,0.5,z},0.0},
+        {{0.30,0.5,z},0.0},{{0.45,0.5,z},0.0},
+        {{0.60,0.5,z},0.0},{{0.75,0.5,z},0.0},
+        {{0.95,0.5,z},0.0}
+    };
+    sliver.edges={
+        {0,1},
+        {1,2},{1,3},{2,3},
+        {2,4},{3,4},{3,5},{4,5},
+        {5,6}
+    };
+    sliver.state_node_index=0;
+    const auto linearized=build_reference_graph_pipeline(room,sliver,0.001);
+    require(linearized.collapsed.nodes.size()==7 &&
+            linearized.collapsed.edges.size()==6,
+            "COLLAPSED must turn an overlapping sliver polygon into one path");
+    for(std::size_t i=0;i<6;++i)
+        require(linearized.collapsed.edges[i].first==i &&
+                linearized.collapsed.edges[i].second==i+1,
+                "COLLAPSED sliver path must follow projected node order");
+    require(linearized.optimized.nodes.size()==2 &&
+            linearized.optimized.edges.size()==1,
+            "OPTIMIZED must simplify the degree-2 nodes exposed by sliver linearization");
+
+    // A thin two-rail polygon has ambiguous projection stations and must not be
+    // flattened into an arbitrary zig-zag chain.
+    ReferenceGraphDebug ambiguous;
+    ambiguous.nodes={
+        {{0.1,0.5,z},0.0},{{0.2,0.495,z},0.0},
+        {{0.8,0.495,z},0.0},{{0.8,0.505,z},0.0},
+        {{0.2,0.505,z},0.0}
+    };
+    ambiguous.edges={{0,1},{1,2},{2,3},{3,4},{4,1}};
+    ambiguous.state_node_index=0;
+    const auto preserved=build_reference_graph_pipeline(room,ambiguous,0.001);
+    require(preserved.collapsed.nodes.size()==5 &&
+            preserved.collapsed.edges.size()==5,
+            "COLLAPSED must preserve a sliver polygon without a unique longitudinal order");
+}
+
+void test_optimized_degree_two_angle_threshold_and_priority_queue()
+{
+    CellData room=tall_room(unit_box_cell());
+    room.category=CellSpaceCategory::Room;
+    const double z=1000.0/25.4;
+
+    ReferenceGraphDebug acute;
+    acute.nodes={
+        {{0.1,0.1,z},0.0},{{0.5,0.7,z},0.0},{{0.9,0.1,z},0.0}
+    };
+    acute.edges={{0,1},{1,2}};
+    acute.state_node_index=0;
+    const auto acute_result=build_reference_graph_pipeline(room,acute,0.001);
+    require(acute_result.optimized.nodes.size()==3 &&
+            acute_result.optimized.edges.size()==2,
+            "OPTIMIZED must preserve a degree-2 turn below 150 degrees");
+
+    ReferenceGraphDebug right_angle;
+    right_angle.nodes={
+        {{0.1,0.1,z},0.0},{{0.5,0.5,z},0.0},{{0.9,0.1,z},0.0}
+    };
+    right_angle.edges={{0,1},{1,2}};
+    right_angle.state_node_index=0;
+    const auto right_angle_result=build_reference_graph_pipeline(room,right_angle,0.001);
+    require(right_angle_result.optimized.nodes.size()==3 &&
+            right_angle_result.optimized.edges.size()==2,
+            "OPTIMIZED must preserve a clear degree-2 turn at 90 degrees");
+
+    ReferenceGraphDebug obtuse;
+    obtuse.nodes={
+        {{0.2,0.5,z},0.0},{{0.4,0.5,z},0.0},
+        {{0.4+0.2*std::cos(20.0*3.14159265358979323846/180.0),
+          0.5+0.2*std::sin(20.0*3.14159265358979323846/180.0),z},0.0}
+    };
+    obtuse.edges={{0,1},{1,2}};
+    obtuse.state_node_index=0;
+    const auto obtuse_result=build_reference_graph_pipeline(room,obtuse,0.001);
+    require(obtuse_result.optimized.nodes.size()==2 &&
+            obtuse_result.optimized.edges.size()==1,
+            "OPTIMIZED must remove a clear degree-2 turn above 150 degrees");
+
+    // Node 2 is much straighter than Node 1 even though its stable id is higher.
+    // Both initially exceed 150 degrees. Removing Node 2 first changes Node 1
+    // to a sub-150-degree turn, so its refreshed heap entry must preserve it.
+    // Index-order contraction would remove both.
+    ReferenceGraphDebug ordered;
+    ordered.nodes={
+        {{0.1,0.1,z},0.0},{{0.2,0.1,z},0.0},
+        {{0.287461,0.148481,z},0.0},{{0.701980,0.428077,z},0.0}
+    };
+    ordered.edges={{0,1},{1,2},{2,3}};
+    ordered.state_node_index=0;
+    const auto ordered_result=build_reference_graph_pipeline(room,ordered,0.001);
+    require(ordered_result.optimized.nodes.size()==3 &&
+            ordered_result.optimized.edges.size()==2,
+            "OPTIMIZED must contract the straightest degree-2 candidate first");
+    require(std::abs(ordered_result.optimized.nodes[1].point.x-0.2)<1.0e-9 &&
+            std::abs(ordered_result.optimized.nodes[1].point.y-0.1)<1.0e-9,
+            "OPTIMIZED must refresh and retain the neighbor that falls below threshold");
+}
+
 void test_full_los_connects_visible_components_to_state()
 {
     for(const auto category:{CellSpaceCategory::Room,CellSpaceCategory::Stair})
@@ -1638,6 +1750,8 @@ int main()
     test_reference_short_path_graph_uses_baked_state_tree();
     test_waypoint_anchor_uses_closest_reachable_optimized_node();
     test_native_reference_pipeline_optimizes_degree_two_and_collapses_certificate();
+    test_collapsed_linearizes_sliver_polygon_components();
+    test_optimized_degree_two_angle_threshold_and_priority_queue();
     test_full_los_connects_visible_components_to_state();
     test_full_los_graph_ignores_optimized_edges_and_uses_all_visible_pairs();
     test_connectivity_repair_restores_two_hole_detour_nodes();

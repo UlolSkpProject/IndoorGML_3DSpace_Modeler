@@ -15,6 +15,11 @@ namespace
 {
 using namespace IndoorGMLAdjacencyNative;
 constexpr double EPSILON = 1.0e-9;
+constexpr double SLIVER_MAX_WIDTH_RATIO = 0.01;
+// Degree-2 shortcuts are considered only when the interior angle is at least
+// 150 degrees. Candidates nearest to a straight 180-degree continuation are
+// contracted first.
+constexpr double OPTIMIZED_MAX_COSINE = -0.86602540378443864676;
 
 double distance(const Vec3& a, const Vec3& b)
 {
@@ -68,59 +73,184 @@ void canonicalize_edges(ReferenceGraphStageSnapshot& graph)
     }),graph.edges.end());
 }
 
-bool contract_existing(ReferenceGraphStageSnapshot& graph,
-                       const CellData& cell,
-                       std::vector<std::size_t> members,
-                       std::size_t representative,
-                       double tolerance)
+struct GraphBlock
 {
-    std::sort(members.begin(),members.end());
-    members.erase(std::unique(members.begin(),members.end()),members.end());
-    if(members.size()<2 || !std::binary_search(members.begin(),members.end(),representative))
-        return false;
-    const auto adj=adjacency(graph);
-    std::vector<bool> selected(graph.nodes.size(),false);
-    for(const auto index:members)
-    {
-        if(index>=graph.nodes.size()) return false;
-        selected[index]=true;
-        if(index!=representative && graph.protected_nodes[index]) return false;
-    }
-    std::set<std::size_t> boundary;
-    for(const auto index:members)
-        for(const auto other:adj[index]) if(!selected[other]) boundary.insert(other);
+    std::vector<std::size_t> vertices;
+    std::vector<ReferenceGraphEdge> edges;
+};
 
-    std::vector<std::pair<Vec3,Vec3>> checks;
-    for(const auto index:members)
-        if(index!=representative && !has_edge(adj,representative,index))
-            checks.push_back({graph.nodes[representative].point,graph.nodes[index].point});
-    for(const auto index:boundary)
-        if(!has_edge(adj,representative,index))
-            checks.push_back({graph.nodes[representative].point,graph.nodes[index].point});
-    if(!clear_segments(cell,checks,tolerance)) return false;
+std::vector<GraphBlock> cyclic_biconnected_blocks(
+    const ReferenceGraphStageSnapshot& graph)
+{
+    const auto adjacent=adjacency(graph);
+    const std::size_t count=graph.nodes.size();
+    std::vector<int> discovery(count,-1),low(count,-1),parent(count,-1);
+    std::vector<ReferenceGraphEdge> stack;
+    std::vector<GraphBlock> result;
+    int tick=0;
 
-    std::vector<bool> removed(graph.nodes.size(),false);
-    for(const auto index:members) if(index!=representative) removed[index]=true;
-    std::vector<std::size_t> remap(graph.nodes.size(),std::numeric_limits<std::size_t>::max());
-    ReferenceGraphStageSnapshot result;
-    for(std::size_t old=0;old<graph.nodes.size();++old)
+    auto finish_block=[&](std::size_t first,std::size_t second){
+        GraphBlock block;
+        std::set<std::size_t> vertices;
+        while(!stack.empty())
+        {
+            auto edge=stack.back();
+            stack.pop_back();
+            if(edge.second<edge.first) std::swap(edge.first,edge.second);
+            block.edges.push_back(edge);
+            vertices.insert(edge.first);
+            vertices.insert(edge.second);
+            if((edge.first==std::min(first,second) &&
+                edge.second==std::max(first,second))) break;
+        }
+        block.vertices.assign(vertices.begin(),vertices.end());
+        std::sort(block.edges.begin(),block.edges.end(),[](const auto& a,const auto& b){
+            return std::tie(a.first,a.second)<std::tie(b.first,b.second);
+        });
+        block.edges.erase(std::unique(block.edges.begin(),block.edges.end(),
+            [](const auto& a,const auto& b){
+                return a.first==b.first && a.second==b.second;
+            }),block.edges.end());
+        if(block.vertices.size()>=3 && block.edges.size()>=block.vertices.size())
+            result.push_back(std::move(block));
+    };
+
+    std::function<void(std::size_t)> visit;
+    visit=[&](std::size_t node){
+        discovery[node]=low[node]=tick++;
+        for(const auto other:adjacent[node])
+        {
+            if(discovery[other]<0)
+            {
+                parent[other]=static_cast<int>(node);
+                stack.push_back({node,other});
+                visit(other);
+                low[node]=std::min(low[node],low[other]);
+                if(low[other]>=discovery[node]) finish_block(node,other);
+            }
+            else if(static_cast<int>(other)!=parent[node] &&
+                    discovery[other]<discovery[node])
+            {
+                low[node]=std::min(low[node],discovery[other]);
+                stack.push_back({node,other});
+            }
+        }
+    };
+
+    for(std::size_t node=0;node<count;++node)
     {
-        if(removed[old]) continue;
-        remap[old]=result.nodes.size();
-        result.nodes.push_back(graph.nodes[old]);
-        result.original_indices.push_back(graph.original_indices[old]);
-        result.protected_nodes.push_back(graph.protected_nodes[old]);
+        if(discovery[node]>=0) continue;
+        visit(node);
+        stack.clear();
     }
-    for(const auto& edge:graph.edges)
+    std::sort(result.begin(),result.end(),[](const GraphBlock& a,const GraphBlock& b){
+        return a.vertices<b.vertices;
+    });
+    return result;
+}
+
+std::optional<std::vector<std::size_t>> sliver_chain(
+    const ReferenceGraphStageSnapshot& graph,
+    const GraphBlock& block,
+    double tolerance)
+{
+    if(block.vertices.size()<3 || block.edges.size()<block.vertices.size())
+        return std::nullopt;
+
+    std::size_t first=block.vertices.front(),last=first;
+    double axis_length_squared=0.0;
+    for(std::size_t i=0;i<block.vertices.size();++i)
+        for(std::size_t j=i+1;j<block.vertices.size();++j)
+        {
+            const auto& a=graph.nodes[block.vertices[i]].point;
+            const auto& b=graph.nodes[block.vertices[j]].point;
+            const double x=b.x-a.x,y=b.y-a.y,z=b.z-a.z;
+            const double candidate=x*x+y*y+z*z;
+            if(candidate>axis_length_squared)
+            {
+                axis_length_squared=candidate;
+                first=block.vertices[i];
+                last=block.vertices[j];
+            }
+        }
+    if(!std::isfinite(axis_length_squared) ||
+       axis_length_squared<=tolerance*tolerance) return std::nullopt;
+
+    const double axis_length=std::sqrt(axis_length_squared);
+    const auto& origin=graph.nodes[first].point;
+    const auto& endpoint=graph.nodes[last].point;
+    const double ax=(endpoint.x-origin.x)/axis_length;
+    const double ay=(endpoint.y-origin.y)/axis_length;
+    const double az=(endpoint.z-origin.z)/axis_length;
+    const double max_width=std::max(tolerance,
+                                    axis_length*SLIVER_MAX_WIDTH_RATIO);
+    std::vector<std::pair<double,std::size_t>> projected;
+    double actual_width=0.0;
+    for(const auto index:block.vertices)
     {
-        if(removed[edge.first] || removed[edge.second]) continue;
-        result.edges.push_back({remap[edge.first],remap[edge.second]});
+        const auto& point=graph.nodes[index].point;
+        const double dx=point.x-origin.x;
+        const double dy=point.y-origin.y;
+        const double dz=point.z-origin.z;
+        const double along=dx*ax+dy*ay+dz*az;
+        double perpendicular_squared=dx*dx+dy*dy+dz*dz-along*along;
+        perpendicular_squared=std::max(0.0,perpendicular_squared);
+        const double perpendicular=std::sqrt(perpendicular_squared);
+        if(!std::isfinite(along) || !std::isfinite(perpendicular) ||
+           along<-tolerance || along>axis_length+tolerance ||
+           perpendicular>max_width+EPSILON) return std::nullopt;
+        actual_width=std::max(actual_width,perpendicular);
+        projected.push_back({along,index});
     }
-    const std::size_t rep=remap[representative];
-    for(const auto old:boundary) result.edges.push_back({rep,remap[old]});
-    canonicalize_edges(result);
-    graph=std::move(result);
-    return true;
+    std::sort(projected.begin(),projected.end(),[](const auto& a,const auto& b){
+        if(a.first!=b.first) return a.first<b.first;
+        return a.second<b.second;
+    });
+    const double minimum_progress=std::max(tolerance,2.0*actual_width);
+    for(std::size_t i=1;i<projected.size();++i)
+        if(projected[i].first-projected[i-1].first<=minimum_progress)
+            return std::nullopt;
+
+    std::vector<std::size_t> result;
+    result.reserve(projected.size());
+    for(const auto& item:projected) result.push_back(item.second);
+    return result;
+}
+
+void linearize_sliver_components(ReferenceGraphStageSnapshot& graph,
+                                 const CellData& cell,
+                                 double tolerance)
+{
+    canonicalize_edges(graph);
+    const auto blocks=cyclic_biconnected_blocks(graph);
+    for(const auto& block:blocks)
+    {
+        const auto chain=sliver_chain(graph,block,tolerance);
+        if(!chain) continue;
+
+        const auto adjacent=adjacency(graph);
+        std::vector<std::pair<Vec3,Vec3>> checks;
+        for(std::size_t i=1;i<chain->size();++i)
+            if(!has_edge(adjacent,(*chain)[i-1],(*chain)[i]))
+                checks.push_back({graph.nodes[(*chain)[i-1]].point,
+                                  graph.nodes[(*chain)[i]].point});
+        if(!clear_segments(cell,checks,tolerance)) continue;
+
+        std::set<std::pair<std::size_t,std::size_t>> internal;
+        for(auto edge:block.edges)
+        {
+            if(edge.second<edge.first) std::swap(edge.first,edge.second);
+            internal.insert({edge.first,edge.second});
+        }
+        graph.edges.erase(std::remove_if(graph.edges.begin(),graph.edges.end(),
+            [&](ReferenceGraphEdge edge){
+                if(edge.second<edge.first) std::swap(edge.first,edge.second);
+                return internal.count({edge.first,edge.second})>0;
+            }),graph.edges.end());
+        for(std::size_t i=1;i<chain->size();++i)
+            graph.edges.push_back({(*chain)[i-1],(*chain)[i]});
+        canonicalize_edges(graph);
+    }
 }
 
 bool contract_fresh(ReferenceGraphStageSnapshot& graph,
@@ -199,6 +329,11 @@ ReferenceGraphStageSnapshot build_collapsed(const CellData& cell,
                                             ReferenceGraphStageSnapshot graph,
                                             double tolerance)
 {
+    // A cyclic block whose reference points have one unambiguous longitudinal
+    // order is a line with redundant chords, not an area-bearing loop. Reduce
+    // it to that path before certified polygon loops are contracted.
+    linearize_sliver_components(graph,cell,tolerance);
+
     std::vector<std::size_t> order(before.loop_candidates.size());
     for(std::size_t i=0;i<order.size();++i) order[i]=i;
     std::sort(order.begin(),order.end(),[&](std::size_t a,std::size_t b){
@@ -256,31 +391,133 @@ bool projected_between(const Vec3& a,const Vec3& b,const Vec3& c)
     return std::isfinite(t) && t>EPSILON && t<1.0-EPSILON;
 }
 
+struct DegreeTwoCandidate
+{
+    double straightness=0.0; // -cos(angle): 1.0 at 180 degrees.
+    std::size_t node=0;
+    std::size_t version=0;
+};
+
+struct DegreeTwoCandidateLess
+{
+    bool operator()(const DegreeTwoCandidate& a,const DegreeTwoCandidate& b) const
+    {
+        if(a.straightness!=b.straightness)
+            return a.straightness<b.straightness;
+        // Stable lower node identity wins equal-angle ties.
+        return a.node>b.node;
+    }
+};
+
+std::optional<DegreeTwoCandidate> degree_two_candidate(
+    const ReferenceGraphStageSnapshot& graph,
+    const std::vector<std::set<std::size_t>>& links,
+    const std::vector<bool>& alive,
+    const std::vector<std::size_t>& versions,
+    std::size_t middle)
+{
+    if(middle>=graph.nodes.size() || !alive[middle] ||
+       middle>=graph.protected_nodes.size() || graph.protected_nodes[middle] ||
+       links[middle].size()!=2) return std::nullopt;
+
+    auto iterator=links[middle].begin();
+    const std::size_t first=*iterator++;
+    const std::size_t second=*iterator;
+    if(!alive[first] || !alive[second]) return std::nullopt;
+
+    const auto& a=graph.nodes[first].point;
+    const auto& b=graph.nodes[middle].point;
+    const auto& c=graph.nodes[second].point;
+    if(!projected_between(a,b,c)) return std::nullopt;
+
+    const double ux=a.x-b.x,uy=a.y-b.y,uz=a.z-b.z;
+    const double vx=c.x-b.x,vy=c.y-b.y,vz=c.z-b.z;
+    const double u_length=std::sqrt(ux*ux+uy*uy+uz*uz);
+    const double v_length=std::sqrt(vx*vx+vy*vy+vz*vz);
+    if(!std::isfinite(u_length) || !std::isfinite(v_length) ||
+       u_length<=EPSILON || v_length<=EPSILON) return std::nullopt;
+
+    double cosine=(ux*vx+uy*vy+uz*vz)/(u_length*v_length);
+    cosine=std::max(-1.0,std::min(1.0,cosine));
+    if(cosine>OPTIMIZED_MAX_COSINE+EPSILON) return std::nullopt;
+    return DegreeTwoCandidate{-cosine,middle,versions[middle]};
+}
+
 ReferenceGraphStageSnapshot build_optimized(const CellData& cell,
                                             ReferenceGraphStageSnapshot graph,
                                             double tolerance)
 {
-    for(;;)
+    const std::size_t count=graph.nodes.size();
+    std::vector<std::set<std::size_t>> links(count);
+    for(const auto& edge:graph.edges)
     {
-        const auto adj=adjacency(graph);
-        bool changed=false;
-        for(std::size_t middle=0;middle<graph.nodes.size();++middle)
-        {
-            if(graph.protected_nodes[middle] || adj[middle].size()!=2) continue;
-            const std::size_t representative=std::min(adj[middle][0],adj[middle][1]);
-            const std::size_t other=std::max(adj[middle][0],adj[middle][1]);
-            if(!projected_between(graph.nodes[representative].point,
-                                  graph.nodes[middle].point,
-                                  graph.nodes[other].point)) continue;
-            if(contract_existing(graph,cell,{representative,middle},representative,tolerance))
-            {
-                changed=true;
-                break;
-            }
-        }
-        if(!changed) break;
+        if(edge.first>=count || edge.second>=count || edge.first==edge.second) continue;
+        links[edge.first].insert(edge.second);
+        links[edge.second].insert(edge.first);
     }
-    return graph;
+    std::vector<bool> alive(count,true);
+    std::vector<std::size_t> versions(count,0);
+    std::priority_queue<DegreeTwoCandidate,
+                        std::vector<DegreeTwoCandidate>,
+                        DegreeTwoCandidateLess> candidates;
+    auto enqueue=[&](std::size_t node){
+        const auto candidate=degree_two_candidate(graph,links,alive,versions,node);
+        if(candidate) candidates.push(*candidate);
+    };
+    for(std::size_t node=0;node<count;++node) enqueue(node);
+
+    while(!candidates.empty())
+    {
+        const auto queued=candidates.top();
+        candidates.pop();
+        if(queued.node>=count || queued.version!=versions[queued.node]) continue;
+        const auto current=degree_two_candidate(graph,links,alive,versions,queued.node);
+        if(!current || std::abs(current->straightness-queued.straightness)>EPSILON) continue;
+
+        auto iterator=links[queued.node].begin();
+        const std::size_t representative=*iterator++;
+        const std::size_t other=*iterator;
+        const bool direct=links[representative].count(other)>0;
+        if(!direct && !clear_segments(cell,{{graph.nodes[representative].point,
+                                             graph.nodes[other].point}},tolerance)) continue;
+
+        links[representative].erase(queued.node);
+        links[other].erase(queued.node);
+        links[queued.node].clear();
+        if(!direct)
+        {
+            links[representative].insert(other);
+            links[other].insert(representative);
+        }
+        alive[queued.node]=false;
+        ++versions[queued.node];
+        ++versions[representative];
+        ++versions[other];
+        enqueue(representative);
+        enqueue(other);
+    }
+
+    std::vector<std::size_t> remap(count,std::numeric_limits<std::size_t>::max());
+    ReferenceGraphStageSnapshot result;
+    for(std::size_t old=0;old<count;++old)
+    {
+        if(!alive[old]) continue;
+        remap[old]=result.nodes.size();
+        result.nodes.push_back(graph.nodes[old]);
+        result.original_indices.push_back(graph.original_indices[old]);
+        result.protected_nodes.push_back(graph.protected_nodes[old]);
+    }
+    for(std::size_t first=0;first<count;++first)
+    {
+        if(!alive[first]) continue;
+        for(const auto second:links[first])
+        {
+            if(first>=second || !alive[second]) continue;
+            result.edges.push_back({remap[first],remap[second]});
+        }
+    }
+    canonicalize_edges(result);
+    return result;
 }
 
 std::vector<bool> reachable_nodes(const ReferenceGraphStageSnapshot& graph,
