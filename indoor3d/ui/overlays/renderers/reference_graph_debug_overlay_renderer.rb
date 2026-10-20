@@ -51,17 +51,17 @@ module ULOL
           each_graph do |graph|
             nodes = graph[:nodes]
             base_count = graph.fetch(:original_edge_count, graph[:edges].length)
-            draw_edge_group(view, nodes, graph[:edges].first(base_count), EDGE_COLOR)
+            draw_edge_group(view, nodes, graph[:edges].first(base_count), EDGE_COLOR, graph[:cell_id])
             additions = Array(graph[:added_edges])
             draw_edge_group(
               view, nodes,
               additions.select { |record| record[:classification] == :clear }.map { |record| record[:edge] },
-              CLEAR_ADDED_EDGE_COLOR
+              CLEAR_ADDED_EDGE_COLOR, graph[:cell_id]
             )
             draw_edge_group(
               view, nodes,
               additions.select { |record| record[:classification] == :blocked }.map { |record| record[:edge] },
-              BLOCKED_ADDED_EDGE_COLOR
+              BLOCKED_ADDED_EDGE_COLOR, graph[:cell_id]
             )
           end
         rescue StandardError => error
@@ -70,7 +70,7 @@ module ULOL
           view.line_width = 1 if view.respond_to?(:line_width=)
         end
 
-        def draw_edge_group(view, nodes, edges, color)
+        def draw_edge_group(view, nodes, edges, color, cell_id)
           segments = Array(edges).filter_map do |first, second|
             next unless nodes[first] && nodes[second]
 
@@ -79,7 +79,7 @@ module ULOL
           return if segments.empty?
 
           view.drawing_color = color
-          model_points = render_points(segments.flatten(1))
+          model_points = render_points(segments.flatten(1), cell_id)
           if top_down_view?(view)
             screen_points = model_points.map { |point| view.screen_coords(point) }
             view.draw2d(GL_LINES, screen_points)
@@ -137,8 +137,10 @@ module ULOL
           false
         end
 
-        def render_points(points)
-          if @transform_context.respond_to?(:overlay_render_points)
+        def render_points(points, cell_id = nil)
+          if cell_id
+            @transform_context.overlay_cell_reference_points(points, cell_id)
+          elsif @transform_context.respond_to?(:overlay_render_points)
             @transform_context.overlay_render_points(points)
           else
             points.map { |point| render_point(point) }
