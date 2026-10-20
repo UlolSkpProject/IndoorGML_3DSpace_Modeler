@@ -79,6 +79,27 @@ class ReferenceGraphPipelineIntegrationTest < Minitest::Test
     refute graph[:nodes].any? { |node| node.key?(:radius) }
   end
 
+  def test_short_path_graph_command_uses_final_tree_snapshot_without_rebuilding
+    lifecycle = Harness.new([Cell.new('cell-1')])
+    active_model = Mode.method(:active_indoor_model)
+    Mode.define_singleton_method(:active_indoor_model) { lifecycle }
+
+    assert_same Mode, ::RG
+    assert_equal :short_path_graph, RG.short_path_graph!
+    assert_equal :short_path_graph, Mode.mode
+    graph = lifecycle.debug_reference_graphs.fetch(0)
+    assert_equal :short_path_graph, graph[:stage]
+    assert_equal [[0, 1]], graph[:edges]
+    assert_equal 'cell-1', graph[:cell_id]
+    assert_equal 2, lifecycle.debug_reference_points_by_kind.fetch(4).length
+
+    RG.clear!
+    assert_empty lifecycle.debug_reference_graphs
+  ensure
+    Mode.define_singleton_method(:active_indoor_model) { active_model.call }
+    Mode.singleton_class.send(:private, :active_indoor_model)
+  end
+
   def test_clear_removes_the_one_shot_overlay_snapshot
     lifecycle = Harness.new([Cell.new('cell-1')])
     lifecycle.request_reference_graph_debug(:optimized)
