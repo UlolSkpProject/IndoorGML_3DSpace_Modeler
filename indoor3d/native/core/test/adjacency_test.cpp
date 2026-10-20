@@ -724,8 +724,8 @@ void test_connectivity_repair_restores_two_hole_detour_nodes()
     los.protected_nodes={true,false};
 
     ReferenceGraphStageSnapshot before=los;
-    before.nodes.push_back({{2,8,0.5},0.0});
-    before.nodes.push_back({{8,8,0.5},0.0});
+    before.nodes.push_back({{2,5.15,0.5},0.0});
+    before.nodes.push_back({{8,5.15,0.5},0.0});
     before.original_indices={0,1,2,3};
     before.protected_nodes={true,false,false,false};
 
@@ -736,8 +736,11 @@ void test_connectivity_repair_restores_two_hole_detour_nodes()
             "Disconnected ring components must restore both valid detour references");
     require(recovered.graph.edges.size()==3,
             "All recovered edges must be valid LOS segments around the hole");
-    require(recovered.graph.edges[0].first<recovered.graph.nodes.size(),
-            "Repair must preserve original indices and append valid bridge nodes");
+    require(recovered.graph.original_indices.size()==4 &&
+            recovered.graph.protected_nodes.size()==4 &&
+            recovered.graph.original_indices[2]==std::optional<std::size_t>(2) &&
+            recovered.graph.original_indices[3]==std::optional<std::size_t>(3),
+            "Repair must retain valid candidate provenance and graph metadata");
 }
 
 void test_full_los_graph_rejects_inherited_edge_through_hole()
@@ -760,7 +763,7 @@ void test_full_los_graph_rejects_inherited_edge_through_hole()
             "Disconnected nodes must remain isolated in the final State tree");
 }
 
-void test_native_optimized_does_not_bridge_through_hole()
+void test_disconnected_los_does_not_bridge_through_hole()
 {
     const CellData room=ring_prism_cell();
     ReferenceGraphDebug before;
@@ -772,7 +775,7 @@ void test_native_optimized_does_not_bridge_through_hole()
             pipeline.repaired_graph.edges.empty() &&
             pipeline.recovered_node_count==0 &&
             pipeline.unreachable_node_count==1,
-            "Native OPTIMIZED must not bridge disconnected nodes through a hole");
+            "Final routing graph must not connect nodes through a hole");
     require(!std::isfinite(pipeline.shortest_path_tree.distances[1]),
             "A node behind a hole must remain unreachable without a valid bridge");
 }
@@ -1639,7 +1642,7 @@ int main()
     test_full_los_graph_ignores_optimized_edges_and_uses_all_visible_pairs();
     test_connectivity_repair_restores_two_hole_detour_nodes();
     test_full_los_graph_rejects_inherited_edge_through_hole();
-    test_native_optimized_does_not_bridge_through_hole();
+    test_disconnected_los_does_not_bridge_through_hole();
     test_convex_floor_one_area_centroid_before();
     test_convex_floor_asymmetric_mesh_has_area_centroid();
     test_coplanar_adjacent_floor_faces_merge();
