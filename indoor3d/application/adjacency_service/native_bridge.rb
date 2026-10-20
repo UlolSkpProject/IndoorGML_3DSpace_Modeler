@@ -283,7 +283,8 @@ module ULOL
         end
 
         def reference_cell_transforms(first_cell_id, second_cell_id, transformation1, transformation2)
-          model = IndoorModel.current if defined?(IndoorModel)
+          model = IndoorModel.current if
+            (transformation1.nil? || transformation2.nil?) && defined?(IndoorModel)
           first = transformation1 || model&.reference_cell_space_transformation(first_cell_id)
           second = transformation2 || model&.reference_cell_space_transformation(second_cell_id)
           unless first.is_a?(Geom::Transformation) && second.is_a?(Geom::Transformation)
