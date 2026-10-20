@@ -694,6 +694,45 @@ void test_reference_node_roles_have_stage_scoped_protection()
             "Protection must depend on node role and the optimization Stage");
 }
 
+void test_successful_loop_visible_neighbor_is_not_optimization_protected()
+{
+    CellData room=tall_room(unit_box_cell());
+    room.category=CellSpaceCategory::Room;
+    const double z=1000.0/25.4;
+
+    ReferenceGraphDebug before;
+    before.nodes={
+        {{0.10,0.45,z},0.0}, // State
+        {{0.25,0.45,z},0.0}, // LOS-visible degree-2 neighbor
+        {{0.40,0.30,z},0.0},
+        {{0.50,0.70,z},0.0},
+        {{0.60,0.30,z},0.0}
+    };
+    before.edges={{0,1},{1,2},{2,3},{3,4},{2,4}};
+    before.state_node_index=0;
+    ReferenceLoopCollapseCandidate certificate;
+    certificate.vertices={2,3,4};
+    certificate.representative={{0.50,0.45,z},0.1};
+    certificate.visible_neighbors={1};
+    before.loop_candidates.push_back(certificate);
+
+    const auto result=build_reference_graph_pipeline(room,before,0.001);
+    require(result.collapsed.nodes.size()==3 &&
+            result.collapsed.node_roles.size()==3 &&
+            result.collapsed.node_roles[0]==ReferenceNodeRole::State &&
+            result.collapsed.node_roles[1]==ReferenceNodeRole::Reference &&
+            result.collapsed.node_roles[2]==ReferenceNodeRole::CollapseRepresentative,
+            "Successful Collapse must preserve unrelated visible neighbors as ordinary references");
+    require(result.optimized.nodes.size()==2 &&
+            result.optimized.node_roles[0]==ReferenceNodeRole::State &&
+            result.optimized.node_roles[1]==ReferenceNodeRole::CollapseRepresentative,
+            "OPTIMIZED may remove a visible neighbor while preserving the Collapse representative");
+    require(result.optimized.edges.size()==1 &&
+            result.los_graph.edges.size()==1 &&
+            result.unreachable_node_count==0,
+            "Releasing a certificate's neighbor must keep the valid State-to-representative LOS route");
+}
+
 void test_collapsed_linearizes_sliver_polygon_components()
 {
     CellData room=tall_room(unit_box_cell());
@@ -1803,6 +1842,7 @@ int main()
     test_waypoint_anchor_uses_closest_reachable_optimized_node();
     test_native_reference_pipeline_optimizes_degree_two_and_collapses_certificate();
     test_reference_node_roles_have_stage_scoped_protection();
+    test_successful_loop_visible_neighbor_is_not_optimization_protected();
     test_collapsed_linearizes_sliver_polygon_components();
     test_optimized_degree_two_angle_threshold_and_priority_queue();
     test_full_los_connects_visible_components_to_state();
