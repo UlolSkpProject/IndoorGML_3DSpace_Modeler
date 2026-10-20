@@ -79,6 +79,24 @@ class ReferenceGraphPipelineIntegrationTest < Minitest::Test
     refute graph[:nodes].any? { |node| node.key?(:radius) }
   end
 
+  def test_los_graph_command_renders_a_separate_native_stage
+    lifecycle = Harness.new([Cell.new('cell-1')])
+    active_model = Mode.method(:active_indoor_model)
+    Mode.define_singleton_method(:active_indoor_model) { lifecycle }
+
+    assert_equal :los_graph, RG.los_graph!
+    assert Mode.los_graph?
+    graph = lifecycle.debug_reference_graphs.fetch(0)
+    assert_equal :los_graph, graph[:stage]
+    assert_equal 'cell-1', graph[:cell_id]
+    assert_equal [[0, 1]], graph[:edges]
+    RG.clear!
+    assert_empty lifecycle.debug_reference_graphs
+  ensure
+    Mode.define_singleton_method(:active_indoor_model) { active_model.call }
+    Mode.singleton_class.send(:private, :active_indoor_model)
+  end
+
   def test_short_path_graph_command_uses_final_tree_snapshot_without_rebuilding
     lifecycle = Harness.new([Cell.new('cell-1')])
     active_model = Mode.method(:active_indoor_model)
