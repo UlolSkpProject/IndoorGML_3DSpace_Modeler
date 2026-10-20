@@ -498,8 +498,9 @@ void test_native_reference_pipeline_bakes_state_tree_and_transition()
 
 void test_non_partitioned_state_is_a_single_node_reference_graph()
 {
+    CellData cell;
     const Vec3 state{1.0,2.0,3.0};
-    const auto pipeline=build_state_reference_graph_pipeline(state);
+    const auto pipeline=build_state_reference_graph_pipeline(state,cell,0.001);
     for(const auto stage:{ReferenceGraphStage::Before,ReferenceGraphStage::After,
                          ReferenceGraphStage::Collapsed,ReferenceGraphStage::Optimized})
     {
