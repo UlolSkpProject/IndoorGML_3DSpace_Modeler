@@ -5,11 +5,11 @@ module ULOL
     module IndoorCore
       # SketchUp Ruby Console:
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.before!
-      # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.after!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.collapsed!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.optimized!
       # RG.los_graph!         # All 3D LOS edges among OPTIMIZED nodes.
-      # RG.short_path_graph!  # State-rooted Dijkstra tree from LOS_GRAPH.
+      # RG.connectivity_repair! # Full LOS plus restored intermediate nodes.
+      # RG.short_path_graph!  # State-rooted Dijkstra tree from repaired graph.
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.clear!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.mode
       #
@@ -26,10 +26,6 @@ module ULOL
           mode == :off
         end
 
-        def after?
-          mode == :after
-        end
-
         def collapsed?
           mode == :collapsed
         end
@@ -42,16 +38,16 @@ module ULOL
           mode == :los_graph
         end
 
+        def connectivity_repair?
+          mode == :connectivity_repair
+        end
+
         def short_path_graph?
           mode == :short_path_graph
         end
 
         def before!
           set_mode(:before)
-        end
-
-        def after!
-          set_mode(:after)
         end
 
         def collapsed!
@@ -64,6 +60,10 @@ module ULOL
 
         def los_graph!
           set_mode(:los_graph)
+        end
+
+        def connectivity_repair!
+          set_mode(:connectivity_repair)
         end
 
         def short_path_graph!
@@ -84,8 +84,8 @@ module ULOL
         def set_mode(value)
           return clear! if value.to_sym == :off
           value = value.to_sym
-          unless %i[before after collapsed optimized los_graph short_path_graph].include?(value)
-            raise ArgumentError, 'expected :off, :before, :after, :collapsed, :optimized, :los_graph or :short_path_graph'
+          unless %i[before collapsed optimized los_graph connectivity_repair short_path_graph].include?(value)
+            raise ArgumentError, 'expected :off, :before, :collapsed, :optimized, :los_graph, :connectivity_repair or :short_path_graph'
           end
 
           count = active_indoor_model&.request_reference_graph_debug(value).to_i
