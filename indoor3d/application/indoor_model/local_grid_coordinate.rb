@@ -322,20 +322,21 @@ module ULOL
             cell_space_entity,
             fixed_z_offset_from_bottom: nil
           )
-            raw_center = native_state_local_point_for_entity(
+            raw_center = nil
+            snapped_center = nil
+            applied = false
+            native_state_local_point_for_entity(
               cell_space_entity,
               fixed_z_offset_from_bottom: fixed_z_offset_from_bottom
-            )
-            return local_grid_recenter_report(false, raw_center, raw_center) if
-              raw_center.distance(ORIGIN) <= 0.001
+            ) do |center|
+              raw_center = center
+              snapped_center = center.distance(ORIGIN) <= 0.001 ?
+                center : snap_local_grid_point(center, LOCAL_GRID_TOLERANCE_MM)
+              applied = snapped_center.distance(ORIGIN) > 0.001
+              apply_cell_space_local_center(cell_space_entity, snapped_center) if applied
+            end
 
-            snapped_center = snap_local_grid_point(
-              raw_center,
-              LOCAL_GRID_TOLERANCE_MM
-            )
-            apply_cell_space_local_center(cell_space_entity, snapped_center)
-
-            local_grid_recenter_report(true, raw_center, snapped_center)
+            local_grid_recenter_report(applied, raw_center, snapped_center)
           end
 
           def local_grid_recenter_report(applied, raw_center, snapped_center)
