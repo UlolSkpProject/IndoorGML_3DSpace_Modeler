@@ -8,7 +8,8 @@ module ULOL
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.after!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.collapsed!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.optimized!
-      # RG.short_path_graph!  # State-rooted Dijkstra tree, not every OPTIMIZED edge.
+      # RG.los_graph!         # All 3D LOS edges among OPTIMIZED nodes.
+      # RG.short_path_graph!  # State-rooted Dijkstra tree from LOS_GRAPH.
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.clear!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.mode
       #
@@ -37,6 +38,10 @@ module ULOL
           mode == :optimized
         end
 
+        def los_graph?
+          mode == :los_graph
+        end
+
         def short_path_graph?
           mode == :short_path_graph
         end
@@ -57,6 +62,10 @@ module ULOL
           set_mode(:optimized)
         end
 
+        def los_graph!
+          set_mode(:los_graph)
+        end
+
         def short_path_graph!
           set_mode(:short_path_graph)
         end
@@ -75,8 +84,8 @@ module ULOL
         def set_mode(value)
           return clear! if value.to_sym == :off
           value = value.to_sym
-          unless %i[before after collapsed optimized short_path_graph].include?(value)
-            raise ArgumentError, 'expected :off, :before, :after, :collapsed, :optimized or :short_path_graph'
+          unless %i[before after collapsed optimized los_graph short_path_graph].include?(value)
+            raise ArgumentError, 'expected :off, :before, :after, :collapsed, :optimized, :los_graph or :short_path_graph'
           end
 
           count = active_indoor_model&.request_reference_graph_debug(value).to_i
