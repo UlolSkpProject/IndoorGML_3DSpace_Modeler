@@ -61,8 +61,13 @@ class NativeStateLocalRefreshTest < Minitest::Test
   class Harness
     include IndoorCore::IndoorModel::SceneGroups
 
-    def initialize(cell)
+    def initialize(cell, entity)
       @cell = cell
+      @entity = entity
+    end
+
+    def reference_cell_space_transformation(_cell_id)
+      @entity.transformation
     end
 
     def find_cell_space_for_entity(_entity)
@@ -86,6 +91,7 @@ class NativeStateLocalRefreshTest < Minitest::Test
     ULOL::Indoor3DGmlModeler::Utils::Geometry.test_snapshot = { faces: [] }
     @opened = nil
     @commits = 0
+    @frames_at_commit = nil
     @closes = 0
     test = self
     Bridge.define_singleton_method(:shared_session_supported?) { true }
@@ -94,7 +100,8 @@ class NativeStateLocalRefreshTest < Minitest::Test
       test.instance_variable_set(:@opened, [snapshots, keys, state_options])
       true
     end
-    Bridge.define_singleton_method(:commit_reference_graph_batch) do
+    Bridge.define_singleton_method(:commit_reference_graph_batch) do |frames|
+      test.instance_variable_set(:@frames_at_commit, frames)
       test.instance_variable_set(:@commits, test.instance_variable_get(:@commits) + 1)
       true
     end
@@ -121,12 +128,28 @@ class NativeStateLocalRefreshTest < Minitest::Test
     cell = FakeCell.new('cell-1', 'Door')
     entity = FakeEntity.new(42, FakeTransform.new)
 
-    point = Harness.new(cell).send(:native_state_local_point_for_entity, entity)
+    point = Harness.new(cell, entity).send(:native_state_local_point_for_entity, entity) do |center|
+      assert_equal [1.0, 2.0, 3.0], [center.x, center.y, center.z]
+    end
 
     assert_equal [1.0, 2.0, 3.0], [point.x, point.y, point.z]
     assert_equal ['cell-1'], @opened[1]
     assert_equal 'Door', @opened[2][0][:category_code]
     assert_equal 1, @commits
+    assert_equal [entity.transformation], @frames_at_commit
+    assert_equal 1, @closes
+  end
+
+  def test_registered_graph_is_not_committed_without_post_state_applier
+    Bridge.define_singleton_method(:compute_reference_from_open_session) do
+      { results: { 0 => { exit_code: 0, state_point: [1.0, 2.0, 3.0], diagnostics: {} } } }
+    end
+    cell = FakeCell.new('cell-1', 'Room')
+    entity = FakeEntity.new(44, FakeTransform.new)
+    assert_raises(Bridge::ProtocolError) do
+      Harness.new(cell, entity).send(:native_state_local_point_for_entity, entity)
+    end
+    assert_equal 0, @commits
     assert_equal 1, @closes
   end
 
@@ -146,7 +169,7 @@ class NativeStateLocalRefreshTest < Minitest::Test
     entity = FakeEntity.new(43, FakeTransform.new)
 
     error = assert_raises(Bridge::StateUnavailableError) do
-      Harness.new(cell).send(:native_state_local_point_for_entity, entity)
+      Harness.new(cell, entity).send(:native_state_local_point_for_entity, entity)
     end
 
     assert_equal 61, error.exit_code
