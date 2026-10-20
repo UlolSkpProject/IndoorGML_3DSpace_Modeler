@@ -46,7 +46,7 @@ struct ReferenceGraphPipeline
     ReferenceGraphStageSnapshot repaired_graph;
     std::size_t state_node_index = 0;
     std::size_t recovered_node_count = 0; // Additional proven interior references.
-    std::size_t unreachable_node_count = 0; // Unreachable in LOS_GRAPH's State tree.
+    std::size_t unreachable_node_count = 0; // Unreachable in repaired graph's State tree.
     ReferenceGraphShortestPathTree shortest_path_tree;
     // Reusable Solid queries for waypoint routing after the geometry batch is cleared.
     std::shared_ptr<const FaceSolid> waypoint_solid;
