@@ -17,7 +17,8 @@ enum class ReferenceGraphStage
     Before,
     After,
     Collapsed,
-    Optimized
+    Optimized,
+    ShortPathGraph // Derived, read-only view of the State-rooted Dijkstra tree.
 };
 
 struct ReferenceGraphStageSnapshot
@@ -73,6 +74,13 @@ ReferenceGraphPipeline build_state_reference_graph_pipeline(
 const ReferenceGraphStageSnapshot& reference_graph_stage(
     const ReferenceGraphPipeline& pipeline,
     ReferenceGraphStage stage
+);
+
+// Display-only snapshot: OPTIMIZED nodes with only the State-rooted shortest-
+// path predecessor edges. Disconnected nodes remain as isolated markers.
+// Reuses the already baked tree; never recomputes graph topology or routes.
+ReferenceGraphStageSnapshot reference_short_path_graph(
+    const ReferenceGraphPipeline& pipeline
 );
 
 // Finalize every persistent stage and LOS Solid in the post-State CellSpace
