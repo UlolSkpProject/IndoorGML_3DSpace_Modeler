@@ -2,6 +2,7 @@
 
 #include "adjacency_session.h"
 
+#include <array>
 #include <climits>
 #include <cmath>
 #include <cstring>
@@ -114,11 +115,20 @@ VALUE adjacency_native_get_state_result_bytes(VALUE self)
     });
 }
 
-VALUE adjacency_native_commit_reference_graph_batch(VALUE self)
+VALUE adjacency_native_commit_reference_graph_batch(VALUE self, VALUE transform_bytes)
 {
     (void)self;
-    return protect_native_call([]() {
-        session().commit_reference_graph_batch();
+    Check_Type(transform_bytes,T_STRING);
+    const std::size_t size=static_cast<std::size_t>(RSTRING_LEN(transform_bytes));
+    if(size%(16*sizeof(double))!=0)
+        rb_raise(rb_eArgError,"invalid Reference CellSpace frame payload");
+    std::vector<std::array<double,16>> frames(size/(16*sizeof(double)));
+    for(std::size_t i=0;i<frames.size();++i)
+        std::memcpy(frames[i].data(),
+            RSTRING_PTR(transform_bytes)+i*16*sizeof(double),
+            16*sizeof(double));
+    return protect_native_call([&frames]() {
+        session().commit_reference_graph_batch(frames);
         return Qtrue;
     });
 }
@@ -205,6 +215,8 @@ VALUE adjacency_native_get_reference_graph(VALUE self, VALUE cell_key, VALUE sta
     });
 }
 
+// Two CellSpace-local waypoint coordinates (six little-endian float64).
+// Results stay separate until Ruby transforms each path back to Root-Local.
 VALUE adjacency_native_get_reference_transition_curve(
     VALUE self,VALUE first_cell_key,VALUE second_cell_key,VALUE waypoint_bytes
 )
@@ -213,30 +225,34 @@ VALUE adjacency_native_get_reference_transition_curve(
     StringValue(first_cell_key);
     StringValue(second_cell_key);
     Check_Type(waypoint_bytes,T_STRING);
-    if(RSTRING_LEN(waypoint_bytes)!=static_cast<long>(3*sizeof(double)))
-        rb_raise(rb_eArgError,"Reference waypoint must contain three float64 values");
-    const std::string first(
-        RSTRING_PTR(first_cell_key),static_cast<std::size_t>(RSTRING_LEN(first_cell_key))
-    );
-    const std::string second(
-        RSTRING_PTR(second_cell_key),static_cast<std::size_t>(RSTRING_LEN(second_cell_key))
-    );
-    double values[3];
+    if(RSTRING_LEN(waypoint_bytes)!=static_cast<long>(6*sizeof(double)))
+        rb_raise(rb_eArgError,"Reference waypoints require six float64 values");
+    const std::string first(RSTRING_PTR(first_cell_key),
+                            static_cast<std::size_t>(RSTRING_LEN(first_cell_key)));
+    const std::string second(RSTRING_PTR(second_cell_key),
+                             static_cast<std::size_t>(RSTRING_LEN(second_cell_key)));
+    double values[6];
     std::memcpy(values,RSTRING_PTR(waypoint_bytes),sizeof(values));
-    for(double value:values) if(!std::isfinite(value))
+    for(const double value:values) if(!std::isfinite(value))
         rb_raise(rb_eArgError,"Reference waypoint coordinate is not finite");
-    const Vec3 waypoint{values[0],values[1],values[2]};
-    return protect_native_call([first,second,waypoint]() {
-        const auto path=session().get_reference_transition_curve(first,second,waypoint);
-        if(path.empty()) return Qnil;
-        VALUE result=rb_ary_new_capa(static_cast<long>(path.size()));
-        for(const auto& item:path)
+    return protect_native_call([first,second,&values]() {
+        const auto paths=session().get_reference_transition_curve(
+            first,second,{values[0],values[1],values[2]},
+                         {values[3],values[4],values[5]});
+        if(paths.first.empty() || paths.second.empty()) return Qnil;
+        VALUE result=rb_ary_new_capa(2);
+        for(const auto* path:{&paths.first,&paths.second})
         {
-            VALUE point=rb_ary_new_capa(3);
-            rb_ary_push(point,DBL2NUM(item.x));
-            rb_ary_push(point,DBL2NUM(item.y));
-            rb_ary_push(point,DBL2NUM(item.z));
-            rb_ary_push(result,point);
+            VALUE list=rb_ary_new_capa(static_cast<long>(path->size()));
+            for(const auto& item:*path)
+            {
+                VALUE point=rb_ary_new_capa(3);
+                rb_ary_push(point,DBL2NUM(item.x));
+                rb_ary_push(point,DBL2NUM(item.y));
+                rb_ary_push(point,DBL2NUM(item.z));
+                rb_ary_push(list,point);
+            }
+            rb_ary_push(result,list);
         }
         return result;
     });
@@ -250,22 +266,20 @@ VALUE adjacency_native_get_reference_waypoint_anchors(
     StringValue(first_cell_key);
     StringValue(second_cell_key);
     Check_Type(waypoint_bytes,T_STRING);
-    if(RSTRING_LEN(waypoint_bytes)!=static_cast<long>(3*sizeof(double)))
-        rb_raise(rb_eArgError,"Reference waypoint must contain three float64 values");
-    const std::string first(
-        RSTRING_PTR(first_cell_key),static_cast<std::size_t>(RSTRING_LEN(first_cell_key))
-    );
-    const std::string second(
-        RSTRING_PTR(second_cell_key),static_cast<std::size_t>(RSTRING_LEN(second_cell_key))
-    );
-    double values[3];
+    if(RSTRING_LEN(waypoint_bytes)!=static_cast<long>(6*sizeof(double)))
+        rb_raise(rb_eArgError,"Reference anchor waypoints require six float64 values");
+    const std::string first(RSTRING_PTR(first_cell_key),
+                            static_cast<std::size_t>(RSTRING_LEN(first_cell_key)));
+    const std::string second(RSTRING_PTR(second_cell_key),
+                             static_cast<std::size_t>(RSTRING_LEN(second_cell_key)));
+    double values[6];
     std::memcpy(values,RSTRING_PTR(waypoint_bytes),sizeof(values));
-    for(double value:values) if(!std::isfinite(value))
+    for(const double value:values) if(!std::isfinite(value))
         rb_raise(rb_eArgError,"Reference waypoint coordinate is not finite");
-    const Vec3 waypoint{values[0],values[1],values[2]};
-    return protect_native_call([first,second,waypoint]() {
+    return protect_native_call([first,second,&values]() {
         const auto anchors=session().get_reference_waypoint_anchors(
-            first,second,waypoint);
+            first,second,{values[0],values[1],values[2]},
+                         {values[3],values[4],values[5]});
         if(!anchors) return Qnil;
         VALUE result=rb_ary_new_capa(2);
         for(const Vec3& item:{anchors->first,anchors->second})
