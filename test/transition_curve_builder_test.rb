@@ -109,6 +109,20 @@ class TransitionCurveBuilderTest < Minitest::Test
     refute_equal original_key, changed_key
   end
 
+  def test_cellspace_transform_change_invalidates_cache_without_graph_revision_change
+    @model.curve = [point(0), point(1), point(2), point(4)]
+    @model.revisions['A'] = [7, [:local_to_root, 0]]
+    before = @builder.transition_line_points
+
+    # Revision 7 stays constant: moving the CellSpace must still rebuild.
+    @model.curve = [point(0), point(1.5), point(2), point(4)]
+    @model.revisions['A'] = [7, [:local_to_root, 12]]
+    after = @builder.transition_line_points
+
+    refute_equal xs(before), xs(after)
+    assert_equal [0.0, 1.5, 1.5, 2.0, 2.0, 4.0], xs(after)
+  end
+
   def test_route_change_rebuilds_assembled_cache_without_explicit_invalidate
     @model.curve = [point(0), point(1), point(2), point(4)]
     @model.revisions['A'] = [:first_graph]
