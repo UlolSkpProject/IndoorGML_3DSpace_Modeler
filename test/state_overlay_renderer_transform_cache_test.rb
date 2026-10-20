@@ -107,14 +107,16 @@ class StateOverlayRendererTransformCacheTest < Minitest::Test
   end
 
   class View
-    attr_reader :point_batches
+    attr_reader :point_batches, :point_styles
 
     def initialize
       @point_batches = []
+      @point_styles = []
     end
 
-    def draw_points(points, *)
+    def draw_points(points, size, style, color)
       @point_batches << points.map(&:dup)
+      @point_styles << [size, style, color]
     end
   end
 
@@ -197,6 +199,42 @@ class StateOverlayRendererTransformCacheTest < Minitest::Test
 
     draw
     assert_equal 2, @context.batch_calls
+  end
+
+  def test_selected_state_overlay_uses_existing_cached_points_and_larger_magenta_style
+    draw
+    @renderer.draw_highlight(@view, selected_cell_ids: { 'B' => true })
+    assert_equal [120], last_x_coordinates
+    assert_equal 2, @view.point_batches.length
+    assert_equal [
+      Renderer::STATE_BASE_POINT_SIZE_PIXELS.to_i,
+      Renderer::STATE_POINT_STYLE,
+      Renderer::DUAL_STATE_COLOR
+    ], @view.point_styles[0]
+    assert_equal [
+      18,
+      Renderer::STATE_POINT_STYLE,
+      Renderer::SELECTED_STATE_COLOR
+    ], @view.point_styles[1]
+    assert_equal 1, @context.batch_calls
+
+    @renderer.draw_highlight(@view, selected_cell_ids: { 'A' => true, 'B' => true })
+    assert_equal [110, 120], last_x_coordinates
+    assert_equal 1, @context.batch_calls
+    @renderer.draw_highlight(@view, selected_cell_ids: {})
+    assert_equal 3, @view.point_batches.length
+  end
+
+  def test_selected_state_highlight_uses_refreshed_transform_without_rebuilding_cache
+    draw
+    @selection.entities = [@cell_a.group]
+    @cell_a.frame = Frame.new(18)
+
+    @renderer.draw_highlight(@view, selected_cell_ids: { 'A' => true })
+
+    assert_equal [118], last_x_coordinates
+    assert_equal 1, @context.batch_calls
+    assert_equal %w[state-a state-b state-a], @context.root_local_calls
   end
 
   private
