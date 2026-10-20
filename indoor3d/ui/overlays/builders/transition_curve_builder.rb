@@ -18,11 +18,13 @@ module ULOL
           @render_transition_line_points_dirty = true
           @render_transition_revision = nil
           @render_transition_exclusion_key = nil
+          @render_visible_transition_segments = []
         end
 
         def invalidate
           @render_transition_line_points = nil
           @render_transition_line_points_dirty = true
+          @render_visible_transition_segments = []
         end
 
         def clear_cache
@@ -49,29 +51,22 @@ module ULOL
           @render_transition_line_points
         end
 
-        # Only the displayed half of a Transition belonging to a selected
-        # CellSpace is highlighted. The existing cached curve segments and
-        # visibility/exclusion policies are reused; no geometry is modified.
+        # Selection is a render-only filter on the segments that the normal
+        # Transition pass has already accepted. No second Native route request
+        # or curve rebuild occurs in the highlight pass.
         def selected_transition_line_points(selected_cell_ids:, excluded_cell_ids: nil)
           return [] if selected_cell_ids.nil? || selected_cell_ids.empty?
 
-          excluded_cells = transition_excluded_cell_lookup(excluded_cell_ids)
-          render_snapshot = transition_render_context_snapshot
-          context_key = render_snapshot&.[](:cache_key) || transition_render_context_cache_key
+          transition_line_points(excluded_cell_ids: excluded_cell_ids)
           points = []
-          @indoor_model.transitions.each do |transition|
-            first_selected = selected_cell_ids[transition.cell1_id.to_s]
-            second_selected = selected_cell_ids[transition.cell2_id.to_s]
-            next unless first_selected || second_selected
-            next if transition_excluded?(transition, excluded_cells)
-            next unless overlay_transition_visible?(transition)
-
-            first_visible = overlay_state_visible?(transition.state1)
-            second_visible = overlay_state_visible?(transition.state2)
+          @render_visible_transition_segments.each do |entry|
+            first_selected = selected_cell_ids[entry[:cell1_id]]
+            second_selected = selected_cell_ids[entry[:cell2_id]]
+            first_visible = entry[:first_visible]
+            second_visible = entry[:second_visible]
             next unless (first_selected && first_visible) || (second_selected && second_visible)
 
-            segments = cached_transition_render_segments(transition, context_key, render_snapshot)
-            # Without an interior waypoint, the displayed segment is shared.
+            segments = entry[:segments]
             points.concat(segments[:default]) if first_visible && second_visible
             points.concat(segments[:first]) if first_selected && first_visible
             points.concat(segments[:second]) if second_selected && second_visible
@@ -81,6 +76,7 @@ module ULOL
 
         def build_render_transition_line_points(excluded_cells = {})
           points = []
+          accepted = []
           render_snapshot = transition_render_context_snapshot
           context_key = render_snapshot&.[](:cache_key) || transition_render_context_cache_key
           @indoor_model.transitions.each do |transition|
@@ -95,7 +91,15 @@ module ULOL
             points.concat(segments[:default]) if first_visible && second_visible
             points.concat(segments[:first]) if first_visible
             points.concat(segments[:second]) if second_visible
+            accepted << {
+              cell1_id: transition.cell1_id.to_s,
+              cell2_id: transition.cell2_id.to_s,
+              first_visible: first_visible,
+              second_visible: second_visible,
+              segments: segments
+            }
           end
+          @render_visible_transition_segments = accepted
           points
         end
 
