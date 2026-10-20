@@ -43,7 +43,7 @@ class TransitionTransformPreviewTest < Minitest::Test
     end
   end
 
-  Cell = Struct.new(:group) do
+  Cell = Struct.new(:id, :group) do
     def valid_sketchup_group
       group
     end
@@ -71,14 +71,15 @@ class TransitionTransformPreviewTest < Minitest::Test
   end
 
   class DrawCounter
-    attr_reader :draws
+    attr_reader :draws, :last_options
 
     def initialize
       @draws = 0
     end
 
-    def draw(*)
+    def draw(*, **options)
       @draws += 1
+      @last_options = options
     end
 
     def draw_partitions(*)
@@ -100,16 +101,18 @@ class TransitionTransformPreviewTest < Minitest::Test
     indoor_model = IndoorModel.new(
       SketchupModel.new(@selection),
       @primal,
-      [Cell.new(@cell_group)]
+      [Cell.new('A', @cell_group)]
     )
     @overlay = Overlay.allocate
     @overlay.instance_variable_set(:@indoor_model, indoor_model)
     @overlay.instance_variable_set(:@transition_curve_builder, @builder)
-    @overlay.instance_variable_set(:@transition_transform_keys, nil)
-    @overlay.instance_variable_set(:@transition_transform_preview_active, false)
+    @overlay.instance_variable_set(:@transition_transform_snapshots, nil)
+    @overlay.instance_variable_set(:@transition_transforming_cell_ids, {})
+    @overlay.instance_variable_set(:@transition_transform_pending_cell_ids, {})
+    @overlay.instance_variable_set(:@primal_transform_preview_active, false)
   end
 
-  def test_selected_cell_transform_hides_until_transaction_finishes
+  def test_selected_cell_transform_stays_suppressed_until_topology_sync_finishes
     refute @overlay.send(:update_transition_transform_preview)
 
     @cell_group.transformation = Transform.new(15)
@@ -117,16 +120,25 @@ class TransitionTransformPreviewTest < Minitest::Test
     assert @overlay.send(:update_transition_transform_preview)
     assert_equal 0, @builder.invalidations
 
-    assert @overlay.finish_transition_transform_preview
+    refute @overlay.finish_transition_transform_preview(source: :commit)
+    assert_equal ['A'], @overlay.send(:transition_transform_excluded_cell_ids)
+    assert_equal 0, @builder.invalidations
+
+    @overlay.begin_transition_topology_sync(['A'])
+    assert_equal ['A'], @overlay.send(:transition_transform_excluded_cell_ids)
+    assert @overlay.complete_transition_topology_sync(['A'])
     assert_equal 1, @builder.invalidations
     refute @overlay.send(:update_transition_transform_preview)
   end
 
-  def test_finish_detects_transform_change_even_without_intermediate_draw
+  def test_topology_sync_suppresses_cell_even_without_intermediate_draw
     refute @overlay.send(:update_transition_transform_preview)
     @cell_group.transformation = Transform.new(15)
 
-    assert @overlay.finish_transition_transform_preview
+    @overlay.begin_transition_topology_sync(['A'])
+    assert_equal ['A'], @overlay.send(:transition_transform_excluded_cell_ids)
+    @overlay.finish_transition_transform_preview(source: :commit)
+    assert @overlay.complete_transition_topology_sync(['A'])
     assert_equal 1, @builder.invalidations
   end
 
@@ -135,11 +147,11 @@ class TransitionTransformPreviewTest < Minitest::Test
     @selection.entities = [@primal]
 
     refute @overlay.send(:update_transition_transform_preview)
-    refute @overlay.finish_transition_transform_preview
+    refute @overlay.finish_transition_transform_preview(source: :commit)
     assert_equal 0, @builder.invalidations
   end
 
-  def test_draw_skips_transition_renderer_until_transform_finishes
+  def test_draw_excludes_only_transforming_cell_transitions
     transition_renderer = DrawCounter.new
     @overlay.instance_variable_set(:@transition_renderer, transition_renderer)
     @overlay.instance_variable_set(:@reference_graph_debug_renderer, DrawCounter.new)
@@ -151,13 +163,32 @@ class TransitionTransformPreviewTest < Minitest::Test
 
     @overlay.draw(view)
     assert_equal 1, transition_renderer.draws
+    assert_empty transition_renderer.last_options[:excluded_cell_ids]
 
     @cell_group.transformation = Transform.new(15)
     @overlay.draw(view)
-    assert_equal 1, transition_renderer.draws
-
-    @overlay.finish_transition_transform_preview
-    @overlay.draw(view)
     assert_equal 2, transition_renderer.draws
+    assert_equal ['A'], transition_renderer.last_options[:excluded_cell_ids]
+
+    @overlay.finish_transition_transform_preview(source: :commit)
+    @overlay.draw(view)
+    assert_equal 3, transition_renderer.draws
+    assert_equal ['A'], transition_renderer.last_options[:excluded_cell_ids]
+
+    @overlay.begin_transition_topology_sync(['A'])
+    @overlay.complete_transition_topology_sync(['A'])
+    @overlay.draw(view)
+    assert_equal 4, transition_renderer.draws
+    assert_empty transition_renderer.last_options[:excluded_cell_ids]
+  end
+
+  def test_abort_releases_transform_suppression
+    refute @overlay.send(:update_transition_transform_preview)
+    @cell_group.transformation = Transform.new(15)
+    assert @overlay.send(:update_transition_transform_preview)
+
+    assert @overlay.finish_transition_transform_preview(source: :abort)
+    assert_empty @overlay.send(:transition_transform_excluded_cell_ids)
+    assert_equal 1, @builder.invalidations
   end
 end

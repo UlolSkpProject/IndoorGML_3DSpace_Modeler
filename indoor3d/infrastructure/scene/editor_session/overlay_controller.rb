@@ -131,12 +131,30 @@ module ULOL
             IndoorCore::Logger.puts "[IndoorGML] Overlay transition cache invalidation failed: #{e.class}: #{e.message}"
           end
 
-          def finish_transition_transform_preview
+          def finish_transition_transform_preview(source: :commit)
             return false unless @space_overlay&.respond_to?(:finish_transition_transform_preview)
 
-            @space_overlay.finish_transition_transform_preview
+            @space_overlay.finish_transition_transform_preview(source: source)
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Overlay transition transform finish failed: #{e.class}: #{e.message}"
+            false
+          end
+
+          def begin_transition_topology_sync(cell_ids)
+            return false unless @space_overlay&.respond_to?(:begin_transition_topology_sync)
+
+            @space_overlay.begin_transition_topology_sync(cell_ids)
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Overlay transition topology begin failed: #{e.class}: #{e.message}"
+            false
+          end
+
+          def complete_transition_topology_sync(cell_ids)
+            return false unless @space_overlay&.respond_to?(:complete_transition_topology_sync)
+
+            @space_overlay.complete_transition_topology_sync(cell_ids)
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Overlay transition topology completion failed: #{e.class}: #{e.message}"
             false
           end
 

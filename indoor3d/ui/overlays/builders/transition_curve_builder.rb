@@ -17,6 +17,7 @@ module ULOL
           @render_transition_line_points = nil
           @render_transition_line_points_dirty = true
           @render_transition_revision = nil
+          @render_transition_exclusion_key = nil
         end
 
         def invalidate
@@ -27,28 +28,33 @@ module ULOL
         def clear_cache
           @transition_render_segment_cache&.clear
           @render_transition_revision = nil
+          @render_transition_exclusion_key = nil
           invalidate
         end
 
-        def transition_line_points
+        def transition_line_points(excluded_cell_ids: nil)
+          excluded_cells = transition_excluded_cell_lookup(excluded_cell_ids)
+          exclusion_key = excluded_cells.keys.sort
           # Ref-Graph snapshots are immutable and replaced on regeneration.
           # Detect new snapshots even if no external overlay invalidation fired.
-          revision = transition_render_revision
+          revision = transition_render_revision(excluded_cells)
           if @render_transition_line_points_dirty || @render_transition_line_points.nil? ||
-             @render_transition_revision != revision
-            @render_transition_line_points = build_render_transition_line_points
+             @render_transition_revision != revision || @render_transition_exclusion_key != exclusion_key
+            @render_transition_line_points = build_render_transition_line_points(excluded_cells)
             @render_transition_line_points_dirty = false
             @render_transition_revision = revision
+            @render_transition_exclusion_key = exclusion_key
           end
 
           @render_transition_line_points
         end
 
-        def build_render_transition_line_points
+        def build_render_transition_line_points(excluded_cells = {})
           points = []
           render_snapshot = transition_render_context_snapshot
           context_key = render_snapshot&.[](:cache_key) || transition_render_context_cache_key
           @indoor_model.transitions.each do |transition|
+            next if transition_excluded?(transition, excluded_cells)
             next unless overlay_transition_visible?(transition)
 
             first_visible = overlay_state_visible?(transition.state1)
@@ -409,10 +415,12 @@ module ULOL
           nil
         end
 
-        def transition_render_revision
+        def transition_render_revision(excluded_cells = {})
           [
             transition_render_context_cache_key,
-            @indoor_model.transitions.map do |transition|
+            @indoor_model.transitions.filter_map do |transition|
+              next if transition_excluded?(transition, excluded_cells)
+
               [
                 transition_render_cache_identity(transition),
                 point_coordinates(transition.state1_point),
@@ -428,6 +436,21 @@ module ULOL
           ]
         rescue StandardError
           nil
+        end
+
+        def transition_excluded_cell_lookup(cell_ids)
+          Array(cell_ids).each_with_object({}) do |cell_id, result|
+            normalized = cell_id.to_s
+            result[normalized] = true unless normalized.empty?
+          end
+        end
+
+        def transition_excluded?(transition, excluded_cells)
+          return false if excluded_cells.empty?
+
+          excluded_cells[transition.cell1_id.to_s] || excluded_cells[transition.cell2_id.to_s]
+        rescue StandardError
+          false
         end
 
         def route_snapshot_key(cell_id)

@@ -12,19 +12,24 @@ class TransitionCurveBuilderTest < Minitest::Test
 
   class FakeModel
     attr_accessor :transitions, :curve, :revisions, :state_visibility
+    attr_reader :route_snapshot_calls, :reference_curve_calls
 
     def initialize(transition)
       @transitions = [transition]
       @curve = nil
       @revisions = {}
       @state_visibility = {}
+      @route_snapshot_calls = []
+      @reference_curve_calls = []
     end
 
-    def reference_transition_curve(_first_cell_id, _second_cell_id, _waypoint)
+    def reference_transition_curve(first_cell_id, second_cell_id, _waypoint)
+      @reference_curve_calls << [first_cell_id, second_cell_id]
       @curve
     end
 
     def reference_graph_route_snapshot_key_for(cell_id)
+      @route_snapshot_calls << cell_id
       @revisions[cell_id]
     end
 
@@ -261,5 +266,28 @@ class TransitionCurveBuilderTest < Minitest::Test
     assert_equal [0.0, 1.5, 1.5, 2.0, 2.0, 4.0], xs(second)
     refute_equal xs(first), xs(second)
     assert_same second, @builder.transition_line_points
+  end
+
+  def test_excluded_cell_transition_is_neither_calculated_nor_rendered
+    other = Transition.new('T2', point(10), point(14), nil, 'C', 'D', :state3, :state4)
+    @model.transitions = [@transition, other]
+    @model.curve = [point(0), point(1), point(2), point(4)]
+
+    points = @builder.transition_line_points(excluded_cell_ids: ['A'])
+
+    assert_equal [10.0, 14.0], xs(points)
+    refute_includes @model.route_snapshot_calls, 'A'
+    refute_includes @model.route_snapshot_calls, 'B'
+    assert_empty @model.reference_curve_calls
+  end
+
+  def test_changing_excluded_cells_rebuilds_assembled_transition_list
+    other = Transition.new('T2', point(10), point(14), nil, 'C', 'D', :state3, :state4)
+    @transition.selected_waypoint = nil
+    @model.transitions = [@transition, other]
+
+    assert_equal [10.0, 14.0], xs(@builder.transition_line_points(excluded_cell_ids: ['A']))
+    assert_equal [0.0, 4.0], xs(@builder.transition_line_points(excluded_cell_ids: ['C']))
+    assert_equal [0.0, 4.0, 10.0, 14.0], xs(@builder.transition_line_points)
   end
 end

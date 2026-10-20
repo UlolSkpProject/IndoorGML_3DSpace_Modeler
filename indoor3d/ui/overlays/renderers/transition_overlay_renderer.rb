@@ -13,10 +13,10 @@ module ULOL
           @curve_builder = curve_builder
         end
 
-        def draw(view)
+        def draw(view, excluded_cell_ids: nil)
           view.line_width = overlay_transition_line_width if view.respond_to?(:line_width=)
 
-          render_points = @curve_builder.transition_line_points
+          render_points = @curve_builder.transition_line_points(excluded_cell_ids: excluded_cell_ids)
           return if render_points.empty?
 
           view.drawing_color = DUAL_TRANSITION_COLOR

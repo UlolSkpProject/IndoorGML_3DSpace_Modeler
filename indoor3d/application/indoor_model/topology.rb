@@ -53,6 +53,7 @@ module ULOL
 
             cell_spaces = validation_focus_highlight_cell_spaces
             metrics = topology_coordinator.synchronize_within(cell_spaces)
+            complete_overlay_transition_topology_sync(cell_spaces.map(&:id))
             mark_validation_focus_topology_dirty
             metrics
           rescue StandardError => e
@@ -96,6 +97,7 @@ module ULOL
             if validation_focus_row_local_topology_sync?
               mark_validation_focus_topology_dirty
               if @editor_session.validation_focus_highlight_row_include_cell?(cell_space)
+                begin_overlay_transition_topology_sync([cell_space.id])
                 synchronize_validation_focus_row_topology
               end
               return
@@ -104,6 +106,7 @@ module ULOL
             entity = cell_space.valid_sketchup_group
             return unless entity
 
+            begin_overlay_transition_topology_sync([cell_space.id])
             dirty_topology_queue.mark(entity.persistent_id)
             schedule_dirty_cell_space_sync
           rescue StandardError => e
@@ -122,10 +125,6 @@ module ULOL
                 dirty_topology_queue.unschedule!
                 next
               end
-
-              # Accumulate edits until Edit Mode finishes. The finish path
-              # flushes all dirty CellSpaces in one native adjacency batch.
-              next if editing?
 
               flush_dirty_cell_space_sync
             end
@@ -149,11 +148,16 @@ module ULOL
 
             # Build one dirty set, then serialize the entire eligible geometry
             # once. Native V5 marks every dirty index in the same load_batch.
-            dirty_cells = pids.filter_map do |persistent_id|
-              cell_space = @feature_registry.find_cell_space_by_persistent_id(persistent_id)
-              cell_space if cell_space&.valid? && cell_space.duality_state&.valid?
+            resolved_cells = pids.filter_map do |persistent_id|
+              @feature_registry.find_cell_space_by_persistent_id(persistent_id)
             end.uniq
-            return if dirty_cells.empty?
+            dirty_cells = resolved_cells.select do |cell_space|
+              cell_space&.valid? && cell_space.duality_state&.valid?
+            end
+            if dirty_cells.empty?
+              complete_overlay_transition_topology_sync(resolved_cells.map(&:id))
+              return
+            end
 
             with_transparent_cell_space_operation('IndoorGML Dirty CellSpace Sync') do
               sync do
@@ -163,6 +167,7 @@ module ULOL
                 end
               end
             end
+            complete_overlay_transition_topology_sync(dirty_cells.map(&:id))
             Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
             invalidate_overlay_transition_points
           rescue StandardError => e

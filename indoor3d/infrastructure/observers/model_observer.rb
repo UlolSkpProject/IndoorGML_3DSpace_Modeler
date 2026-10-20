@@ -37,6 +37,10 @@ module ULOL
           finish_transition_transform_preview(model, source: :abort)
         end
 
+        def onTransactionEmpty(model)
+          finish_transition_transform_preview(model, source: :empty)
+        end
+
         def onDeleteModel(model)
           if @on_delete_model
             @on_delete_model.call(model)
@@ -61,7 +65,7 @@ module ULOL
           indoor_model = IndoorModel.for(model)
           return unless indoor_model.respond_to?(:finish_overlay_transition_transform_preview)
 
-          indoor_model.finish_overlay_transition_transform_preview(model)
+          indoor_model.finish_overlay_transition_transform_preview(model, source: source)
         rescue StandardError => e
           IndoorCore::Logger.puts(
             "[IndoorGML] Transition transform #{source} handling failed: #{e.class}: #{e.message}"

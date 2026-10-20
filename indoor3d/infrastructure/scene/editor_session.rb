@@ -620,8 +620,18 @@ module ULOL
           overlay_controller.invalidate_transition_points
         end
 
-        def finish_overlay_transition_transform_preview(model = Sketchup.active_model)
-          changed = overlay_controller.finish_transition_transform_preview
+        def finish_overlay_transition_transform_preview(model = Sketchup.active_model, source: :commit)
+          changed = overlay_controller.finish_transition_transform_preview(source: source)
+          invalidate_view(model) if changed
+          changed
+        end
+
+        def begin_overlay_transition_topology_sync(cell_ids)
+          overlay_controller.begin_transition_topology_sync(cell_ids)
+        end
+
+        def complete_overlay_transition_topology_sync(cell_ids, model = Sketchup.active_model)
+          changed = overlay_controller.complete_transition_topology_sync(cell_ids)
           invalidate_view(model) if changed
           changed
         end

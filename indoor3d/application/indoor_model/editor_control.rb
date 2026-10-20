@@ -276,8 +276,16 @@ module ULOL
             @editor_session.invalidate_overlay_transition_points
           end
 
-          def finish_overlay_transition_transform_preview(model = @model)
-            @editor_session.finish_overlay_transition_transform_preview(model)
+          def finish_overlay_transition_transform_preview(model = @model, source: :commit)
+            @editor_session.finish_overlay_transition_transform_preview(model, source: source)
+          end
+
+          def begin_overlay_transition_topology_sync(cell_ids)
+            @editor_session.begin_overlay_transition_topology_sync(cell_ids)
+          end
+
+          def complete_overlay_transition_topology_sync(cell_ids, model = @model)
+            @editor_session.complete_overlay_transition_topology_sync(cell_ids, model)
           end
 
           def edit_mode_visibility_filter_snapshot
