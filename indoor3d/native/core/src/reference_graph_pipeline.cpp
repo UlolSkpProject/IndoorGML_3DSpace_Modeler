@@ -100,7 +100,8 @@ void integrate_isolated_nodes_near_edges(ReferenceGraphStageSnapshot& graph,
     for(std::size_t node=0;node<graph.nodes.size();++node)
     {
         if(!adjacent[node].empty() ||
-           node>=graph.protected_nodes.size() || graph.protected_nodes[node])
+           node>=graph.node_roles.size() ||
+           reference_node_protected_from_optimization(graph.node_roles[node]))
             continue;
 
         std::optional<std::pair<ReferenceGraphEdge,OrphanEdgeInsertion>> best;
@@ -383,7 +384,11 @@ bool contract_fresh(ReferenceGraphStageSnapshot& graph,
     std::vector<bool> selected(graph.nodes.size(),false);
     for(const auto index:members)
     {
-        if(index>=graph.nodes.size() || graph.protected_nodes[index]) return false;
+        // Certified loop members are eligible only for this explicit Collapse.
+        // State and previously created representatives cannot be consumed.
+        if(index>=graph.nodes.size() ||
+           index>=graph.node_roles.size() ||
+           graph.node_roles[index]!=ReferenceNodeRole::Reference) return false;
         selected[index]=true;
     }
     std::set<std::size_t> boundary;
@@ -410,12 +415,12 @@ bool contract_fresh(ReferenceGraphStageSnapshot& graph,
         remap[old]=result.nodes.size();
         result.nodes.push_back(graph.nodes[old]);
         result.original_indices.push_back(graph.original_indices[old]);
-        result.protected_nodes.push_back(graph.protected_nodes[old]);
+        result.node_roles.push_back(graph.node_roles[old]);
     }
     const std::size_t rep=result.nodes.size();
     result.nodes.push_back(representative);
     result.original_indices.push_back(std::nullopt);
-    result.protected_nodes.push_back(true);
+    result.node_roles.push_back(ReferenceNodeRole::CollapseRepresentative);
     for(const auto& edge:graph.edges)
     {
         if(removed[edge.first] || removed[edge.second]) continue;
@@ -494,7 +499,6 @@ ReferenceGraphStageSnapshot build_collapsed(const CellData& cell,
         std::set<std::size_t> certified(candidate.vertices.begin(),candidate.vertices.end());
         certified.insert(candidate.visible_neighbors.begin(),candidate.visible_neighbors.end());
         ReferenceGraphStageSnapshot attempt=graph;
-        for(const auto index:members) attempt.protected_nodes[index]=false;
         if(contract_fresh(attempt,cell,members,candidate.representative,certified,tolerance))
         {
             graph=std::move(attempt);
@@ -539,7 +543,8 @@ std::optional<DegreeTwoCandidate> degree_two_candidate(
     std::size_t middle)
 {
     if(middle>=graph.nodes.size() || !alive[middle] ||
-       middle>=graph.protected_nodes.size() || graph.protected_nodes[middle] ||
+       middle>=graph.node_roles.size() ||
+       reference_node_protected_from_optimization(graph.node_roles[middle]) ||
        links[middle].size()!=2) return std::nullopt;
 
     auto iterator=links[middle].begin();
@@ -627,7 +632,7 @@ ReferenceGraphStageSnapshot build_optimized(const CellData& cell,
         remap[old]=result.nodes.size();
         result.nodes.push_back(graph.nodes[old]);
         result.original_indices.push_back(graph.original_indices[old]);
-        result.protected_nodes.push_back(graph.protected_nodes[old]);
+        result.node_roles.push_back(graph.node_roles[old]);
     }
     for(std::size_t first=0;first<count;++first)
     {
@@ -719,7 +724,7 @@ ReferenceConnectivityRepairResult repair_connectivity(
             possible.original_indices.push_back(
                 i<source.original_indices.size() ? source.original_indices[i] :
                 std::nullopt);
-            possible.protected_nodes.push_back(true);
+            possible.node_roles.push_back(ReferenceNodeRole::RecoveredReference);
         }
     };
     collect(before);
@@ -778,7 +783,7 @@ ReferenceConnectivityRepairResult repair_connectivity(
         if(!restore[i]) continue;
         result.graph.nodes.push_back(candidates.nodes[i]);
         result.graph.original_indices.push_back(candidates.original_indices[i]);
-        result.graph.protected_nodes.push_back(true);
+        result.graph.node_roles.push_back(ReferenceNodeRole::RecoveredReference);
         ++result.added_nodes;
     }
     if(result.added_nodes)
@@ -838,7 +843,7 @@ ReferenceGraphPipeline build_state_reference_graph_pipeline(
     ReferenceGraphPipeline result;
     result.before.nodes.push_back({state_point,0.0});
     result.before.original_indices.push_back(0);
-    result.before.protected_nodes.push_back(true);
+    result.before.node_roles.push_back(ReferenceNodeRole::State);
     result.collapsed=result.before;
     result.optimized=result.before;
     result.los_graph=result.optimized;
@@ -862,19 +867,13 @@ ReferenceGraphPipeline build_reference_graph_pipeline(
     result.before.nodes=before.nodes;
     result.before.edges=before.edges;
     result.before.original_indices.reserve(before.nodes.size());
-    result.before.protected_nodes.assign(before.nodes.size(),false);
+    result.before.node_roles.assign(before.nodes.size(),ReferenceNodeRole::Reference);
     for(std::size_t i=0;i<before.nodes.size();++i) result.before.original_indices.push_back(i);
     canonicalize_edges(result.before);
-    // Preserve the State and the loop vertices themselves. A node merely
-    // visible from a certified loop representative is not part of that loop
-    // and must remain eligible for ordinary degree-2 optimization.
-    result.before.protected_nodes[*before.state_node_index]=true;
-    for(const auto& candidate:before.loop_candidates)
-    {
-        for(const auto index:candidate.vertices)
-            if(index<result.before.nodes.size())
-                result.before.protected_nodes[index]=true;
-    }
+    // State is the sole hard-protected BEFORE node. Loop vertices and visible
+    // neighbors belong to the Collapse certificate, not the next Stage's
+    // optimization policy. A failed/unused certificate imposes no protection.
+    result.before.node_roles[*before.state_node_index]=ReferenceNodeRole::State;
     result.collapsed=build_collapsed(cell,before,result.before,tolerance);
     result.optimized=build_optimized(cell,result.collapsed,tolerance);
 

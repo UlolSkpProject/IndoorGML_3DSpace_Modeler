@@ -246,19 +246,30 @@ module ULOL
             end
             [first, second].freeze
           end.freeze
-          protected_nodes = if graph[:protected_nodes].nil?
-                              # Keep Ruby reloads compatible with a native module
-                              # that was already loaded before this field existed.
-                              Array.new(nodes.length, false).freeze
-                            else
-                              flags = Array(graph[:protected_nodes])
-                              unless flags.length == nodes.length &&
-                                     flags.all? { |flag| flag == true || flag == false }
-                                raise ProtocolError, 'Native Reference Graph protected-node flags are invalid'
-                              end
-                              flags.freeze
-                            end
-          { nodes: nodes, edges: edges, protected_nodes: protected_nodes }.freeze
+          node_roles = if graph[:node_roles]
+                         roles = Array(graph[:node_roles]).map(&:to_sym)
+                         valid_roles = %i[
+                           reference state collapse_representative recovered_reference
+                         ]
+                         unless roles.length == nodes.length &&
+                                roles.all? { |role| valid_roles.include?(role) }
+                           raise ProtocolError, 'Native Reference Graph node roles are invalid'
+                         end
+                         roles.freeze
+                       elsif graph[:protected_nodes]
+                         # A loaded extension cannot be unloaded from SketchUp.
+                         # Preserve debug rendering across a Ruby-only reload of
+                         # the pre-role native API.
+                         flags = Array(graph[:protected_nodes])
+                         unless flags.length == nodes.length &&
+                                flags.all? { |flag| flag == true || flag == false }
+                           raise ProtocolError, 'Native Reference Graph protected-node flags are invalid'
+                         end
+                         flags.map { |flag| flag ? :legacy_protected : :reference }.freeze
+                       else
+                         Array.new(nodes.length, :reference).freeze
+                       end
+          { nodes: nodes, edges: edges, node_roles: node_roles }.freeze
         end
 
         # All persistent Native Reference graph coordinates are CellSpace Local.

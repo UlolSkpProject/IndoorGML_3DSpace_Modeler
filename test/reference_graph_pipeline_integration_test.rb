@@ -48,7 +48,7 @@ class ReferenceGraphPipelineIntegrationTest < Minitest::Test
       {
         nodes: [[0.0, 0.0, 1.0], [1.0, 0.0, 1.0]].freeze,
         edges: [[0, 1].freeze].freeze,
-        protected_nodes: [false, true].freeze,
+        node_roles: %i[reference state].freeze,
         requested_stage: stage
       }.freeze
     end
@@ -77,7 +77,7 @@ class ReferenceGraphPipelineIntegrationTest < Minitest::Test
                  lifecycle.debug_reference_points_by_kind.fetch(4)
     assert_equal [{ cell_id: 'cell-1', point: graph[:nodes][1][:point] }],
                  lifecycle.debug_reference_points_by_kind.fetch(5)
-    assert_equal [false, true], graph[:nodes].map { |node| node[:protected] }
+    assert_equal %i[reference state], graph[:nodes].map { |node| node[:role] }
     refute graph[:nodes].any? { |node| node.key?(:radius) }
   end
 

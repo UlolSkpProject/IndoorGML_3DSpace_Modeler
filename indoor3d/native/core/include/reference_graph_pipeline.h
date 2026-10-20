@@ -22,12 +22,32 @@ enum class ReferenceGraphStage
     ShortPathGraph // Derived, read-only view of the State-rooted Dijkstra tree.
 };
 
+// Node identity/provenance, not a blanket protection flag. In particular,
+// LoopCollapseCandidate vertices and visible_neighbors are certificates only.
+enum class ReferenceNodeRole
+{
+    Reference,
+    State,
+    CollapseRepresentative,
+    RecoveredReference
+};
+
+// Protection belongs to the operation, not the lifetime of every reference.
+// State is immutable; a collapse representative remains fixed through
+// OPTIMIZED until all LOS edges are independently rebuilt.
+inline bool reference_node_protected_from_optimization(ReferenceNodeRole role)
+{
+    return role == ReferenceNodeRole::State ||
+           role == ReferenceNodeRole::CollapseRepresentative;
+}
+
 struct ReferenceGraphStageSnapshot
 {
     std::vector<ReferenceGraphNode> nodes;
     std::vector<ReferenceGraphEdge> edges;
     std::vector<std::optional<std::size_t>> original_indices;
-    std::vector<bool> protected_nodes;
+    // Aligned with nodes. The role survives Stage snapshots and remapping.
+    std::vector<ReferenceNodeRole> node_roles;
 };
 
 struct ReferenceGraphShortestPathTree

@@ -53,8 +53,8 @@ class ReferencePointProtectedOverlayTest < Minitest::Test
         'A' => {
           cell_id: 'A',
           nodes: [
-            { point: p(1, 1), protected: false }.freeze,
-            { point: p(2, 2), protected: true }.freeze
+            { point: p(1, 1), role: :reference }.freeze,
+            { point: p(2, 2), role: :collapse_representative }.freeze
           ].freeze,
           edges: [[0, 1].freeze].freeze
         }.freeze
@@ -109,7 +109,8 @@ class ReferencePointProtectedOverlayTest < Minitest::Test
     assert_equal 1, view.points.length
     assert_equal 4, view.points.last[:style]
     assert_equal 14, view.points.last[:size]
-    assert_equal [235, 20, 145], view.points.last[:color].values_at(:red, :green, :blue)
+    color = view.points.last[:color]
+    assert_equal [235, 20, 145], [color.red, color.green, color.blue]
     assert_equal [p(3, 1)], view.points.last[:points]
   end
 

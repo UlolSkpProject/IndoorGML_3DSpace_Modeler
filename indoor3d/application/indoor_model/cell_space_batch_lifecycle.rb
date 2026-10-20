@@ -332,7 +332,7 @@ module ULOL
                 point = node[:point]
                 next unless point
 
-                kind = node[:protected] ? 5 : 4
+                kind = %i[state collapse_representative legacy_protected].include?(node[:role]) ? 5 : 4
                 points_by_kind[kind] ||= []
                 points_by_kind[kind] << {
                   cell_id: graph[:cell_id], point: point
@@ -358,11 +358,11 @@ module ULOL
               graph = NativeAdjacencyBridge.reference_graph(cell_space.id, selected)
               next unless graph
 
-              protected_nodes = Array(graph[:protected_nodes])
+              node_roles = Array(graph[:node_roles])
               nodes = Array(graph[:nodes]).each_with_index.map do |coordinates, index|
                 {
                   point: Geom::Point3d.new(*coordinates),
-                  protected: protected_nodes[index] == true
+                  role: node_roles[index] || :reference
                 }.freeze
               end.freeze
               snapshots[cell_space.id] = {

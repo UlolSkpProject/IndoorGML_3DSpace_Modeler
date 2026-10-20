@@ -417,7 +417,7 @@ void test_reference_graph_routes_from_nonzero_state_node()
     require(pipeline.state_node_index==1 &&
             pipeline.shortest_path_tree.root==1,
             "Native graph and shortest-path tree must use a nonzero State index");
-    require(pipeline.before.protected_nodes[1] &&
+    require(pipeline.before.node_roles[1]==ReferenceNodeRole::State &&
             pipeline.shortest_path_tree.distances[1]==0.0 &&
             std::isfinite(pipeline.shortest_path_tree.distances[0]),
             "Nonzero State must remain protected and reach the other node");
