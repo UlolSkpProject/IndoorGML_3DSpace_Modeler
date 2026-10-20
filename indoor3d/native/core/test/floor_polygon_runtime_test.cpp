@@ -469,6 +469,7 @@ void test_waypoint_gateway_uses_los_and_total_state_cost()
     pipeline.optimized.nodes={
         {state,0.0},{near_gateway,0.0},{far_gateway,0.0}
     };
+    pipeline.los_graph=pipeline.optimized;
     pipeline.shortest_path_tree.root=0;
     pipeline.shortest_path_tree.distances={0.0,80.0,25.0};
     pipeline.shortest_path_tree.previous={std::nullopt,0,0};
