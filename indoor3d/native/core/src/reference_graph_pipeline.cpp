@@ -675,9 +675,29 @@ ReferenceConnectivityRepairResult repair_connectivity(
 
     std::vector<bool> restore(candidates.nodes.size(),false);
     std::vector<ReferenceGraphEdge> selected_edges;
-    for(std::size_t target=0;target<original_count;++target)
+    // Every disconnected component needs only one new validated gateway.
+    // All other original nodes in that component remain connected through
+    // their existing OPTIMIZED edges; do not add redundant LOS shortcuts.
+    std::vector<bool> component_seen(original_count,false);
+    for(std::size_t start=0;start<original_count;++start)
     {
-        if(reached[target] || std::get<0>(best[target])==no_cost) continue;
+        if(reached[start] || component_seen[start]) continue;
+        std::vector<std::size_t> component{start};
+        component_seen[start]=true;
+        for(std::size_t head=0;head<component.size();++head)
+            for(const auto other:existing_adj[component[head]])
+            {
+                if(component_seen[other]) continue;
+                component_seen[other]=true;
+                component.push_back(other);
+            }
+        std::size_t target=original_count;
+        for(const auto index:component)
+            if(std::get<0>(best[index])!=no_cost &&
+               (target==original_count || best[index]<best[target]))
+                target=index;
+        if(target==original_count) continue;
+
         std::size_t current=target;
         for(std::size_t step=0;step<candidates.nodes.size();++step)
         {
