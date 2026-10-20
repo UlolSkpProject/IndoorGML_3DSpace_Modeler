@@ -17,7 +17,7 @@ extern "C" INDOOR_GML_NATIVE_EXPORT void Init_indoor_gml_native()
 
     rb_define_singleton_method(native_module, "start_state_check", adjacency_native_start_state_check, 0);
     rb_define_singleton_method(native_module, "get_state_result_bytes", adjacency_native_get_state_result_bytes, 0);
-    rb_define_singleton_method(native_module, "commit_reference_graph_batch", adjacency_native_commit_reference_graph_batch, 0);
+    rb_define_singleton_method(native_module, "commit_reference_graph_batch", adjacency_native_commit_reference_graph_batch, 1);
     // Phase 0 API: stable Reference/State result contract. Internally
     // delegates to the existing State pipeline until phases 9-10.
     rb_define_singleton_method(native_module, "start_reference_check", adjacency_native_start_state_check, 0);
