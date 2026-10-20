@@ -251,6 +251,37 @@ module ULOL
 
         # All persistent Native Reference graph coordinates are CellSpace Local.
         # Waypoints enter and paths leave Ruby in the common Primal Root-Local frame.
+        # Rigid-only contract: graph radii, LOS tolerances and Dijkstra costs
+        # were computed in Euclidean units and cannot survive nonuniform scale.
+        def require_rigid_reference_frame!(transform)
+          values = transform.to_a.map(&:to_f)
+          unless values.length == 16 && values.all?(&:finite?)
+            raise ProtocolError, 'Reference CellSpace transformation is not finite'
+          end
+          axes = [[values[0], values[1], values[2]],
+                  [values[4], values[5], values[6]],
+                  [values[8], values[9], values[10]]]
+          dot = ->(a, b) { a.zip(b).sum { |x, y| x * y } }
+          unless axes.all? { |axis| (dot.call(axis, axis) - 1.0).abs <= 1.0e-6 } &&
+                 dot.call(axes[0], axes[1]).abs <= 1.0e-6 &&
+                 dot.call(axes[1], axes[2]).abs <= 1.0e-6 &&
+                 dot.call(axes[2], axes[0]).abs <= 1.0e-6 &&
+                 values.values_at(3, 7, 11).all? { |v| v.abs <= 1.0e-8 } &&
+                 (values[15] - 1.0).abs <= 1.0e-8
+            raise ProtocolError, 'Scaled/sheared CellSpace cannot reuse Reference path distances'
+          end
+          a, b, c = axes
+          determinant = dot.call(a, [
+            b[1] * c[2] - b[2] * c[1],
+            b[2] * c[0] - b[0] * c[2],
+            b[0] * c[1] - b[1] * c[0]
+          ])
+          unless (determinant - 1.0).abs <= 1.0e-6
+            raise ProtocolError, 'Reference CellSpace transform must preserve orientation'
+          end
+          transform
+        end
+
         def reference_cell_transforms(first_cell_id, second_cell_id, transformation1, transformation2)
           model = IndoorModel.current if defined?(IndoorModel)
           first = transformation1 || model&.reference_cell_space_transformation(first_cell_id)
@@ -258,7 +289,8 @@ module ULOL
           unless first.is_a?(Geom::Transformation) && second.is_a?(Geom::Transformation)
             raise ProtocolError, 'Reference CellSpace transform unavailable'
           end
-          [first, second]
+          [require_rigid_reference_frame!(first),
+           require_rigid_reference_frame!(second)]
         end
 
         def local_reference_waypoints(waypoint, transforms)
@@ -439,6 +471,7 @@ module ULOL
             unless transform.is_a?(Geom::Transformation)
               raise ProtocolError, 'Post-State CellSpace transform is missing'
             end
+            require_rigid_reference_frame!(transform)
             matrix = transform.inverse.to_a.map(&:to_f)
             unless matrix.length == 16 && matrix.all?(&:finite?)
               raise ProtocolError, 'Post-State CellSpace frame is invalid'
