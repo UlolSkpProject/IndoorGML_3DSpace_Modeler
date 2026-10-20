@@ -13,7 +13,7 @@
 namespace IndoorGMLAdjacencyNative
 {
 // TEMPORARY TEST SWITCH. True: OPTIMIZED (validated existing edges) -> REPAIR.
-// False: OPTIMIZED -> FULL LOS -> REPAIR (previous production behavior).
+// False: OPTIMIZED -> FULL LOS -> REPAIR (normal stage ordering).
 // This is deliberately compile-time so the original path is preserved.
 inline constexpr bool SKIP_PRE_REPAIR_FULL_LOS_FOR_TEST = true;
 
@@ -22,7 +22,7 @@ enum class ReferenceGraphStage
     Before,
     Collapsed,
     Optimized,
-    LosGraph, // All unobstructed pairs from OPTIMIZED nodes, ignoring its edges.
+    LosGraph, // Full LOS or validated sparse OPTIMIZED input (temporary test mode).
     ConnectivityRepair, // LOS graph augmented with proven intermediate references.
     ShortPathGraph // Derived, read-only view of the State-rooted Dijkstra tree.
 };
