@@ -15,10 +15,10 @@ namespace IndoorGMLAdjacencyNative
 enum class ReferenceGraphStage
 {
     Before,
-    After,
     Collapsed,
     Optimized,
     LosGraph, // All unobstructed pairs from OPTIMIZED nodes, ignoring its edges.
+    ConnectivityRepair, // LOS graph augmented with proven intermediate references.
     ShortPathGraph // Derived, read-only view of the State-rooted Dijkstra tree.
 };
 
@@ -40,12 +40,12 @@ struct ReferenceGraphShortestPathTree
 struct ReferenceGraphPipeline
 {
     ReferenceGraphStageSnapshot before;
-    ReferenceGraphStageSnapshot after;
     ReferenceGraphStageSnapshot collapsed;
     ReferenceGraphStageSnapshot optimized;
     ReferenceGraphStageSnapshot los_graph;
+    ReferenceGraphStageSnapshot repaired_graph;
     std::size_t state_node_index = 0;
-    std::size_t optimized_bridge_count = 0; // OPTIMIZED bridges; not used in LOS routing.
+    std::size_t recovered_node_count = 0; // Additional proven interior references.
     std::size_t unreachable_node_count = 0; // Unreachable in LOS_GRAPH's State tree.
     ReferenceGraphShortestPathTree shortest_path_tree;
     // Reusable Solid queries for waypoint routing after the geometry batch is cleared.
@@ -55,9 +55,9 @@ struct ReferenceGraphPipeline
     bool legacy_state_only = false;
 };
 
-// OPTIMIZED reductions remain available for debugging. Routing uses an
-// independent Full LOS graph formed from OPTIMIZED nodes, then a State-rooted
-// shortest-path tree. Radius never appears in the public Ruby snapshots.
+// BEFORE -> COLLAPSED -> OPTIMIZED -> LOS_GRAPH -> CONNECTIVITY_REPAIR ->
+// State-rooted Dijkstra. Routing uses the repaired graph and never inherits
+// unvalidated OPTIMIZED edges. Radius is not exposed in Ruby snapshots.
 ReferenceGraphPipeline build_reference_graph_pipeline(
     const CellData& cell,
     const ReferenceGraphDebug& before,
@@ -78,7 +78,7 @@ const ReferenceGraphStageSnapshot& reference_graph_stage(
     ReferenceGraphStage stage
 );
 
-// Display-only snapshot: LOS_GRAPH nodes with only the State-rooted shortest-
+// Display-only snapshot: repaired graph nodes with only the State-rooted shortest-
 // path predecessor edges. Disconnected nodes remain as isolated markers.
 // Reuses the already baked tree; never recomputes graph topology or routes.
 ReferenceGraphStageSnapshot reference_short_path_graph(
@@ -93,7 +93,7 @@ void finalize_reference_graph_local(
     const std::array<double,16>& root_to_local
 );
 
-// Closest LOS_GRAPH node that remains reachable from State. The raw shared
+// Closest final repaired-graph node that remains reachable from State. The raw shared
 // Face centroid is used as the query before waypoint Z is adjusted.
 std::optional<Vec3> closest_reachable_reference_point(
     const ReferenceGraphPipeline& pipeline,
