@@ -17,12 +17,15 @@ module ULOL
           @transform_context = transform_context
           @render_states = []
           @render_state_points = []
+          @render_state_groups = {}
+          @cell_transform_keys = {}
+          @primal_transform_key = nil
           @render_state_points_dirty = true
           clear_extent_cache
         end
 
         def draw(view, state_radius_scale: 1.0)
-          rebuild_state_points if @render_state_points_dirty
+          prepare_state_points
           return if @render_state_points.empty?
 
           view.draw_points(
@@ -34,8 +37,11 @@ module ULOL
         end
 
         def clear_cache
-          @render_states.clear
-          @render_state_points.clear
+          @render_states = []
+          @render_state_points = []
+          @render_state_groups = {}
+          @cell_transform_keys = {}
+          @primal_transform_key = nil
           @render_state_points_dirty = true
           clear_extent_cache
         end
@@ -51,7 +57,7 @@ module ULOL
         end
 
         def overlay_state_extent_points(state_radius_scale:)
-          rebuild_state_points if @render_state_points_dirty
+          prepare_state_points
           return [] if @render_state_points.empty?
 
           scale = state_radius_scale.to_f
@@ -96,9 +102,19 @@ module ULOL
 
         private
 
+        def prepare_state_points
+          if @render_state_points_dirty
+            rebuild_state_points
+          else
+            refresh_selected_state_points
+          end
+        end
+
         def rebuild_state_points
           @render_states.clear
           @render_state_points.clear
+          @render_state_groups.clear
+          @cell_transform_keys.clear
           clear_extent_cache
 
           root_local_points = []
@@ -108,6 +124,7 @@ module ULOL
 
             @render_states << state
             root_local_points << state_root_local_point(state)
+            remember_state_group(state, @render_states.length - 1)
           end
 
           if @transform_context.respond_to?(:overlay_render_points)
@@ -117,7 +134,101 @@ module ULOL
               @render_state_points << @transform_context.overlay_render_point(point)
             end
           end
+          @primal_transform_key = current_primal_transform_key
+          @render_state_groups.each_value do |entry|
+            @cell_transform_keys[entry[:group].object_id] = current_cell_transform_key(entry[:cell])
+          end
           @render_state_points_dirty = false
+        end
+
+        # State points normally remain cached. While the user is transforming a
+        # selected CellSpace (or the PrimalSpaceFeatures container), compare only
+        # the relevant transform fingerprints and refresh the affected points.
+        # Observer/topology invalidation remains the fallback for unselected and
+        # programmatic changes.
+        def refresh_selected_state_points
+          selected_entities = current_selection_entities
+          return if selected_entities.empty?
+
+          primal_group = @indoor_model.primal_group if @indoor_model.respond_to?(:primal_group)
+          if primal_group && selected_entities.any? { |entity| entity.equal?(primal_group) }
+            current_key = current_primal_transform_key
+            if current_key != @primal_transform_key
+              rebuild_state_points
+              return
+            end
+          end
+
+          points_changed = false
+          selected_entities.each do |entity|
+            entry = @render_state_groups[entity.object_id]
+            next unless entry && entry[:group].equal?(entity)
+
+            group_key = entity.object_id
+            current_key = current_cell_transform_key(entry[:cell])
+            next if current_key == @cell_transform_keys[group_key]
+
+            entry[:indices].each do |index|
+              @render_state_points[index] = overlay_state_point(@render_states[index])
+            end
+            @cell_transform_keys[group_key] = current_key
+            points_changed = true
+          end
+          clear_extent_cache if points_changed
+        rescue StandardError
+          # Rendering should keep the last valid cache if selection inspection
+          # happens during an entity lifecycle transition.
+          nil
+        end
+
+        def remember_state_group(state, index)
+          cell = state&.duality_cell
+          group = cell&.valid_sketchup_group
+          return unless group
+
+          entry = (@render_state_groups[group.object_id] ||= {
+            group: group,
+            cell: cell,
+            indices: []
+          })
+          entry[:indices] << index
+        rescue StandardError
+          nil
+        end
+
+        def current_selection_entities
+          model = @indoor_model.model if @indoor_model.respond_to?(:model)
+          selection = model&.selection
+          selection ? selection.to_a : []
+        rescue StandardError
+          []
+        end
+
+        def current_primal_transform_key
+          if @transform_context.respond_to?(:overlay_render_context_cache_key)
+            @transform_context.overlay_render_context_cache_key
+          else
+            transformation_key(@indoor_model.primal_group&.transformation)
+          end
+        rescue StandardError
+          nil
+        end
+
+        def current_cell_transform_key(cell)
+          transformation = if @indoor_model.respond_to?(:reference_cell_space_transformation)
+                             @indoor_model.reference_cell_space_transformation(cell.id)
+                           else
+                             cell&.valid_sketchup_group&.transformation
+                           end
+          [current_primal_transform_key, transformation_key(transformation)]
+        rescue StandardError
+          nil
+        end
+
+        def transformation_key(transformation)
+          return nil unless transformation.respond_to?(:to_a)
+
+          transformation.to_a.map { |value| value.to_f.round(6) }
         end
 
         def state_root_local_point(state)

@@ -21,9 +21,10 @@ module ULOL
 end
 
 require_relative '../indoor3d/ui/overlays/space_overlay'
+require_relative '../indoor3d/ui/overlays/dual_graph_space_overlay'
 
 class ReferenceLocalOverlayFrameTest < Minitest::Test
-  Overlay = ULOL::Indoor3DGmlModeler::IndoorCore::SpaceOverlay
+  Overlay = ULOL::Indoor3DGmlModeler::IndoorCore::DualGraphSpaceOverlay
   Point = Struct.new(:x, :y, :z) do
     def transform(frame)
       frame.apply(self)
@@ -69,15 +70,15 @@ class ReferenceLocalOverlayFrameTest < Minitest::Test
     overlay.instance_variable_set(:@indoor_model, model)
     local_point = Point.new(1, 0, 5)
 
-    initial = overlay.send(:overlay_cell_reference_points, [local_point], 'A').first
+    initial = overlay.overlay_cell_reference_points([local_point], 'A').first
     assert_in_delta 111, initial.x, 1e-9
 
     model.cell_frames['A'] = Frame.new(0, 20, 0)
-    moved = overlay.send(:overlay_cell_reference_points, [local_point], 'A').first
+    moved = overlay.overlay_cell_reference_points([local_point], 'A').first
     assert_in_delta 121, moved.x, 1e-9
 
     primal.world = Frame.new(0, 150, 0)
-    primal_moved = overlay.send(:overlay_cell_reference_points, [local_point], 'A').first
+    primal_moved = overlay.overlay_cell_reference_points([local_point], 'A').first
     assert_in_delta 171, primal_moved.x, 1e-9
     assert_in_delta 50, primal_moved.x - moved.x, 1e-9
   end
@@ -92,12 +93,12 @@ class ReferenceLocalOverlayFrameTest < Minitest::Test
     overlay.instance_variable_set(:@indoor_model, model)
     source = Point.new(1, 0, 5)
 
-    a = overlay.send(:overlay_cell_reference_points, [source], 'A').first
-    b = overlay.send(:overlay_cell_reference_points, [source], 'B').first
+    a = overlay.overlay_cell_reference_points([source], 'A').first
+    b = overlay.overlay_cell_reference_points([source], 'B').first
     assert_in_delta 110, a.x, 1e-9
     assert_in_delta 1, a.y, 1e-9
     assert_in_delta 141, b.x, 1e-9
     assert_in_delta 0, b.y, 1e-9
-    assert_equal [], overlay.send(:overlay_cell_reference_points, [source], 'missing')
+    assert_equal [], overlay.overlay_cell_reference_points([source], 'missing')
   end
 end
