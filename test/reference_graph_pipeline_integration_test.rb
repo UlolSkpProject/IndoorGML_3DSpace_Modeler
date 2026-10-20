@@ -71,6 +71,10 @@ class ReferenceGraphPipelineIntegrationTest < Minitest::Test
     Mode.instance_variable_set(:@mode, :after)
     graph = lifecycle.debug_reference_graphs.fetch(0)
     assert_equal [[0, 1]], graph[:edges]
+    assert_equal 'cell-1', graph[:cell_id]
+    assert_equal [{ cell_id: 'cell-1', point: graph[:nodes][0][:point] },
+                  { cell_id: 'cell-1', point: graph[:nodes][1][:point] }],
+                 lifecycle.debug_reference_points_by_kind.fetch(4)
     assert graph[:nodes].all? { |node| node.keys == [:point] }
     refute graph[:nodes].any? { |node| node.key?(:radius) }
   end
