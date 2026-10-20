@@ -483,6 +483,18 @@ void test_waypoint_gateway_uses_los_and_total_state_cost()
                 pipeline,Vec3{50,50,z}).empty(),
             "Waypoint outside the CellSpace without visible gateways must fail closed");
 }
+void test_legacy_state_only_route_survives_invalid_solid()
+{
+    CellData legacy_cell;
+    const Vec3 state{1,2,3};
+    const auto pipeline=build_state_reference_graph_pipeline(
+        state,legacy_cell,0.001);
+    require(pipeline.legacy_state_only && !pipeline.waypoint_solid->valid(),
+            "Legacy fallback fixture must retain its explicit State-only route");
+    const auto path=reference_transition_polyline(pipeline,Vec3{4,5,6});
+    require(path.size()==2 && near(path[0].x,1.0) && near(path[1].x,4.0),
+            "Invalid legacy Solid must not regress the prior State-only route");
+}
 void test_shared_boundary_midpoint_without_matching_tessellation()
 {
     const auto left=normal_face(rectangle(0,0,4,4));
@@ -612,6 +624,7 @@ int main()
     test_before_selects_nearest_valid_seed_and_retains_orphan_centroids();
     test_reference_graph_routes_from_nonzero_state_node();
     test_waypoint_gateway_uses_los_and_total_state_cost();
+    test_legacy_state_only_route_survives_invalid_solid();
     test_shared_boundary_midpoint_without_matching_tessellation();
     test_shared_edge_with_mismatched_vertex_splits_merges_once();
     test_stair_uses_same_first_reference_policy();
