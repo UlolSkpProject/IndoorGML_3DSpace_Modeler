@@ -861,13 +861,16 @@ void test_full_los_connects_visible_components_to_state()
         before.state_node_index=0;
 
         const auto pipeline=build_reference_graph_pipeline(cell,before,0.001);
+        const std::size_t expected_input_edges=
+            SKIP_PRE_REPAIR_FULL_LOS_FOR_TEST ? 2 : 6;
         require(pipeline.optimized.nodes.size()==4 &&
                 pipeline.optimized.edges.size()==2 &&
-                pipeline.los_graph.edges.size()==6 &&
+                pipeline.los_graph.edges.size()==expected_input_edges &&
                 pipeline.repaired_graph.nodes.size()==4 &&
+                pipeline.repaired_graph.edges.size()>=3 &&
                 pipeline.recovered_node_count==0 &&
                 pipeline.unreachable_node_count==0,
-                "Full LOS must connect visible components without inserting nodes");
+                "Sparse repair must connect visible components without unnecessary nodes");
         require(std::all_of(
                     pipeline.shortest_path_tree.distances.begin(),
                     pipeline.shortest_path_tree.distances.end(),
@@ -893,21 +896,59 @@ void test_full_los_graph_ignores_optimized_edges_and_uses_all_visible_pairs()
     require(result.optimized.nodes.size()==4 &&
             result.optimized.edges.size()==2 &&
             result.los_graph.nodes.size()==4 &&
-            result.los_graph.edges.size()==6,
-            "Full LOS must test all node pairs, independent of OPTIMIZED edges or radii");
+            result.los_graph.edges.size()==
+                (SKIP_PRE_REPAIR_FULL_LOS_FOR_TEST ? 2u : 6u) &&
+            result.repaired_graph.edges.size()==
+                (SKIP_PRE_REPAIR_FULL_LOS_FOR_TEST ? 3u : 6u),
+            "Sparse input must retain only validated existing edges and repair the disconnected component");
     require(result.shortest_path_tree.root==result.state_node_index &&
             result.unreachable_node_count==0,
             "Full LOS must preserve the existing State and find every reachable node");
     for(std::size_t i=1;i<4;++i)
-    {
         require(result.shortest_path_tree.previous[i] &&
-                *result.shortest_path_tree.previous[i]==result.state_node_index,
-                "Full LOS Dijkstra must choose direct State edges when they are shortest");
-    }
+                std::isfinite(result.shortest_path_tree.distances[i]),
+                "Dijkstra must reach all nodes through verified sparse or full LOS edges");
+    if(!SKIP_PRE_REPAIR_FULL_LOS_FOR_TEST)
+        for(std::size_t i=1;i<4;++i)
+            require(*result.shortest_path_tree.previous[i]==result.state_node_index,
+                    "Full LOS Dijkstra should select direct State shortcuts");
     const auto tree=reference_short_path_graph(result);
     require(tree.nodes.size()==4 && tree.edges.size()==3 &&
-            result.los_graph.edges.size()==6,
-            "The short-path view must show the tree, without removing full LOS choices");
+            result.repaired_graph.nodes.size()==4,
+            "Final path tree must use the repaired routing graph");
+}
+
+void test_sparse_optimized_routing_skips_full_los_on_connected_graph()
+{
+    CellData room=tall_room(unit_box_cell());
+    room.category=CellSpaceCategory::Room;
+    const double z=1000.0/25.4;
+    ReferenceGraphDebug before;
+    before.nodes={
+        {{0.1,0.1,z},0.0},{{0.5,0.7,z},0.0},{{0.9,0.1,z},0.0}
+    };
+    before.edges={{0,1},{1,2}};
+    before.state_node_index=0;
+
+    const auto result=build_reference_graph_pipeline(room,before,0.001);
+    require(result.optimized.nodes.size()==3 &&
+            result.optimized.edges.size()==2,
+            "A genuine corner must survive OPTIMIZED");
+    if(SKIP_PRE_REPAIR_FULL_LOS_FOR_TEST)
+    {
+        require(result.los_graph.edges.size()==2 &&
+                result.repaired_graph.edges.size()==2 &&
+                result.recovered_node_count==0 &&
+                result.shortest_path_tree.previous[2] &&
+                *result.shortest_path_tree.previous[2]==1,
+                "Connected OPTIMIZED routes must remain sparse without new LOS shortcuts");
+    }
+    else
+    {
+        require(result.los_graph.edges.size()==3 &&
+                result.repaired_graph.edges.size()==3,
+                "Switch OFF must restore all-pairs Full LOS routing");
+    }
 }
 
 void test_connectivity_repair_restores_two_hole_detour_nodes()
@@ -1847,6 +1888,7 @@ int main()
     test_optimized_degree_two_angle_threshold_and_priority_queue();
     test_full_los_connects_visible_components_to_state();
     test_full_los_graph_ignores_optimized_edges_and_uses_all_visible_pairs();
+    test_sparse_optimized_routing_skips_full_los_on_connected_graph();
     test_connectivity_repair_restores_two_hole_detour_nodes();
     test_full_los_graph_rejects_inherited_edge_through_hole();
     test_disconnected_los_does_not_bridge_through_hole();
