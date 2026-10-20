@@ -249,58 +249,85 @@ module ULOL
           { nodes: nodes, edges: edges }.freeze
         end
 
-        # Returns one closest reachable OPTIMIZED reference for each CellSpace.
-        # Only two points cross the Ruby boundary; the full graphs remain Native.
-        def reference_waypoint_anchors(first_cell_id, second_cell_id, waypoint)
-          raise ProtocolError, 'Native Reference Waypoint Anchor API unavailable' unless
-            available? && native.respond_to?(:get_reference_waypoint_anchors)
-          coordinates = waypoint.respond_to?(:to_a) ? Array(waypoint.to_a) : Array(waypoint)
-          unless coordinates.length == 3 &&
-                 coordinates.all? { |number| number.is_a?(Numeric) && number.finite? }
-            raise ProtocolError, 'Reference waypoint is invalid'
+        # All persistent Native Reference graph coordinates are CellSpace Local.
+        # Waypoints enter and paths leave Ruby in the common Primal Root-Local frame.
+        def reference_cell_transforms(first_cell_id, second_cell_id, transformation1, transformation2)
+          model = IndoorModel.current if defined?(IndoorModel)
+          first = transformation1 || model&.reference_cell_space_transformation(first_cell_id)
+          second = transformation2 || model&.reference_cell_space_transformation(second_cell_id)
+          unless first.is_a?(Geom::Transformation) && second.is_a?(Geom::Transformation)
+            raise ProtocolError, 'Reference CellSpace transform unavailable'
           end
-          result = native.get_reference_waypoint_anchors(
-            first_cell_id.to_s, second_cell_id.to_s,
-            coordinates.map(&:to_f).pack('E*')
-          )
-          return nil if result.nil?
-
-          anchors = Array(result).map do |entry|
-            point = Array(entry)
-            unless point.length == 3 && point.all? { |number| number.is_a?(Numeric) && number.finite? }
-              raise ProtocolError, 'Native Reference Waypoint Anchor is invalid'
-            end
-            point.map(&:to_f).freeze
-          end
-          raise ProtocolError, 'Native Reference Waypoint Anchor pair is incomplete' unless anchors.length == 2
-
-          anchors.freeze
+          [first, second]
         end
 
-        # After waypoint XYZ is final, Native requires direct gateway LOS
-        # and minimizes (gateway-to-State shortest path + waypoint-to-gateway).
-        # The shortest-path tree is already baked for this CellSpace.
-        def reference_transition_curve(first_cell_id, second_cell_id, waypoint)
-          raise ProtocolError, 'Native Reference Transition Curve API unavailable' unless
-            available? && native.respond_to?(:get_reference_transition_curve)
+        def local_reference_waypoints(waypoint, transforms)
           coordinates = waypoint.respond_to?(:to_a) ? Array(waypoint.to_a) : Array(waypoint)
           unless coordinates.length == 3 &&
-                 coordinates.all? { |number| number.is_a?(Numeric) && number.finite? }
+                 coordinates.all? { |value| value.is_a?(Numeric) && value.finite? }
             raise ProtocolError, 'Reference waypoint is invalid'
           end
-          result = native.get_reference_transition_curve(
+          root = Geom::Point3d.new(*coordinates)
+          transforms.map do |transform|
+            root.transform(transform.inverse).to_a.map(&:to_f)
+          end
+        end
+
+        def root_reference_point(coordinates, transform)
+          point = Array(coordinates)
+          unless point.length == 3 &&
+                 point.all? { |value| value.is_a?(Numeric) && value.finite? }
+            raise ProtocolError, 'Native Reference point is invalid'
+          end
+          Geom::Point3d.new(*point).transform(transform).to_a.map(&:to_f).freeze
+        end
+
+        # Raw shared-Face centroid is converted independently for each graph.
+        def reference_waypoint_anchors(first_cell_id, second_cell_id, waypoint,
+                                       transformation1: nil, transformation2: nil)
+          raise ProtocolError, 'Native Reference Waypoint Anchor API unavailable' unless
+            available? && native.respond_to?(:get_reference_waypoint_anchors)
+          transforms = reference_cell_transforms(
+            first_cell_id, second_cell_id, transformation1, transformation2
+          )
+          local_waypoints = local_reference_waypoints(waypoint, transforms)
+          result = native.get_reference_waypoint_anchors(
             first_cell_id.to_s, second_cell_id.to_s,
-            coordinates.map(&:to_f).pack('E*')
+            local_waypoints.flatten.pack('E*')
           )
           return nil if result.nil?
+          anchors = Array(result)
+          raise ProtocolError, 'Native Reference Waypoint Anchor pair is incomplete' unless anchors.length == 2
+          anchors.each_with_index.map { |point, index| root_reference_point(point, transforms[index]) }.freeze
+        end
 
-          Array(result).map do |entry|
-            point = Array(entry)
-            unless point.length == 3 && point.all? { |number| number.is_a?(Numeric) && number.finite? }
-              raise ProtocolError, 'Native Reference Transition Curve point is invalid'
-            end
-            point.map(&:to_f).freeze
-          end.freeze
+        # Native returns each State -> waypoint route in the owner's Local frame.
+        # Convert both to Root-Local before joining at the exact shared waypoint.
+        def reference_transition_curve(first_cell_id, second_cell_id, waypoint,
+                                       transformation1: nil, transformation2: nil)
+          raise ProtocolError, 'Native Reference Transition Curve API unavailable' unless
+            available? && native.respond_to?(:get_reference_transition_curve)
+          transforms = reference_cell_transforms(
+            first_cell_id, second_cell_id, transformation1, transformation2
+          )
+          local_waypoints = local_reference_waypoints(waypoint, transforms)
+          result = native.get_reference_transition_curve(
+            first_cell_id.to_s, second_cell_id.to_s,
+            local_waypoints.flatten.pack('E*')
+          )
+          return nil if result.nil?
+          paths = Array(result)
+          unless paths.length == 2 && paths.all? { |path| path.is_a?(Array) && !path.empty? }
+            raise ProtocolError, 'Native Reference route must contain two Local paths'
+          end
+          first = paths[0].map { |point| root_reference_point(point, transforms[0]) }
+          second = paths[1].map { |point| root_reference_point(point, transforms[1]) }.reverse
+          # Preserve exact common waypoint instead of accumulating inverse-matrix roundoff.
+          coordinates = waypoint.respond_to?(:to_a) ? Array(waypoint.to_a) : Array(waypoint)
+          exact = coordinates.map(&:to_f).freeze
+          first[-1] = exact
+          second[0] = exact
+          first.concat(second.drop(1)).freeze
         end
 
         def reference_revision(cell_id)
@@ -399,13 +426,26 @@ module ULOL
           decoded.merge(metrics: metrics.freeze).freeze
         end
 
-        def commit_reference_graph_batch
+        def commit_reference_graph_batch(cell_transforms)
           raise ProtocolError, 'native geometry session is not active' unless shared_session_active?
           unless native.respond_to?(:commit_reference_graph_batch)
             raise ProtocolError, 'Native Reference Graph batch commit API unavailable'
           end
-
-          native.commit_reference_graph_batch == true
+          frames = Array(cell_transforms)
+          unless frames.length == Array(@shared_session_keys).length
+            raise ProtocolError, 'Post-State CellSpace transform count mismatch'
+          end
+          values = frames.flat_map do |transform|
+            unless transform.is_a?(Geom::Transformation)
+              raise ProtocolError, 'Post-State CellSpace transform is missing'
+            end
+            matrix = transform.inverse.to_a.map(&:to_f)
+            unless matrix.length == 16 && matrix.all?(&:finite?)
+              raise ProtocolError, 'Post-State CellSpace frame is invalid'
+            end
+            matrix
+          end
+          native.commit_reference_graph_batch(values.pack('E*')) == true
         end
 
         def close_geometry_session
