@@ -280,6 +280,8 @@ std::optional<ReferenceGraphStageSnapshot> AdjacencySession::get_reference_graph
     std::lock_guard<std::mutex> lock(reference_graph_mutex_);
     const auto found=reference_graphs_.find(cell_key);
     if(found==reference_graphs_.end()) return std::nullopt;
+    if(stage==ReferenceGraphStage::ShortPathGraph)
+        return reference_short_path_graph(found->second.pipeline);
     return reference_graph_stage(found->second.pipeline,stage);
 }
 
