@@ -18,6 +18,7 @@ enum class ReferenceGraphStage
     After,
     Collapsed,
     Optimized,
+    LosGraph, // All unobstructed pairs from OPTIMIZED nodes, ignoring its edges.
     ShortPathGraph // Derived, read-only view of the State-rooted Dijkstra tree.
 };
 
@@ -42,6 +43,7 @@ struct ReferenceGraphPipeline
     ReferenceGraphStageSnapshot after;
     ReferenceGraphStageSnapshot collapsed;
     ReferenceGraphStageSnapshot optimized;
+    ReferenceGraphStageSnapshot los_graph;
     std::size_t state_node_index = 0;
     std::size_t optimized_bridge_count = 0;
     std::size_t unreachable_node_count = 0;
@@ -53,9 +55,9 @@ struct ReferenceGraphPipeline
     bool legacy_state_only = false;
 };
 
-// All radius-dependent reductions, LOS-safe OPTIMIZED component bridges and
-// shortest-path preprocessing are Native. Radius never appears in the public
-// Ruby snapshots returned by native_api.
+// OPTIMIZED reductions remain available for debugging. Routing uses an
+// independent Full LOS graph formed from OPTIMIZED nodes, then a State-rooted
+// shortest-path tree. Radius never appears in the public Ruby snapshots.
 ReferenceGraphPipeline build_reference_graph_pipeline(
     const CellData& cell,
     const ReferenceGraphDebug& before,
@@ -76,7 +78,7 @@ const ReferenceGraphStageSnapshot& reference_graph_stage(
     ReferenceGraphStage stage
 );
 
-// Display-only snapshot: OPTIMIZED nodes with only the State-rooted shortest-
+// Display-only snapshot: LOS_GRAPH nodes with only the State-rooted shortest-
 // path predecessor edges. Disconnected nodes remain as isolated markers.
 // Reuses the already baked tree; never recomputes graph topology or routes.
 ReferenceGraphStageSnapshot reference_short_path_graph(
@@ -91,7 +93,7 @@ void finalize_reference_graph_local(
     const std::array<double,16>& root_to_local
 );
 
-// Closest OPTIMIZED node that remains reachable from State. The raw shared
+// Closest LOS_GRAPH node that remains reachable from State. The raw shared
 // Face centroid is used as the query before waypoint Z is adjusted.
 std::optional<Vec3> closest_reachable_reference_point(
     const ReferenceGraphPipeline& pipeline,
