@@ -51,6 +51,7 @@ class ReferencePointProtectedOverlayTest < Minitest::Test
       :@debug_reference_graph_overlay_by_cell_id,
       {
         'A' => {
+          cell_id: 'A',
           nodes: [{ point: p(1, 1) }.freeze, { point: p(2, 2) }.freeze].freeze,
           edges: [[0, 1].freeze].freeze
         }.freeze
@@ -67,14 +68,20 @@ class ReferencePointProtectedOverlayTest < Minitest::Test
   def test_native_snapshot_points_have_no_radius_or_protected_radius_style
     Core::ReferenceGraphDebugMode.instance_variable_set(:@mode, :before)
     grouped = build_model.debug_reference_points_by_kind
-    assert_equal [p(1, 1), p(2, 2)], grouped[4]
+    assert_equal [{ cell_id: 'A', point: p(1, 1) },
+                  { cell_id: 'A', point: p(2, 2) }], grouped[4]
     refute grouped.key?(5)
   end
 
   def test_renderer_draws_radius_free_reference_points
-    model = Struct.new(:debug_reference_points_by_kind).new({ 4 => [p(2, 1)] })
+    model = Struct.new(:debug_reference_points_by_kind).new(
+      { 4 => [{ cell_id: 'A', point: p(2, 1) }] }
+    )
     render = Renderer.new(indoor_model: model, transform_context: Object.new.tap do |transform|
-      def transform.overlay_render_points(points) = points
+      def transform.overlay_cell_reference_points(points, cell_id)
+        return [] unless cell_id == 'A'
+        points
+      end
     end)
     view = View.new
     render.draw(view)
