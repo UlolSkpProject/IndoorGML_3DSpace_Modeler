@@ -15,10 +15,6 @@ namespace
 {
 using namespace IndoorGMLAdjacencyNative;
 constexpr double EPSILON = 1.0e-9;
-// TEMPORARY EXPERIMENT: true routes OPTIMIZED edges directly into Connectivity
-// Repair, without a full all-pairs LOS rebuild beforehand.
-// Set false to restore the original FULL LOS -> REPAIR -> DIJKSTRA pipeline.
-constexpr bool SKIP_FULL_LOS_BEFORE_REPAIR_FOR_TEST = true;
 constexpr double SLIVER_MAX_WIDTH_RATIO = 0.01;
 // Degree-2 shortcuts are considered only when the interior angle is at least
 // 150 degrees. Candidates nearest to a straight 180-degree continuation are
@@ -827,7 +823,7 @@ ReferenceGraphPipeline build_reference_graph_pipeline(
     // The old Full LOS path remains behind a single switch for easy rollback.
     result.waypoint_solid=std::make_shared<FaceSolid>(cell,tolerance);
     result.waypoint_tolerance=tolerance;
-    if(SKIP_FULL_LOS_BEFORE_REPAIR_FOR_TEST)
+    if(SKIP_PRE_REPAIR_FULL_LOS_FOR_TEST)
         result.los_graph=validate_sparse_optimized_edges(
             result.optimized,*result.waypoint_solid,tolerance);
     else
