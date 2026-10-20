@@ -12,6 +12,11 @@
 
 namespace IndoorGMLAdjacencyNative
 {
+// TEMPORARY TEST SWITCH. True: OPTIMIZED (validated existing edges) -> REPAIR.
+// False: OPTIMIZED -> FULL LOS -> REPAIR (previous production behavior).
+// This is deliberately compile-time so the original path is preserved.
+inline constexpr bool SKIP_PRE_REPAIR_FULL_LOS_FOR_TEST = true;
+
 enum class ReferenceGraphStage
 {
     Before,
@@ -75,9 +80,10 @@ struct ReferenceGraphPipeline
     bool legacy_state_only = false;
 };
 
-// BEFORE -> COLLAPSED -> OPTIMIZED -> LOS_GRAPH -> CONNECTIVITY_REPAIR ->
-// State-rooted Dijkstra. Routing uses the repaired graph and never inherits
-// unvalidated OPTIMIZED edges. Radius is not exposed in Ruby snapshots.
+// BEFORE -> COLLAPSED -> OPTIMIZED -> optional FULL LOS ->
+// CONNECTIVITY_REPAIR -> State-rooted Dijkstra. The temporary test switch
+// omits all-pairs LOS before Repair while keeping individual Edge checks.
+// Radius is not exposed in Ruby snapshots.
 ReferenceGraphPipeline build_reference_graph_pipeline(
     const CellData& cell,
     const ReferenceGraphDebug& before,
