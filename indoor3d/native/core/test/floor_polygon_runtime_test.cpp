@@ -420,6 +420,69 @@ void test_reference_graph_routes_from_nonzero_state_node()
             near(path.back().x,15.0),
             "Transition routing must start from the selected nonzero State node");
 }
+CellData l_shaped_reference_room()
+{
+    const double height=80.0;
+    const std::vector<Vec3> base{
+        {0,0,0},{40,0,0},{40,10,0},
+        {10,10,0},{10,40,0},{0,40,0}
+    };
+    std::vector<Vec3> roof=base;
+    for(auto& p:roof) p.z=height;
+    std::vector<Vec3> bottom=base;
+    std::reverse(bottom.begin(),bottom.end());
+    CellData cell;
+    cell.category=CellSpaceCategory::Room;
+    cell.bounds={{0,0,0},{40,40,height}};
+    cell.faces.push_back(face({0,0,-1},bottom));
+    cell.faces.push_back(face({0,0,1},roof));
+    for(std::size_t i=0;i<base.size();++i)
+    {
+        const Vec3& a=base[i];
+        const Vec3& b=base[(i+1)%base.size()];
+        cell.faces.push_back(face(
+            {b.y-a.y,a.x-b.x,0},
+            {a,b,{b.x,b.y,height},{a.x,a.y,height}}
+        ));
+    }
+    return cell;
+}
+
+void test_waypoint_gateway_uses_los_and_total_state_cost()
+{
+    const CellData cell=l_shaped_reference_room();
+    const double z=1000.0/25.4;
+    const Vec3 state{5,30,z};
+    const Vec3 far_gateway{5,5,z};
+    const Vec3 near_gateway{35,5,z};
+    const Vec3 waypoint{40,5,z}; // Exact shared-Face boundary
+    ReferenceGraphPipeline pipeline;
+    pipeline.optimized.nodes={
+        {state,0.0},{near_gateway,0.0},{far_gateway,0.0}
+    };
+    pipeline.shortest_path_tree.root=0;
+    pipeline.shortest_path_tree.distances={0.0,80.0,25.0};
+    pipeline.shortest_path_tree.previous={std::nullopt,0,0};
+    pipeline.waypoint_solid=std::make_shared<FaceSolid>(cell,0.001);
+    pipeline.waypoint_tolerance=0.001;
+
+    require(pipeline.waypoint_solid->valid(),
+            "L-shaped Solid must be usable for persistent waypoint LOS");
+    const auto path=reference_transition_polyline(pipeline,waypoint);
+    require(path.size()==3 && near(path[1].x,5.0) &&
+            near(path.back().x,40.0),
+            "Gateway must minimize LOS-direct plus State shortest-path cost, "
+            "not raw waypoint distance; boundary waypoint must remain exact");
+
+    pipeline.shortest_path_tree.distances[1]=35.0;
+    const auto shorter=reference_transition_polyline(pipeline,waypoint);
+    require(shorter.size()==3 && near(shorter[1].x,35.0),
+            "A shorter total State route must select the nearer LOS gateway");
+
+    require(reference_transition_polyline(
+                pipeline,Vec3{50,50,z}).empty(),
+            "Waypoint outside the CellSpace without visible gateways must fail closed");
+}
 void test_shared_boundary_midpoint_without_matching_tessellation()
 {
     const auto left=normal_face(rectangle(0,0,4,4));
@@ -548,6 +611,7 @@ int main()
     test_l_floor_queue_and_state_promoted_without_triangles();
     test_before_selects_nearest_valid_seed_and_retains_orphan_centroids();
     test_reference_graph_routes_from_nonzero_state_node();
+    test_waypoint_gateway_uses_los_and_total_state_cost();
     test_shared_boundary_midpoint_without_matching_tessellation();
     test_shared_edge_with_mismatched_vertex_splits_merges_once();
     test_stair_uses_same_first_reference_policy();
