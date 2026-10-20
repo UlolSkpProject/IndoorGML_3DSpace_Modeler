@@ -7,7 +7,7 @@ module ULOL
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.before!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.collapsed!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.optimized!
-      # RG.los_graph!         # All 3D LOS edges among OPTIMIZED nodes.
+      # RG.los_graph!         # During temporary bypass: validated OPTIMIZED edges only.
       # RG.connectivity_repair! # Full LOS plus restored intermediate nodes.
       # RG.short_path_graph!  # State-rooted Dijkstra tree from repaired graph.
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.clear!
