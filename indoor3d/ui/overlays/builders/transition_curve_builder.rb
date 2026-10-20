@@ -49,6 +49,36 @@ module ULOL
           @render_transition_line_points
         end
 
+        # Only the displayed half of a Transition belonging to a selected
+        # CellSpace is highlighted. The existing cached curve segments and
+        # visibility/exclusion policies are reused; no geometry is modified.
+        def selected_transition_line_points(selected_cell_ids:, excluded_cell_ids: nil)
+          return [] if selected_cell_ids.nil? || selected_cell_ids.empty?
+
+          excluded_cells = transition_excluded_cell_lookup(excluded_cell_ids)
+          render_snapshot = transition_render_context_snapshot
+          context_key = render_snapshot&.[](:cache_key) || transition_render_context_cache_key
+          points = []
+          @indoor_model.transitions.each do |transition|
+            first_selected = selected_cell_ids[transition.cell1_id.to_s]
+            second_selected = selected_cell_ids[transition.cell2_id.to_s]
+            next unless first_selected || second_selected
+            next if transition_excluded?(transition, excluded_cells)
+            next unless overlay_transition_visible?(transition)
+
+            first_visible = overlay_state_visible?(transition.state1)
+            second_visible = overlay_state_visible?(transition.state2)
+            next unless (first_selected && first_visible) || (second_selected && second_visible)
+
+            segments = cached_transition_render_segments(transition, context_key, render_snapshot)
+            # Without an interior waypoint, the displayed segment is shared.
+            points.concat(segments[:default]) if first_visible && second_visible
+            points.concat(segments[:first]) if first_selected && first_visible
+            points.concat(segments[:second]) if second_selected && second_visible
+          end
+          points
+        end
+
         def build_render_transition_line_points(excluded_cells = {})
           points = []
           render_snapshot = transition_render_context_snapshot
