@@ -277,8 +277,9 @@ module ULOL
           anchors.freeze
         end
 
-        # Native selects the closest reachable gateway and restores the
-        # already-baked State-rooted shortest path tree.
+        # After waypoint XYZ is final, Native requires direct gateway LOS
+        # and minimizes (gateway-to-State shortest path + waypoint-to-gateway).
+        # The shortest-path tree is already baked for this CellSpace.
         def reference_transition_curve(first_cell_id, second_cell_id, waypoint)
           raise ProtocolError, 'Native Reference Transition Curve API unavailable' unless
             available? && native.respond_to?(:get_reference_transition_curve)
