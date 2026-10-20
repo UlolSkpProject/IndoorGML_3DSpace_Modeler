@@ -21,7 +21,8 @@ module ULOL
             candidates.select { |candidate| (candidate[:area] - max_area).abs <= tolerance.to_f }
                       .map do |candidate|
                         anchors = reference_waypoint_anchor_points(
-                          cell1_id, cell2_id, candidate[:centroid]
+                          cell1_id, cell2_id, candidate[:centroid],
+                          transformation1: transformation1, transformation2: transformation2
                         )
                         {
                           point: adjusted_waypoint(
@@ -112,13 +113,15 @@ module ULOL
           end
           private_class_method :adjusted_waypoint
 
-          def self.reference_waypoint_anchor_points(cell1_id, cell2_id, waypoint)
+          def self.reference_waypoint_anchor_points(cell1_id, cell2_id, waypoint,
+                                                        transformation1: nil, transformation2: nil)
             return nil if cell1_id.to_s.empty? || cell2_id.to_s.empty?
             return nil unless waypoint.is_a?(Geom::Point3d)
             return nil unless defined?(NativeAdjacencyBridge)
 
             coordinates = NativeAdjacencyBridge.reference_waypoint_anchors(
-              cell1_id, cell2_id, waypoint
+              cell1_id, cell2_id, waypoint,
+              transformation1: transformation1, transformation2: transformation2
             )
             points = Array(coordinates).map do |point|
               values = Array(point)
