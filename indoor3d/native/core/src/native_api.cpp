@@ -184,10 +184,10 @@ VALUE adjacency_native_get_reference_graph(VALUE self, VALUE cell_key, VALUE sta
     const ID stage_id=SYM2ID(stage);
     ReferenceGraphStage selected;
     if(stage_id==rb_intern("before")) selected=ReferenceGraphStage::Before;
-    else if(stage_id==rb_intern("after")) selected=ReferenceGraphStage::After;
-    else if(stage_id==rb_intern("collapsed")) selected=ReferenceGraphStage::Collapsed;
+     else if(stage_id==rb_intern("collapsed")) selected=ReferenceGraphStage::Collapsed;
     else if(stage_id==rb_intern("optimized")) selected=ReferenceGraphStage::Optimized;
     else if(stage_id==rb_intern("los_graph")) selected=ReferenceGraphStage::LosGraph;
+    else if(stage_id==rb_intern("connectivity_repair")) selected=ReferenceGraphStage::ConnectivityRepair;
     else if(stage_id==rb_intern("short_path_graph")) selected=ReferenceGraphStage::ShortPathGraph;
     else rb_raise(rb_eArgError,"unknown Reference Graph stage");
     return protect_native_call([key,selected]() {
