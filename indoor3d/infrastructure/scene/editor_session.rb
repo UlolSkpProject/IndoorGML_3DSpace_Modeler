@@ -217,7 +217,9 @@ module ULOL
         end
 
         def visible_storeys
-          visibility_controller.visible_storeys
+          return visibility_controller.visible_storeys if visibility_controller.storey_filter_active?
+
+          StoreyFilter.options_for(@indoor_model.cell_spaces).map { |option| option[:value] }
         end
 
         def visible_cell_type_labels
@@ -616,6 +618,12 @@ module ULOL
 
         def invalidate_overlay_transition_points
           overlay_controller.invalidate_transition_points
+        end
+
+        def finish_overlay_transition_transform_preview(model = Sketchup.active_model)
+          changed = overlay_controller.finish_transition_transform_preview
+          invalidate_view(model) if changed
+          changed
         end
 
         private

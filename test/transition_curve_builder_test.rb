@@ -7,15 +7,17 @@ class TransitionCurveBuilderTest < Minitest::Test
   Builder = ULOL::Indoor3DGmlModeler::IndoorCore::TransitionCurveBuilder
   Point = Struct.new(:x, :y, :z)
   Transition = Struct.new(:id, :state1_point, :state2_point, :selected_waypoint,
-                          :cell1_id, :cell2_id, :state1, :state2)
+                          :cell1_id, :cell2_id, :state1, :state2,
+                          :selected_waypoint_normal1, :selected_waypoint_normal2)
 
   class FakeModel
-    attr_accessor :transitions, :curve, :revisions
+    attr_accessor :transitions, :curve, :revisions, :state_visibility
 
     def initialize(transition)
       @transitions = [transition]
       @curve = nil
       @revisions = {}
+      @state_visibility = {}
     end
 
     def reference_transition_curve(_first_cell_id, _second_cell_id, _waypoint)
@@ -28,6 +30,10 @@ class TransitionCurveBuilderTest < Minitest::Test
 
     def dual_overlay_transition_visible?(_transition)
       true
+    end
+
+    def dual_overlay_state_visible?(state)
+      @state_visibility.fetch(state, true)
     end
   end
 
@@ -47,14 +53,22 @@ class TransitionCurveBuilderTest < Minitest::Test
     def overlay_render_point_from_snapshot(point, _snapshot)
       point
     end
+
+    def overlay_render_vector_from_snapshot(vector, _snapshot)
+      vector
+    end
   end
 
   def point(x)
     Point.new(x.to_f, 0.0, 0.0)
   end
 
+  def point3(x, y, z = 0)
+    Point.new(x.to_f, y.to_f, z.to_f)
+  end
+
   def setup
-    @transition = Transition.new('T', point(0), point(4), point(2), 'A', 'B')
+    @transition = Transition.new('T', point(0), point(4), point(2), 'A', 'B', :state1, :state2)
     @model = FakeModel.new(@transition)
     @builder = Builder.new(indoor_model: @model, transform_context: FakeTransform.new)
   end
@@ -63,18 +77,108 @@ class TransitionCurveBuilderTest < Minitest::Test
     points.map(&:x)
   end
 
-  def test_ref_graph_waypoint_paths_render_only_straight_gl_lines
+  def segment_points(groups)
+    groups.values_at(:default, :first, :second).flatten
+  end
+
+  def test_collinear_ref_graph_waypoint_paths_remain_straight_gl_lines
     @model.curve = [point(0), point(1), point(2), point(3), point(4)]
     groups = @builder.transition_curve_segments(@transition)
 
-    assert_equal [0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0],
-                 xs(groups[:default])
-    assert_empty groups[:first]
-    assert_empty groups[:second]
+    assert_empty groups[:default]
+    assert_equal [0.0, 1.0, 1.0, 2.0], xs(groups[:first])
+    assert_equal [2.0, 3.0, 3.0, 4.0], xs(groups[:second])
+  end
+
+  def test_direction_change_is_rounded_with_local_quadratic_bezier
+    @transition.state2_point = point3(2, 1)
+    @transition.selected_waypoint = point3(1, 1)
+    @model.curve = [point3(0, 0), point3(1, 0), point3(1, 1)]
+
+    input = @builder.transition_curve_input(@transition)
+    segments = segment_points(@builder.transition_curve_segments_from_input(@transition, input))
+    coordinates = segments.map { |value| [value.x, value.y, value.z] }
+
+    assert_operator segments.length, :>, 6
+    assert_equal [0.0, 0.0, 0.0], coordinates.first
+    assert_equal [2.0, 1.0, 0.0], coordinates.last
+    refute_includes coordinates, [1.0, 0.0, 0.0]
+    assert coordinates.all? { |x, y, _z| x.between?(0.0, 2.0) && y.between?(0.0, 1.0) }
+  end
+
+  def test_exact_waypoint_is_protected_from_corner_rounding
+    @transition.state2_point = point3(2, 1)
+    @transition.selected_waypoint = point3(1, 1)
+    @model.curve = [point3(0, 0), point3(1, 0), point3(1, 1)]
+
+    input = @builder.transition_curve_input(@transition)
+    segments = segment_points(@builder.transition_curve_segments_from_input(@transition, input))
+    coordinates = segments.map { |value| [value.x, value.y, value.z] }
+
+    protected_index = input[:protected_indices].first
+    assert_equal [1.0, 1.0, 0.0], input[:points][protected_index].to_a
+    assert_includes coordinates, [1.0, 1.0, 0.0]
+  end
+
+  def test_only_waypoint_departure_uses_selected_face_normal
+    @transition.state2_point = point3(2, 1)
+    @transition.selected_waypoint = point3(1, 1)
+    @transition.selected_waypoint_normal1 = point3(1, 1)
+    @model.curve = [point3(0, 0), point3(1, 0), point3(1, 1)]
+
+    input = @builder.transition_curve_input(@transition)
+    segments = segment_points(@builder.transition_curve_segments_from_input(@transition, input))
+    pairs = segments.each_slice(2).to_a
+    waypoint = [1.0, 1.0, 0.0]
+    departing = pairs.find do |first, second|
+      [first.x, first.y, first.z] == waypoint && [second.x, second.y, second.z] != waypoint
+    end
+
+    refute_nil departing
+    straight_end = departing.last
+    assert_operator straight_end.x, :>, 1.0
+    assert_operator straight_end.y, :>, 1.0
+    expected_projection = 1.0 / Math.sqrt(2.0)
+    expected_magnitude = expected_projection * Builder::WAYPOINT_NORMAL_PROJECTION_RATIO
+    assert_in_delta expected_magnitude,
+                    Math.sqrt(((straight_end.x - 1.0)**2) + ((straight_end.y - 1.0)**2)),
+                    1.0e-9
+    assert_in_delta straight_end.x - 1.0, straight_end.y - 1.0, 1.0e-9
+
+    incoming = pairs.find { |_first, second| [second.x, second.y, second.z] == waypoint }
+    refute_nil incoming
+    assert_in_delta 1.0, incoming.first.x, 1.0e-9
+  end
+
+  def test_waypoint_departure_normal_is_part_of_render_fingerprint
+    @transition.selected_waypoint_normal1 = point3(1, 0)
+    @model.curve = [point(0), point(1), point(2), point(4)]
+    first = @builder.transition_curve_input(@transition)
+    first_key = @builder.send(:transition_render_fingerprint, first, [:identity])
+
+    @transition.selected_waypoint_normal1 = point3(0, 1)
+    second = @builder.transition_curve_input(@transition)
+    second_key = @builder.send(:transition_render_fingerprint, second, [:identity])
+
+    refute_equal first_key, second_key
+  end
+
+  def test_waypoint_normal_change_rebuilds_assembled_cache_without_explicit_invalidate
+    @transition.state2_point = point3(2, 1)
+    @transition.selected_waypoint = point3(1, 1)
+    @transition.selected_waypoint_normal1 = point3(1, 0)
+    @model.curve = [point3(0, 0), point3(1, 0), point3(1, 1)]
+    first = @builder.transition_line_points
+
+    @transition.selected_waypoint_normal1 = point3(1, 1)
+    second = @builder.transition_line_points
+
+    refute_equal second.map { |value| [value.x, value.y, value.z] },
+                 first.map { |value| [value.x, value.y, value.z] }
   end
 
   def test_missing_native_curve_fails_closed
-    assert_empty @builder.transition_curve_segments(@transition)[:default]
+    assert_empty segment_points(@builder.transition_curve_segments(@transition))
   end
 
   def test_missing_waypoint_connects_exact_state_endpoints
@@ -87,14 +191,36 @@ class TransitionCurveBuilderTest < Minitest::Test
   def test_consecutive_duplicate_points_are_removed
     @model.curve = [point(0), point(0), point(2), point(2), point(4)]
     assert_equal [0.0, 2.0, 2.0, 4.0],
-                 xs(@builder.transition_curve_segments(@transition)[:default])
+                 xs(segment_points(@builder.transition_curve_segments(@transition)))
   end
 
   def test_exact_state_endpoints_are_preserved_when_graph_state_is_different
     @model.curve = [point(0.25), point(1), point(2), point(3), point(3.75)]
     assert_equal [0.0, 0.25, 0.25, 1.0, 1.0, 2.0, 2.0, 3.0,
                   3.0, 3.75, 3.75, 4.0],
-                 xs(@builder.transition_curve_segments(@transition)[:default])
+                 xs(segment_points(@builder.transition_curve_segments(@transition)))
+  end
+
+  def test_only_first_state_storey_draws_through_waypoint
+    @model.curve = [point(0), point(1), point(2), point(3), point(4)]
+    @model.state_visibility[:state2] = false
+
+    assert_equal [0.0, 1.0, 1.0, 2.0], xs(@builder.transition_line_points)
+  end
+
+  def test_only_second_state_storey_draws_from_waypoint
+    @model.curve = [point(0), point(1), point(2), point(3), point(4)]
+    @model.state_visibility[:state1] = false
+
+    assert_equal [2.0, 3.0, 3.0, 4.0], xs(@builder.transition_line_points)
+  end
+
+  def test_no_visible_state_storey_draws_no_transition
+    @model.curve = [point(0), point(1), point(2), point(3), point(4)]
+    @model.state_visibility[:state1] = false
+    @model.state_visibility[:state2] = false
+
+    assert_empty @builder.transition_line_points
   end
 
   def test_route_coordinates_change_transition_cache_fingerprint

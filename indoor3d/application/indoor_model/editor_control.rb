@@ -276,6 +276,10 @@ module ULOL
             @editor_session.invalidate_overlay_transition_points
           end
 
+          def finish_overlay_transition_transform_preview(model = @model)
+            @editor_session.finish_overlay_transition_transform_preview(model)
+          end
+
           def edit_mode_visibility_filter_snapshot
             {
               storey_options: edit_mode_storey_filter_options,

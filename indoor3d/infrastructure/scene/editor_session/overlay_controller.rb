@@ -131,6 +131,15 @@ module ULOL
             IndoorCore::Logger.puts "[IndoorGML] Overlay transition cache invalidation failed: #{e.class}: #{e.message}"
           end
 
+          def finish_transition_transform_preview
+            return false unless @space_overlay&.respond_to?(:finish_transition_transform_preview)
+
+            @space_overlay.finish_transition_transform_preview
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Overlay transition transform finish failed: #{e.class}: #{e.message}"
+            false
+          end
+
           def invalidate_view(model)
             model.active_view.invalidate if model&.active_view
           end
