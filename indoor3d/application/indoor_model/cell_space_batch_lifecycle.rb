@@ -272,11 +272,20 @@ module ULOL
             debug_reference_points_by_kind.values.flatten
           end
 
-          # Runtime-only debug graphs; only active, valid CellSpaces render.
+          # Runtime-only debug graphs preserve their CellSpace owner.
           def debug_reference_graphs
             return [] if ReferenceGraphDebugMode.mode == :off
 
             Array((@debug_reference_graph_overlay_by_cell_id || {}).values)
+          end
+
+          def reference_cell_space_transformation(cell_id)
+            cell = Array(@feature_registry&.cell_spaces).find do |candidate|
+              candidate.id.to_s == cell_id.to_s && candidate.valid?
+            end
+            return nil unless cell&.sketchup_group&.valid?
+
+            cell_space_root_local_transformation(cell)
           end
 
           # Native's exact completed Floor partition boundaries. These are
@@ -286,8 +295,13 @@ module ULOL
           end
 
           def reference_transition_curve(first_cell_id, second_cell_id, waypoint)
+            transforms = [
+              reference_cell_space_transformation(first_cell_id),
+              reference_cell_space_transformation(second_cell_id)
+            ]
             coordinates = NativeAdjacencyBridge.reference_transition_curve(
-              first_cell_id, second_cell_id, waypoint
+              first_cell_id, second_cell_id, waypoint,
+              transformation1: transforms[0], transformation2: transforms[1]
             )
             return nil if coordinates.nil? || coordinates.empty?
 
@@ -305,14 +319,18 @@ module ULOL
           # revision check catches replacements without relying on overlay
           # invalidation from another subsystem.
           def reference_graph_route_snapshot_key_for(cell_id)
-            NativeAdjacencyBridge.reference_revision(cell_id)
+            transform = reference_cell_space_transformation(cell_id)
+            [NativeAdjacencyBridge.reference_revision(cell_id), transform&.to_a]
           end
 
           def debug_reference_points_by_kind
             return {} if ReferenceGraphDebugMode.mode == :off
 
             points = Array((@debug_reference_graph_overlay_by_cell_id || {}).values).flat_map do |graph|
-              Array(graph[:nodes]).filter_map { |node| node[:point] }
+              Array(graph[:nodes]).filter_map do |node|
+                point = node[:point]
+                { cell_id: graph[:cell_id], point: point }.freeze if point
+              end
             end
             { 4 => points.freeze }
           end
@@ -336,6 +354,7 @@ module ULOL
                 { point: Geom::Point3d.new(*coordinates) }.freeze
               end.freeze
               snapshots[cell_space.id] = {
+                cell_id: cell_space.id,
                 nodes: nodes,
                 edges: Array(graph[:edges]).freeze,
                 stage: selected
@@ -627,7 +646,13 @@ module ULOL
               successful << cell_space
             end
 
-            NativeAdjacencyBridge.commit_reference_graph_batch
+            # Read the actual post-State/post-Local-grid transforms, never infer
+            # them from raw Native State (snapping may shift the local origin).
+            NativeAdjacencyBridge.commit_reference_graph_batch(
+              session_entries.map do |entry|
+                reference_cell_space_transformation(entry[:cell_space].id)
+              end
+            )
             yield({ successful: successful.freeze, failures: failures.freeze }.freeze)
           ensure
             if defined?(NativeAdjacencyBridge) &&
