@@ -534,7 +534,7 @@ ReferenceGraphPipeline build_reference_graph_pipeline(
     result.waypoint_tolerance=tolerance;
     result.los_graph=build_full_los_graph(
         result.optimized,*result.waypoint_solid,tolerance);
-    const auto repaired=repair_reference_connectivity(
+    auto repaired=repair_reference_connectivity(
         result.los_graph,result.before,result.collapsed,
         result.state_node_index,*result.waypoint_solid,tolerance);
     result.repaired_graph=std::move(repaired.graph);
