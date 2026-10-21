@@ -157,7 +157,7 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_raises(Bridge::ProtocolError) { Bridge.decode_state_result(bytes) }
   end
 
-  def test_reference_state_result_rejects_old_native_protocol
+  def test_reference_state_result_rejects_unsupported_format
     bytes = "IGMLSTA\0".b + [12, 0, 0].pack('Q<3')
     assert_raises(Bridge::ProtocolError) { Bridge.decode_state_result(bytes) }
   end
