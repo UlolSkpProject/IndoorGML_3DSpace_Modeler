@@ -77,6 +77,8 @@ Validation은 XML well-formedness 확인과 val3dity 2.2.0 검사를 수행합�
 
 빠른 검사는 Geometry를 변경하지 않으며, `--overlap_tol -1`로 val3dity를 실행한 뒤 Extension 701/704 재검사를 수행합니다.
 
+**Native 701/704 재검사 계약 주의:** 현재 Ruby `ValidityNativeBridge.compute`는 `NativeAdjacencyBridge.encode_geometry_input`으로 Geometry 포맷 ID `5`를 전송하지만, Native `validity_data.cpp`의 `parse_geometry_batch`는 ID `2`만 허용합니다. 소스 기준으로 두 직렬화 계약이 불일치하므로 Native 재검사 경로의 정상 실행을 보장할 수 없습니다. 이 차이는 명칭 정리만으로 해결되지 않으며, Native 파서·바이너리 호환성을 함께 검토해야 합니다.
+
 최종 결과는 일관되게 다음 세 상태로 보고합니다.
 
 - `Valid`: 검사 기준에서 오류가 발견되지 않음
