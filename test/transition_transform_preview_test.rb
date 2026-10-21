@@ -42,22 +42,69 @@ class TransitionTransformPreviewTest < Minitest::Test
       @persistent_id = persistent_id
       @transformation = Transform.new(value)
     end
+
+    def valid?
+      true
+    end
   end
 
   Cell = Struct.new(:id, :group) do
     def valid_sketchup_group
       group
     end
+
+    def valid?
+      true
+    end
   end
 
   Selection = Struct.new(:entities) do
     def each(&block)
+      @enumerations = @enumerations.to_i + 1
       entities.each(&block)
+    end
+
+    def enumerations
+      @enumerations.to_i
     end
   end
 
   SketchupModel = Struct.new(:selection)
-  IndoorModel = Struct.new(:model, :primal_group, :cell_spaces)
+  IndoorModel = Struct.new(:model, :primal_group, :cell_spaces) do
+    attr_accessor :editing
+
+    def editing?
+      editing == true
+    end
+
+    # Simulate the observer-owned selection snapshot. A Draw must not call
+    # model.selection; changing Selection alone does not refresh the snapshot.
+    def refresh_dual_graph_selection_cache
+      selected = {}
+      model.selection.each { |entity| selected[entity.object_id] = entity }
+      groups = []
+      ids = {}
+      if selected[primal_group.object_id].equal?(primal_group)
+        groups << { entity: primal_group, kind: :primal }
+      end
+      cell_spaces.each do |cell|
+        group = cell.valid_sketchup_group
+        next unless selected[group.object_id].equal?(group)
+
+        ids[cell.id] = true
+        groups << { entity: group, kind: :cell, cell_id: cell.id }
+      end
+      @snapshot = {
+        cell_ids: ids,
+        watched_groups: groups,
+        entities: groups.map { |group| group[:entity] }
+      }
+    end
+
+    def dual_graph_selection_snapshot
+      @snapshot || { cell_ids: {}, watched_groups: [], entities: [] }
+    end
+  end
 
   class Builder
     attr_reader :invalidations
@@ -104,6 +151,8 @@ class TransitionTransformPreviewTest < Minitest::Test
       @primal,
       [Cell.new('A', @cell_group)]
     )
+    indoor_model.editing = true
+    indoor_model.refresh_dual_graph_selection_cache
     @overlay = Overlay.allocate
     @overlay.instance_variable_set(:@indoor_model, indoor_model)
     @overlay.instance_variable_set(:@transition_curve_builder, @builder)
@@ -146,6 +195,7 @@ class TransitionTransformPreviewTest < Minitest::Test
   def test_selection_change_without_transform_does_not_start_preview
     refute @overlay.send(:update_transition_transform_preview)
     @selection.entities = [@primal]
+    @overlay.instance_variable_get(:@indoor_model).refresh_dual_graph_selection_cache
 
     refute @overlay.send(:update_transition_transform_preview)
     refute @overlay.finish_transition_transform_preview(source: :commit)
@@ -217,18 +267,21 @@ class TransitionTransformPreviewTest < Minitest::Test
 
     order.clear
     @selection.entities = [@cell_group, second_group]
+    indoor_model.refresh_dual_graph_selection_cache
     @overlay.draw(view)
     assert_equal [:transition, [:selected_transition, %w[A B], []], :state,
                   [:selected_state, %w[A B]]], order
 
     order.clear
     @selection.entities = [Group.new(99, 1)]
+    indoor_model.refresh_dual_graph_selection_cache
     @overlay.draw(view)
     assert_equal [:transition, :state], order
 
     order.clear
     @selection.entities = [@cell_group]
-    indoor_model.define_singleton_method(:editing?) { false }
+    indoor_model.refresh_dual_graph_selection_cache
+    indoor_model.editing = false
     @overlay.draw(view)
     assert_equal [:transition, :state], order
   end
@@ -252,6 +305,27 @@ class TransitionTransformPreviewTest < Minitest::Test
     assert_empty @overlay.send(:selected_dual_overlay_cell_ids)
   ensure
     mode&.highlight_on!
+  end
+
+  def test_camera_redraw_does_not_enumerate_selection_or_cellspace_registry
+    model = @overlay.instance_variable_get(:@indoor_model)
+    model.cell_spaces.first.freeze
+    enumerations = @selection.enumerations
+    initial_snapshot = model.dual_graph_selection_snapshot
+
+    # Without observer notification, a draw cannot discover changed selection.
+    @selection.entities = [Group.new(97, 7)]
+    3.times do
+      assert_equal({ 'A' => true }, @overlay.send(:selected_dual_overlay_cell_ids))
+      @overlay.send(:update_transition_transform_preview)
+    end
+    assert_equal enumerations, @selection.enumerations
+    assert_same initial_snapshot, model.dual_graph_selection_snapshot
+
+    # The selection event updates the cache once; subsequent redraws read it.
+    model.refresh_dual_graph_selection_cache
+    assert_empty @overlay.send(:selected_dual_overlay_cell_ids)
+    assert_equal enumerations + 1, @selection.enumerations
   end
 
   def test_abort_releases_transform_suppression
