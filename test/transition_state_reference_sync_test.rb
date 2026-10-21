@@ -158,6 +158,22 @@ class TransitionStateReferenceSyncTest < Minitest::Test
     assert_empty @model.transition_writes
   end
 
+  def test_same_pair_id_but_replaced_cell_object_must_rebuild_transition
+    stale = @model.sync_pair(@first, @second)
+    restored_cell = Core::CellSpace.new('a')
+    restored_state = register_state(restored_cell, 3.0)
+
+    assert_equal @first.id, restored_cell.id
+    refute_same @first, restored_cell
+    assert stale.valid?
+
+    current = @model.sync_pair(restored_cell, @second)
+    refute_same stale, current
+    assert_links(current, restored_state, @original_second)
+    assert_empty @original_first.transitions
+    refute_includes @original_second.transitions, stale
+  end
+
   def test_runtime_path_keeps_existing_transition_when_states_are_current
     existing = @model.sync_pair(@first, @second, runtime: true)
     assert_same existing, @model.sync_pair(@second, @first, runtime: true)
