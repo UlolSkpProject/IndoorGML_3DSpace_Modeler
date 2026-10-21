@@ -7,8 +7,8 @@ module ULOL
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.before!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.collapsed!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.optimized!
-      # RG.los_graph!         # Individually validated OPTIMIZED edges.
-      # RG.connectivity_repair! # Verified connecting paths and restored reference nodes.
+      # RG.los_graph!         # Full line-of-sight graph of OPTIMIZED reference nodes.
+      # RG.connectivity_repair! # Full LOS with verified connecting paths and restored nodes.
       # RG.short_path_graph!  # State-rooted Dijkstra tree from repaired graph.
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.clear!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.mode
@@ -117,7 +117,7 @@ module ULOL
             raise ArgumentError, 'expected :off, :before, :collapsed, :optimized, :los_graph, :connectivity_repair or :short_path_graph'
           end
 
-          count = active_indoor_model&.request_reference_graph_debug(value).to_i
+          active_indoor_model&.request_reference_graph_debug(value)
           @mode = value
           if defined?(Sketchup) && Sketchup.respond_to?(:active_model)
             Sketchup.active_model&.active_view&.invalidate
