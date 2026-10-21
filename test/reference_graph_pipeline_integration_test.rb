@@ -164,8 +164,7 @@ class ReferenceGraphPipelineIntegrationTest < Minitest::Test
       assert RG.highlight?
     end
 
-    assert_includes output, 'Selected CellSpace Highlight: OFF'
-    assert_includes output, 'Selected CellSpace Highlight: ON'
+    assert_empty output, 'Console commands should return status without printing during release operation'
     assert_equal :optimized, RG.mode
     Mode.instance_variable_set(:@mode, :off)
     refute RG.highlight_off!
