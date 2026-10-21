@@ -75,6 +75,7 @@ private:
     std::atomic<std::uint32_t> active_workers_{0};
     std::atomic<bool> running_{false};
     std::atomic<bool> completed_{false};
+    std::atomic<bool> failed_{false};
     std::atomic<bool> cancel_requested_{false};
 
     std::atomic<std::uint64_t> overlap_701_count_{0};

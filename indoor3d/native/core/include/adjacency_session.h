@@ -115,6 +115,7 @@ private:
     void adjacency_worker_loop();
     void join_workers();
     void record_adjacency_failure(const std::string& message);
+    void record_unhandled_worker_failure(const char* message) noexcept;
     bool has_state_targets() const;
 
     std::vector<CellData> cells_;

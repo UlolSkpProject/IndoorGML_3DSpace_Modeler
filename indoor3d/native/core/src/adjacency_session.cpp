@@ -128,16 +128,31 @@ std::size_t AdjacencySession::start_state_check()
     running_.store(true, std::memory_order_release);
     state_.store(SessionState::StateRunning, std::memory_order_release);
 
-    workers_.reserve(worker_count);
-    for (std::size_t index=0; index<worker_count; ++index)
+    try
     {
-        workers_.emplace_back(&AdjacencySession::state_worker_loop, this);
+        workers_.reserve(worker_count);
+        for (std::size_t index=0; index<worker_count; ++index)
+            workers_.emplace_back(&AdjacencySession::state_worker_loop, this);
+    }
+    catch (...)
+    {
+        // A partially launched pool must be joined before a retry or clear().
+        cancel_requested_.store(true, std::memory_order_release);
+        join_workers();
+        active_workers_.store(0, std::memory_order_relaxed);
+        running_.store(false, std::memory_order_release);
+        completed_.store(false, std::memory_order_release);
+        phase_.store(ProgressPhase::None, std::memory_order_release);
+        state_.store(SessionState::Ready, std::memory_order_release);
+        throw;
     }
     return state_targets_.size();
 }
 
 void AdjacencySession::state_worker_loop()
 {
+    try
+    {
     std::vector<StatePointResult> local_results;
 
     while (!cancel_requested_.load(std::memory_order_acquire))
@@ -226,6 +241,16 @@ void AdjacencySession::state_worker_loop()
             std::make_move_iterator(local_results.begin()),
             std::make_move_iterator(local_results.end())
         );
+    }
+
+    }
+    catch (const std::exception& error)
+    {
+        record_unhandled_worker_failure(error.what());
+    }
+    catch (...)
+    {
+        record_unhandled_worker_failure("Unexpected state_worker_loop exception");
     }
 
     if (active_workers_.fetch_sub(1, std::memory_order_acq_rel) == 1)
@@ -462,16 +487,30 @@ std::size_t AdjacencySession::start_adjacency_check(
     running_.store(true, std::memory_order_release);
     state_.store(SessionState::AdjacencyRunning, std::memory_order_release);
 
-    workers_.reserve(worker_count);
-    for (std::size_t index=0; index<worker_count; ++index)
+    try
     {
-        workers_.emplace_back(&AdjacencySession::adjacency_worker_loop, this);
+        workers_.reserve(worker_count);
+        for (std::size_t index=0; index<worker_count; ++index)
+            workers_.emplace_back(&AdjacencySession::adjacency_worker_loop, this);
+    }
+    catch (...)
+    {
+        cancel_requested_.store(true, std::memory_order_release);
+        join_workers();
+        active_workers_.store(0, std::memory_order_relaxed);
+        running_.store(false, std::memory_order_release);
+        completed_.store(false, std::memory_order_release);
+        phase_.store(ProgressPhase::None, std::memory_order_release);
+        state_.store(current_state, std::memory_order_release);
+        throw;
     }
     return candidates_.size();
 }
 
 void AdjacencySession::adjacency_worker_loop()
 {
+    try
+    {
     std::vector<PairResult> local_results;
 
     while (!cancel_requested_.load(std::memory_order_acquire))
@@ -511,6 +550,16 @@ void AdjacencySession::adjacency_worker_loop()
             std::make_move_iterator(local_results.begin()),
             std::make_move_iterator(local_results.end())
         );
+    }
+
+    }
+    catch (const std::exception& error)
+    {
+        record_unhandled_worker_failure(error.what());
+    }
+    catch (...)
+    {
+        record_unhandled_worker_failure("Unexpected adjacency_worker_loop exception");
     }
 
     if (active_workers_.fetch_sub(1, std::memory_order_acq_rel) == 1)
@@ -654,5 +703,22 @@ void AdjacencySession::record_adjacency_failure(const std::string& message)
     failed_pair_count_.fetch_add(1, std::memory_order_relaxed);
     std::lock_guard<std::mutex> lock(error_mutex_);
     if (first_error_.empty()) first_error_ = message;
+}
+
+void AdjacencySession::record_unhandled_worker_failure(const char* message) noexcept
+{
+    // Never allocate outside a catch boundary while handling a worker failure.
+    failed_.store(true, std::memory_order_release);
+    cancel_requested_.store(true, std::memory_order_release);
+    try
+    {
+        std::lock_guard<std::mutex> lock(error_mutex_);
+        if (first_error_.empty())
+            first_error_ = message ? message : "Unknown native worker failure";
+    }
+    catch (...)
+    {
+        // OOM while recording a diagnostic must not terminate the worker.
+    }
 }
 } // namespace IndoorGMLAdjacencyNative

@@ -39,6 +39,7 @@ std::size_t ValiditySession::load_batch(const std::uint8_t* data,std::size_t siz
     manifold_attempted_.assign(cells_.size(),false);
     current_.store(0,std::memory_order_relaxed);
     completed_.store(false,std::memory_order_relaxed);
+    failed_.store(false,std::memory_order_relaxed);
     return cells_.size();
 }
 
@@ -75,6 +76,7 @@ std::size_t ValiditySession::start_check(
     next_work_.store(0,std::memory_order_relaxed);
     cancel_requested_.store(false,std::memory_order_relaxed);
     completed_.store(false,std::memory_order_relaxed);
+    failed_.store(false,std::memory_order_relaxed);
     overlap_701_count_.store(0,std::memory_order_relaxed);
     adjacency_704_count_.store(0,std::memory_order_relaxed);
     manifold_build_count_.store(0,std::memory_order_relaxed);
@@ -94,9 +96,22 @@ std::size_t ValiditySession::start_check(
     active_workers_.store(static_cast<std::uint32_t>(worker_count),std::memory_order_relaxed);
     started_at_=std::chrono::steady_clock::now();
     running_.store(true,std::memory_order_release);
-    workers_.reserve(worker_count);
-    for (std::size_t index=0; index<worker_count; ++index)
-        workers_.emplace_back(&ValiditySession::worker_loop,this);
+    try
+    {
+        workers_.reserve(worker_count);
+        for (std::size_t index=0; index<worker_count; ++index)
+            workers_.emplace_back(&ValiditySession::worker_loop,this);
+    }
+    catch (...)
+    {
+        cancel_requested_.store(true,std::memory_order_release);
+        join_workers();
+        active_workers_.store(0,std::memory_order_relaxed);
+        running_.store(false,std::memory_order_release);
+        completed_.store(false,std::memory_order_release);
+        failed_.store(true,std::memory_order_release);
+        throw;
+    }
     return requests_.size();
 }
 
@@ -113,6 +128,8 @@ std::shared_ptr<manifold::Manifold> ValiditySession::manifold_for(std::size_t in
 
 void ValiditySession::worker_loop()
 {
+    try
+    {
     std::vector<ValidityResult> local;
     while (!cancel_requested_.load(std::memory_order_acquire))
     {
@@ -174,6 +191,15 @@ void ValiditySession::worker_loop()
         );
     }
 
+    }
+    catch (...)
+    {
+        // Infrastructure failure (including result-vector allocation) is not
+        // an ordinary 701/704 Uncertain result. Fail the whole batch.
+        failed_.store(true,std::memory_order_release);
+        cancel_requested_.store(true,std::memory_order_release);
+    }
+
     if (active_workers_.fetch_sub(1,std::memory_order_acq_rel)==1)
     {
         duration_.store(elapsed_seconds(started_at_),std::memory_order_release);
@@ -211,6 +237,8 @@ std::vector<std::uint8_t> ValiditySession::get_result_bytes()
     if (!completed_.load(std::memory_order_acquire))
         throw std::runtime_error("validity result requested before check completed");
     join_workers();
+    if (failed_.load(std::memory_order_acquire))
+        throw std::runtime_error("Validity native worker failed; partial results are unusable");
     std::vector<ValidityResult> copy;
     {
         std::lock_guard<std::mutex> lock(result_mutex_);
@@ -240,6 +268,7 @@ void ValiditySession::clear()
     running_.store(false,std::memory_order_relaxed);
     completed_.store(false,std::memory_order_relaxed);
     cancel_requested_.store(false,std::memory_order_relaxed);
+    failed_.store(false,std::memory_order_relaxed);
 }
 
 void ValiditySession::join_workers()
