@@ -12,16 +12,17 @@
 
 namespace IndoorGMLAdjacencyNative
 {
-// Default: OPTIMIZED -> FULL LOS -> REPAIR. The optional sparse-input
-// path is retained for controlled regression comparisons only.
-inline constexpr bool SKIP_PRE_REPAIR_FULL_LOS_FOR_TEST = false;
+// Use the existing OPTIMIZED edges after individual LOS validation.
+// Connectivity Repair searches additional LOS only when required.
+// The full all-pairs LOS path remains available as an alternative.
+inline constexpr bool USE_SPARSE_OPTIMIZED_GRAPH_FOR_REPAIR = true;
 
 enum class ReferenceGraphStage
 {
     Before,
     Collapsed,
     Optimized,
-    LosGraph, // Full LOS (sparse validated edges in an optional test configuration).
+    LosGraph, // Verified OPTIMIZED edges (Full LOS under alternative routing policy).
     ConnectivityRepair, // LOS graph augmented with proven intermediate references.
     ShortPathGraph // Derived, read-only view of the State-rooted Dijkstra tree.
 };
@@ -85,9 +86,9 @@ struct ReferenceGraphPipeline
     bool legacy_state_only = false;
 };
 
-// BEFORE -> COLLAPSED -> OPTIMIZED -> FULL LOS ->
-// CONNECTIVITY_REPAIR -> State-rooted Dijkstra. The optional sparse-input
-// comparison mode verifies existing edges individually.
+// BEFORE -> COLLAPSED -> OPTIMIZED -> individually verified existing edges ->
+// CONNECTIVITY_REPAIR -> State-rooted Dijkstra. An all-pairs LOS alternative
+// remains available without changing the default sparse routing policy.
 // Radius is not exposed in Ruby snapshots.
 ReferenceGraphPipeline build_reference_graph_pipeline(
     const CellData& cell,
