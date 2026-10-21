@@ -138,13 +138,17 @@ VALUE adjacency_native_commit_reference_graph_batch(VALUE self, VALUE transform_
     const std::size_t size=static_cast<std::size_t>(RSTRING_LEN(transform_bytes));
     if(size%(16*sizeof(double))!=0)
         rb_raise(rb_eArgError,"invalid Reference CellSpace frame payload");
-    std::vector<std::array<double,16>> frames(size/(16*sizeof(double)));
-    for(std::size_t i=0;i<frames.size();++i)
-        std::memcpy(frames[i].data(),
-            RSTRING_PTR(transform_bytes)+i*16*sizeof(double),
-            16*sizeof(double));
-    return protect_native_call([&frames]() {
+    return protect_native_call([transform_bytes,size]() {
+        // Allocate and decode inside the exception boundary; input stays
+        // alive until its bytes have been copied into Native-owned storage.
+        std::vector<std::array<double,16>> frames(size/(16*sizeof(double)));
+        const char* bytes=RSTRING_PTR(transform_bytes);
+        for(std::size_t i=0;i<frames.size();++i)
+            std::memcpy(frames[i].data(),
+                bytes+i*16*sizeof(double),
+                16*sizeof(double));
         session().commit_reference_graph_batch(frames);
+        RB_GC_GUARD(transform_bytes);
         return Qtrue;
     });
 }
@@ -196,7 +200,6 @@ VALUE adjacency_native_get_reference_graph(VALUE self, VALUE cell_key, VALUE sta
 {
     (void)self;
     StringValue(cell_key);
-    const std::string key(RSTRING_PTR(cell_key),static_cast<std::size_t>(RSTRING_LEN(cell_key)));
     const ID stage_id=SYM2ID(stage);
     ReferenceGraphStage selected;
     if(stage_id==rb_intern("before")) selected=ReferenceGraphStage::Before;
@@ -206,7 +209,9 @@ VALUE adjacency_native_get_reference_graph(VALUE self, VALUE cell_key, VALUE sta
     else if(stage_id==rb_intern("connectivity_repair")) selected=ReferenceGraphStage::ConnectivityRepair;
     else if(stage_id==rb_intern("short_path_graph")) selected=ReferenceGraphStage::ShortPathGraph;
     else rb_raise(rb_eArgError,"unknown Reference Graph stage");
-    return protect_native_call([key,selected]() {
+    return protect_native_call([cell_key,selected]() {
+        const std::string key(RSTRING_PTR(cell_key),
+                              static_cast<std::size_t>(RSTRING_LEN(cell_key)));
         const auto graph=session().get_reference_graph(key,selected);
         if(!graph) return Qnil;
         VALUE result=rb_hash_new();
@@ -253,15 +258,15 @@ VALUE adjacency_native_get_reference_transition_curve(
     Check_Type(waypoint_bytes,T_STRING);
     if(RSTRING_LEN(waypoint_bytes)!=static_cast<long>(6*sizeof(double)))
         rb_raise(rb_eArgError,"Reference waypoints require six float64 values");
-    const std::string first(RSTRING_PTR(first_cell_key),
-                            static_cast<std::size_t>(RSTRING_LEN(first_cell_key)));
-    const std::string second(RSTRING_PTR(second_cell_key),
-                             static_cast<std::size_t>(RSTRING_LEN(second_cell_key)));
     double values[6];
     std::memcpy(values,RSTRING_PTR(waypoint_bytes),sizeof(values));
     for(const double value:values) if(!std::isfinite(value))
         rb_raise(rb_eArgError,"Reference waypoint coordinate is not finite");
-    return protect_native_call([first,second,&values]() {
+    return protect_native_call([first_cell_key,second_cell_key,&values]() {
+        const std::string first(RSTRING_PTR(first_cell_key),
+                                static_cast<std::size_t>(RSTRING_LEN(first_cell_key)));
+        const std::string second(RSTRING_PTR(second_cell_key),
+                                 static_cast<std::size_t>(RSTRING_LEN(second_cell_key)));
         const auto paths=session().get_reference_transition_curve(
             first,second,{values[0],values[1],values[2]},
                          {values[3],values[4],values[5]});
@@ -294,15 +299,15 @@ VALUE adjacency_native_get_reference_waypoint_anchors(
     Check_Type(waypoint_bytes,T_STRING);
     if(RSTRING_LEN(waypoint_bytes)!=static_cast<long>(6*sizeof(double)))
         rb_raise(rb_eArgError,"Reference anchor waypoints require six float64 values");
-    const std::string first(RSTRING_PTR(first_cell_key),
-                            static_cast<std::size_t>(RSTRING_LEN(first_cell_key)));
-    const std::string second(RSTRING_PTR(second_cell_key),
-                             static_cast<std::size_t>(RSTRING_LEN(second_cell_key)));
     double values[6];
     std::memcpy(values,RSTRING_PTR(waypoint_bytes),sizeof(values));
     for(const double value:values) if(!std::isfinite(value))
         rb_raise(rb_eArgError,"Reference waypoint coordinate is not finite");
-    return protect_native_call([first,second,&values]() {
+    return protect_native_call([first_cell_key,second_cell_key,&values]() {
+        const std::string first(RSTRING_PTR(first_cell_key),
+                                static_cast<std::size_t>(RSTRING_LEN(first_cell_key)));
+        const std::string second(RSTRING_PTR(second_cell_key),
+                                 static_cast<std::size_t>(RSTRING_LEN(second_cell_key)));
         const auto anchors=session().get_reference_waypoint_anchors(
             first,second,{values[0],values[1],values[2]},
                          {values[3],values[4],values[5]});
@@ -324,8 +329,9 @@ VALUE adjacency_native_get_reference_revision(VALUE self, VALUE cell_key)
 {
     (void)self;
     StringValue(cell_key);
-    const std::string key(RSTRING_PTR(cell_key),static_cast<std::size_t>(RSTRING_LEN(cell_key)));
-    return protect_native_call([key]() {
+    return protect_native_call([cell_key]() {
+        const std::string key(RSTRING_PTR(cell_key),
+                              static_cast<std::size_t>(RSTRING_LEN(cell_key)));
         return ULL2NUM(static_cast<unsigned long long>(session().get_reference_revision(key)));
     });
 }
