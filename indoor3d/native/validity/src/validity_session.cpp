@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <new>
 #include <stdexcept>
 #include <utility>
 
@@ -170,6 +171,12 @@ void ValiditySession::worker_loop()
                 result.first=request.first;
                 result.second=request.second;
             }
+        }
+        catch (const std::bad_alloc&)
+        {
+            // Exhausted memory is a batch infrastructure failure, not an
+            // ordinary geometric Uncertain result. Reach the outer handler.
+            throw;
         }
         catch (...)
         {
