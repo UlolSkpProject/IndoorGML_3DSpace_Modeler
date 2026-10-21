@@ -115,7 +115,10 @@ module ULOL
             points = Array(snapshot_face[:points]).map do |point|
               Geom::Point3d.new(point[0], point[1], point[2])
             end
+            # Geometry snapshots carry the SketchUp-transformed plane
+            # (A, B, C, D), while live Face queries carry :normal.
             normal = Array(snapshot_face[:normal])
+            normal = Array(snapshot_face[:plane]).first(3) if normal.length < 3
             return nil if points.length < 3 || normal.length < 3
 
             inner_loops = Array(snapshot_face[:inner_loops]).map do |loop|
@@ -126,7 +129,9 @@ module ULOL
             return nil if inner_loops.any? { |loop| loop.length < 3 }
 
             vector = Geom::Vector3d.new(normal[0], normal[1], normal[2])
-            vector.normalize! if vector.length > 0.001
+            return nil if vector.length <= 0.000001
+
+            vector.normalize!
             { points: points, normal: vector, inner_loops: inner_loops }
           rescue StandardError
             nil

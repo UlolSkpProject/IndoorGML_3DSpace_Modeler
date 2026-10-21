@@ -96,7 +96,7 @@ class ReferenceWaypointAnchorGeometryTest < Minitest::Test
     face = wall_face(inner_loops: [doorway_hole])
     raw = {
       points: face[:points].map(&:to_a),
-      normal: [1.0, 0.0, 0.0],
+      plane: [1.0, 0.0, 0.0, 0.0],
       inner_loops: face[:inner_loops].map { |loop| loop.map(&:to_a) }
     }
     restored = Query.send(:geometry_face, raw)
@@ -108,10 +108,10 @@ class ReferenceWaypointAnchorGeometryTest < Minitest::Test
     face = wall_face(inner_loops: [doorway_hole])
     first = {
       points: face[:points].map(&:to_a),
-      normal: [1.0, 0.0, 0.0],
+      plane: [1.0, 0.0, 0.0, 0.0],
       inner_loops: face[:inner_loops].map { |loop| loop.map(&:to_a) }
     }
-    second = first.merge(normal: [-1.0, 0.0, 0.0])
+    second = first.merge(plane: [-1.0, 0.0, 0.0, 0.0])
     context = {
       waypoint_snapshot_candidates: [{
         area: 1.0,
@@ -129,6 +129,62 @@ class ReferenceWaypointAnchorGeometryTest < Minitest::Test
       state2_point: state2,
       tolerance: 0.001
     )
+  end
+
+  def test_invalid_adjusted_height_reuses_a_centroid_outside_hole
+    face = wall_face(inner_loops: [doorway_hole])
+    centroid = Geom::Point3d.new(0.0, 5.0, 8.0)
+    candidate = {
+      centroid: centroid,
+      face1: face,
+      face2: face,
+      normal1: Geom::Vector3d.new(1.0, 0.0, 0.0)
+    }
+    state1 = Geom::Point3d.new(0.0, 5.0, 15.0)
+    state2 = Geom::Point3d.new(0.0, 5.0, 15.0)
+
+    selected = Query.send(:adjusted_waypoint, candidate, state1, state2, 0.001)
+    assert_same centroid, selected
+    assert Query.send(:valid_shared_waypoint?, selected, candidate, 0.001)
+  end
+
+  def test_final_candidate_must_belong_to_both_shared_faces
+    centroid = Geom::Point3d.new(0.0, 5.0, 15.0)
+    candidate = {
+      centroid: centroid,
+      face1: wall_face,
+      face2: wall_face(inner_loops: [doorway_hole]),
+      normal1: Geom::Vector3d.new(1.0, 0.0, 0.0)
+    }
+    refute Query.send(:valid_shared_waypoint?, centroid, candidate, 0.001)
+  end
+
+  def test_valid_snapshot_candidate_remains_after_failed_height_adjustment
+    face = wall_face(inner_loops: [doorway_hole])
+    first = {
+      points: face[:points].map(&:to_a),
+      plane: [1.0, 0.0, 0.0, 0.0],
+      inner_loops: face[:inner_loops].map { |loop| loop.map(&:to_a) }
+    }
+    context = {
+      waypoint_snapshot_candidates: [{
+        area: 1.0,
+        centroid_2d: [5.0, 8.0],
+        axis: :x,
+        face1: first,
+        face2: first.merge(plane: [-1.0, 0.0, 0.0, 0.0])
+      }]
+    }
+    state1 = Geom::Point3d.new(0.0, 5.0, 15.0)
+    state2 = Geom::Point3d.new(0.0, 5.0, 15.0)
+    found = Query.waypoint_candidates_from_snapshot_context(
+      context,
+      state1_point: state1,
+      state2_point: state2,
+      tolerance: 0.001
+    )
+    assert_equal 1, found.length
+    assert_in_delta 8.0, found.first.fetch(:point).z, 1.0e-9
   end
 
   def test_closest_reference_points_replace_state_height_sources
