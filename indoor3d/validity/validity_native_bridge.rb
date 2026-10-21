@@ -174,7 +174,7 @@ module ULOL
           raise ProtocolError, 'validity result magic mismatch' unless reader.read_bytes(8) == RESULT_MAGIC
 
           version = reader.read_u64
-          raise ProtocolError, "unsupported validity result version #{version}" unless version == VALIDITY_FORMAT_ID
+          raise ProtocolError, "unsupported validity result format #{version}" unless version == VALIDITY_FORMAT_ID
 
           count = checked_count(reader.read_u64, 'validity result count')
           raise ProtocolError, 'validity result reserved field is non-zero' unless reader.read_u64.zero?
