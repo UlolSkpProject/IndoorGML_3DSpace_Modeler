@@ -40,6 +40,23 @@ class ReferencePointProtectedOverlayTest < Minitest::Test
     end
   end
 
+  State = Struct.new(:cell_id)
+  CellSpace = Struct.new(:id, :duality_state)
+
+  class VisibleModel
+    attr_reader :debug_reference_points_by_kind, :cell_spaces
+
+    def initialize(points, visibility)
+      @debug_reference_points_by_kind = points
+      @visibility = visibility
+      @cell_spaces = visibility.keys.map { |id| CellSpace.new(id, State.new(id)) }
+    end
+
+    def dual_overlay_state_visible?(state)
+      @visibility.fetch(state.cell_id, false)
+    end
+  end
+
   def p(x, y)
     Point.new(x, y, 5)
   end
@@ -93,25 +110,21 @@ class ReferencePointProtectedOverlayTest < Minitest::Test
     assert_equal [p(2, 1)], view.points.last[:points]
   end
 
-  def test_renderer_draws_protected_points_as_larger_magenta_x
-    model = Struct.new(:debug_reference_points_by_kind).new(
-      { 5 => [{ cell_id: 'A', point: p(3, 1) }] }
+  def test_renderer_suppresses_reference_points_for_hidden_owner_cell
+    model = VisibleModel.new(
+      { 4 => [{ cell_id: 'A', point: p(2, 1) }, { cell_id: 'B', point: p(4, 3) }] },
+      'A' => true,
+      'B' => false
     )
     render = Renderer.new(indoor_model: model, transform_context: Object.new.tap do |transform|
-      def transform.overlay_cell_reference_points(points, cell_id)
-        return [] unless cell_id == 'A'
-        points
-      end
+      def transform.overlay_cell_reference_points(points, _cell_id) = points
     end)
     view = View.new
+
     render.draw(view)
 
     assert_equal 1, view.points.length
-    assert_equal 4, view.points.last[:style]
-    assert_equal 14, view.points.last[:size]
-    color = view.points.last[:color]
-    assert_equal [235, 20, 145], [color.red, color.green, color.blue]
-    assert_equal [p(3, 1)], view.points.last[:points]
+    assert_equal [p(2, 1)], view.points.first[:points]
   end
 
   def teardown

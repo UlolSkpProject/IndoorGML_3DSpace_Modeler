@@ -87,7 +87,7 @@ PreparationResult prepare(
     double tolerance
 );
 
-// Legacy/synthetic input ONLY. Modern V5 production calls prepare(Plane)
+// Derived-plane overload for synthetic input and callers lacking an explicit plane.
 // and never reconstructs D from a Loop vertex.
 PreparationResult prepare(
     const Vec3& normal,

@@ -53,6 +53,7 @@ class ReferenceGraphPipelineIntegrationTest < Minitest::Test
       }.freeze
     end
     Mode.instance_variable_set(:@mode, :off)
+    Mode.remove_instance_variable(:@selection_highlight_enabled) if Mode.instance_variable_defined?(:@selection_highlight_enabled)
   end
 
   def teardown
@@ -61,6 +62,7 @@ class ReferenceGraphPipelineIntegrationTest < Minitest::Test
       original.call(*args)
     end
     Mode.instance_variable_set(:@mode, :off)
+    Mode.remove_instance_variable(:@selection_highlight_enabled) if Mode.instance_variable_defined?(:@selection_highlight_enabled)
   end
 
   def test_overlay_is_off_until_an_explicit_native_stage_query
@@ -147,6 +149,30 @@ class ReferenceGraphPipelineIntegrationTest < Minitest::Test
     lifecycle.clear_reference_graph_debug
     Mode.instance_variable_set(:@mode, :off)
     assert_empty lifecycle.debug_reference_graphs
+  end
+
+  def test_selected_cellspace_highlight_toggle_is_independent_of_graph_mode
+    assert RG.highlight?
+    Mode.instance_variable_set(:@mode, :optimized)
+
+    output, = capture_io do
+      refute RG.highlight_off!
+      refute RG.highlight?
+      assert_equal :optimized, RG.mode
+      assert RG.highlight_on!
+      assert RG.highlight?
+      refute RG.toggle_highlight!
+      refute RG.highlight?
+      assert RG.toggle_highlight!
+      assert RG.highlight?
+    end
+
+    assert_empty output, 'Console commands should return status without printing during release operation'
+    assert_equal :optimized, RG.mode
+    Mode.instance_variable_set(:@mode, :off)
+    refute RG.highlight_off!
+    RG.clear!
+    refute RG.highlight?, 'Clearing Ref-Graph stage must not turn selection highlighting on'
   end
 
   def test_only_native_stage_names_are_accepted

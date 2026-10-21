@@ -88,16 +88,29 @@ module ULOL
 
           update_transition_transform_preview
           state_radius_scale = DualOverlayPreferences.state_radius_scale
+          selected_cell_ids = selected_dual_overlay_cell_ids
           @reference_graph_debug_renderer.draw_partitions(view)
-          unless validation_focus_active?
-            @transition_renderer.draw(
-              view,
-              excluded_cell_ids: transition_transform_excluded_cell_ids
-            )
-          end
           @reference_graph_debug_renderer.draw_edges(view)
           @reference_point_debug_renderer.draw(view)
+
+          # Draw order: Transition -> selected Transition -> State ->
+          # selected State. The additional passes never modify base styling.
+          unless validation_focus_active?
+            excluded_cell_ids = transition_transform_excluded_cell_ids
+            @transition_renderer.draw(
+              view,
+              selected_cell_ids: selected_cell_ids,
+              excluded_cell_ids: excluded_cell_ids
+            )
+          end
           @state_renderer.draw(view, state_radius_scale: state_radius_scale)
+          unless selected_cell_ids.empty?
+            @state_renderer.draw_highlight(
+              view,
+              selected_cell_ids: selected_cell_ids,
+              state_radius_scale: state_radius_scale
+            )
+          end
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Dual graph overlay draw failed: #{e.class}: #{e.message}"
         ensure
@@ -140,6 +153,17 @@ module ULOL
 
         private
 
+        # The SelectionObserver updates this immutable snapshot. Camera
+        # redraws read it in O(1), without scanning Selection or CellSpaces.
+        def selected_dual_overlay_cell_ids
+          return {} if defined?(ReferenceGraphDebugMode) && !ReferenceGraphDebugMode.highlight?
+          return {} unless @indoor_model.respond_to?(:editing?) && @indoor_model.editing?
+
+          @indoor_model.dual_graph_selection_snapshot[:cell_ids]
+        rescue StandardError
+          {}
+        end
+
         def update_transition_transform_preview
           ensure_transition_transform_state
           current_snapshots = selected_transition_transform_snapshots
@@ -175,23 +199,13 @@ module ULOL
           end
         end
 
+        # Only selected entities are fingerprinted for live transform preview.
+        # The selected entity set itself is event-cached, never queried in draw.
         def selected_transition_transform_snapshots
-          model = @indoor_model.model if @indoor_model.respond_to?(:model)
-          selection = model&.selection
-          return {} unless selection
-
-          watched_groups = {}
-          primal_group = @indoor_model.primal_group if @indoor_model.respond_to?(:primal_group)
-          watched_groups[primal_group.object_id] = { entity: primal_group, kind: :primal } if primal_group
-          Array(@indoor_model.cell_spaces).each do |cell_space|
-            group = cell_space&.valid_sketchup_group
-            watched_groups[group.object_id] = { entity: group, kind: :cell, cell_id: cell_space.id } if group
-          end
-
-          selection.each_with_object({}) do |entity, result|
-            watched = watched_groups[entity.object_id]
-            next unless watched && watched[:entity].equal?(entity)
-            next unless entity.respond_to?(:transformation)
+          watched_groups = @indoor_model.dual_graph_selection_snapshot[:watched_groups]
+          watched_groups.each_with_object({}) do |watched, result|
+            entity = watched[:entity]
+            next unless entity&.valid? && entity.respond_to?(:transformation)
 
             result[transition_transform_entity_key(entity)] = {
               kind: watched[:kind],

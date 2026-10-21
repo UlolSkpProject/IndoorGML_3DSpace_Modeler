@@ -49,6 +49,7 @@ module ULOL
           return unless enabled?(level_name)
 
           resolved = block_given? ? yield : message
+          # Centralized console sink; callers must use Logger so LOGGING_ENABLED applies.
           Kernel.puts(resolved) unless resolved.nil?
         end
 

@@ -7,11 +7,13 @@ module ULOL
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.before!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.collapsed!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.optimized!
-      # RG.los_graph!         # During temporary bypass: validated OPTIMIZED edges only.
-      # RG.connectivity_repair! # Full LOS plus restored intermediate nodes.
+      # RG.los_graph!         # Full line-of-sight graph of OPTIMIZED reference nodes.
+      # RG.connectivity_repair! # Full LOS with verified connecting paths and restored nodes.
       # RG.short_path_graph!  # State-rooted Dijkstra tree from repaired graph.
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.clear!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.mode
+      # RG.highlight_on! / RG.highlight_off! / RG.highlight?
+      # RG.toggle_highlight!
       #
       # Each stage command asks Native for one radius-free display snapshot.
       # It changes no State, Transition, geometry or undoable model data.
@@ -46,6 +48,32 @@ module ULOL
           mode == :short_path_graph
         end
 
+        # Runtime-only selection highlight setting. Independent of RG.mode
+        # and ON by default; changing it never touches Native or model data.
+        def highlight?
+          @selection_highlight_enabled != false
+        end
+
+        def highlight_on!
+          set_selection_highlight(true)
+        end
+
+        def highlight_off!
+          set_selection_highlight(false)
+        end
+
+        def toggle_highlight!
+          set_selection_highlight(!highlight?)
+        end
+
+        def set_selection_highlight(enabled)
+          @selection_highlight_enabled = (enabled == true)
+          if defined?(Sketchup) && Sketchup.respond_to?(:active_model)
+            Sketchup.active_model&.active_view&.invalidate
+          end
+          highlight?
+        end
+
         def before!
           set_mode(:before)
         end
@@ -73,7 +101,6 @@ module ULOL
         def clear!
           @mode = :off
           active_indoor_model&.clear_reference_graph_debug
-          puts '[IndoorGML] Reference Graph Overlay: OFF'
           :off
         end
 
@@ -88,12 +115,11 @@ module ULOL
             raise ArgumentError, 'expected :off, :before, :collapsed, :optimized, :los_graph, :connectivity_repair or :short_path_graph'
           end
 
-          count = active_indoor_model&.request_reference_graph_debug(value).to_i
+          active_indoor_model&.request_reference_graph_debug(value)
           @mode = value
           if defined?(Sketchup) && Sketchup.respond_to?(:active_model)
             Sketchup.active_model&.active_view&.invalidate
           end
-          puts "[IndoorGML] Reference Graph Overlay: #{value.upcase} (#{count} CellSpace)"
           value
         end
 

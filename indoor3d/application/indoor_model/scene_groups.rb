@@ -8,9 +8,9 @@ module ULOL
       class IndoorModel
         module SceneGroups
           STATE_FIXED_HEIGHT_OFFSET = 1000.mm unless const_defined?(:STATE_FIXED_HEIGHT_OFFSET, false)
-          # Temporary feature flag. When enabled, CellSpace local-center
-          # calculation aligns local X to the dominant vertical-wall normal.
-          # Local Z remains world Z; the horizontal OBB is only a fallback.
+          # Local-frame alignment policy: X follows the dominant vertical-wall
+          # direction. When wall orientation is unavailable, use the horizontal
+          # minimum-area OBB. World-space geometry remains fixed; local Z is upright.
           ALIGN_CELL_SPACE_LOCAL_CENTER_TO_DOMINANT_WALLS = true unless const_defined?(
             :ALIGN_CELL_SPACE_LOCAL_CENTER_TO_DOMINANT_WALLS,
             false

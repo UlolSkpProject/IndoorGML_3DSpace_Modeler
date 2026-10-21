@@ -6,6 +6,10 @@ module ULOL
       class StateOverlayRenderer
         # view.draw_points에 alpha값이 적용되지 않음
         DUAL_STATE_COLOR = Sketchup::Color.new(35, 120, 255, 0)
+        # Sampled from the supplied reference image; only selected States use it.
+        SELECTED_STATE_COLOR = Sketchup::Color.new(179, 50, 103)
+        SELECTED_STATE_SIZE_MULTIPLIER = 1.5
+        SELECTED_STATE_MAX_POINT_SIZE_PIXELS = 36
         STATE_BASE_POINT_SIZE_PIXELS = 12.0
         STATE_MIN_POINT_SIZE_PIXELS = 2
         STATE_MAX_POINT_SIZE_PIXELS = 24
@@ -18,6 +22,7 @@ module ULOL
           @render_states = []
           @render_state_points = []
           @render_state_groups = {}
+          @render_state_indices_by_cell_id = {}
           @cell_transform_keys = {}
           @primal_transform_key = nil
           @render_state_points_dirty = true
@@ -36,10 +41,36 @@ module ULOL
           )
         end
 
+        # Draw selected CellSpace States over the unchanged normal overlay.
+        # Reuse cached world points; selection is a drawing concern, not a
+        # reason to invalidate or regenerate State geometry.
+        def draw_highlight(view, selected_cell_ids:, state_radius_scale: 1.0)
+          return if selected_cell_ids.nil? || selected_cell_ids.empty?
+
+          prepare_state_points
+          points = []
+          selected_cell_ids.each_key do |cell_id|
+            Array(@render_state_indices_by_cell_id[cell_id]).each do |index|
+              points << @render_state_points[index]
+            end
+          end
+          return if points.empty?
+
+          size = (overlay_state_point_size(state_radius_scale: state_radius_scale) *
+                  SELECTED_STATE_SIZE_MULTIPLIER).round
+          view.draw_points(
+            points,
+            [size, SELECTED_STATE_MAX_POINT_SIZE_PIXELS].min,
+            STATE_POINT_STYLE,
+            SELECTED_STATE_COLOR
+          )
+        end
+
         def clear_cache
           @render_states = []
           @render_state_points = []
           @render_state_groups = {}
+          @render_state_indices_by_cell_id = {}
           @cell_transform_keys = {}
           @primal_transform_key = nil
           @render_state_points_dirty = true
@@ -114,6 +145,7 @@ module ULOL
           @render_states.clear
           @render_state_points.clear
           @render_state_groups.clear
+          @render_state_indices_by_cell_id.clear
           @cell_transform_keys.clear
           clear_extent_cache
 
@@ -123,8 +155,13 @@ module ULOL
             next unless @transform_context.overlay_state_visible?(state)
 
             @render_states << state
+            index = @render_states.length - 1
+            cell_id = state.duality_cell&.id.to_s
+            unless cell_id.empty?
+              (@render_state_indices_by_cell_id[cell_id] ||= []) << index
+            end
             root_local_points << state_root_local_point(state)
-            remember_state_group(state, @render_states.length - 1)
+            remember_state_group(state, index)
           end
 
           if @transform_context.respond_to?(:overlay_render_points)
@@ -176,8 +213,7 @@ module ULOL
           end
           clear_extent_cache if points_changed
         rescue StandardError
-          # Rendering should keep the last valid cache if selection inspection
-          # happens during an entity lifecycle transition.
+          # Keep the last valid cache during an entity lifecycle transition.
           nil
         end
 
@@ -196,10 +232,10 @@ module ULOL
           nil
         end
 
+        # The EditorControl selection snapshot is refreshed by the observer.
+        # This method never traverses SketchUp Selection while the camera moves.
         def current_selection_entities
-          model = @indoor_model.model if @indoor_model.respond_to?(:model)
-          selection = model&.selection
-          selection ? selection.to_a : []
+          @indoor_model.dual_graph_selection_snapshot[:entities]
         rescue StandardError
           []
         end

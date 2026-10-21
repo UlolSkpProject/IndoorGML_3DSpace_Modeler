@@ -516,7 +516,7 @@ module ULOL
           metrics[:cell_space_state_duration] ||= 0.0
           metrics[:adjacency_transition_duration] ||= 0.0
           metrics[:total_duration] = Time.now - metrics_started_at
-          log_timing_metrics(metrics)
+          # Timing metrics remain available in Result; console output is disabled.
           Result.new(converted_count: converted_count, errors: errors, metrics: metrics)
         end
 
@@ -762,15 +762,7 @@ module ULOL
           Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at
         end
 
-        def log_timing_metrics(metrics)
-          puts '----------------------------------------'
-          puts 'Create CellSpace 시간 요약'
-          puts format('  전체 시간                  : %.3f sec', metrics[:total_duration].to_f)
-          puts format('  시작 전 검사               : %.3f sec', metrics[:preflight_duration].to_f)
-          puts format('  CellSpace/State 생성       : %.3f sec', metrics[:cell_space_state_duration].to_f)
-          puts format('  Adjacency/Transition 생성  : %.3f sec', metrics[:adjacency_transition_duration].to_f)
-          puts '----------------------------------------'
-        end
+        # Console-only timing report was intentionally disabled for release.
       end
     end
   end

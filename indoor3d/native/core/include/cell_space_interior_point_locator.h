@@ -111,9 +111,10 @@ struct ReferenceGraphDebug
     std::vector<ReferenceGraphEdge> edges;
     std::vector<ReferenceLoopCollapseCandidate> loop_candidates;
     std::vector<ReferenceFloorPartition> floor_partitions;
-    // Actual BEFORE index of the AABB-nearest validated reference seed
-    // (Polygon centroid or shared-edge midpoint), independent of node order.
-    // The selected anchor must survive every later graph reduction.
+    // Actual BEFORE index of the validated reference seed with the greatest
+    // horizontal wall clearance (Polygon centroid or shared-edge midpoint).
+    // Radius ties use AABB-center distance, then stable seed order. The
+    // selected anchor must survive every later graph reduction.
     std::optional<std::size_t> state_node_index;
 };
 
@@ -165,9 +166,10 @@ std::vector<bool> validate_room_reference_segments(
 );
 
 // Room/Stair/Door/Elevator/Window reference preparation and BEFORE graph.
-// State is the validated centroid or shared-edge seed nearest the CellSpace
-// AABB center. locate_cell_space_interior_points applies legacy fallback only
-// when this category-aware path yields no valid reference.
+// State is the validated centroid or shared-edge seed with the greatest
+// horizontal wall clearance. Radius ties prefer the CellSpace AABB center.
+// locate_cell_space_interior_points applies legacy fallback only when this
+// category-aware path yields no valid reference.
 CellSpaceInteriorPointResult locate_reference_before(
     const CellData& cell,
     double tolerance

@@ -14,7 +14,7 @@ module ULOL
           end
 
           # One Native geometry session for every changed CellSpace in the batch.
-          # Native already supports multiple adjacency_dirty bits in V5; pairs
+          # The geometry payload supports multiple adjacency_dirty bits; pairs
           # without a dirty endpoint are excluded from the narrow phase.
           def synchronize_dirty(cell_spaces)
             dirty_cells = Array(cell_spaces).compact.uniq.select do |cell_space|

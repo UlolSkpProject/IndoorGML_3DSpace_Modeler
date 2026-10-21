@@ -24,6 +24,23 @@ class ReferenceGraphDebugOverlayRendererTest < Minitest::Test
   Point = Struct.new(:x, :y, :z)
   Direction = Struct.new(:z)
   Camera = Struct.new(:direction)
+  State = Struct.new(:cell_id)
+  CellSpace = Struct.new(:id, :duality_state)
+
+  class FakeModel
+    attr_reader :debug_floor_partitions, :debug_reference_graphs, :cell_spaces
+
+    def initialize(partitions, graphs, visibility = { 'A' => true })
+      @debug_floor_partitions = partitions
+      @debug_reference_graphs = graphs
+      @visibility = visibility
+      @cell_spaces = visibility.keys.map { |id| CellSpace.new(id, State.new(id)) }
+    end
+
+    def dual_overlay_state_visible?(state)
+      @visibility.fetch(state.cell_id, false)
+    end
+  end
 
   class FakeView
     attr_accessor :drawing_color, :line_width, :line_stipple
@@ -62,9 +79,7 @@ class ReferenceGraphDebugOverlayRendererTest < Minitest::Test
       ],
       edges: [[0, 1]]
     }
-    model = Struct.new(:debug_floor_partitions, :debug_reference_graphs).new(
-      [partition], [graph]
-    )
+    model = FakeModel.new([partition], [graph])
     transform = Object.new
     def transform.overlay_render_points(points)
       points.map { |point| Point.new(point.x + 1, point.y + 2, point.z + 0.5) }
@@ -118,5 +133,25 @@ class ReferenceGraphDebugOverlayRendererTest < Minitest::Test
     assert_equal [:draw2d, GL_LINES], view.draw_calls.first.first(2)
     assert_equal [[100.0, 200.0, 0.0], [140.0, 230.0, 0.0]],
                  view.draw_calls.first.last.map { |point| [point.x, point.y, point.z] }
+  end
+
+  def test_hidden_owner_cell_suppresses_reference_graph_edges
+    graph = {
+      cell_id: 'B',
+      nodes: [
+        { point: Point.new(0, 0, 1) },
+        { point: Point.new(4, 3, 1) }
+      ],
+      edges: [[0, 1]]
+    }
+    model = FakeModel.new([], [graph], 'B' => false)
+    transform = Object.new
+    def transform.overlay_cell_reference_points(points, _cell_id) = points
+    renderer = Renderer.new(indoor_model: model, transform_context: transform)
+    view = FakeView.new(-1.0)
+
+    renderer.draw_edges(view)
+
+    assert_empty view.draw_calls
   end
 end

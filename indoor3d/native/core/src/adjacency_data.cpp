@@ -16,19 +16,19 @@ using namespace IndoorGMLAdjacencyNative;
 constexpr std::uint8_t INPUT_MAGIC[8] = {'I', 'G', 'M', 'L', 'A', 'D', 'J', '\0'};
 constexpr std::uint8_t OUTPUT_MAGIC[8] = {'I', 'G', 'M', 'L', 'R', 'E', 'S', '\0'};
 constexpr std::uint8_t STATE_OUTPUT_MAGIC[8] = {'I', 'G', 'M', 'L', 'S', 'T', 'A', '\0'};
-constexpr std::uint64_t INPUT_VERSION_V1 = 1;
-constexpr std::uint64_t INPUT_VERSION_V2 = 2;
-constexpr std::uint64_t INPUT_VERSION_V3 = 3;
-constexpr std::uint64_t INPUT_VERSION_V4 = 4;
-constexpr std::uint64_t INPUT_VERSION_V5 = 5;
-constexpr std::uint64_t RESULT_VERSION = 1;
-constexpr std::uint64_t STATE_RESULT_VERSION = 13;
+constexpr std::uint64_t INPUT_FORMAT_BASIC_ADJACENCY = 1;
+constexpr std::uint64_t INPUT_FORMAT_FLAGS_AND_HEIGHT = 2;
+constexpr std::uint64_t INPUT_FORMAT_CATEGORY = 3;
+constexpr std::uint64_t INPUT_FORMAT_INNER_LOOPS = 4;
+constexpr std::uint64_t INPUT_FORMAT_FACE_PLANE = 5;
+constexpr std::uint64_t ADJACENCY_RESULT_FORMAT_ID = 1;
+constexpr std::uint64_t STATE_RESULT_FORMAT_ID = 13;
 constexpr std::size_t INPUT_HEADER_SIZE = 32;
-constexpr std::size_t CELL_FIXED_SIZE_V1 = 80;
-constexpr std::size_t CELL_FIXED_SIZE_V2 = 96;
-constexpr std::size_t CELL_FIXED_SIZE_V3 = 104;
+constexpr std::size_t CELL_FIXED_SIZE_BASIC_ADJACENCY = 80;
+constexpr std::size_t CELL_FIXED_SIZE_FLAGS_AND_HEIGHT = 96;
+constexpr std::size_t CELL_FIXED_SIZE_CATEGORY = 104;
 constexpr std::size_t FACE_FIXED_SIZE = 56;
-constexpr std::size_t FACE_FIXED_SIZE_V5 = 64;
+constexpr std::size_t FACE_FIXED_SIZE_FACE_PLANE = 64;
 constexpr std::size_t PAIR_FIXED_SIZE = 40;
 constexpr std::size_t CANDIDATE_SIZE = 56;
 
@@ -149,7 +149,7 @@ FaceData parse_face(const std::uint8_t* data, std::size_t size, std::uint64_t ve
     Reader reader(data, size);
     const std::size_t record_size = checked_size(reader.read_u64(), "face record size");
     const std::size_t minimum_size =
-        version >= INPUT_VERSION_V5 ? FACE_FIXED_SIZE_V5 : FACE_FIXED_SIZE;
+        version >= INPUT_FORMAT_FACE_PLANE ? FACE_FIXED_SIZE_FACE_PLANE : FACE_FIXED_SIZE;
     if (record_size != size || record_size < minimum_size)
     {
         throw std::invalid_argument("face record size is invalid");
@@ -158,9 +158,9 @@ FaceData parse_face(const std::uint8_t* data, std::size_t size, std::uint64_t ve
     const std::size_t outer_count = checked_size(reader.read_u64(), "outer point count");
     const std::size_t triangle_count = checked_size(reader.read_u64(), "triangle count");
     const std::uint64_t extra = reader.read_u64();
-    const std::size_t inner_count = version >= INPUT_VERSION_V4 ?
+    const std::size_t inner_count = version >= INPUT_FORMAT_INNER_LOOPS ?
         checked_size(extra, "inner loop count") : 0;
-    if (version < INPUT_VERSION_V4 && extra != 0)
+    if (version < INPUT_FORMAT_INNER_LOOPS && extra != 0)
         throw std::invalid_argument("face reserved field is non-zero");
     if (outer_count < 3)
     {
@@ -168,7 +168,7 @@ FaceData parse_face(const std::uint8_t* data, std::size_t size, std::uint64_t ve
     }
 
     FaceData face;
-    if (version >= INPUT_VERSION_V5)
+    if (version >= INPUT_FORMAT_FACE_PLANE)
     {
         const Vec3 coefficients=read_vec3(reader, "face plane normal");
         const double d=reader.read_double();
@@ -243,8 +243,8 @@ CellData parse_cell(
 {
     Reader reader(data, size);
     const std::size_t fixed_size =
-        version == INPUT_VERSION_V1 ? CELL_FIXED_SIZE_V1 :
-        (version == INPUT_VERSION_V2 ? CELL_FIXED_SIZE_V2 : CELL_FIXED_SIZE_V3);
+        version == INPUT_FORMAT_BASIC_ADJACENCY ? CELL_FIXED_SIZE_BASIC_ADJACENCY :
+        (version == INPUT_FORMAT_FLAGS_AND_HEIGHT ? CELL_FIXED_SIZE_FLAGS_AND_HEIGHT : CELL_FIXED_SIZE_CATEGORY);
     const std::size_t record_size = checked_size(reader.read_u64(), "cell record size");
     if (record_size != size || record_size < fixed_size)
     {
@@ -254,7 +254,7 @@ CellData parse_cell(
     const std::size_t cell_index = checked_size(reader.read_u64(), "cell index");
     std::uint64_t flags = CELL_FLAG_ADJACENCY_TARGET;
     std::size_t face_count = 0;
-    if (version == INPUT_VERSION_V1)
+    if (version == INPUT_FORMAT_BASIC_ADJACENCY)
     {
         face_count = checked_size(reader.read_u64(), "face count");
         if (reader.read_u64() != 0)
@@ -303,13 +303,13 @@ CellData parse_cell(
         throw std::invalid_argument("cell bounds are inverted");
     }
 
-    if (version >= INPUT_VERSION_V2)
+    if (version >= INPUT_FORMAT_FLAGS_AND_HEIGHT)
     {
         cell.fixed_z = reader.read_double();
         require_finite(cell.fixed_z, "cell fixed z");
     }
 
-    if (version >= INPUT_VERSION_V3)
+    if (version >= INPUT_FORMAT_CATEGORY)
     {
         const std::uint64_t raw_category = reader.read_u64();
         if (raw_category > static_cast<std::uint64_t>(CellSpaceCategory::Window))
@@ -320,7 +320,7 @@ CellData parse_cell(
     }
 
     const std::size_t minimum_face_size =
-        version >= INPUT_VERSION_V5 ? FACE_FIXED_SIZE_V5 : FACE_FIXED_SIZE;
+        version >= INPUT_FORMAT_FACE_PLANE ? FACE_FIXED_SIZE_FACE_PLANE : FACE_FIXED_SIZE;
     if (face_count > reader.remaining() / minimum_face_size)
     {
         throw std::invalid_argument("face count exceeds cell record");
@@ -379,13 +379,13 @@ std::vector<CellData> parse_input_batch(const std::uint8_t* data, std::size_t si
         throw std::invalid_argument("adjacency input magic mismatch");
     }
     const std::uint64_t version = reader.read_u64();
-    if (version != INPUT_VERSION_V1 &&
-        version != INPUT_VERSION_V2 &&
-        version != INPUT_VERSION_V3 &&
-        version != INPUT_VERSION_V4 &&
-        version != INPUT_VERSION_V5)
+    if (version != INPUT_FORMAT_BASIC_ADJACENCY &&
+        version != INPUT_FORMAT_FLAGS_AND_HEIGHT &&
+        version != INPUT_FORMAT_CATEGORY &&
+        version != INPUT_FORMAT_INNER_LOOPS &&
+        version != INPUT_FORMAT_FACE_PLANE)
     {
-        throw std::invalid_argument("unsupported adjacency input version");
+        throw std::invalid_argument("unsupported adjacency input format");
     }
     const std::size_t cell_count = checked_size(reader.read_u64(), "cell count");
     if (reader.read_u64() != 0)
@@ -394,8 +394,8 @@ std::vector<CellData> parse_input_batch(const std::uint8_t* data, std::size_t si
     }
 
     const std::size_t minimum_cell_size =
-        version == INPUT_VERSION_V1 ? CELL_FIXED_SIZE_V1 :
-        (version == INPUT_VERSION_V2 ? CELL_FIXED_SIZE_V2 : CELL_FIXED_SIZE_V3);
+        version == INPUT_FORMAT_BASIC_ADJACENCY ? CELL_FIXED_SIZE_BASIC_ADJACENCY :
+        (version == INPUT_FORMAT_FLAGS_AND_HEIGHT ? CELL_FIXED_SIZE_FLAGS_AND_HEIGHT : CELL_FIXED_SIZE_CATEGORY);
     if (cell_count > reader.remaining() / minimum_cell_size)
     {
         throw std::invalid_argument("cell count exceeds adjacency input");
@@ -453,7 +453,7 @@ std::vector<std::uint8_t> serialize_result_batch(std::vector<PairResult> results
 
     Writer writer;
     writer.append_bytes(OUTPUT_MAGIC, sizeof(OUTPUT_MAGIC));
-    writer.append_u64(RESULT_VERSION);
+    writer.append_u64(ADJACENCY_RESULT_FORMAT_ID);
     writer.append_u64(checked_u64(results.size(), "pair count"));
     writer.append_u64(checked_u64(candidate_total, "candidate total"));
 
@@ -508,13 +508,13 @@ std::vector<std::uint8_t> serialize_state_result_batch(std::vector<StatePointRes
 
     Writer writer;
     writer.append_bytes(STATE_OUTPUT_MAGIC, sizeof(STATE_OUTPUT_MAGIC));
-    writer.append_u64(STATE_RESULT_VERSION);
+    writer.append_u64(STATE_RESULT_FORMAT_ID);
     writer.append_u64(checked_u64(results.size(), "state result count"));
     writer.append_u64(0);
 
     for (const StatePointResult& result : results)
     {
-        // V13 per-cell envelope: index, integer ExitCode, State flag,
+        // Per-cell State envelope: index, integer ExitCode, State flag,
         // optional State and nine aggregate diagnostics. Reference Graphs and
         // their private radii live only in the keyed Native repository.
         if (result.exit_code != StateExitCode::Success && result.point.has_value())

@@ -114,6 +114,7 @@ module ULOL
           end
           unless activated
             @editing = false
+            @indoor_model.clear_dual_graph_selection_cache
             active_path_controller.reset_target
             @indoor_model.detach_edit_selection_observer(model)
             restore_validation_focus_rendering_options
@@ -180,6 +181,7 @@ module ULOL
             restore_validation_focus_visibility
             normalize_visibility_for_non_edit_mode
             @editing = false
+            @indoor_model.clear_dual_graph_selection_cache
             active_path_controller.reset_target
             reset_edit_mode_visibility_filter
             restore_validation_focus_rendering_options
@@ -584,9 +586,13 @@ module ULOL
         end
 
         def selection_changed
+          @indoor_model.refresh_dual_graph_selection_cache
           return unless @editing
 
           @dialog.update_selection(@indoor_model.selected_edit_mode_snapshot)
+          # Selection-only highlight passes must redraw without rebuilding
+          # State positions, Transition routes or Native Ref-Graphs.
+          invalidate_view(@indoor_model.model) if dual_overlay_visible?
         end
 
         def cleanup_before_quit
@@ -605,6 +611,7 @@ module ULOL
             restore_validation_focus_visibility
             normalize_visibility_for_non_edit_mode if restoring_edit_visibility
             @editing = false
+            @indoor_model.clear_dual_graph_selection_cache
             active_path_controller.reset
             restore_validation_focus_rendering_options
             reset_edit_mode_visibility_filter
@@ -617,6 +624,10 @@ module ULOL
         end
 
         def invalidate_overlay_transition_points
+          # Topology refresh can replace a CellSpace Group without triggering
+          # a SelectionObserver event. Reconcile its cached ownership here,
+          # not on camera redraw.
+          @indoor_model.refresh_dual_graph_selection_cache if @editing
           overlay_controller.invalidate_transition_points
         end
 

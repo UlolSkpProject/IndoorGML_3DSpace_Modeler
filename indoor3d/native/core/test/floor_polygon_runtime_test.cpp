@@ -276,16 +276,16 @@ void test_l_floor_queue_and_state_promoted_without_triangles()
     require(l.size()==6 && l[3].x==2 && l[3].y==2,
             "Queue partitioning must leave source immutable");
 }
-CellData l_shaped_room()
+CellData wide_lobe_room()
 {
     const std::vector<Vec3> floor{
-        {0,0,0},{64,0,0},{64,20,0},
-        {20,20,0},{20,64,0},{0,64,0}
+        {0,0,0},{30,0,0},{30,44,0},{100,44,0},
+        {100,56,0},{30,56,0},{30,100,0},{0,100,0}
     };
     CellData cell;
     cell.category=CellSpaceCategory::Room;
     cell.flags=CELL_FLAG_NEEDS_STATE;
-    cell.bounds={{0,0,0},{64,64,80}};
+    cell.bounds={{0,0,0},{100,100,80}};
 
     std::vector<Vec3> bottom(floor.rbegin(),floor.rend());
     cell.faces.push_back(face({0,0,-1},bottom));
@@ -301,12 +301,12 @@ CellData l_shaped_room()
     }
     return cell;
 }
-void test_before_selects_nearest_valid_seed_and_retains_orphan_centroids()
+void test_before_selects_widest_valid_seed_and_retains_orphan_centroids()
 {
-    const CellData cell=l_shaped_room();
+    const CellData cell=wide_lobe_room();
     const double tolerance=0.001;
     const FaceSolid solid(cell,tolerance);
-    require(solid.valid(),"L-shaped regression fixture must be a valid Solid");
+    require(solid.valid(),"Wide-lobe regression fixture must be a valid Solid");
     const auto result=locate_reference_before(cell,tolerance);
     require(result.exit_code==StateExitCode::Success &&
             result.state_point.has_value() &&
@@ -323,10 +323,11 @@ void test_before_selects_nearest_valid_seed_and_retains_orphan_centroids()
         require(normalized.face.has_value(),"Recorded polygon must re-prepare");
         leaves.push_back({0,leaves.size(),*normalized.face});
     }
-    require(leaves.size()>1,"L-shaped Floor cannot convex-coarsen to one polygon");
+    require(leaves.size()>1,"Wide-lobe Floor cannot convex-coarsen to one polygon");
     const auto seeds=generate_reference_seeds(leaves,tolerance);
     struct Accepted {
         const Seed* seed;
+        double radius;
     };
     std::vector<Accepted> accepted;
     std::vector<bool> has_valid_shared(leaves.size(),false);
@@ -338,7 +339,10 @@ void test_before_selects_nearest_valid_seed_and_retains_orphan_centroids()
         const double wall=solid.nearest_wall_distance(seed.position);
         if (std::isfinite(wall) && std::max(0.0,wall-tolerance)<150.0/25.4)
             continue;
-        accepted.push_back({&seed});
+        const double radius=std::isfinite(wall) ?
+            std::max(0.0,wall-tolerance) :
+            std::numeric_limits<double>::infinity();
+        accepted.push_back({&seed,radius});
         if (seed.kind==SeedKind::SharedEdgeMidpoint)
         {
             has_valid_shared[seed.first_leaf]=true;
@@ -347,11 +351,24 @@ void test_before_selects_nearest_valid_seed_and_retains_orphan_centroids()
     }
     require(!accepted.empty(),"Fixture must have valid reference seeds");
 
-    const Vec3 center{32,32,40};
+    const Vec3 center{50,50,40};
+    double maximum_radius=accepted.front().radius;
+    for (const Accepted& candidate:accepted)
+    {
+        if (candidate.radius>maximum_radius)
+            maximum_radius=candidate.radius;
+    }
     std::size_t state=0;
     double shortest=std::numeric_limits<double>::infinity();
     for (std::size_t i=0;i<accepted.size();++i)
     {
+        const double radius=accepted[i].radius;
+        const bool maximum_tied=
+            (std::isinf(maximum_radius) && std::isinf(radius)) ||
+            (!std::isinf(maximum_radius) && !std::isinf(radius) &&
+             maximum_radius-radius<=tolerance);
+        if (!maximum_tied) continue;
+
         const Vec3& p=accepted[i].seed->position;
         const double squared_distance=
             (p.x-center.x)*(p.x-center.x)+
@@ -363,6 +380,24 @@ void test_before_selects_nearest_valid_seed_and_retains_orphan_centroids()
             state=i;
         }
     }
+
+    std::size_t aabb_nearest=0;
+    double nearest_distance=std::numeric_limits<double>::infinity();
+    for (std::size_t i=0;i<accepted.size();++i)
+    {
+        const Vec3& p=accepted[i].seed->position;
+        const double squared_distance=
+            (p.x-center.x)*(p.x-center.x)+
+            (p.y-center.y)*(p.y-center.y)+
+            (p.z-center.z)*(p.z-center.z);
+        if (squared_distance<nearest_distance)
+        {
+            nearest_distance=squared_distance;
+            aabb_nearest=i;
+        }
+    }
+    require(state!=aabb_nearest,
+            "Fixture must distinguish maximum clearance from AABB proximity");
 
     std::vector<Vec3> expected;
     std::size_t expected_state_index=accepted.size();
@@ -396,7 +431,7 @@ void test_before_selects_nearest_valid_seed_and_retains_orphan_centroids()
     require(near(result.state_point->x,selected.x) &&
             near(result.state_point->y,selected.y) &&
             near(result.state_point->z,selected.z),
-            "State must be the nearest valid centroid or shared-edge midpoint");
+            "State must maximize wall clearance before AABB-center proximity");
 }
 void test_reference_graph_routes_from_nonzero_state_node()
 {
@@ -490,9 +525,25 @@ void test_waypoint_gateway_uses_los_and_total_state_cost()
     require(shorter.size()==3 && near(shorter[1].x,35.0),
             "A shorter total State route must select the nearer LOS gateway");
 
-    require(reference_transition_polyline(
-                pipeline,Vec3{50,50,z}).empty(),
-            "Waypoint outside the CellSpace without visible gateways must fail closed");
+    pipeline.shortest_path_tree.distances[1]=-40.0;
+    pipeline.shortest_path_tree.distances[2]=25.0;
+    const auto verified_first=reference_transition_polyline(pipeline,waypoint);
+    require(verified_first.size()==3 && near(verified_first[1].x,5.0),
+            "A visible verified gateway must outrank every forced fallback");
+
+    pipeline.shortest_path_tree.distances[2]=
+        std::numeric_limits<double>::infinity();
+    pipeline.shortest_path_tree.previous[2]=std::nullopt;
+    const auto forced=reference_transition_polyline(pipeline,waypoint);
+    require(forced.size()==3 && near(forced[1].x,35.0),
+            "A visible forced gateway must be used when no verified gateway is visible");
+
+    const auto forced_waypoint=reference_transition_polyline(
+        pipeline,Vec3{50,50,z});
+    require(forced_waypoint.size()==3 && near(forced_waypoint[1].x,35.0) &&
+            near(forced_waypoint.back().x,50.0),
+            "When no gateway has waypoint LOS, routing must force-connect the "
+            "closest finite-distance Reference node");
 }
 void test_legacy_state_only_route_survives_invalid_solid()
 {
@@ -703,7 +754,7 @@ int main()
     test_no_wall_solid_keeps_reference_candidate();
     test_single_convex_floor_reference_only_before();
     test_l_floor_queue_and_state_promoted_without_triangles();
-    test_before_selects_nearest_valid_seed_and_retains_orphan_centroids();
+    test_before_selects_widest_valid_seed_and_retains_orphan_centroids();
     test_reference_graph_routes_from_nonzero_state_node();
     test_waypoint_gateway_uses_los_and_total_state_cost();
     test_legacy_state_only_route_survives_invalid_solid();

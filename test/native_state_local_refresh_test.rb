@@ -117,7 +117,7 @@ class NativeStateLocalRefreshTest < Minitest::Test
     end
   end
 
-  def test_registered_cell_uses_v13_result_and_commits_graph_under_cell_id
+  def test_registered_cell_uses_state_result_and_commits_graph_under_cell_id
     Bridge.define_singleton_method(:compute_reference_from_open_session) do
       {
         results: {

@@ -4,6 +4,7 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class TransitionCurveBuilder
+        EMPTY_LINE_POINTS = [].freeze
         MIN_TRANSITION_RENDER_CACHE_LIMIT = 2048
         CURVE_CORNER_TRIM_RATIO = 0.2
         CURVE_SAMPLES_PER_CORNER = 6
@@ -18,11 +19,16 @@ module ULOL
           @render_transition_line_points_dirty = true
           @render_transition_revision = nil
           @render_transition_exclusion_key = nil
+          @render_visible_transition_segments = []
+          @render_transition_generation = 0
+          clear_selection_batches
         end
 
         def invalidate
           @render_transition_line_points = nil
           @render_transition_line_points_dirty = true
+          @render_visible_transition_segments = []
+          clear_selection_batches
         end
 
         def clear_cache
@@ -44,13 +50,30 @@ module ULOL
             @render_transition_line_points_dirty = false
             @render_transition_revision = revision
             @render_transition_exclusion_key = exclusion_key
+            @render_transition_generation += 1
+            clear_selection_batches
           end
 
           @render_transition_line_points
         end
 
+        # Keep one canonical full array. A selection change only partitions
+        # cached segment references into disjoint normal/highlight arrays.
+        # Native routes, curve interpolation and coordinate transforms are not
+        # repeated. Empty and complete selections alias the canonical array.
+        def transition_line_batches(selected_cell_ids:, excluded_cell_ids: nil)
+          full_points = transition_line_points(excluded_cell_ids: excluded_cell_ids)
+          selected_cells = selected_cell_lookup(selected_cell_ids)
+          cache_key = [@render_transition_generation, selected_cells.keys.sort]
+          return @render_selection_batches if @render_selection_batch_key == cache_key
+
+          @render_selection_batch_key = cache_key
+          @render_selection_batches = build_selection_batches(full_points, selected_cells)
+        end
+
         def build_render_transition_line_points(excluded_cells = {})
           points = []
+          accepted = []
           render_snapshot = transition_render_context_snapshot
           context_key = render_snapshot&.[](:cache_key) || transition_render_context_cache_key
           @indoor_model.transitions.each do |transition|
@@ -65,7 +88,16 @@ module ULOL
             points.concat(segments[:default]) if first_visible && second_visible
             points.concat(segments[:first]) if first_visible
             points.concat(segments[:second]) if second_visible
+            entry = {
+              cell1_id: transition.cell1_id.to_s,
+              cell2_id: transition.cell2_id.to_s,
+              first_visible: first_visible,
+              second_visible: second_visible,
+              segments: segments
+            }
+            accepted << entry
           end
+          @render_visible_transition_segments = accepted
           points
         end
 
@@ -168,6 +200,62 @@ module ULOL
         end
 
         private
+
+        def clear_selection_batches
+          @render_selection_batch_key = nil
+          @render_selection_batches = nil
+        end
+
+        def selected_cell_lookup(selected_cell_ids)
+          Hash(selected_cell_ids || {}).each_with_object({}) do |(cell_id, selected), result|
+            next unless selected
+
+            normalized = cell_id.to_s
+            result[normalized] = true unless normalized.empty?
+          end
+        rescue StandardError
+          {}
+        end
+
+        def build_selection_batches(full_points, selected_cells)
+          return frozen_line_batches(full_points, EMPTY_LINE_POINTS) if selected_cells.empty? || full_points.empty?
+
+          has_normal = false
+          has_highlight = false
+          each_visible_segment_group(selected_cells) do |_points, selected|
+            selected ? has_highlight = true : has_normal = true
+            break if has_normal && has_highlight
+          end
+          return frozen_line_batches(full_points, EMPTY_LINE_POINTS) unless has_highlight
+          return frozen_line_batches(EMPTY_LINE_POINTS, full_points) unless has_normal
+
+          normal = []
+          highlight = []
+          each_visible_segment_group(selected_cells) do |points, selected|
+            (selected ? highlight : normal).concat(points)
+          end
+          frozen_line_batches(normal.freeze, highlight.freeze)
+        end
+
+        def each_visible_segment_group(selected_cells)
+          @render_visible_transition_segments.each do |entry|
+            first_visible = entry[:first_visible]
+            second_visible = entry[:second_visible]
+            first_selected = selected_cells[entry[:cell1_id]] == true
+            second_selected = selected_cells[entry[:cell2_id]] == true
+            segments = entry[:segments]
+
+            if first_visible && second_visible && !segments[:default].empty?
+              yield segments[:default], first_selected || second_selected
+            end
+            yield segments[:first], first_selected if first_visible && !segments[:first].empty?
+            yield segments[:second], second_selected if second_visible && !segments[:second].empty?
+          end
+        end
+
+        def frozen_line_batches(normal, highlight)
+          { normal: normal, highlight: highlight }.freeze
+        end
 
         def reference_curve(first_cell_id, second_cell_id, waypoint)
           return nil unless @indoor_model.respond_to?(:reference_transition_curve)

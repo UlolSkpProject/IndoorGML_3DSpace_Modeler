@@ -8,7 +8,9 @@ module ULOL
       module ValidityNativeBridge
         REQUEST_MAGIC = "IGMLVLD\0".b.freeze
         RESULT_MAGIC = "IGMLVRS\0".b.freeze
-        PROTOCOL_VERSION = 1
+        VALIDITY_FORMAT_ID = 1
+        GEOMETRY_FORMAT_ID = 3
+        GEOMETRY_MAGIC = "IGMLADJ\0".b.freeze
         NORMAL_TOLERANCE = 0.000001
         POLL_INTERVAL_SECONDS = 0.01
         RESULT_FIXED_SIZE = 80
@@ -101,11 +103,7 @@ module ULOL
 
           snapshots = Array(snapshots)
           requests = Array(requests)
-          state_options = snapshots.map { { needs_state: false } }
-          geometry_bytes = NativeAdjacencyBridge.encode_geometry_input(
-            snapshots,
-            state_options
-          )
+          geometry_bytes = encode_geometry_input(snapshots)
           request_bytes = encode_requests(requests, snapshots.length)
 
           native_module = native
@@ -147,10 +145,71 @@ module ULOL
           end
         end
 
+
+        # Validity owns a compact geometry contract: no State flags, fixed Z,
+        # category, inner loops, or plane. Triangles describe the occupied face.
+        def encode_geometry_input(snapshots)
+          snapshots = Array(snapshots)
+          buffer = String.new(encoding: Encoding::BINARY)
+          buffer << GEOMETRY_MAGIC
+          append_pack(buffer, [GEOMETRY_FORMAT_ID, snapshots.length, 0], 'Q<Q<Q<')
+
+          snapshots.each_with_index do |snapshot, cell_index|
+            geometry = Hash(snapshot)
+            bounds = Hash(geometry.fetch(:bounds))
+            minimum = validity_vec3(bounds.fetch(:min), "cell #{cell_index} bounds minimum")
+            maximum = validity_vec3(bounds.fetch(:max), "cell #{cell_index} bounds maximum")
+            raise ProtocolError, "cell #{cell_index} bounds are inverted" if 3.times.any? { |axis| minimum[axis] > maximum[axis] }
+
+            faces = Array(geometry[:faces])
+            face_bytes = String.new(encoding: Encoding::BINARY)
+            faces.each_with_index do |face_value, face_index|
+              face = Hash(face_value)
+              label = "cell #{cell_index} face #{face_index}"
+              points = Array(face[:points]).map { |point| validity_vec3(point, "#{label} outer vertex") }
+              raise ProtocolError, "#{label} requires at least three outer vertices" if points.length < 3
+              triangles = Array(face[:triangles]).map do |triangle|
+                vertices = Array(triangle)
+                raise ProtocolError, "#{label} triangle must have three vertices" unless vertices.length == 3
+                vertices.map { |vertex| validity_vec3(vertex, "#{label} triangle vertex") }
+              end
+              normal = face[:normal]
+              if normal.nil?
+                coefficients = Array(face[:plane]).first(3).map { |value| finite_f64(value, "#{label} plane normal") }
+                raise ProtocolError, "#{label} plane normal must have three coefficients" unless coefficients.length == 3
+                magnitude = Math.sqrt(coefficients.sum { |value| value * value })
+                raise ProtocolError, "#{label} normal is degenerate" unless magnitude.finite? && magnitude > 1.0e-12
+                normal = coefficients.map { |value| value / magnitude }
+              end
+              normal = validity_vec3(normal, "#{label} normal")
+              raise ProtocolError, "#{label} normal is degenerate" if normal.sum { |value| value * value } <= 1.0e-24
+
+              face_size = 56 + points.length * 24 + triangles.length * 72
+              append_pack(face_bytes, [face_size, points.length, triangles.length, 0], 'Q<Q<Q<Q<')
+              append_pack(face_bytes, normal, 'E3')
+              points.each { |point| append_pack(face_bytes, point, 'E3') }
+              triangles.each { |triangle| triangle.each { |point| append_pack(face_bytes, point, 'E3') } }
+            end
+
+            cell_size = 80 + face_bytes.bytesize
+            append_pack(buffer, [cell_size, cell_index, faces.length, 0], 'Q<Q<Q<Q<')
+            append_pack(buffer, minimum + maximum, 'E6')
+            buffer << face_bytes
+          end
+          buffer
+        end
+
+        def validity_vec3(value, label)
+          values = Array(value)
+          raise ProtocolError, "#{label} must contain three values" unless values.length == 3
+          values.map { |component| finite_f64(component, label) }
+        end
+        private_class_method :validity_vec3
+
         def encode_requests(requests, cell_count)
           buffer = String.new(capacity: 32 + requests.length * 24, encoding: Encoding::BINARY)
           buffer << REQUEST_MAGIC
-          append_pack(buffer, [PROTOCOL_VERSION, requests.length, 0], 'Q<Q<Q<')
+          append_pack(buffer, [VALIDITY_FORMAT_ID, requests.length, 0], 'Q<Q<Q<')
 
           requests.each do |request|
             row = Hash(request)
@@ -174,7 +233,7 @@ module ULOL
           raise ProtocolError, 'validity result magic mismatch' unless reader.read_bytes(8) == RESULT_MAGIC
 
           version = reader.read_u64
-          raise ProtocolError, "unsupported validity result version #{version}" unless version == PROTOCOL_VERSION
+          raise ProtocolError, "unsupported validity result format #{version}" unless version == VALIDITY_FORMAT_ID
 
           count = checked_count(reader.read_u64, 'validity result count')
           raise ProtocolError, 'validity result reserved field is non-zero' unless reader.read_u64.zero?

@@ -2,8 +2,6 @@
 
 > SketchUp 2026에서 solid group을 IndoorGML CellSpace로 변환하고, dual graph를 편집·검증·Export하는 Ruby Extension입니다.
 
-![SeoulSpace IndoorGML Modeler](docs/images/preview.png)
-
 ![Version](https://img.shields.io/badge/version-1.0.7-blue)
 ![SketchUp](https://img.shields.io/badge/SketchUp-2026-brightgreen)
 ![IndoorGML](https://img.shields.io/badge/IndoorGML-1.0.3-orange)
@@ -22,15 +20,14 @@ SeoulSpace IndoorGML Modeler는 SketchUp 모델 안의 manifold solid group을 I
 - val3dity v2.2.0과 Extension 재검사 정책으로 Geometry/Topology 오류 확인
 - Geometry를 변경하지 않는 빠른 유효성 검사 제공
 
-## v1.0.5 Highlights
+## 주요 기능
 
-v1.0.5는 검사 자체뿐 아니라 오류를 찾고, 안전하게 보정하고, 다시 확인하는 전체 Validation 워크플로를 확장합니다.
+Validation은 오류 위치 확인, 수정, 재검사까지 지원합니다.
 
 - Validation report의 오류 geometry를 viewport Overlay로 표시하고 오류 범위에 focus
 - 빠른 검사의 701/704 재검사를 현재 SketchUp 원본 CellSpace geometry 기준으로 수행
 - 선택한 CellSpace의 IndoorGML 의미만 제거하여 일반 Solid Group으로 복원
 - Validation 진행률, 재실행 session 정리, Fix Mode와 runtime 복원 안정성 개선
-
 
 ## Project Scope
 
@@ -67,18 +64,20 @@ v1.0.5는 검사 자체뿐 아니라 오류를 찾고, 안전하게 보정하고
 
 | 항목 | 값 | 정의 |
 | --- | --- | --- |
-| Extension/storage version | `1.0.3` | `Definition::INDOOR_GML_VERSION` |
+| IndoorGML storage format version | `1.0.3` | `Definition::INDOOR_GML_VERSION` |
 | Extension package version | `1.0.7` | `Indoor3DGmlModeler::EXTENSION_VERSION` |
 | IndoorGML XML schema version | `1.0` | `Definition::INDOOR_GML_SCHEMA_VERSION` |
 | Validator runtime | `val3dity-windows-x64-v2.2.0` | `Val3dityRunner::VENDOR_ROOT` |
 
-`schemas.opengis.net/indoorgml/1.0.3/*.xsd`는 존재하지 않으므로 Export XML의 namespace와 `xsi:schemaLocation`은 공식 IndoorGML 1.0 schema 경로를 사용합니다. SketchUp attribute에 기록되는 extension/storage version은 `1.0.3`입니다.
+`schemas.opengis.net/indoorgml/1.0.3/*.xsd`는 존재하지 않으므로 Export XML의 namespace와 `xsi:schemaLocation`은 공식 IndoorGML 1.0 schema 경로를 사용합니다. SketchUp attribute에 기록되는 IndoorGML 저장 형식 버전은 `1.0.3`입니다.
 
 ## Validation Contract
 
 Validation은 XML well-formedness 확인과 val3dity 2.2.0 검사를 수행합니다. XSD validation은 수행하지 않습니다. 모든 val3dity 실행에는 GML 좌표 단위 기준 `--planarity_d2p_tol 0.025`가 적용됩니다.
 
 빠른 검사는 Geometry를 변경하지 않으며, `--overlap_tol -1`로 val3dity를 실행한 뒤 Extension 701/704 재검사를 수행합니다.
+
+**Validity Native Geometry 계약:** Core는 기존 Geometry 포맷 ID `5`를 유지하고, Validity는 전용 Geometry 포맷 ID `3`을 사용합니다. Validity 포맷은 CellSpace AABB, Face Normal, Outer Vertices, Triangles만 전달하고 State 관련 플래그 및 `fixed_z`를 포함하지 않습니다. 포맷 ID `2`와는 레이아웃이 달라 기존 `indoor_gml_validity_native.so` 바이너리에는 호환되지 않습니다. 변경된 Validity Native 소스로 `.so`를 재빌드·교체하기 전에는 701/704 Native 재검사 경로를 사용할 수 없습니다.
 
 최종 결과는 일관되게 다음 세 상태로 보고합니다.
 
@@ -88,7 +87,7 @@ Validation은 XML well-formedness 확인과 val3dity 2.2.0 검사를 수행합�
 
 Exporter는 하나의 exterior shell과 0개 이상의 `gml:interior` shell을 가진 `gml:Solid`를 생성합니다. 따라서 외부 shell 안에 완전히 포함된 cavity는 export할 수 있습니다. 서로 분리된 복수 exterior solid와 cavity 내부에 다시 solid가 중첩된 형상은 단일 CellSpace로 export하기 전에 거부됩니다.
 
-Transition geometry는 두 State endpoint를 연결하는 방식이 기본값입니다. API 호출에서는 비교·실험 목적으로 `transition_geometry_mode: :shared_face_waypoint`를 지정하여 `State1 → shared-face waypoint → State2`의 3점 LineString을 사용할 수 있지만 기본 Export 동작은 변경되지 않습니다.
+Transition geometry는 두 State endpoint를 연결하는 방식이 기본값입니다. API에서 `transition_geometry_mode: :shared_face_waypoint`를 지정하면 `State1 → shared-face waypoint → State2`의 3점 LineString을 생성할 수 있습니다.
 
 ## Installation
 
@@ -98,18 +97,6 @@ Transition geometry는 두 State endpoint를 연결하는 방식이 기본값입
 2. SketchUp 2026에서 `Extension Manager`를 엽니다.
 3. `Install Extension`으로 `.rbz`를 선택합니다.
 4. SketchUp을 재시작합니다.
-
-### 개발용 직접 배치
-
-SketchUp plugin 경로에 다음 구조로 배치합니다.
-
-```text
-Plugins/
-├── indoor3d.rb
-└── indoor3d/
-```
-
-현재 진입 파일은 [indoor3d.rb](indoor3d.rb)이고, 실제 extension loader는 [indoor3d/core.rb](indoor3d/core.rb)를 로드합니다.
 
 ## Quick Start
 
@@ -145,13 +132,9 @@ TAG는 `{층}{층}_{구분1}_{구분2}` 또는 `{층}{층}_{구분1}_{구분2}_{
 
 SketchUp에서 CellSpace로 변환할 공간을 solid group 또는 component instance로 모델링합니다. 변환 대상은 manifold solid여야 하며, 하나의 CellSpace는 하나의 연결된 exterior shell이어야 합니다.
 
-![Solid Group 준비](docs/images/step1_solid_group.png)
-
 ### 2. CellSpace 생성
 
 변환할 group을 선택한 뒤 `Create CellSpace`를 실행합니다.
-
-![Create CellSpace 결과](docs/images/step2_create_cellspace.png)
 
 변환된 객체는 `IndoorGML_PrimalSpaceFeatures` group 아래로 이동되며, 대응되는 `State`가 1:1로 생성됩니다. 선택 객체가 이미 CellSpace이면 재변환하지 않습니다.
 
@@ -161,15 +144,11 @@ SketchUp에서 CellSpace로 변환할 공간을 solid group 또는 component ins
 
 `Edit CellSpace Property`를 실행하면 Edit Mode가 켜지고, CellSpace 편집 dialog와 viewport Overlay가 활성화됩니다.
 
-![EditMode 진입](docs/images/step3_edit_mode.png)
-
 Edit Mode에서는 CellSpace 이동, 타입 변경, 층 변경, visibility filter, geometry 표시 토글, State/Transition Overlay 확인을 수행합니다.
 
 ### 4. CellSpace 편집
 
 CellSpace를 이동하거나 타입·층 정보를 변경하면 runtime attribute와 topology가 갱신됩니다. 인접 관계가 생기거나 사라지면 Transition도 자동 생성·삭제됩니다.
-
-![CellSpace 편집](docs/images/step4_edit_cellspace.png)
 
 ### 5. Validity Check
 
@@ -245,10 +224,6 @@ CellSpace는 `storey` attribute를 가집니다. 기본값은 `F01`입니다.
 층 range 편집은 `TransitionSpace` 중 `Stair`, `Elevator` 카테고리에 허용됩니다. 일반 CellSpace는 첫 번째 층 값만 저장합니다.
 
 Edit Mode dialog는 Storey filter와 Type filter를 제공하여 특정 층 또는 타입만 표시할 수 있습니다.
-
-![Dialog 요약](docs/images/dialog_summary.png)
-
-![Dialog CellSpace](docs/images/dialog_cellspace.png)
 
 ## Edit Mode Behavior
 
@@ -435,7 +410,7 @@ val3dity process가 실행되는 동안 `IndoorGML_PrimalSpaceFeatures`는 잠�
 
 ```text
 indoor3d/
-├── definition.rb                  # version constants
+├── definition.rb                  # storage/schema identifiers and runtime settings
 ├── core.rb                        # extension runtime loader
 ├── domain/                        # CellSpace, State, Transition, semantics
 ├── application/
@@ -467,6 +442,10 @@ indoor3d/
 
 ## Development
 
+### 소스 배치
+
+SketchUp 플러그인 폴더에는 `indoor3d.rb`와 `indoor3d/` 디렉터리를 함께 배치합니다. 진입 파일은 [indoor3d.rb](indoor3d.rb), 확장 로더는 [indoor3d/loader.rb](indoor3d/loader.rb)입니다.
+
 ### Test
 
 ```powershell
@@ -496,7 +475,7 @@ ruby -Itest test\run_all.rb
 
 ## References
 
-- [v1.0.5 Release Notes](https://github.com/UlolSkpProject/IndoorGML_3DSpace_Modeler/releases/tag/v1.0.5)
+- [Releases](https://github.com/UlolSkpProject/IndoorGML_3DSpace_Modeler/releases)
 - [IndoorGML](https://www.ogc.org/standards/indoorgml)
 - [IndoorGML 1.0 schemas](http://schemas.opengis.net/indoorgml/1.0/)
 - [val3dity](https://github.com/tudelft3d/val3dity)

@@ -444,7 +444,7 @@ void test_convex_floor_one_area_centroid_before()
     const CellSpaceInteriorPointResult result =
         locate_cell_space_interior_points(room, 0.001);
     require(result.state_point.has_value(),
-            "State must be selected from the AABB-nearest valid polygon centroid");
+            "State must be selected from a valid polygon centroid");
     require(result.reference_status == ReferencePointStatus::Succeeded,
             "Floor Reference generation failed");
 
@@ -583,16 +583,16 @@ void test_waypoint_anchor_uses_closest_reachable_optimized_node()
     pipeline.repaired_graph=pipeline.los_graph;
     pipeline.shortest_path_tree.root=0;
     pipeline.shortest_path_tree.distances={
-        0.0,1.0,std::numeric_limits<double>::infinity()
+        0.0,1.0,-2.0
     };
     pipeline.shortest_path_tree.previous={
-        std::nullopt,0,std::nullopt
+        std::nullopt,0,0
     };
 
     const auto closest=closest_reachable_reference_point(
         pipeline,{2.0,0.0,30.0});
     require(closest.has_value() && std::abs(closest->z-20.0)<1.0e-9,
-            "Waypoint anchor must ignore a closer OPTIMIZED node unreachable from State");
+            "Waypoint anchor must ignore a closer forced-fallback node");
 }
 
 void test_native_reference_pipeline_optimizes_degree_two_and_collapses_certificate()
@@ -1064,10 +1064,11 @@ void test_full_los_graph_rejects_inherited_edge_through_hole()
     require(result.optimized.edges.size()==1 &&
             result.los_graph.edges.empty() &&
             result.unreachable_node_count==1 &&
-            !std::isfinite(result.shortest_path_tree.distances[1]),
-            "A stale OPTIMIZED edge across a hole must not contaminate LOS routing");
-    require(reference_short_path_graph(result).edges.empty(),
-            "Disconnected nodes must remain isolated in the final State tree");
+            result.forced_node_count==1 &&
+            result.shortest_path_tree.distances[1]<0.0,
+            "A stale OPTIMIZED edge across a hole must become only a forced State fallback");
+    require(reference_short_path_graph(result).edges.size()==1,
+            "The final State tree must expose the forced fallback edge");
 }
 
 void test_disconnected_los_does_not_bridge_through_hole()
@@ -1081,10 +1082,12 @@ void test_disconnected_los_does_not_bridge_through_hole()
     require(pipeline.optimized.edges.empty() &&
             pipeline.repaired_graph.edges.empty() &&
             pipeline.recovered_node_count==0 &&
-            pipeline.unreachable_node_count==1,
-            "Final routing graph must not connect nodes through a hole");
-    require(!std::isfinite(pipeline.shortest_path_tree.distances[1]),
-            "A node behind a hole must remain unreachable without a valid bridge");
+            pipeline.unreachable_node_count==1 &&
+            pipeline.forced_node_count==1,
+            "Verified routing graph must not connect nodes through a hole");
+    require(std::abs(pipeline.shortest_path_tree.distances[1]+6.0)<1.0e-9 &&
+            pipeline.shortest_path_tree.previous[1]==0,
+            "A node behind a hole must store its direct State distance as negative");
 }
 
 void test_convex_floor_asymmetric_mesh_has_area_centroid()
@@ -1769,10 +1772,10 @@ std::uint64_t read_u64_le(const std::vector<std::uint8_t>& bytes,std::size_t ind
     return result;
 }
 
-void test_protocol_v4_preserves_holes_and_triangles()
+void test_geometry_input_with_inner_loops_preserves_holes_and_triangles()
 {
     std::vector<std::uint8_t> bytes{'I','G','M','L','A','D','J',0};
-    append_u64_le(bytes,4);   // V4
+    append_u64_le(bytes,4);   // Geometry payload with inner loops
     append_u64_le(bytes,1);   // One Cell
     append_u64_le(bytes,0);   // Reserved
 
@@ -1790,7 +1793,7 @@ void test_protocol_v4_preserves_holes_and_triangles()
     append_u64_le(bytes,face_size);
     append_u64_le(bytes,4); // outer count
     append_u64_le(bytes,1); // triangle count
-    append_u64_le(bytes,1); // inner LOOP count (was reserved in V3)
+    append_u64_le(bytes,1); // inner loop count
     append_vec3_le(bytes,{0,0,-1});
     const std::vector<Vec3> outside{{0,0,0},{10,0,0},{10,10,0},{0,10,0}};
     const std::vector<Vec3> hole{{3,3,0},{3,7,0},{7,7,0},{7,3,0}};
@@ -1803,21 +1806,21 @@ void test_protocol_v4_preserves_holes_and_triangles()
 
     const auto cells=parse_input_batch(bytes.data(),bytes.size());
     require(cells.size()==1 && cells[0].faces.size()==1,
-            "V4 parser lost the Cell/Face");
+            "Geometry parser lost the Cell/Face");
     const FaceData& face=cells[0].faces.front();
     require(face.outer_points.size()==4 && face.inner_loops.size()==1 &&
             face.inner_loops.front().size()==4 && face.triangles.size()==1,
-            "V4 parser lost Outer, Inner, or immutable Triangle geometry");
+            "Geometry parser lost Outer, Inner, or immutable Triangle geometry");
     require(face.inner_loops.front()[2].x==7 &&
             face.inner_loops.front()[2].y==7 &&
             face.triangles[0].points[1].x==10,
-            "V4 parser must retain original coordinate payloads");
+            "Geometry parser must retain original coordinate payloads");
 }
 
-void test_protocol_v5_decodes_authoritative_plane_and_derives_normal()
+void test_geometry_input_with_face_plane_derives_normal()
 {
     std::vector<std::uint8_t> bytes{'I','G','M','L','A','D','J',0};
-    append_u64_le(bytes,5); // Geometry V5
+    append_u64_le(bytes,5); // Geometry payload with explicit face plane
     append_u64_le(bytes,1);
     append_u64_le(bytes,0);
 
@@ -1853,22 +1856,22 @@ void test_protocol_v5_decodes_authoritative_plane_and_derives_normal()
 
     const auto cells=parse_input_batch(bytes.data(),bytes.size());
     require(cells.size()==1 && cells[0].faces.size()==1,
-            "V5 Face parser lost source geometry");
+            "Face parser lost source geometry");
     const FaceData& f=cells[0].faces.front();
     require(f.has_plane && std::abs(f.plane.d-7.0)<1.0e-12 &&
             std::abs(f.normal.z+1.0)<1.0e-12 &&
             std::abs(f.plane.normal.z+1.0)<1.0e-12,
-            "V5 plane coefficients must normalize with correct D and normal");
+            "Face plane coefficients must normalize with correct D and normal");
     require(f.inner_loops.size()==1 && f.inner_loops[0].size()==4 &&
             f.triangles.size()==1,
-            "V5 Plane header must not displace hole loops or triangles");
+            "Face plane header must not displace hole loops or triangles");
     const auto prepared=FloorPartition::prepare(
         f.plane,f.outer_loop(),f.holes(),0.001);
     require(bool(prepared) && std::abs(prepared.face->frame.origin.z-7)<1.0e-10,
             "Native partition must use authoritative SketchUp D coefficient");
 }
 
-void test_result_v13_encodes_state_and_diagnostics_only()
+void test_state_result_encodes_state_and_diagnostics_only()
 {
     StatePointResult success;
     success.cell_index=0;
@@ -1885,15 +1888,15 @@ void test_result_v13_encodes_state_and_diagnostics_only()
     no_state.diagnostics.rejected_outside=2;
     const auto bytes=serialize_state_result_batch({success,no_state});
     require(read_u64_le(bytes,8)==13 && read_u64_le(bytes,16)==2,
-            "Result protocol must use V13 and one record per target");
+            "Result protocol must use State result format and one record per target");
     require(read_u64_le(bytes,32)==0 && read_u64_le(bytes,40)==0 &&
             read_u64_le(bytes,48)==1,
-            "V13 success has an explicit State flag");
+            "State result format success has an explicit State flag");
     require(read_u64_le(bytes,80)==10 &&
             read_u64_le(bytes,104)==1 &&
             read_u64_le(bytes,128)==2 &&
             read_u64_le(bytes,144)==9,
-            "V13 diagnostics must retain partial failures with success");
+            "State result format diagnostics must retain partial failures with success");
 
     const std::size_t second=152;
     require(read_u64_le(bytes,second)==1 &&
@@ -1901,9 +1904,9 @@ void test_result_v13_encodes_state_and_diagnostics_only()
             read_u64_le(bytes,second+16)==0 &&
             read_u64_le(bytes,second+24+4*8)==2 &&
             bytes.size()==second+24+9*8,
-            "V13 failure must serialize explicit ExitCode and nil State");
+            "State result format failure must serialize explicit ExitCode and nil State");
     require(bytes.size()==248,
-            "V13 State payload must not contain graph nodes or radius");
+            "State result format State payload must not contain graph nodes or radius");
 
     bool rejected=false;
     try
@@ -1922,9 +1925,9 @@ void test_result_v13_encodes_state_and_diagnostics_only()
 
 int main()
 {
-    test_protocol_v4_preserves_holes_and_triangles();
-    test_protocol_v5_decodes_authoritative_plane_and_derives_normal();
-    test_result_v13_encodes_state_and_diagnostics_only();
+    test_geometry_input_with_inner_loops_preserves_holes_and_triangles();
+    test_geometry_input_with_face_plane_derives_normal();
+    test_state_result_encodes_state_and_diagnostics_only();
     test_z_sweep_matches_bruteforce();
     test_shared_face_analysis();
     test_state_volume_centroid_on_box();

@@ -42,11 +42,11 @@ struct FaceData
 {
     // Shared immutable-by-convention source geometry. Consumers of
     // partitioning use const FaceData&, never mutate this mesh or loops.
-    // Derived from plane for Geometry V5 (not sent separately).
+    // Derived from the supplied face plane; not serialized separately.
     // Kept for Exact Adjacency's existing normal comparisons.
     Vec3 normal;
     Plane plane;
-    bool has_plane = false; // Legacy V1-V4 and synthetic fixtures
+    bool has_plane = false; // Geometry inputs without an explicit plane and synthetic fixtures
     std::vector<Vec3> outer_points;
     std::vector<std::vector<Vec3>> inner_loops;
     std::vector<Triangle> triangles;

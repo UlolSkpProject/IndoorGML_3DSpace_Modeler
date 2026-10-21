@@ -7,7 +7,7 @@
 namespace IndoorGMLAdjacencyNative::FloorPartition
 {
 // Phase 8. Only valid children are enqueued. Failed polygons are
-// retained verbatim for a future debug API, never silently discarded.
+// retained for diagnostics and failure recovery, never silently discarded.
 struct PartitionFailure {
     std::size_t source_face_id=0;
     std::size_t depth=0;

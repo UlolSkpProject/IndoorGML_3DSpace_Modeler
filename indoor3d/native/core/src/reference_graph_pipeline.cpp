@@ -942,8 +942,8 @@ ReferenceGraphPipeline build_reference_graph_pipeline(
     if(found==result.optimized.original_indices.end())
         throw std::runtime_error("Reference State node did not survive Native reductions");
     result.state_node_index=static_cast<std::size_t>(found-result.optimized.original_indices.begin());
-    // The temporary experiment validates only existing OPTIMIZED edges.
-    // The old Full LOS path remains behind a single switch for easy rollback.
+    // Test mode validates existing OPTIMIZED edges without an all-pairs LOS
+    // rebuild before Repair. The full LOS mode remains available.
     result.waypoint_solid=std::make_shared<FaceSolid>(cell,tolerance);
     result.waypoint_tolerance=tolerance;
     if(SKIP_PRE_REPAIR_FULL_LOS_FOR_TEST)
@@ -963,6 +963,18 @@ ReferenceGraphPipeline build_reference_graph_pipeline(
         result.shortest_path_tree.distances.begin(),
         result.shortest_path_tree.distances.end(),
         [](double value){return !std::isfinite(value);}));
+    const Vec3& state=result.repaired_graph.nodes[result.state_node_index].point;
+    for(std::size_t i=0;i<result.repaired_graph.nodes.size();++i)
+    {
+        if(std::isfinite(result.shortest_path_tree.distances[i])) continue;
+        const double direct=distance(state,result.repaired_graph.nodes[i].point);
+        if(!std::isfinite(direct)) continue;
+        // Preserve the sign as a route-quality marker. EPSILON prevents a
+        // coincident fallback node from becoming negative zero.
+        result.shortest_path_tree.distances[i]=-std::max(direct,EPSILON);
+        result.shortest_path_tree.previous[i]=result.state_node_index;
+        ++result.forced_node_count;
+    }
 
     return result;
 }
@@ -1110,7 +1122,7 @@ std::optional<Vec3> closest_reachable_reference_point(
     double best=std::numeric_limits<double>::infinity();
     for(std::size_t i=0;i<graph.nodes.size();++i)
     {
-        if(!std::isfinite(tree.distances[i])) continue;
+        if(!std::isfinite(tree.distances[i]) || tree.distances[i]<0.0) continue;
         const double candidate=distance(graph.nodes[i].point,waypoint);
         if(candidate<best || (candidate==best && (!closest || i<*closest)))
         {
@@ -1160,21 +1172,44 @@ std::vector<Vec3> reference_transition_polyline(
         return {};
     const bool has_visibility= pipeline.waypoint_solid && pipeline.waypoint_solid->valid();
     // The legacy State-only fallback can lack a valid Face Solid. Retain its
-    // existing direct route; every normal Reference graph requires verified LOS.
+    // existing direct route. A normal graph needs a valid Solid to distinguish
+    // a verified gateway from the deliberate no-LOS fallback below.
     if(!has_visibility && !pipeline.legacy_state_only) return {};
-    std::optional<std::size_t> gateway;
-    double best=std::numeric_limits<double>::infinity();
-    for(std::size_t i=0;i<graph.nodes.size();++i)
+    const auto select_gateway=[&](bool forced) {
+        std::optional<std::size_t> gateway;
+        double best=std::numeric_limits<double>::infinity();
+        for(std::size_t i=0;i<graph.nodes.size();++i)
+        {
+            const double state_distance=tree.distances[i];
+            if(!std::isfinite(state_distance) ||
+               (forced ? state_distance>=0.0 : state_distance<0.0)) continue;
+            const double direct=distance(graph.nodes[i].point,waypoint);
+            if(has_visibility &&
+               !waypoint_reference_visible(*pipeline.waypoint_solid,
+                                           graph.nodes[i].point,waypoint,
+                                           pipeline.waypoint_tolerance)) continue;
+            const double candidate=std::abs(state_distance)+direct;
+            if(candidate<best || (candidate==best && (!gateway || i<*gateway)))
+            {best=candidate;gateway=i;}
+        }
+        return gateway;
+    };
+    std::optional<std::size_t> gateway=select_gateway(false);
+    if(!gateway) gateway=select_gateway(true);
+    if(!gateway)
     {
-        if(!std::isfinite(tree.distances[i])) continue;
-        const double direct=distance(graph.nodes[i].point,waypoint);
-        if(has_visibility &&
-           !waypoint_reference_visible(*pipeline.waypoint_solid,
-                                       graph.nodes[i].point,waypoint,
-                                       pipeline.waypoint_tolerance)) continue;
-        const double candidate=tree.distances[i]+direct;
-        if(candidate<best || (candidate==best && (!gateway || i<*gateway)))
-        {best=candidate;gateway=i;}
+        // Last-resort waypoint fallback: every finite-distance node has either
+        // a verified State predecessor chain or an explicit direct-to-State
+        // fallback. Ignore waypoint LOS and force the shortest direct segment.
+        double best=std::numeric_limits<double>::infinity();
+        for(std::size_t i=0;i<graph.nodes.size();++i)
+        {
+            if(!std::isfinite(tree.distances[i])) continue;
+            const double direct=distance(graph.nodes[i].point,waypoint);
+            if(!std::isfinite(direct)) continue;
+            if(direct<best || (direct==best && (!gateway || i<*gateway)))
+            {best=direct;gateway=i;}
+        }
     }
     if(!gateway) return {};
     std::vector<std::size_t> reversed;

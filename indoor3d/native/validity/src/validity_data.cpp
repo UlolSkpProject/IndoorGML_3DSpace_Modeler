@@ -17,10 +17,10 @@ using namespace IndoorGMLValidityNative;
 constexpr std::uint8_t GEOMETRY_MAGIC[8] = {'I','G','M','L','A','D','J','\0'};
 constexpr std::uint8_t REQUEST_MAGIC[8] = {'I','G','M','L','V','L','D','\0'};
 constexpr std::uint8_t RESULT_MAGIC[8] = {'I','G','M','L','V','R','S','\0'};
-constexpr std::uint64_t GEOMETRY_VERSION = 2;
-constexpr std::uint64_t VALIDITY_VERSION = 1;
+constexpr std::uint64_t VALIDITY_GEOMETRY_FORMAT_ID = 3;
+constexpr std::uint64_t VALIDITY_REQUEST_FORMAT_ID = 1;
 constexpr std::size_t HEADER_SIZE = 32;
-constexpr std::size_t CELL_FIXED_SIZE = 96;
+constexpr std::size_t CELL_FIXED_SIZE = 80;
 constexpr std::size_t FACE_FIXED_SIZE = 56;
 constexpr std::size_t RESULT_FIXED_SIZE = 80;
 
@@ -160,28 +160,17 @@ CellData parse_cell(const std::uint8_t* data, std::size_t size, std::size_t expe
     if (cell_index != expected_index)
         throw std::invalid_argument("validity cell indices must be contiguous and ordered");
 
-    const std::uint64_t flags = reader.read_u64();
     const std::size_t face_count = checked_size(reader.read_u64(), "face count");
     if (reader.read_u64() != 0) throw std::invalid_argument("validity cell reserved field is non-zero");
 
-    const std::uint64_t known_flags =
-        CELL_FLAG_NEEDS_STATE | CELL_FLAG_ADJACENCY_TARGET |
-        CELL_FLAG_HAS_FIXED_Z | CELL_FLAG_ADJACENCY_DIRTY;
-    if ((flags & ~known_flags) != 0)
-        throw std::invalid_argument("validity cell flags contain unsupported bits");
-
     CellData cell;
     cell.index = cell_index;
-    cell.flags = flags;
     cell.bounds.minimum = read_vec3(reader, "cell bounds minimum");
     cell.bounds.maximum = read_vec3(reader, "cell bounds maximum");
     if (cell.bounds.minimum.x > cell.bounds.maximum.x ||
         cell.bounds.minimum.y > cell.bounds.maximum.y ||
         cell.bounds.minimum.z > cell.bounds.maximum.z)
         throw std::invalid_argument("validity cell bounds are inverted");
-
-    cell.fixed_z = reader.read_double();
-    require_finite(cell.fixed_z, "cell fixed z");
 
     if (face_count > reader.remaining() / FACE_FIXED_SIZE)
         throw std::invalid_argument("validity face count exceeds cell record");
@@ -216,8 +205,8 @@ std::vector<CellData> parse_geometry_batch(const std::uint8_t* data, std::size_t
     Reader reader(data, size);
     if (std::memcmp(reader.read_bytes(8), GEOMETRY_MAGIC, sizeof(GEOMETRY_MAGIC)) != 0)
         throw std::invalid_argument("validity geometry magic mismatch");
-    if (reader.read_u64() != GEOMETRY_VERSION)
-        throw std::invalid_argument("validity requires geometry protocol version 2");
+    if (reader.read_u64() != VALIDITY_GEOMETRY_FORMAT_ID)
+        throw std::invalid_argument("unsupported validity geometry payload format");
     const std::size_t cell_count = checked_size(reader.read_u64(), "cell count");
     if (reader.read_u64() != 0) throw std::invalid_argument("validity geometry reserved field is non-zero");
     if (cell_count > reader.remaining() / CELL_FIXED_SIZE)
@@ -247,8 +236,8 @@ std::vector<ValidityPairRequest> parse_validity_requests(const std::uint8_t* dat
     Reader reader(data, size);
     if (std::memcmp(reader.read_bytes(8), REQUEST_MAGIC, sizeof(REQUEST_MAGIC)) != 0)
         throw std::invalid_argument("validity request magic mismatch");
-    if (reader.read_u64() != VALIDITY_VERSION)
-        throw std::invalid_argument("unsupported validity request version");
+    if (reader.read_u64() != VALIDITY_REQUEST_FORMAT_ID)
+        throw std::invalid_argument("unsupported validity request format");
     const std::size_t count = checked_size(reader.read_u64(), "validity request count");
     if (reader.read_u64() != 0) throw std::invalid_argument("validity request reserved field is non-zero");
     if (count > reader.remaining() / 24)
@@ -281,7 +270,7 @@ std::vector<std::uint8_t> serialize_validity_results(std::vector<ValidityResult>
 
     Writer writer;
     writer.append_bytes(RESULT_MAGIC, sizeof(RESULT_MAGIC));
-    writer.append_u64(VALIDITY_VERSION);
+    writer.append_u64(VALIDITY_REQUEST_FORMAT_ID);
     writer.append_u64(static_cast<std::uint64_t>(results.size()));
     writer.append_u64(0);
 
