@@ -284,15 +284,15 @@ class TransitionCurveBuilderTest < Minitest::Test
   def test_selected_transition_highlights_only_the_selected_visible_half
     @model.curve = [point(0), point(1), point(2), point(3), point(4)]
 
-    first = @builder.selected_transition_line_points(selected_cell_ids: { 'A' => true })
-    second = @builder.selected_transition_line_points(selected_cell_ids: { 'B' => true })
-    both = @builder.selected_transition_line_points(selected_cell_ids: { 'A' => true, 'B' => true })
+    first = @builder.transition_line_batches(selected_cell_ids: { 'A' => true })[:highlight]
+    second = @builder.transition_line_batches(selected_cell_ids: { 'B' => true })[:highlight]
+    both = @builder.transition_line_batches(selected_cell_ids: { 'A' => true, 'B' => true })[:highlight]
 
     assert_equal [0.0, 1.0, 1.0, 2.0], xs(first)
     assert_equal [2.0, 3.0, 3.0, 4.0], xs(second)
     assert_equal xs(first) + xs(second), xs(both)
-    assert_empty @builder.selected_transition_line_points(selected_cell_ids: {})
-    assert_empty @builder.selected_transition_line_points(selected_cell_ids: { 'C' => true })
+    assert_empty @builder.transition_line_batches(selected_cell_ids: {})[:highlight]
+    assert_empty @builder.transition_line_batches(selected_cell_ids: { 'C' => true })[:highlight]
   end
 
   def test_selection_batches_partition_cached_segments_without_overdraw
@@ -333,13 +333,13 @@ class TransitionCurveBuilderTest < Minitest::Test
     @model.curve = [point(0), point(1), point(2), point(3), point(4)]
     @model.state_visibility[:state1] = false
 
-    assert_empty @builder.selected_transition_line_points(selected_cell_ids: { 'A' => true })
+    assert_empty @builder.transition_line_batches(selected_cell_ids: { 'A' => true })[:highlight]
     assert_equal [2.0, 3.0, 3.0, 4.0],
-                 xs(@builder.selected_transition_line_points(selected_cell_ids: { 'B' => true }))
-    assert_empty @builder.selected_transition_line_points(
+                 xs(@builder.transition_line_batches(selected_cell_ids: { 'B' => true })[:highlight])
+    assert_empty @builder.transition_line_batches(
       selected_cell_ids: { 'B' => true },
       excluded_cell_ids: ['A']
-    )
+    )[:highlight]
   end
 
   def test_selected_transition_reuses_existing_curve_cache
@@ -349,7 +349,7 @@ class TransitionCurveBuilderTest < Minitest::Test
                  xs(@builder.transition_line_points)
     calls_after_base = @model.reference_curve_calls.length
     assert_equal [0.0, 1.0, 1.0, 2.0],
-                 xs(@builder.selected_transition_line_points(selected_cell_ids: { 'A' => true }))
+                 xs(@builder.transition_line_batches(selected_cell_ids: { 'A' => true })[:highlight])
     assert_equal calls_after_base, @model.reference_curve_calls.length
   end
 
