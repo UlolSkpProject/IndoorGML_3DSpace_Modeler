@@ -7,8 +7,8 @@ module ULOL
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.before!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.collapsed!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.optimized!
-      # RG.los_graph!         # Full line-of-sight graph from OPTIMIZED nodes.
-      # RG.connectivity_repair! # Full LOS plus restored intermediate nodes.
+      # RG.los_graph!         # Individually validated OPTIMIZED edges.
+      # RG.connectivity_repair! # Verified connecting paths and restored reference nodes.
       # RG.short_path_graph!  # State-rooted Dijkstra tree from repaired graph.
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.clear!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.mode
