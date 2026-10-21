@@ -140,6 +140,7 @@ module ULOL
             original_id = indoor_attribute(entity, 'id').to_s
             original_state_id = indoor_attribute(entity, 'duality_state_id').to_s
             runtime_snapshot = cell_space_copy_independence_runtime_snapshot
+            cell_space = nil
             IndoorCore::Logger.puts "[IndoorGML] Duplicate CellSpace id detected: entity_id=#{entity.entityID} copied_id=#{original_id}"
 
             with_transparent_cell_space_operation('IndoorGML CellSpace Copy Independence') do
@@ -152,6 +153,7 @@ module ULOL
 
                 register_cell_space(cell_space)
                 register_state(state)
+                initialize_cell_space_copy_reference_graph(cell_space)
                 name_cell_space_entity(cell_space)
                 apply_cell_space_material(cell_space)
                 write_cell_space_attributes(cell_space)
@@ -164,10 +166,33 @@ module ULOL
 
             true
           rescue StandardError => e
+            erase_independent_cell_space_reference_graph(cell_space)
             restore_cell_space_copy_independence_runtime(runtime_snapshot)
             clear_copied_cell_space_indoor_attributes(entity)
             log_cell_space_copy_independence_failure(e)
             defer_cell_space_copy_independence_failure_warning
+            false
+          end
+
+          def initialize_cell_space_copy_reference_graph(cell_space)
+            if respond_to?(:local_grid_coordinate_enabled?, true) &&
+               local_grid_coordinate_enabled?
+              finish_cell_space_geometry_local_grid(cell_space)
+            else
+              recenter_cell_space_origin(cell_space)
+            end
+          end
+
+          def erase_independent_cell_space_reference_graph(cell_space)
+            return false unless cell_space
+            return false unless defined?(NativeAdjacencyBridge)
+
+            NativeAdjacencyBridge.erase_reference_graphs([cell_space.id])
+          rescue StandardError => cleanup_error
+            IndoorCore::Logger.puts(
+              '[IndoorGML] CellSpace copy Reference graph cleanup failed: ' \
+              "cell=#{cell_space&.id} #{cleanup_error.class}: #{cleanup_error.message}"
+            )
             false
           end
 
