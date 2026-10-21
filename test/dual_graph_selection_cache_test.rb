@@ -112,6 +112,16 @@ class DualGraphSelectionCacheTest < Minitest::Test
     assert_equal({ 'A' => true }, @indoor_model.refresh_dual_graph_selection_cache[:cell_ids])
   end
 
+  def test_one_broken_cell_does_not_hide_other_selected_cells
+    broken = Object.new
+    broken.define_singleton_method(:valid?) { raise 'stale CellSpace' }
+    @cells.unshift(broken)
+    @selection.entities = [@a, @b]
+
+    assert_equal({ 'A' => true, 'B' => true },
+                 @indoor_model.refresh_dual_graph_selection_cache[:cell_ids])
+  end
+
   def test_end_editing_clears_snapshot
     @indoor_model.refresh_dual_graph_selection_cache
     @indoor_model.editing = false
