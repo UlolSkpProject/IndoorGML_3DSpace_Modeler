@@ -410,7 +410,7 @@ val3dity process가 실행되는 동안 `IndoorGML_PrimalSpaceFeatures`는 잠�
 
 ```text
 indoor3d/
-├── definition.rb                  # version constants
+├── definition.rb                  # storage/schema identifiers and runtime settings
 ├── core.rb                        # extension runtime loader
 ├── domain/                        # CellSpace, State, Transition, semantics
 ├── application/

@@ -71,7 +71,6 @@ module ULOL
           if defined?(Sketchup) && Sketchup.respond_to?(:active_model)
             Sketchup.active_model&.active_view&.invalidate
           end
-          # puts "[IndoorGML] Selected CellSpace Highlight: #{highlight? ? 'ON' : 'OFF'}"
           highlight?
         end
 
@@ -102,7 +101,6 @@ module ULOL
         def clear!
           @mode = :off
           active_indoor_model&.clear_reference_graph_debug
-          # puts '[IndoorGML] Reference Graph Overlay: OFF'
           :off
         end
 
@@ -122,7 +120,6 @@ module ULOL
           if defined?(Sketchup) && Sketchup.respond_to?(:active_model)
             Sketchup.active_model&.active_view&.invalidate
           end
-          # puts "[IndoorGML] Reference Graph Overlay: #{value.upcase}"
           value
         end
 
