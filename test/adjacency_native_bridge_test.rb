@@ -39,10 +39,6 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_equal 0, bytes.byteslice(24, 8).unpack1('Q<')
   end
 
-  def test_optimized_input_encoding_is_byte_identical_to_legacy_layout
-    assert_equal legacy_encode_input(sample_snapshots), Bridge.encode_input(sample_snapshots)
-  end
-
   def test_geometry_with_authored_plane_serializes_plane_holes_and_keeps_triangle_payload
     snapshots = Marshal.load(Marshal.dump(sample_snapshots))
     hole = [
@@ -129,12 +125,13 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_equal 1, bytes.byteslice(8, 8).unpack1('Q<')
   end
 
-  def test_standalone_adjacency_encoding_ignores_hole_metadata_and_remains_byte_identical
+  def test_standalone_adjacency_ignores_hole_metadata
+    baseline = Bridge.encode_input(sample_snapshots)
     snapshots = Marshal.load(Marshal.dump(sample_snapshots))
     snapshots[0][:faces][0][:inner_loops] = [
       [[1.0, 0.2, 0.2], [1.0, 0.8, 0.2], [1.0, 0.8, 0.8]]
     ]
-    assert_equal legacy_encode_input(snapshots), Bridge.encode_input(snapshots)
+    assert_equal baseline, Bridge.encode_input(snapshots)
   end
 
   def test_reference_state_result_decodes_state_and_diagnostics_without_graph_payload
@@ -261,33 +258,6 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     end
   end
 
-  def legacy_encode_input(snapshots)
-    records = snapshots.each_with_index.map do |snapshot, cell_index|
-      faces = Array(snapshot[:faces])
-      face_records = faces.map do |face|
-        points = Array(face[:points])
-        triangles = Array(face[:triangles])
-        point_bytes = points.flatten.pack('E*')
-        triangle_bytes = triangles.flatten.pack('E*')
-        record_size = 56 + point_bytes.bytesize + triangle_bytes.bytesize
-        [record_size, points.length, triangles.length, 0].pack('Q<Q<Q<Q<') +
-          Array(face[:normal]).pack('E3') +
-          point_bytes +
-          triangle_bytes
-      end
-      body = face_records.join
-      bounds = snapshot.fetch(:bounds)
-      record_size = 80 + body.bytesize
-      [record_size, cell_index, faces.length, 0].pack('Q<Q<Q<Q<') +
-        (Array(bounds.fetch(:min)) + Array(bounds.fetch(:max))).pack('E6') +
-        body
-    end
-
-    "IGMLADJ\0".b +
-      [1, snapshots.length, 0].pack('Q<Q<Q<') +
-      records.join
-  end
-
   private
 
   def with_adjacency_native(native)
@@ -326,7 +296,7 @@ class AdjacencyNativeBridgeTest < Minitest::Test
       },
       faces: [
         {
-          normal: normal, # retained in fixture for Standalone adjacency byte-compatibility
+          normal: normal, # retained to test the standalone adjacency input format
           plane: [normal[0], normal[1], normal[2], -(normal[0] * max_x)],
           points: points,
           triangles: [

@@ -1709,7 +1709,7 @@ std::uint64_t read_u64_le(const std::vector<std::uint8_t>& bytes,std::size_t ind
     return result;
 }
 
-void test_protocol_v4_preserves_holes_and_triangles()
+void test_geometry_input_with_inner_loops_preserves_holes_and_triangles()
 {
     std::vector<std::uint8_t> bytes{'I','G','M','L','A','D','J',0};
     append_u64_le(bytes,4);   // Geometry payload with inner loops
@@ -1754,7 +1754,7 @@ void test_protocol_v4_preserves_holes_and_triangles()
             "Geometry parser must retain original coordinate payloads");
 }
 
-void test_protocol_v5_decodes_authoritative_plane_and_derives_normal()
+void test_geometry_input_with_face_plane_derives_normal()
 {
     std::vector<std::uint8_t> bytes{'I','G','M','L','A','D','J',0};
     append_u64_le(bytes,5); // Geometry payload with explicit face plane
@@ -1808,7 +1808,7 @@ void test_protocol_v5_decodes_authoritative_plane_and_derives_normal()
             "Native partition must use authoritative SketchUp D coefficient");
 }
 
-void test_result_v13_encodes_state_and_diagnostics_only()
+void test_state_result_encodes_state_and_diagnostics_only()
 {
     StatePointResult success;
     success.cell_index=0;
@@ -1862,9 +1862,9 @@ void test_result_v13_encodes_state_and_diagnostics_only()
 
 int main()
 {
-    test_protocol_v4_preserves_holes_and_triangles();
-    test_protocol_v5_decodes_authoritative_plane_and_derives_normal();
-    test_result_v13_encodes_state_and_diagnostics_only();
+    test_geometry_input_with_inner_loops_preserves_holes_and_triangles();
+    test_geometry_input_with_face_plane_derives_normal();
+    test_state_result_encodes_state_and_diagnostics_only();
     test_z_sweep_matches_bruteforce();
     test_shared_face_analysis();
     test_state_volume_centroid_on_box();
