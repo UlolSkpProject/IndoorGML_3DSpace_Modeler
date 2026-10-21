@@ -16,7 +16,7 @@ VALUE adjacency_native_erase_reference_graphs(VALUE self, VALUE cell_keys);
 VALUE adjacency_native_start_adjacency_check(VALUE self, VALUE length_tolerance, VALUE normal_tolerance);
 VALUE adjacency_native_get_adjacency_result_bytes(VALUE self);
 
-// V1 API compatibility aliases.
+// Public Ruby entry points for standalone adjacency requests.
 VALUE adjacency_native_start_check(VALUE self, VALUE length_tolerance, VALUE normal_tolerance);
 VALUE adjacency_native_get_result_bytes(VALUE self);
 
