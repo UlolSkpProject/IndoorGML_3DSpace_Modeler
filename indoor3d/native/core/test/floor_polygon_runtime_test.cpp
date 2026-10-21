@@ -525,9 +525,25 @@ void test_waypoint_gateway_uses_los_and_total_state_cost()
     require(shorter.size()==3 && near(shorter[1].x,35.0),
             "A shorter total State route must select the nearer LOS gateway");
 
-    require(reference_transition_polyline(
-                pipeline,Vec3{50,50,z}).empty(),
-            "Waypoint outside the CellSpace without visible gateways must fail closed");
+    pipeline.shortest_path_tree.distances[1]=-40.0;
+    pipeline.shortest_path_tree.distances[2]=25.0;
+    const auto verified_first=reference_transition_polyline(pipeline,waypoint);
+    require(verified_first.size()==3 && near(verified_first[1].x,5.0),
+            "A visible verified gateway must outrank every forced fallback");
+
+    pipeline.shortest_path_tree.distances[2]=
+        std::numeric_limits<double>::infinity();
+    pipeline.shortest_path_tree.previous[2]=std::nullopt;
+    const auto forced=reference_transition_polyline(pipeline,waypoint);
+    require(forced.size()==3 && near(forced[1].x,35.0),
+            "A visible forced gateway must be used when no verified gateway is visible");
+
+    const auto forced_waypoint=reference_transition_polyline(
+        pipeline,Vec3{50,50,z});
+    require(forced_waypoint.size()==3 && near(forced_waypoint[1].x,35.0) &&
+            near(forced_waypoint.back().x,50.0),
+            "When no gateway has waypoint LOS, routing must force-connect the "
+            "closest finite-distance Reference node");
 }
 void test_legacy_state_only_route_survives_invalid_solid()
 {

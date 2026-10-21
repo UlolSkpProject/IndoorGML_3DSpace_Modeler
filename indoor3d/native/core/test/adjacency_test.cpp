@@ -583,16 +583,16 @@ void test_waypoint_anchor_uses_closest_reachable_optimized_node()
     pipeline.repaired_graph=pipeline.los_graph;
     pipeline.shortest_path_tree.root=0;
     pipeline.shortest_path_tree.distances={
-        0.0,1.0,std::numeric_limits<double>::infinity()
+        0.0,1.0,-2.0
     };
     pipeline.shortest_path_tree.previous={
-        std::nullopt,0,std::nullopt
+        std::nullopt,0,0
     };
 
     const auto closest=closest_reachable_reference_point(
         pipeline,{2.0,0.0,30.0});
     require(closest.has_value() && std::abs(closest->z-20.0)<1.0e-9,
-            "Waypoint anchor must ignore a closer OPTIMIZED node unreachable from State");
+            "Waypoint anchor must ignore a closer forced-fallback node");
 }
 
 void test_native_reference_pipeline_optimizes_degree_two_and_collapses_certificate()
@@ -1001,10 +1001,11 @@ void test_full_los_graph_rejects_inherited_edge_through_hole()
     require(result.optimized.edges.size()==1 &&
             result.los_graph.edges.empty() &&
             result.unreachable_node_count==1 &&
-            !std::isfinite(result.shortest_path_tree.distances[1]),
-            "A stale OPTIMIZED edge across a hole must not contaminate LOS routing");
-    require(reference_short_path_graph(result).edges.empty(),
-            "Disconnected nodes must remain isolated in the final State tree");
+            result.forced_node_count==1 &&
+            result.shortest_path_tree.distances[1]<0.0,
+            "A stale OPTIMIZED edge across a hole must become only a forced State fallback");
+    require(reference_short_path_graph(result).edges.size()==1,
+            "The final State tree must expose the forced fallback edge");
 }
 
 void test_disconnected_los_does_not_bridge_through_hole()
@@ -1018,10 +1019,12 @@ void test_disconnected_los_does_not_bridge_through_hole()
     require(pipeline.optimized.edges.empty() &&
             pipeline.repaired_graph.edges.empty() &&
             pipeline.recovered_node_count==0 &&
-            pipeline.unreachable_node_count==1,
-            "Final routing graph must not connect nodes through a hole");
-    require(!std::isfinite(pipeline.shortest_path_tree.distances[1]),
-            "A node behind a hole must remain unreachable without a valid bridge");
+            pipeline.unreachable_node_count==1 &&
+            pipeline.forced_node_count==1,
+            "Verified routing graph must not connect nodes through a hole");
+    require(std::abs(pipeline.shortest_path_tree.distances[1]+6.0)<1.0e-9 &&
+            pipeline.shortest_path_tree.previous[1]==0,
+            "A node behind a hole must store its direct State distance as negative");
 }
 
 void test_convex_floor_asymmetric_mesh_has_area_centroid()
