@@ -77,7 +77,7 @@ Validation은 XML well-formedness 확인과 val3dity 2.2.0 검사를 수행합�
 
 빠른 검사는 Geometry를 변경하지 않으며, `--overlap_tol -1`로 val3dity를 실행한 뒤 Extension 701/704 재검사를 수행합니다.
 
-**Native 701/704 재검사 계약 주의:** 현재 Ruby `ValidityNativeBridge.compute`는 `NativeAdjacencyBridge.encode_geometry_input`으로 Geometry 포맷 ID `5`를 전송하지만, Native `validity_data.cpp`의 `parse_geometry_batch`는 ID `2`만 허용합니다. 소스 기준으로 두 직렬화 계약이 불일치하므로 Native 재검사 경로의 정상 실행을 보장할 수 없습니다. 이 차이는 명칭 정리만으로 해결되지 않으며, Native 파서·바이너리 호환성을 함께 검토해야 합니다.
+**Validity Native Geometry 계약:** Core는 기존 Geometry 포맷 ID `5`를 유지하고, Validity는 전용 Geometry 포맷 ID `3`을 사용합니다. Validity 포맷은 CellSpace AABB, Face Normal, Outer Vertices, Triangles만 전달하고 State 관련 플래그 및 `fixed_z`를 포함하지 않습니다. 포맷 ID `2`와는 레이아웃이 달라 기존 `indoor_gml_validity_native.so` 바이너리에는 호환되지 않습니다. 변경된 Validity Native 소스로 `.so`를 재빌드·교체하기 전에는 701/704 Native 재검사 경로를 사용할 수 없습니다.
 
 최종 결과는 일관되게 다음 세 상태로 보고합니다.
 
