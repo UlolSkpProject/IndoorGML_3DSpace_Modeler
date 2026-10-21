@@ -106,16 +106,6 @@ public:
     std::size_t start_adjacency_check(double length_tolerance, double normal_tolerance);
     std::vector<std::uint8_t> get_adjacency_result_bytes();
 
-    // V1 Ruby API compatibility aliases.
-    std::size_t start_check(double length_tolerance, double normal_tolerance)
-    {
-        return start_adjacency_check(length_tolerance, normal_tolerance);
-    }
-    std::vector<std::uint8_t> get_result_bytes()
-    {
-        return get_adjacency_result_bytes();
-    }
-
     ProgressSnapshot get_progress() const;
     MetricsSnapshot get_metrics() const;
     void clear();
