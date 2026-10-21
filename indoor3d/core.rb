@@ -105,7 +105,8 @@ module SeoulSpacePluginsMenu
 
       @built = true
     rescue StandardError => e
-      puts "[SeoulSpacePluginsMenu] Build failed: #{e.class}: #{e.message}"
+      # puts "[SeoulSpacePluginsMenu] Build failed: #{e.class}: #{e.message}"
+      nil
     end
 
     def append_group(key)
@@ -119,7 +120,8 @@ module SeoulSpacePluginsMenu
       group[:builder].call(target_menu)
       @built_groups[key] = true
     rescue StandardError => e
-      puts "[SeoulSpacePluginsMenu] Late group append failed (#{key}): #{e.class}: #{e.message}"
+      # puts "[SeoulSpacePluginsMenu] Late group append failed (#{key}): #{e.class}: #{e.message}"
+      nil
     end
   end
 end
