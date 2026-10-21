@@ -53,7 +53,12 @@ class StateOverlayRendererTransformCacheTest < Minitest::Test
     end
 
     def to_a
+      @enumerations = @enumerations.to_i + 1
       entities.dup
+    end
+
+    def enumerations
+      @enumerations.to_i
     end
   end
 
@@ -70,6 +75,14 @@ class StateOverlayRendererTransformCacheTest < Minitest::Test
 
     def reference_cell_space_transformation(cell_id)
       states.find { |state| state.duality_cell.id == cell_id }.duality_cell.frame
+    end
+
+    def refresh_dual_graph_selection_cache
+      @snapshot = { entities: model.selection.to_a }
+    end
+
+    def dual_graph_selection_snapshot
+      @snapshot || { entities: [] }
     end
   end
 
@@ -133,6 +146,7 @@ class StateOverlayRendererTransformCacheTest < Minitest::Test
       selection: @selection,
       primal_group: @primal_group
     )
+    @indoor_model.refresh_dual_graph_selection_cache
     @renderer = Renderer.new(indoor_model: @indoor_model, transform_context: @context)
     @view = View.new
   end
@@ -150,7 +164,7 @@ class StateOverlayRendererTransformCacheTest < Minitest::Test
 
   def test_selected_cell_refreshes_only_its_state_when_transform_changes
     draw
-    @selection.entities = [@cell_a.group]
+    select(@cell_a.group)
     @cell_a.frame = Frame.new(15)
 
     draw
@@ -165,7 +179,7 @@ class StateOverlayRendererTransformCacheTest < Minitest::Test
 
   def test_multiple_selected_cells_refresh_independently
     draw
-    @selection.entities = [@cell_a.group, @cell_b.group]
+    select(@cell_a.group, @cell_b.group)
     @cell_a.frame = Frame.new(16)
     @cell_b.frame = Frame.new(27)
 
@@ -177,7 +191,7 @@ class StateOverlayRendererTransformCacheTest < Minitest::Test
 
   def test_selected_cell_includes_primal_render_context_in_its_fingerprint
     draw
-    @selection.entities = [@cell_a.group]
+    select(@cell_a.group)
     @context.primal_offset = 200
 
     draw
@@ -188,7 +202,7 @@ class StateOverlayRendererTransformCacheTest < Minitest::Test
 
   def test_selected_primal_rebuilds_all_state_points_when_transform_changes
     draw
-    @selection.entities = [@primal_group]
+    select(@primal_group)
     @context.primal_offset = 200
 
     draw
@@ -227,7 +241,7 @@ class StateOverlayRendererTransformCacheTest < Minitest::Test
 
   def test_selected_state_highlight_uses_refreshed_transform_without_rebuilding_cache
     draw
-    @selection.entities = [@cell_a.group]
+    select(@cell_a.group)
     @cell_a.frame = Frame.new(18)
 
     @renderer.draw_highlight(@view, selected_cell_ids: { 'A' => true })
@@ -237,7 +251,25 @@ class StateOverlayRendererTransformCacheTest < Minitest::Test
     assert_equal %w[state-a state-b state-a], @context.root_local_calls
   end
 
+  def test_camera_redraw_uses_selected_entity_cache_without_selection_enumeration
+    select(@cell_a.group)
+    draw
+    count = @selection.enumerations
+    4.times { draw }
+    assert_equal count, @selection.enumerations
+
+    @cell_a.frame = Frame.new(19)
+    draw
+    assert_equal [119, 120], last_x_coordinates
+    assert_equal count, @selection.enumerations
+  end
+
   private
+
+  def select(*entities)
+    @selection.entities = entities
+    @indoor_model.refresh_dual_graph_selection_cache
+  end
 
   def draw
     @renderer.draw(@view)
