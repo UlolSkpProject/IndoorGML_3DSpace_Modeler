@@ -97,14 +97,11 @@ module ULOL
           # selected State. The additional passes never modify base styling.
           unless validation_focus_active?
             excluded_cell_ids = transition_transform_excluded_cell_ids
-            @transition_renderer.draw(view, excluded_cell_ids: excluded_cell_ids)
-            unless selected_cell_ids.empty?
-              @transition_renderer.draw_highlight(
-                view,
-                selected_cell_ids: selected_cell_ids,
-                excluded_cell_ids: excluded_cell_ids
-              )
-            end
+            @transition_renderer.draw(
+              view,
+              selected_cell_ids: selected_cell_ids,
+              excluded_cell_ids: excluded_cell_ids
+            )
           end
           @state_renderer.draw(view, state_radius_scale: state_radius_scale)
           unless selected_cell_ids.empty?

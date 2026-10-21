@@ -16,37 +16,37 @@ module ULOL
           @curve_builder = curve_builder
         end
 
-        def draw(view, excluded_cell_ids: nil)
-          view.line_width = overlay_transition_line_width if view.respond_to?(:line_width=)
-
-          render_points = @curve_builder.transition_line_points(excluded_cell_ids: excluded_cell_ids)
-          return if render_points.empty?
-
-          view.drawing_color = DUAL_TRANSITION_COLOR
-          view.draw(GL_LINES, render_points)
-        ensure
-          view.line_width = 1 if view.respond_to?(:line_width=)
-        end
-
-        # Draw only selected cells' visible Transition segments, after the
-        # normal pass. Do not invalidate or mutate the underlying curves.
-        def draw_highlight(view, selected_cell_ids:, excluded_cell_ids: nil)
-          return if selected_cell_ids.nil? || selected_cell_ids.empty?
-
-          render_points = @curve_builder.selected_transition_line_points(
+        # Partition cached segments once, then submit disjoint normal and
+        # highlight batches. Different styles still require separate draw
+        # calls, but a selected segment is never sent to the GPU twice.
+        def draw(view, selected_cell_ids: nil, excluded_cell_ids: nil)
+          batches = @curve_builder.transition_line_batches(
             selected_cell_ids: selected_cell_ids,
             excluded_cell_ids: excluded_cell_ids
           )
-          return if render_points.empty?
-
-          view.line_width = SELECTED_TRANSITION_LINE_WIDTH_PIXELS if view.respond_to?(:line_width=)
-          view.drawing_color = SELECTED_TRANSITION_COLOR
-          view.draw(GL_LINES, render_points)
+          draw_normal(view, batches[:normal])
+          draw_highlight(view, batches[:highlight])
         ensure
           view.line_width = 1 if view.respond_to?(:line_width=)
         end
 
         private
+
+        def draw_normal(view, render_points)
+          return if render_points.empty?
+
+          view.line_width = overlay_transition_line_width if view.respond_to?(:line_width=)
+          view.drawing_color = DUAL_TRANSITION_COLOR
+          view.draw(GL_LINES, render_points)
+        end
+
+        def draw_highlight(view, render_points)
+          return if render_points.empty?
+
+          view.line_width = SELECTED_TRANSITION_LINE_WIDTH_PIXELS if view.respond_to?(:line_width=)
+          view.drawing_color = SELECTED_TRANSITION_COLOR
+          view.draw(GL_LINES, render_points)
+        end
 
         def overlay_transition_line_width
           [

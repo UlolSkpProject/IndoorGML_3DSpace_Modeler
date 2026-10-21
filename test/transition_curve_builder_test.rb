@@ -295,6 +295,40 @@ class TransitionCurveBuilderTest < Minitest::Test
     assert_empty @builder.selected_transition_line_points(selected_cell_ids: { 'C' => true })
   end
 
+  def test_selection_batches_partition_cached_segments_without_overdraw
+    @model.curve = [point(0), point(1), point(2), point(3), point(4)]
+
+    batches = @builder.transition_line_batches(selected_cell_ids: { 'A' => true })
+
+    assert_equal [2.0, 3.0, 3.0, 4.0], xs(batches[:normal])
+    assert_equal [0.0, 1.0, 1.0, 2.0], xs(batches[:highlight])
+  end
+
+  def test_empty_and_complete_selection_alias_the_canonical_full_array
+    @model.curve = [point(0), point(1), point(2), point(3), point(4)]
+    full = @builder.transition_line_points
+
+    empty = @builder.transition_line_batches(selected_cell_ids: {})
+    complete = @builder.transition_line_batches(selected_cell_ids: { 'A' => true, 'B' => true })
+
+    assert_same full, empty[:normal]
+    assert_empty empty[:highlight]
+    assert_empty complete[:normal]
+    assert_same full, complete[:highlight]
+  end
+
+  def test_unchanged_selection_reuses_partition_arrays_without_curve_rebuild
+    @model.curve = [point(0), point(1), point(2), point(3), point(4)]
+    first = @builder.transition_line_batches(selected_cell_ids: { 'A' => true })
+    curve_calls = @model.reference_curve_calls.length
+    second = @builder.transition_line_batches(selected_cell_ids: { 'A' => true })
+
+    assert_same first, second
+    assert_same first[:normal], second[:normal]
+    assert_same first[:highlight], second[:highlight]
+    assert_equal curve_calls, @model.reference_curve_calls.length
+  end
+
   def test_selected_transition_respects_visibility_and_topology_suppression
     @model.curve = [point(0), point(1), point(2), point(3), point(4)]
     @model.state_visibility[:state1] = false

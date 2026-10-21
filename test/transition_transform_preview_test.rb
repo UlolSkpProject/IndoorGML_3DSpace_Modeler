@@ -130,6 +130,11 @@ class TransitionTransformPreviewTest < Minitest::Test
       @last_options = options
     end
 
+    def draw_highlight(*, **options)
+      @draws += 1
+      @last_options = options
+    end
+
     def draw_partitions(*)
       @draws += 1
     end
@@ -244,9 +249,8 @@ class TransitionTransformPreviewTest < Minitest::Test
 
     order = []
     draw_context = Object.new
-    draw_context.define_singleton_method(:draw) { |*, **_| order << :transition }
-    draw_context.define_singleton_method(:draw_highlight) do |*, **options|
-      order << [:selected_transition, options[:selected_cell_ids].keys.sort, options[:excluded_cell_ids]]
+    draw_context.define_singleton_method(:draw) do |*, **options|
+      order << [:transition_batches, options[:selected_cell_ids].keys.sort, options[:excluded_cell_ids]]
     end
     state_context = Object.new
     state_context.define_singleton_method(:draw) { |*, **_| order << :state }
@@ -262,28 +266,28 @@ class TransitionTransformPreviewTest < Minitest::Test
     view = View.new(1)
 
     @overlay.draw(view)
-    assert_equal [:transition, [:selected_transition, ['A'], []], :state,
+    assert_equal [[:transition_batches, ['A'], []], :state,
                   [:selected_state, ['A']]], order
 
     order.clear
     @selection.entities = [@cell_group, second_group]
     indoor_model.refresh_dual_graph_selection_cache
     @overlay.draw(view)
-    assert_equal [:transition, [:selected_transition, %w[A B], []], :state,
+    assert_equal [[:transition_batches, %w[A B], []], :state,
                   [:selected_state, %w[A B]]], order
 
     order.clear
     @selection.entities = [Group.new(99, 1)]
     indoor_model.refresh_dual_graph_selection_cache
     @overlay.draw(view)
-    assert_equal [:transition, :state], order
+    assert_equal [[:transition_batches, [], []], :state], order
 
     order.clear
     @selection.entities = [@cell_group]
     indoor_model.refresh_dual_graph_selection_cache
-    indoor_model.editing = false
+    indoor_model.define_singleton_method(:editing?) { false }
     @overlay.draw(view)
-    assert_equal [:transition, :state], order
+    assert_equal [[:transition_batches, [], []], :state], order
   end
 
   def test_rg_highlight_switch_gates_edit_selection_without_changing_selection
