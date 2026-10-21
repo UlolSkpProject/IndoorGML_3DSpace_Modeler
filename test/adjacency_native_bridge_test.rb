@@ -30,7 +30,7 @@ end
 class AdjacencyNativeBridgeTest < Minitest::Test
   Bridge = ULOL::Indoor3DGmlModeler::IndoorCore::NativeAdjacencyBridge
 
-  def test_input_encoding_uses_versioned_little_endian_batch
+  def test_standalone_input_encoding_uses_little_endian_batch
     bytes = Bridge.encode_input(sample_snapshots)
 
     assert_equal "IGMLADJ\0".b, bytes.byteslice(0, 8)
@@ -43,7 +43,7 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_equal legacy_encode_input(sample_snapshots), Bridge.encode_input(sample_snapshots)
   end
 
-  def test_geometry_v5_serializes_plane_holes_and_keeps_triangle_payload
+  def test_geometry_with_authored_plane_serializes_plane_holes_and_keeps_triangle_payload
     snapshots = Marshal.load(Marshal.dump(sample_snapshots))
     hole = [
       [1.0, 0.2, 0.2], [1.0, 0.8, 0.2],
@@ -79,7 +79,7 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_equal 0, bytes.byteslice(second_cell + 104 + 24, 8).unpack1('Q<')
   end
 
-  def test_geometry_v5_encodes_moved_and_edited_flags_together
+  def test_geometry_with_authored_plane_encodes_moved_and_edited_flags_together
     # moved: adjacency only (target + dirty)
     # edited: State/Ref plus adjacency (target + needs_state + dirty)
     bytes = Bridge.encode_geometry_input(
@@ -97,14 +97,14 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_equal 11, bytes.byteslice(second_cell_offset + 16, 8).unpack1('Q<')
   end
 
-  def test_geometry_v5_requires_authoritative_plane_and_ignores_normal_metadata
+  def test_geometry_with_authored_plane_requires_authoritative_plane_and_ignores_normal_metadata
     snapshot = Marshal.load(Marshal.dump(sample_snapshots.first))
     original = snapshot[:faces].first
     bytes = Bridge.encode_geometry_input([snapshot], [{ needs_state: true }])
 
     original[:normal] = [-1.0, 0.0, 0.0] # deliberately contradictory
     modified = Bridge.encode_geometry_input([snapshot], [{ needs_state: true }])
-    assert_equal bytes, modified, 'V5 must use plane exclusively, not normal'
+    assert_equal bytes, modified, 'Geometry payload must use plane exclusively, not normal'
 
     original.delete(:plane)
     assert_raises(Bridge::ProtocolError) do
@@ -117,7 +117,7 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     end
   end
 
-  def test_legacy_v1_normal_is_derived_and_normalized_from_plane_only
+  def test_standalone_adjacency_normal_is_derived_and_normalized_from_plane_only
     snapshot = Marshal.load(Marshal.dump(sample_snapshots.first))
     face = snapshot.fetch(:faces).first
     face.delete(:normal)
@@ -129,7 +129,7 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_equal 1, bytes.byteslice(8, 8).unpack1('Q<')
   end
 
-  def test_legacy_v1_encoding_ignores_hole_metadata_and_remains_byte_identical
+  def test_standalone_adjacency_encoding_ignores_hole_metadata_and_remains_byte_identical
     snapshots = Marshal.load(Marshal.dump(sample_snapshots))
     snapshots[0][:faces][0][:inner_loops] = [
       [[1.0, 0.2, 0.2], [1.0, 0.8, 0.2], [1.0, 0.8, 0.8]]
@@ -137,7 +137,7 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_equal legacy_encode_input(snapshots), Bridge.encode_input(snapshots)
   end
 
-  def test_reference_v13_decodes_state_and_diagnostics_without_graph_payload
+  def test_reference_state_result_decodes_state_and_diagnostics_without_graph_payload
     bytes = "IGMLSTA\0".b + [13, 2, 0].pack('Q<3')
     bytes << [0, 0, 1].pack('Q<3') << [1.0, 2.0, 3.0].pack('E3')
     bytes << [10, 10, 9, 1, 12, 0, 2, 1, 9].pack('Q<9')
@@ -152,12 +152,12 @@ class AdjacencyNativeBridgeTest < Minitest::Test
     assert_nil decoded.fetch(1).fetch(:state_point)
   end
 
-  def test_reference_v13_rejects_unknown_exit_code
+  def test_reference_state_result_rejects_unknown_exit_code
     bytes = "IGMLSTA\0".b + [13, 1, 0, 0, 999].pack('Q<5')
     assert_raises(Bridge::ProtocolError) { Bridge.decode_state_result(bytes) }
   end
 
-  def test_reference_v13_rejects_old_native_protocol
+  def test_reference_state_result_rejects_old_native_protocol
     bytes = "IGMLSTA\0".b + [12, 0, 0].pack('Q<3')
     assert_raises(Bridge::ProtocolError) { Bridge.decode_state_result(bytes) }
   end
@@ -326,7 +326,7 @@ class AdjacencyNativeBridgeTest < Minitest::Test
       },
       faces: [
         {
-          normal: normal, # retained in fixture for V1 byte-compatibility
+          normal: normal, # retained in fixture for Standalone adjacency byte-compatibility
           plane: [normal[0], normal[1], normal[2], -(normal[0] * max_x)],
           points: points,
           triangles: [
