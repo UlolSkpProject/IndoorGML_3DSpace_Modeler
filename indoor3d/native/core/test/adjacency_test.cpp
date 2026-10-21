@@ -862,7 +862,7 @@ void test_full_los_connects_visible_components_to_state()
 
         const auto pipeline=build_reference_graph_pipeline(cell,before,0.001);
         const std::size_t expected_input_edges=
-            USE_SPARSE_OPTIMIZED_GRAPH_FOR_REPAIR ? 2 : 6;
+            SKIP_PRE_REPAIR_FULL_LOS_FOR_TEST ? 2 : 6;
         require(pipeline.optimized.nodes.size()==4 &&
                 pipeline.optimized.edges.size()==2 &&
                 pipeline.los_graph.edges.size()==expected_input_edges &&
@@ -897,9 +897,9 @@ void test_full_los_graph_ignores_optimized_edges_and_uses_all_visible_pairs()
             result.optimized.edges.size()==2 &&
             result.los_graph.nodes.size()==4 &&
             result.los_graph.edges.size()==
-                (USE_SPARSE_OPTIMIZED_GRAPH_FOR_REPAIR ? 2u : 6u) &&
+                (SKIP_PRE_REPAIR_FULL_LOS_FOR_TEST ? 2u : 6u) &&
             result.repaired_graph.edges.size()==
-                (USE_SPARSE_OPTIMIZED_GRAPH_FOR_REPAIR ? 3u : 6u),
+                (SKIP_PRE_REPAIR_FULL_LOS_FOR_TEST ? 3u : 6u),
             "Sparse input must retain only validated existing edges and repair the disconnected component");
     require(result.shortest_path_tree.root==result.state_node_index &&
             result.unreachable_node_count==0,
@@ -908,7 +908,7 @@ void test_full_los_graph_ignores_optimized_edges_and_uses_all_visible_pairs()
         require(result.shortest_path_tree.previous[i] &&
                 std::isfinite(result.shortest_path_tree.distances[i]),
                 "Dijkstra must reach all nodes through verified sparse or full LOS edges");
-    if(!USE_SPARSE_OPTIMIZED_GRAPH_FOR_REPAIR)
+    if(!SKIP_PRE_REPAIR_FULL_LOS_FOR_TEST)
         for(std::size_t i=1;i<4;++i)
             require(*result.shortest_path_tree.previous[i]==result.state_node_index,
                     "Full LOS Dijkstra should select direct State shortcuts");
@@ -934,7 +934,7 @@ void test_sparse_optimized_routing_skips_full_los_on_connected_graph()
     require(result.optimized.nodes.size()==3 &&
             result.optimized.edges.size()==2,
             "A genuine corner must survive OPTIMIZED");
-    if(USE_SPARSE_OPTIMIZED_GRAPH_FOR_REPAIR)
+    if(SKIP_PRE_REPAIR_FULL_LOS_FOR_TEST)
     {
         require(result.los_graph.edges.size()==2 &&
                 result.repaired_graph.edges.size()==2 &&
