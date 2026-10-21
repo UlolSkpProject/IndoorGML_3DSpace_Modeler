@@ -385,7 +385,7 @@ std::vector<CellData> parse_input_batch(const std::uint8_t* data, std::size_t si
         version != INPUT_FORMAT_INNER_LOOPS &&
         version != INPUT_FORMAT_FACE_PLANE)
     {
-        throw std::invalid_argument("unsupported adjacency input version");
+        throw std::invalid_argument("unsupported adjacency input format");
     }
     const std::size_t cell_count = checked_size(reader.read_u64(), "cell count");
     if (reader.read_u64() != 0)
