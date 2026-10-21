@@ -3,11 +3,11 @@
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
-      # Temporary visualization of Room candidates, cluster representatives,
+      # Reference-point diagnostic overlay for Room candidates, representatives,
       # and final Reference Points.
       class ReferencePointDebugOverlayRenderer
         POINT_COLORS = {
-          0 => Sketchup::Color.new(255, 140, 0),  # Legacy V3: unclassified
+          0 => Sketchup::Color.new(255, 140, 0),  # Unclassified reference
           1 => Sketchup::Color.new(40, 220, 100), # Face midpoint: green
           2 => Sketchup::Color.new(175, 95, 240), # Corner bisector: purple
           3 => Sketchup::Color.new(235, 60, 60),  # Cluster centroid: red
