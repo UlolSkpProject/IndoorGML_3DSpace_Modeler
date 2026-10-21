@@ -92,7 +92,7 @@ module ULOL
               transitions: transitions
             )
             if result && !row_id.to_s.empty?
-              puts "[IndoorGML] validation focus ref-cells: #{Array(row_cells).inspect}"
+              # puts "[IndoorGML] validation focus ref-cells: #{Array(row_cells).inspect}"
             end
             result
           end
@@ -319,7 +319,7 @@ module ULOL
                       end
             return nil unless payload
 
-            puts "[IndoorGML] validation focus ref-cells: #{Array(payload[:cells]).inspect}"
+            # puts "[IndoorGML] validation focus ref-cells: #{Array(payload[:cells]).inspect}"
             deferred ? queue_validation_focus_report_row(payload) : update_validation_focus_report_row(payload)
           end
 
