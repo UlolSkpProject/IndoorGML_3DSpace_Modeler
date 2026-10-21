@@ -122,7 +122,7 @@ module ULOL
           if defined?(Sketchup) && Sketchup.respond_to?(:active_model)
             Sketchup.active_model&.active_view&.invalidate
           end
-          # puts "[IndoorGML] Reference Graph Overlay: #{value.upcase} (#{count} CellSpace)"
+          # puts "[IndoorGML] Reference Graph Overlay: #{value.upcase}"
           value
         end
 
