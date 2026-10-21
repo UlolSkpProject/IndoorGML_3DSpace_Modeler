@@ -203,8 +203,7 @@ module ULOL
           end
           clear_extent_cache if points_changed
         rescue StandardError
-          # Rendering should keep the last valid cache if selection inspection
-          # happens during an entity lifecycle transition.
+          # Keep the last valid cache during an entity lifecycle transition.
           nil
         end
 
@@ -223,10 +222,10 @@ module ULOL
           nil
         end
 
+        # The EditorControl selection snapshot is refreshed by the observer.
+        # This method never traverses SketchUp Selection while the camera moves.
         def current_selection_entities
-          model = @indoor_model.model if @indoor_model.respond_to?(:model)
-          selection = model&.selection
-          selection ? selection.to_a : []
+          @indoor_model.dual_graph_selection_snapshot[:entities]
         rescue StandardError
           []
         end
