@@ -1712,7 +1712,7 @@ std::uint64_t read_u64_le(const std::vector<std::uint8_t>& bytes,std::size_t ind
 void test_protocol_v4_preserves_holes_and_triangles()
 {
     std::vector<std::uint8_t> bytes{'I','G','M','L','A','D','J',0};
-    append_u64_le(bytes,4);   // V4
+    append_u64_le(bytes,4);   // Geometry payload with inner loops
     append_u64_le(bytes,1);   // One Cell
     append_u64_le(bytes,0);   // Reserved
 
@@ -1730,7 +1730,7 @@ void test_protocol_v4_preserves_holes_and_triangles()
     append_u64_le(bytes,face_size);
     append_u64_le(bytes,4); // outer count
     append_u64_le(bytes,1); // triangle count
-    append_u64_le(bytes,1); // inner LOOP count (was reserved in V3)
+    append_u64_le(bytes,1); // inner loop count
     append_vec3_le(bytes,{0,0,-1});
     const std::vector<Vec3> outside{{0,0,0},{10,0,0},{10,10,0},{0,10,0}};
     const std::vector<Vec3> hole{{3,3,0},{3,7,0},{7,7,0},{7,3,0}};
@@ -1743,21 +1743,21 @@ void test_protocol_v4_preserves_holes_and_triangles()
 
     const auto cells=parse_input_batch(bytes.data(),bytes.size());
     require(cells.size()==1 && cells[0].faces.size()==1,
-            "V4 parser lost the Cell/Face");
+            "Geometry parser lost the Cell/Face");
     const FaceData& face=cells[0].faces.front();
     require(face.outer_points.size()==4 && face.inner_loops.size()==1 &&
             face.inner_loops.front().size()==4 && face.triangles.size()==1,
-            "V4 parser lost Outer, Inner, or immutable Triangle geometry");
+            "Geometry parser lost Outer, Inner, or immutable Triangle geometry");
     require(face.inner_loops.front()[2].x==7 &&
             face.inner_loops.front()[2].y==7 &&
             face.triangles[0].points[1].x==10,
-            "V4 parser must retain original coordinate payloads");
+            "Geometry parser must retain original coordinate payloads");
 }
 
 void test_protocol_v5_decodes_authoritative_plane_and_derives_normal()
 {
     std::vector<std::uint8_t> bytes{'I','G','M','L','A','D','J',0};
-    append_u64_le(bytes,5); // Geometry V5
+    append_u64_le(bytes,5); // Geometry payload with explicit face plane
     append_u64_le(bytes,1);
     append_u64_le(bytes,0);
 
@@ -1793,15 +1793,15 @@ void test_protocol_v5_decodes_authoritative_plane_and_derives_normal()
 
     const auto cells=parse_input_batch(bytes.data(),bytes.size());
     require(cells.size()==1 && cells[0].faces.size()==1,
-            "V5 Face parser lost source geometry");
+            "Face parser lost source geometry");
     const FaceData& f=cells[0].faces.front();
     require(f.has_plane && std::abs(f.plane.d-7.0)<1.0e-12 &&
             std::abs(f.normal.z+1.0)<1.0e-12 &&
             std::abs(f.plane.normal.z+1.0)<1.0e-12,
-            "V5 plane coefficients must normalize with correct D and normal");
+            "Face plane coefficients must normalize with correct D and normal");
     require(f.inner_loops.size()==1 && f.inner_loops[0].size()==4 &&
             f.triangles.size()==1,
-            "V5 Plane header must not displace hole loops or triangles");
+            "Face plane header must not displace hole loops or triangles");
     const auto prepared=FloorPartition::prepare(
         f.plane,f.outer_loop(),f.holes(),0.001);
     require(bool(prepared) && std::abs(prepared.face->frame.origin.z-7)<1.0e-10,
@@ -1825,15 +1825,15 @@ void test_result_v13_encodes_state_and_diagnostics_only()
     no_state.diagnostics.rejected_outside=2;
     const auto bytes=serialize_state_result_batch({success,no_state});
     require(read_u64_le(bytes,8)==13 && read_u64_le(bytes,16)==2,
-            "Result protocol must use V13 and one record per target");
+            "Result protocol must use State result format and one record per target");
     require(read_u64_le(bytes,32)==0 && read_u64_le(bytes,40)==0 &&
             read_u64_le(bytes,48)==1,
-            "V13 success has an explicit State flag");
+            "State result format success has an explicit State flag");
     require(read_u64_le(bytes,80)==10 &&
             read_u64_le(bytes,104)==1 &&
             read_u64_le(bytes,128)==2 &&
             read_u64_le(bytes,144)==9,
-            "V13 diagnostics must retain partial failures with success");
+            "State result format diagnostics must retain partial failures with success");
 
     const std::size_t second=152;
     require(read_u64_le(bytes,second)==1 &&
@@ -1841,9 +1841,9 @@ void test_result_v13_encodes_state_and_diagnostics_only()
             read_u64_le(bytes,second+16)==0 &&
             read_u64_le(bytes,second+24+4*8)==2 &&
             bytes.size()==second+24+9*8,
-            "V13 failure must serialize explicit ExitCode and nil State");
+            "State result format failure must serialize explicit ExitCode and nil State");
     require(bytes.size()==248,
-            "V13 State payload must not contain graph nodes or radius");
+            "State result format State payload must not contain graph nodes or radius");
 
     bool rejected=false;
     try
