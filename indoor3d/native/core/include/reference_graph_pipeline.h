@@ -12,17 +12,16 @@
 
 namespace IndoorGMLAdjacencyNative
 {
-// Use the existing OPTIMIZED edges after individual LOS validation.
-// Connectivity Repair searches additional LOS only when required.
-// The full all-pairs LOS path remains available as an alternative.
-inline constexpr bool USE_SPARSE_OPTIMIZED_GRAPH_FOR_REPAIR = true;
+// Default: build the complete LOS graph before Connectivity Repair.
+// The sparse OPTIMIZED-input path is disabled and retained for controlled tests.
+inline constexpr bool USE_SPARSE_OPTIMIZED_GRAPH_FOR_REPAIR = false;
 
 enum class ReferenceGraphStage
 {
     Before,
     Collapsed,
     Optimized,
-    LosGraph, // Verified OPTIMIZED edges (Full LOS under alternative routing policy).
+    LosGraph, // Full LOS (verified sparse OPTIMIZED edges in the optional test path).
     ConnectivityRepair, // LOS graph augmented with proven intermediate references.
     ShortPathGraph // Derived, read-only view of the State-rooted Dijkstra tree.
 };
