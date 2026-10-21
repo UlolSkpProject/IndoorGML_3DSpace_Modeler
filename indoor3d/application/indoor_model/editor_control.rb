@@ -11,6 +11,63 @@ module ULOL
     module IndoorCore
       class IndoorModel
         module EditorControl
+          EMPTY_DUAL_GRAPH_SELECTION = {
+            cell_ids: {}.freeze,
+            watched_groups: [].freeze,
+            entities: [].freeze
+          }.freeze
+
+          # Snapshot changes only on selection/lifecycle events, never during
+          # Overlay#draw. Selected transforms still update independently.
+          def dual_graph_selection_snapshot
+            @dual_graph_selection_snapshot || EMPTY_DUAL_GRAPH_SELECTION
+          end
+
+          def refresh_dual_graph_selection_cache
+            unless editing?
+              return clear_dual_graph_selection_cache
+            end
+
+            selection = @model&.selection
+            return clear_dual_graph_selection_cache unless selection
+
+            selected = {}
+            selection.each { |entity| selected[entity.object_id] = entity }
+
+            watched = []
+            cell_ids = {}
+            primal = primal_group
+            if primal && selected[primal.object_id].equal?(primal)
+              watched << { entity: primal, kind: :primal }.freeze
+            end
+
+            Array(@cell_spaces).each do |cell|
+              next unless cell&.valid?
+
+              group = cell.valid_sketchup_group
+              next unless group && selected[group.object_id].equal?(group)
+
+              cell_id = cell.id.to_s
+              next if cell_id.empty?
+
+              cell_ids[cell_id] = true
+              watched << { entity: group, kind: :cell, cell_id: cell_id }.freeze
+            end
+
+            @dual_graph_selection_snapshot = {
+              cell_ids: cell_ids.freeze,
+              watched_groups: watched.freeze,
+              entities: watched.map { |entry| entry[:entity] }.freeze
+            }.freeze
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Dual Graph selection cache refresh failed: #{e.class}: #{e.message}"
+            clear_dual_graph_selection_cache
+          end
+
+          def clear_dual_graph_selection_cache
+            @dual_graph_selection_snapshot = EMPTY_DUAL_GRAPH_SELECTION
+          end
+
           def begin_editing
             @editor_session.begin_editing()
           end
