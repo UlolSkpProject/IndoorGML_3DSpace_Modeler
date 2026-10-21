@@ -229,7 +229,13 @@ module ULOL
 
             pair_key = cell_pair_key(cell1, cell2)
             transition = @feature_registry.transition_for_pair(pair_key)
-            unless transition&.valid?
+            if transition && !transition_current_for_pair?(transition, cell1, cell2)
+              # A State can remain valid after its CellSpace replaces the
+              # duality object. Discard all stale backlinks before rebuilding.
+              erase_transition(transition)
+              transition = nil
+            end
+            unless transition
               transition = Transition.new(
                 cell1.duality_state,
                 cell2.duality_state,
@@ -246,6 +252,22 @@ module ULOL
             write_transition_attributes(transition)
             invalidate_overlay_transition_points
             transition
+          end
+
+          # The same CellSpace pair may be passed in reverse order. Object
+          # identity, rather than matching feature IDs or State#valid?, is the
+          # necessary condition for reusing a Transition after State restore.
+          def transition_current_for_pair?(transition, cell1, cell2)
+            return false unless transition.valid?
+
+            (transition.cell1.equal?(cell1) &&
+             transition.cell2.equal?(cell2) &&
+             transition.state1.equal?(cell1.duality_state) &&
+             transition.state2.equal?(cell2.duality_state)) ||
+              (transition.cell1.equal?(cell2) &&
+               transition.cell2.equal?(cell1) &&
+               transition.state1.equal?(cell2.duality_state) &&
+               transition.state2.equal?(cell1.duality_state))
           end
 
           def erase_transition_for_pair_key(pair_key)
@@ -426,7 +448,11 @@ module ULOL
 
             pair_key = cell_pair_key(cell1, cell2)
             transition = @feature_registry.transition_for_pair(pair_key)
-            unless transition&.valid?
+            if transition && !transition_current_for_pair?(transition, cell1, cell2)
+              erase_runtime_transition_for_pair_key(pair_key)
+              transition = nil
+            end
+            unless transition
               transition = Transition.new(
                 cell1.duality_state,
                 cell2.duality_state,
