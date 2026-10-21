@@ -12,6 +12,8 @@ module ULOL
       # RG.short_path_graph!  # State-rooted Dijkstra tree from repaired graph.
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.clear!
       # ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode.mode
+      # RG.highlight_on! / RG.highlight_off! / RG.highlight?
+      # RG.toggle_highlight!
       #
       # Each stage command asks Native for one radius-free display snapshot.
       # It changes no State, Transition, geometry or undoable model data.
@@ -44,6 +46,33 @@ module ULOL
 
         def short_path_graph?
           mode == :short_path_graph
+        end
+
+        # Runtime-only selection highlight setting. Independent of RG.mode
+        # and ON by default; changing it never touches Native or model data.
+        def highlight?
+          @selection_highlight_enabled != false
+        end
+
+        def highlight_on!
+          set_selection_highlight(true)
+        end
+
+        def highlight_off!
+          set_selection_highlight(false)
+        end
+
+        def toggle_highlight!
+          set_selection_highlight(!highlight?)
+        end
+
+        def set_selection_highlight(enabled)
+          @selection_highlight_enabled = (enabled == true)
+          if defined?(Sketchup) && Sketchup.respond_to?(:active_model)
+            Sketchup.active_model&.active_view&.invalidate
+          end
+          puts "[IndoorGML] Selected CellSpace Highlight: #{highlight? ? 'ON' : 'OFF'}"
+          highlight?
         end
 
         def before!
