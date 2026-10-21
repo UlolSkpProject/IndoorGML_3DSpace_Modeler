@@ -624,6 +624,10 @@ module ULOL
         end
 
         def invalidate_overlay_transition_points
+          # Topology refresh can replace a CellSpace Group without triggering
+          # a SelectionObserver event. Reconcile its cached ownership here,
+          # not on camera redraw.
+          @indoor_model.refresh_dual_graph_selection_cache if @editing
           overlay_controller.invalidate_transition_points
         end
 
