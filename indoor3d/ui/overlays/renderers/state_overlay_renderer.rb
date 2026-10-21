@@ -22,6 +22,7 @@ module ULOL
           @render_states = []
           @render_state_points = []
           @render_state_groups = {}
+          @render_state_indices_by_cell_id = {}
           @cell_transform_keys = {}
           @primal_transform_key = nil
           @render_state_points_dirty = true
@@ -47,9 +48,11 @@ module ULOL
           return if selected_cell_ids.nil? || selected_cell_ids.empty?
 
           prepare_state_points
-          points = @render_states.each_with_index.filter_map do |state, index|
-            cell_id = state&.duality_cell&.id.to_s
-            @render_state_points[index] if selected_cell_ids[cell_id]
+          points = []
+          selected_cell_ids.each_key do |cell_id|
+            Array(@render_state_indices_by_cell_id[cell_id]).each do |index|
+              points << @render_state_points[index]
+            end
           end
           return if points.empty?
 
@@ -67,6 +70,7 @@ module ULOL
           @render_states = []
           @render_state_points = []
           @render_state_groups = {}
+          @render_state_indices_by_cell_id = {}
           @cell_transform_keys = {}
           @primal_transform_key = nil
           @render_state_points_dirty = true
@@ -141,6 +145,7 @@ module ULOL
           @render_states.clear
           @render_state_points.clear
           @render_state_groups.clear
+          @render_state_indices_by_cell_id.clear
           @cell_transform_keys.clear
           clear_extent_cache
 
@@ -150,8 +155,13 @@ module ULOL
             next unless @transform_context.overlay_state_visible?(state)
 
             @render_states << state
+            index = @render_states.length - 1
+            cell_id = state.duality_cell&.id.to_s
+            unless cell_id.empty?
+              (@render_state_indices_by_cell_id[cell_id] ||= []) << index
+            end
             root_local_points << state_root_local_point(state)
-            remember_state_group(state, @render_states.length - 1)
+            remember_state_group(state, index)
           end
 
           if @transform_context.respond_to?(:overlay_render_points)
