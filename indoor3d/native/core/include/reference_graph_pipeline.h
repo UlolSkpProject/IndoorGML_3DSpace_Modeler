@@ -55,6 +55,21 @@ struct ReferenceGraphStageSnapshot
     std::vector<ReferenceNodeRole> node_roles;
 };
 
+// Internal graph analysis for sliver-component reduction. Exposed within the
+// Native C++ layer so deep and articulation-point fixtures can test Tarjan
+// decomposition without running geometry LOS or routing pipelines.
+namespace ReferenceGraphDetail
+{
+struct GraphBlock
+{
+    std::vector<std::size_t> vertices;
+    std::vector<ReferenceGraphEdge> edges;
+};
+std::vector<GraphBlock> cyclic_biconnected_blocks(
+    const ReferenceGraphStageSnapshot& graph
+);
+} // namespace ReferenceGraphDetail
+
 struct ReferenceGraphShortestPathTree
 {
     std::size_t root = 0;

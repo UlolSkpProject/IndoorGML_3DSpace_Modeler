@@ -1921,6 +1921,56 @@ void test_state_result_encodes_state_and_diagnostics_only()
     require(rejected,"Contradictory ExitCode and State must be rejected");
 }
 
+void test_iterative_biconnected_blocks_separate_cycles_and_bridges()
+{
+    ReferenceGraphStageSnapshot graph;
+    graph.nodes.resize(11);
+    // Two cycles share an articulation point; bridges and isolated nodes
+    // must not be treated as cyclic biconnected components.
+    graph.edges={
+        {0,1},{1,2},{2,0},
+        {2,3},{3,4},{4,2},
+        {4,5},{5,6},{6,7},
+        {8,9},{9,10}
+    };
+    const auto blocks=ReferenceGraphDetail::cyclic_biconnected_blocks(graph);
+    require(blocks.size()==2,
+            "Tarjan decomposition must return only the two cyclic blocks");
+    require(blocks[0].vertices==std::vector<std::size_t>({0,1,2}) &&
+            blocks[1].vertices==std::vector<std::size_t>({2,3,4}),
+            "Articulation-point cycles were not separated in canonical order");
+    const auto matching_edges=[](const auto& actual,
+                                 const std::vector<std::pair<std::size_t,std::size_t>>& expected){
+        if(actual.size()!=expected.size()) return false;
+        for(std::size_t i=0;i<expected.size();++i)
+            if(actual[i].first!=expected[i].first ||
+               actual[i].second!=expected[i].second) return false;
+        return true;
+    };
+    require(matching_edges(blocks[0].edges,{{0,1},{0,2},{1,2}}) &&
+            matching_edges(blocks[1].edges,{{2,3},{2,4},{3,4}}),
+            "Tarjan cyclic blocks must retain their exact, canonical edge sets");
+}
+
+void test_iterative_biconnected_blocks_handle_deep_chain()
+{
+    constexpr std::size_t count=20000;
+    ReferenceGraphStageSnapshot graph;
+    graph.nodes.resize(count);
+    graph.edges.reserve(count);
+    for(std::size_t i=1;i<count;++i)
+        graph.edges.push_back({i-1,i});
+    // The only true cyclic block lies at maximum DFS depth.
+    graph.edges.push_back({count-3,count-1});
+
+    const auto blocks=ReferenceGraphDetail::cyclic_biconnected_blocks(graph);
+    require(blocks.size()==1 &&
+            blocks[0].vertices==std::vector<std::size_t>(
+                {count-3,count-2,count-1}) &&
+            blocks[0].edges.size()==3,
+            "Deep iterative Tarjan traversal must unwind and retain the final cycle");
+}
+
 } // namespace
 
 int main()
@@ -1951,6 +2001,8 @@ int main()
     test_reference_node_roles_have_stage_scoped_protection();
     test_successful_loop_visible_neighbor_is_not_optimization_protected();
     test_collapsed_linearizes_sliver_polygon_components();
+    test_iterative_biconnected_blocks_separate_cycles_and_bridges();
+    test_iterative_biconnected_blocks_handle_deep_chain();
     test_collapsed_integrates_nearby_isolated_nodes();
     test_optimized_degree_two_angle_threshold_and_priority_queue();
     test_visible_loop_neighbors_remain_optimizable();

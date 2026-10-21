@@ -15,6 +15,7 @@
 namespace
 {
 using namespace IndoorGMLAdjacencyNative;
+using ReferenceGraphDetail::GraphBlock;
 constexpr double EPSILON = 1.0e-9;
 constexpr double SLIVER_MAX_WIDTH_RATIO = 0.05;
 // Degree-2 shortcuts are considered only when the interior angle is at least
@@ -73,12 +74,6 @@ void canonicalize_edges(ReferenceGraphStageSnapshot& graph)
         return a.first==b.first && a.second==b.second;
     }),graph.edges.end());
 }
-
-struct GraphBlock
-{
-    std::vector<std::size_t> vertices;
-    std::vector<ReferenceGraphEdge> edges;
-};
 
 struct OrphanEdgeInsertion
 {
@@ -198,76 +193,6 @@ void integrate_isolated_nodes_near_edges(ReferenceGraphStageSnapshot& graph,
     canonicalize_edges(graph);
 }
 
-std::vector<GraphBlock> cyclic_biconnected_blocks(
-    const ReferenceGraphStageSnapshot& graph)
-{
-    const auto adjacent=adjacency(graph);
-    const std::size_t count=graph.nodes.size();
-    std::vector<int> discovery(count,-1),low(count,-1),parent(count,-1);
-    std::vector<ReferenceGraphEdge> stack;
-    std::vector<GraphBlock> result;
-    int tick=0;
-
-    auto finish_block=[&](std::size_t first,std::size_t second){
-        GraphBlock block;
-        std::set<std::size_t> vertices;
-        while(!stack.empty())
-        {
-            auto edge=stack.back();
-            stack.pop_back();
-            if(edge.second<edge.first) std::swap(edge.first,edge.second);
-            block.edges.push_back(edge);
-            vertices.insert(edge.first);
-            vertices.insert(edge.second);
-            if((edge.first==std::min(first,second) &&
-                edge.second==std::max(first,second))) break;
-        }
-        block.vertices.assign(vertices.begin(),vertices.end());
-        std::sort(block.edges.begin(),block.edges.end(),[](const auto& a,const auto& b){
-            return std::tie(a.first,a.second)<std::tie(b.first,b.second);
-        });
-        block.edges.erase(std::unique(block.edges.begin(),block.edges.end(),
-            [](const auto& a,const auto& b){
-                return a.first==b.first && a.second==b.second;
-            }),block.edges.end());
-        if(block.vertices.size()>=3 && block.edges.size()>=block.vertices.size())
-            result.push_back(std::move(block));
-    };
-
-    std::function<void(std::size_t)> visit;
-    visit=[&](std::size_t node){
-        discovery[node]=low[node]=tick++;
-        for(const auto other:adjacent[node])
-        {
-            if(discovery[other]<0)
-            {
-                parent[other]=static_cast<int>(node);
-                stack.push_back({node,other});
-                visit(other);
-                low[node]=std::min(low[node],low[other]);
-                if(low[other]>=discovery[node]) finish_block(node,other);
-            }
-            else if(static_cast<int>(other)!=parent[node] &&
-                    discovery[other]<discovery[node])
-            {
-                low[node]=std::min(low[node],discovery[other]);
-                stack.push_back({node,other});
-            }
-        }
-    };
-
-    for(std::size_t node=0;node<count;++node)
-    {
-        if(discovery[node]>=0) continue;
-        visit(node);
-        stack.clear();
-    }
-    std::sort(result.begin(),result.end(),[](const GraphBlock& a,const GraphBlock& b){
-        return a.vertices<b.vertices;
-    });
-    return result;
-}
-
 std::optional<std::vector<std::size_t>> sliver_chain(
     const ReferenceGraphStageSnapshot& graph,
     const GraphBlock& block,
@@ -341,7 +266,7 @@ void linearize_sliver_components(ReferenceGraphStageSnapshot& graph,
                                  double tolerance)
 {
     canonicalize_edges(graph);
-    const auto blocks=cyclic_biconnected_blocks(graph);
+    const auto blocks=ReferenceGraphDetail::cyclic_biconnected_blocks(graph);
     for(const auto& block:blocks)
     {
         const auto chain=sliver_chain(graph,block,tolerance);
@@ -882,6 +807,104 @@ ReferenceGraphShortestPathTree bake_tree(const ReferenceGraphStageSnapshot& grap
     return tree;
 }
 } // namespace
+
+namespace IndoorGMLAdjacencyNative::ReferenceGraphDetail
+{
+std::vector<GraphBlock> cyclic_biconnected_blocks(
+    const ReferenceGraphStageSnapshot& graph)
+{
+    const auto adjacent=adjacency(graph);
+    const std::size_t count=graph.nodes.size();
+    const std::size_t unvisited=std::numeric_limits<std::size_t>::max();
+    std::vector<std::size_t> discovery(count,unvisited);
+    std::vector<std::size_t> low(count,unvisited);
+    std::vector<std::size_t> parent(count,unvisited);
+    std::vector<ReferenceGraphEdge> edge_stack;
+    std::vector<GraphBlock> result;
+    std::size_t tick=0;
+
+    auto finish_block=[&](std::size_t first,std::size_t second){
+        GraphBlock block;
+        std::set<std::size_t> vertices;
+        while(!edge_stack.empty())
+        {
+            auto edge=edge_stack.back();
+            edge_stack.pop_back();
+            if(edge.second<edge.first) std::swap(edge.first,edge.second);
+            block.edges.push_back(edge);
+            vertices.insert(edge.first);
+            vertices.insert(edge.second);
+            if((edge.first==std::min(first,second) &&
+                edge.second==std::max(first,second))) break;
+        }
+        block.vertices.assign(vertices.begin(),vertices.end());
+        std::sort(block.edges.begin(),block.edges.end(),[](const auto& a,const auto& b){
+            return std::tie(a.first,a.second)<std::tie(b.first,b.second);
+        });
+        block.edges.erase(std::unique(block.edges.begin(),block.edges.end(),
+            [](const auto& a,const auto& b){
+                return a.first==b.first && a.second==b.second;
+            }),block.edges.end());
+        if(block.vertices.size()>=3 && block.edges.size()>=block.vertices.size())
+            result.push_back(std::move(block));
+    };
+
+    // Explicit DFS frames preserve the recursive Tarjan postorder. A child
+    // must finish before its low-link is propagated and its block is emitted.
+    struct DfsFrame
+    {
+        std::size_t node;
+        std::size_t next_neighbor=0;
+    };
+    std::vector<DfsFrame> dfs_stack;
+    dfs_stack.reserve(count);
+
+    for(std::size_t root=0;root<count;++root)
+    {
+        if(discovery[root]!=unvisited) continue;
+        discovery[root]=low[root]=tick++;
+        dfs_stack.push_back({root,0});
+
+        while(!dfs_stack.empty())
+        {
+            DfsFrame& frame=dfs_stack.back();
+            const std::size_t node=frame.node;
+            if(frame.next_neighbor==adjacent[node].size())
+            {
+                dfs_stack.pop_back();
+                if(parent[node]!=unvisited)
+                {
+                    const std::size_t ancestor=parent[node];
+                    low[ancestor]=std::min(low[ancestor],low[node]);
+                    if(low[node]>=discovery[ancestor])
+                        finish_block(ancestor,node);
+                }
+                continue;
+            }
+
+            const std::size_t other=adjacent[node][frame.next_neighbor++];
+            if(discovery[other]==unvisited)
+            {
+                parent[other]=node;
+                edge_stack.push_back({node,other});
+                discovery[other]=low[other]=tick++;
+                dfs_stack.push_back({other,0});
+            }
+            else if(other!=parent[node] && discovery[other]<discovery[node])
+            {
+                low[node]=std::min(low[node],discovery[other]);
+                edge_stack.push_back({node,other});
+            }
+        }
+        // No uncommitted edges may leak into another connected component.
+        edge_stack.clear();
+    }
+    std::sort(result.begin(),result.end(),[](const GraphBlock& a,const GraphBlock& b){
+        return a.vertices<b.vertices;
+    });
+    return result;
+}
+} // namespace IndoorGMLAdjacencyNative::ReferenceGraphDetail
 
 namespace IndoorGMLAdjacencyNative
 {
