@@ -66,7 +66,7 @@ module ULOL
                 anchors&.fetch(1, nil) || state2_point,
                 tolerance
               )
-              next nil unless point.is_a?(Geom::Point3d)
+              next nil unless valid_shared_waypoint?(point, geometry_candidate, tolerance)
 
               {
                 point: point,
@@ -118,9 +118,16 @@ module ULOL
             normal = Array(snapshot_face[:normal])
             return nil if points.length < 3 || normal.length < 3
 
+            inner_loops = Array(snapshot_face[:inner_loops]).map do |loop|
+              Array(loop).map do |point|
+                Geom::Point3d.new(point[0], point[1], point[2])
+              end
+            end
+            return nil if inner_loops.any? { |loop| loop.length < 3 }
+
             vector = Geom::Vector3d.new(normal[0], normal[1], normal[2])
             vector.normalize! if vector.length > 0.001
-            { points: points, normal: vector }
+            { points: points, normal: vector, inner_loops: inner_loops }
           rescue StandardError
             nil
           end

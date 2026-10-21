@@ -10,7 +10,19 @@ module Geom
       Math.sqrt(((x - other.x)**2) + ((y - other.y)**2) + ((z - other.z)**2))
     end
   end
-  Vector3d = Struct.new(:x, :y, :z)
+  Vector3d = Struct.new(:x, :y, :z) do
+    def length = Math.sqrt((x**2) + (y**2) + (z**2))
+
+    def normalize!
+      magnitude = length
+      return self if magnitude.zero?
+
+      self.x /= magnitude
+      self.y /= magnitude
+      self.z /= magnitude
+      self
+    end
+  end
 end
 
 module ULOL
@@ -30,7 +42,6 @@ module ULOL
           points.map { |point| [point.y, point.z] }
         end
 
-        def self.point_in_polygon_2d?(_point, _polygon, _tolerance) = true
       end
     end
 
@@ -44,11 +55,81 @@ module ULOL
   end
 end
 
+require_relative '../indoor3d/utils/geometry/polygon2d'
 require_relative '../indoor3d/application/adjacency_service/geometry_query'
+require_relative '../indoor3d/application/adjacency_service/snapshot_waypoint_reuse'
 
 class ReferenceWaypointAnchorGeometryTest < Minitest::Test
   Core = ULOL::Indoor3DGmlModeler::IndoorCore
   Query = Core::AdjacencyService::GeometryQuery
+
+  def wall_face(inner_loops: [])
+    {
+      points: [
+        Geom::Point3d.new(0.0, 0.0, 0.0),
+        Geom::Point3d.new(0.0, 10.0, 0.0),
+        Geom::Point3d.new(0.0, 10.0, 30.0),
+        Geom::Point3d.new(0.0, 0.0, 30.0)
+      ],
+      inner_loops: inner_loops
+    }
+  end
+
+  def doorway_hole
+    [
+      Geom::Point3d.new(0.0, 3.0, 10.0),
+      Geom::Point3d.new(0.0, 7.0, 10.0),
+      Geom::Point3d.new(0.0, 7.0, 20.0),
+      Geom::Point3d.new(0.0, 3.0, 20.0)
+    ]
+  end
+
+  def test_waypoint_checks_exclude_inner_loop_and_its_boundary
+    face = wall_face(inner_loops: [doorway_hole])
+    assert Query.send(:point_in_face?, Geom::Point3d.new(0.0, 2.0, 15.0), face, :x, 0.001)
+    refute Query.send(:point_in_face?, Geom::Point3d.new(0.0, 5.0, 15.0), face, :x, 0.001)
+    refute Query.send(:point_in_face?, Geom::Point3d.new(0.0, 3.0, 15.0), face, :x, 0.001)
+    refute Query.send(:point_in_face?, Geom::Point3d.new(0.0, 15.0, 15.0), face, :x, 0.001)
+  end
+
+  def test_inner_loop_is_preserved_when_snapshot_face_is_restored
+    face = wall_face(inner_loops: [doorway_hole])
+    raw = {
+      points: face[:points].map(&:to_a),
+      normal: [1.0, 0.0, 0.0],
+      inner_loops: face[:inner_loops].map { |loop| loop.map(&:to_a) }
+    }
+    restored = Query.send(:geometry_face, raw)
+    assert_equal [4], restored.fetch(:inner_loops).map(&:length)
+    refute Query.send(:point_in_face?, Geom::Point3d.new(0.0, 5.0, 15.0), restored, :x, 0.001)
+  end
+
+  def test_snapshot_candidate_is_rejected_if_adjusted_and_original_points_are_in_hole
+    face = wall_face(inner_loops: [doorway_hole])
+    first = {
+      points: face[:points].map(&:to_a),
+      normal: [1.0, 0.0, 0.0],
+      inner_loops: face[:inner_loops].map { |loop| loop.map(&:to_a) }
+    }
+    second = first.merge(normal: [-1.0, 0.0, 0.0])
+    context = {
+      waypoint_snapshot_candidates: [{
+        area: 1.0,
+        centroid_2d: [5.0, 15.0],
+        axis: :x,
+        face1: first,
+        face2: second
+      }]
+    }
+    state1 = Geom::Point3d.new(0.0, 5.0, 16.0)
+    state2 = Geom::Point3d.new(0.0, 5.0, 16.0)
+    assert_empty Query.waypoint_candidates_from_snapshot_context(
+      context,
+      state1_point: state1,
+      state2_point: state2,
+      tolerance: 0.001
+    )
+  end
 
   def test_closest_reference_points_replace_state_height_sources
     centroid = Geom::Point3d.new(0.0, 5.0, 12.0)

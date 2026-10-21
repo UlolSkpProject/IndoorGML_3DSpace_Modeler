@@ -24,7 +24,15 @@ module ULOL
 
             normal = face.normal.transform(transformation)
             normal.normalize!
-            { points: points, normal: normal, triangles: face_mesh_triangles(face, transformation) }
+            inner_loops = face.loops.reject(&:outer?).map do |loop|
+              loop.vertices.map { |vertex| vertex.position.transform(transformation) }
+            end
+            {
+              points: points,
+              normal: normal,
+              inner_loops: inner_loops,
+              triangles: face_mesh_triangles(face, transformation)
+            }
           end.compact
         end
 
