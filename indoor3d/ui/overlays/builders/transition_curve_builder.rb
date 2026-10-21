@@ -71,16 +71,6 @@ module ULOL
           @render_selection_batches = build_selection_batches(full_points, selected_cells)
         end
 
-        # Selection is a render-only filter on the segments that the normal
-        # Transition pass has already accepted. No second Native route request
-        # or curve rebuild occurs in the highlight pass.
-        def selected_transition_line_points(selected_cell_ids:, excluded_cell_ids: nil)
-          transition_line_batches(
-            selected_cell_ids: selected_cell_ids,
-            excluded_cell_ids: excluded_cell_ids
-          )[:highlight]
-        end
-
         def build_render_transition_line_points(excluded_cells = {})
           points = []
           accepted = []
