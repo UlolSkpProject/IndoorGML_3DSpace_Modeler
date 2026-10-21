@@ -704,7 +704,7 @@ module ULOL
           raise ProtocolError, 'native Reference result magic mismatch' unless reader.read_bytes(8) == STATE_OUTPUT_MAGIC
           version = reader.read_u64
           unless version == STATE_RESULT_FORMAT_ID
-            raise ProtocolError, "unsupported Native Reference result version #{version}; rebuild indoor_gml_native.so"
+            raise ProtocolError, "unsupported Native Reference result format #{version}; rebuild indoor_gml_native.so"
           end
           count = checked_count(reader.read_u64, 'Reference result count')
           raise ProtocolError, 'native Reference result reserved field is non-zero' unless reader.read_u64.zero?
@@ -761,7 +761,7 @@ module ULOL
           raise ProtocolError, 'native result magic mismatch' unless magic == OUTPUT_MAGIC
 
           version = reader.read_u64
-          raise ProtocolError, "unsupported native result version #{version}" unless version == ADJACENCY_FORMAT_ID
+          raise ProtocolError, "unsupported native adjacency result format #{version}" unless version == ADJACENCY_FORMAT_ID
 
           pair_count = checked_count(reader.read_u64, 'pair count')
           expected_candidate_total = checked_count(reader.read_u64, 'candidate total')
