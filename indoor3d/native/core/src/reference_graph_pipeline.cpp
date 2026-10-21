@@ -819,8 +819,8 @@ ReferenceGraphPipeline build_reference_graph_pipeline(
     if(found==result.optimized.original_indices.end())
         throw std::runtime_error("Reference State node did not survive Native reductions");
     result.state_node_index=static_cast<std::size_t>(found-result.optimized.original_indices.begin());
-    // The routing input consists of individually validated OPTIMIZED edges.
-    // Full all-pairs LOS remains an alternative for comparative diagnostics.
+    // The default routing input rebuilds all valid LOS pairs from OPTIMIZED nodes.
+    // An alternative sparse-input path remains available for controlled tests.
     result.waypoint_solid=std::make_shared<FaceSolid>(cell,tolerance);
     result.waypoint_tolerance=tolerance;
     if(USE_SPARSE_OPTIMIZED_GRAPH_FOR_REPAIR)
