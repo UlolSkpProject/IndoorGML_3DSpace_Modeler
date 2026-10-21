@@ -9,6 +9,7 @@ unless defined?(Sketchup::Overlay)
 end
 
 require_relative '../indoor3d/ui/overlays/space_overlay'
+require_relative '../indoor3d/application/adjacency_service/reference_graph_debug_mode'
 require_relative '../indoor3d/ui/overlays/dual_graph_space_overlay'
 
 module ULOL
@@ -230,6 +231,27 @@ class TransitionTransformPreviewTest < Minitest::Test
     indoor_model.define_singleton_method(:editing?) { false }
     @overlay.draw(view)
     assert_equal [:transition, :state], order
+  end
+
+  def test_rg_highlight_switch_gates_edit_selection_without_changing_selection
+    mode = ULOL::Indoor3DGmlModeler::IndoorCore::ReferenceGraphDebugMode
+    indoor_model = @overlay.instance_variable_get(:@indoor_model)
+    indoor_model.define_singleton_method(:editing?) { true }
+    indoor_model.cell_spaces.first.define_singleton_method(:valid?) { true }
+
+    mode.highlight_on!
+    assert_equal({ 'A' => true }, @overlay.send(:selected_dual_overlay_cell_ids))
+
+    mode.highlight_off!
+    assert_empty @overlay.send(:selected_dual_overlay_cell_ids)
+    assert_equal [@cell_group], @selection.entities
+
+    mode.highlight_on!
+    assert_equal({ 'A' => true }, @overlay.send(:selected_dual_overlay_cell_ids))
+    indoor_model.define_singleton_method(:editing?) { false }
+    assert_empty @overlay.send(:selected_dual_overlay_cell_ids)
+  ensure
+    mode&.highlight_on!
   end
 
   def test_abort_releases_transform_suppression
