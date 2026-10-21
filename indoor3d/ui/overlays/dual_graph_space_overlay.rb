@@ -156,29 +156,13 @@ module ULOL
 
         private
 
-        # Selection highlights are only active in Edit Mode. Resolve group
-        # identity from the current SketchUp selection on each draw, so
-        # deselection, multi-selection, and hide/show never require cache edits.
+        # The SelectionObserver updates this immutable snapshot. Camera
+        # redraws read it in O(1), without scanning Selection or CellSpaces.
         def selected_dual_overlay_cell_ids
           return {} if defined?(ReferenceGraphDebugMode) && !ReferenceGraphDebugMode.highlight?
           return {} unless @indoor_model.respond_to?(:editing?) && @indoor_model.editing?
 
-          model = @indoor_model.model if @indoor_model.respond_to?(:model)
-          selection = model&.selection
-          return {} unless selection
-
-          selected_group_ids = {}
-          selection.each { |entity| selected_group_ids[entity.object_id] = entity }
-
-          Array(@indoor_model.cell_spaces).each_with_object({}) do |cell, result|
-            next unless cell&.valid?
-
-            group = cell.valid_sketchup_group
-            next unless group && selected_group_ids[group.object_id].equal?(group)
-
-            cell_id = cell.id.to_s
-            result[cell_id] = true unless cell_id.empty?
-          end
+          @indoor_model.dual_graph_selection_snapshot[:cell_ids]
         rescue StandardError
           {}
         end
@@ -218,23 +202,13 @@ module ULOL
           end
         end
 
+        # Only selected entities are fingerprinted for live transform preview.
+        # The selected entity set itself is event-cached, never queried in draw.
         def selected_transition_transform_snapshots
-          model = @indoor_model.model if @indoor_model.respond_to?(:model)
-          selection = model&.selection
-          return {} unless selection
-
-          watched_groups = {}
-          primal_group = @indoor_model.primal_group if @indoor_model.respond_to?(:primal_group)
-          watched_groups[primal_group.object_id] = { entity: primal_group, kind: :primal } if primal_group
-          Array(@indoor_model.cell_spaces).each do |cell_space|
-            group = cell_space&.valid_sketchup_group
-            watched_groups[group.object_id] = { entity: group, kind: :cell, cell_id: cell_space.id } if group
-          end
-
-          selection.each_with_object({}) do |entity, result|
-            watched = watched_groups[entity.object_id]
-            next unless watched && watched[:entity].equal?(entity)
-            next unless entity.respond_to?(:transformation)
+          watched_groups = @indoor_model.dual_graph_selection_snapshot[:watched_groups]
+          watched_groups.each_with_object({}) do |watched, result|
+            entity = watched[:entity]
+            next unless entity&.valid? && entity.respond_to?(:transformation)
 
             result[transition_transform_entity_key(entity)] = {
               kind: watched[:kind],
