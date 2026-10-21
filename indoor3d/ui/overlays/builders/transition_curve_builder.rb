@@ -18,13 +18,13 @@ module ULOL
           @render_transition_line_points_dirty = true
           @render_transition_revision = nil
           @render_transition_exclusion_key = nil
-          @render_visible_transition_segments = []
+          @render_transition_segments_by_cell_id = {}
         end
 
         def invalidate
           @render_transition_line_points = nil
           @render_transition_line_points_dirty = true
-          @render_visible_transition_segments = []
+          @render_transition_segments_by_cell_id = {}
         end
 
         def clear_cache
@@ -59,24 +59,30 @@ module ULOL
 
           transition_line_points(excluded_cell_ids: excluded_cell_ids)
           points = []
-          @render_visible_transition_segments.each do |entry|
-            first_selected = selected_cell_ids[entry[:cell1_id]]
-            second_selected = selected_cell_ids[entry[:cell2_id]]
-            first_visible = entry[:first_visible]
-            second_visible = entry[:second_visible]
-            next unless (first_selected && first_visible) || (second_selected && second_visible)
+          drawn = {}
+          selected_cell_ids.each_key do |cell_id|
+            Array(@render_transition_segments_by_cell_id[cell_id]).each do |entry|
+              next if drawn[entry.object_id]
 
-            segments = entry[:segments]
-            points.concat(segments[:default]) if first_visible && second_visible
-            points.concat(segments[:first]) if first_selected && first_visible
-            points.concat(segments[:second]) if second_selected && second_visible
+              drawn[entry.object_id] = true
+              first_selected = selected_cell_ids[entry[:cell1_id]]
+              second_selected = selected_cell_ids[entry[:cell2_id]]
+              first_visible = entry[:first_visible]
+              second_visible = entry[:second_visible]
+              next unless (first_selected && first_visible) || (second_selected && second_visible)
+
+              segments = entry[:segments]
+              points.concat(segments[:default]) if first_visible && second_visible
+              points.concat(segments[:first]) if first_selected && first_visible
+              points.concat(segments[:second]) if second_selected && second_visible
+            end
           end
           points
         end
 
         def build_render_transition_line_points(excluded_cells = {})
           points = []
-          accepted = []
+          by_cell = {}
           render_snapshot = transition_render_context_snapshot
           context_key = render_snapshot&.[](:cache_key) || transition_render_context_cache_key
           @indoor_model.transitions.each do |transition|
@@ -91,15 +97,20 @@ module ULOL
             points.concat(segments[:default]) if first_visible && second_visible
             points.concat(segments[:first]) if first_visible
             points.concat(segments[:second]) if second_visible
-            accepted << {
+            entry = {
               cell1_id: transition.cell1_id.to_s,
               cell2_id: transition.cell2_id.to_s,
               first_visible: first_visible,
               second_visible: second_visible,
               segments: segments
             }
+            [entry[:cell1_id], entry[:cell2_id]].uniq.each do |cell_id|
+              next if cell_id.empty?
+
+              (by_cell[cell_id] ||= []) << entry
+            end
           end
-          @render_visible_transition_segments = accepted
+          @render_transition_segments_by_cell_id = by_cell
           points
         end
 
