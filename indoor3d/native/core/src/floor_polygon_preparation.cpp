@@ -351,8 +351,8 @@ PreparationResult prepare(
     double tolerance
 )
 {
-    // Required for Geometry V1-V4 and existing in-memory test fixtures.
-    // Geometry V5 callers provide SketchUp's transformed plane directly.
+    // For inputs that omit a transformed face plane (including synthetic fixtures).
+    // Geometry sessions supply the authored SketchUp plane directly.
     if (!std::isfinite(tolerance) || tolerance<=0.0)
         return {{},PreparationError::InvalidTolerance,0};
     if (outer_loop.empty())
