@@ -7,14 +7,9 @@ module ULOL
         INPUT_MAGIC = "IGMLADJ\0".b.freeze
         OUTPUT_MAGIC = "IGMLRES\0".b.freeze
         STATE_OUTPUT_MAGIC = "IGMLSTA\0".b.freeze
-        PROTOCOL_VERSION = 1
-        GEOMETRY_PROTOCOL_VERSION = 5
-        REFERENCE_POINTS_RESULT_VERSION = 2
-        STATE_RESULT_VERSION = 13
-        TRIANGLE_RESULT_VERSION = 6
-        GRAPH_RESULT_VERSION = 5
-        PREVIOUS_STATE_RESULT_VERSION = 4
-        LEGACY_STATE_RESULT_VERSION = 3
+        ADJACENCY_FORMAT_ID = 1
+        GEOMETRY_FORMAT_ID = 5
+        STATE_RESULT_FORMAT_ID = 13
         NORMAL_TOLERANCE = 0.000001
         POLL_INTERVAL_SECONDS = 0.01
         INPUT_HEADER_SIZE = 32
@@ -667,7 +662,7 @@ module ULOL
         end
         private_class_method :poll_adjacency_progress
 
-        # V1 encoder retained for standalone adjacency compatibility.
+        # Standalone adjacency encoder uses the compact adjacency cell payload.
         def encode_input(snapshots)
           snapshots = Array(snapshots)
           buffer = String.new(
@@ -675,10 +670,10 @@ module ULOL
             encoding: Encoding::BINARY
           )
           buffer << INPUT_MAGIC
-          append_pack(buffer, [PROTOCOL_VERSION, snapshots.length, 0], 'Q<Q<Q<')
+          append_pack(buffer, [ADJACENCY_FORMAT_ID, snapshots.length, 0], 'Q<Q<Q<')
 
           snapshots.each_with_index do |snapshot, cell_index|
-            append_cell_v1(buffer, snapshot, cell_index)
+            append_standalone_adjacency_cell(buffer, snapshot, cell_index)
           end
           buffer
         end
@@ -693,22 +688,22 @@ module ULOL
             encoding: Encoding::BINARY
           )
           buffer << INPUT_MAGIC
-          append_pack(buffer, [GEOMETRY_PROTOCOL_VERSION, snapshots.length, 0], 'Q<Q<Q<')
+          append_pack(buffer, [GEOMETRY_FORMAT_ID, snapshots.length, 0], 'Q<Q<Q<')
 
           snapshots.each_with_index do |snapshot, cell_index|
-            append_cell_v3(buffer, snapshot, cell_index, Hash(state_options[cell_index]))
+            append_geometry_cell(buffer, snapshot, cell_index, Hash(state_options[cell_index]))
           end
           buffer
         end
 
-        # V13: State and diagnostics only. Reference graphs/radii remain in
+        # State result payload contains State and diagnostics only. Reference graphs/radii remain in
         # Native and are exposed through separate radius-free query methods.
         def decode_state_result(bytes)
           reader = BinaryReader.new(bytes)
           raise ProtocolError, 'native Reference result header is truncated' if reader.remaining < 32
           raise ProtocolError, 'native Reference result magic mismatch' unless reader.read_bytes(8) == STATE_OUTPUT_MAGIC
           version = reader.read_u64
-          unless version == STATE_RESULT_VERSION
+          unless version == STATE_RESULT_FORMAT_ID
             raise ProtocolError, "unsupported Native Reference result version #{version}; rebuild indoor_gml_native.so"
           end
           count = checked_count(reader.read_u64, 'Reference result count')
@@ -766,7 +761,7 @@ module ULOL
           raise ProtocolError, 'native result magic mismatch' unless magic == OUTPUT_MAGIC
 
           version = reader.read_u64
-          raise ProtocolError, "unsupported native result version #{version}" unless version == PROTOCOL_VERSION
+          raise ProtocolError, "unsupported native result version #{version}" unless version == ADJACENCY_FORMAT_ID
 
           pair_count = checked_count(reader.read_u64, 'pair count')
           expected_candidate_total = checked_count(reader.read_u64, 'candidate total')
@@ -887,7 +882,7 @@ module ULOL
         end
         private_class_method :cell_geometry
 
-        def append_cell_v1(buffer, snapshot, cell_index)
+        def append_standalone_adjacency_cell(buffer, snapshot, cell_index)
           minimum, maximum, faces = cell_geometry(snapshot, cell_index)
           record_size = CELL_FIXED_SIZE
           faces.each { |face| record_size += encoded_face_size(face, include_inner_loops: false) }
@@ -897,9 +892,9 @@ module ULOL
           append_vec3(buffer, maximum, 'cell bounds max')
           faces.each_with_index { |face, face_index| append_face(buffer, face, cell_index, face_index, include_inner_loops: false, include_plane: false) }
         end
-        private_class_method :append_cell_v1
+        private_class_method :append_standalone_adjacency_cell
 
-        def append_cell_v3(buffer, snapshot, cell_index, option)
+        def append_geometry_cell(buffer, snapshot, cell_index, option)
           minimum, maximum, faces = cell_geometry(snapshot, cell_index)
           flags = CELL_FLAG_ADJACENCY_TARGET
           flags |= CELL_FLAG_NEEDS_STATE if option[:needs_state] == true
@@ -927,7 +922,7 @@ module ULOL
           append_pack(buffer, [category], 'Q<')
           faces.each_with_index { |face, face_index| append_face(buffer, face, cell_index, face_index, include_inner_loops: true, include_plane: true) }
         end
-        private_class_method :append_cell_v3
+        private_class_method :append_geometry_cell
 
         def encode_cell_category(category_code)
           case category_code.to_s.downcase
@@ -943,7 +938,7 @@ module ULOL
 
         def append_face(buffer, face, cell_index, face_index, include_inner_loops:, include_plane:)
           face = Hash(face)
-          # Legacy V1 sends a 3-vector. Geometry V5 sends the full
+          # Standalone adjacency uses a 3-vector normal. The geometry session sends the full
           # SketchUp-authored plane; never recompute D from a vertex.
           plane = include_plane ? Array(face[:plane]) : nil
           normal = nil
