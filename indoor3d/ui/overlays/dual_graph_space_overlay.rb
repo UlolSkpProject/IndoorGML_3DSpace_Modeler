@@ -160,6 +160,7 @@ module ULOL
         # identity from the current SketchUp selection on each draw, so
         # deselection, multi-selection, and hide/show never require cache edits.
         def selected_dual_overlay_cell_ids
+          return {} if defined?(ReferenceGraphDebugMode) && !ReferenceGraphDebugMode.highlight?
           return {} unless @indoor_model.respond_to?(:editing?) && @indoor_model.editing?
 
           model = @indoor_model.model if @indoor_model.respond_to?(:model)
