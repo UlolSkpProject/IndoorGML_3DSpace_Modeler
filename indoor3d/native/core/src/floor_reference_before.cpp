@@ -297,16 +297,33 @@ CellSpaceInteriorPointResult locate_reference_before(
     }
 
     // Any validated seed can be State, including a shared-edge midpoint.
-    // The deterministic first minimum wins a distance tie.
+    // Prefer the largest horizontal wall clearance. Candidates within the
+    // geometric tolerance share that maximum and are resolved by proximity
+    // to the AABB center, then by their stable seed order.
     const Vec3 aabb_center{
         (cell.bounds.minimum.x+cell.bounds.maximum.x)*0.5,
         (cell.bounds.minimum.y+cell.bounds.maximum.y)*0.5,
         (cell.bounds.minimum.z+cell.bounds.maximum.z)*0.5
     };
+    double maximum_radius=valid_seeds.front().radius;
+    for (const ValidatedSeed& validated:valid_seeds)
+    {
+        if (validated.radius>maximum_radius)
+            maximum_radius=validated.radius;
+    }
+
+    const double radius_tolerance=std::max(0.0,tolerance);
     std::size_t state_index=0;
     double state_distance=std::numeric_limits<double>::infinity();
     for (std::size_t i=0;i<valid_seeds.size();++i)
     {
+        const double radius=valid_seeds[i].radius;
+        const bool maximum_tied=
+            (std::isinf(maximum_radius) && std::isinf(radius)) ||
+            (!std::isinf(maximum_radius) && !std::isinf(radius) &&
+             maximum_radius-radius<=radius_tolerance);
+        if (!maximum_tied) continue;
+
         const double distance=squared(sub(valid_seeds[i].seed->position,aabb_center));
         if (distance<state_distance)
         {

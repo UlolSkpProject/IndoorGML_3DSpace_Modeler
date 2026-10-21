@@ -444,7 +444,7 @@ void test_convex_floor_one_area_centroid_before()
     const CellSpaceInteriorPointResult result =
         locate_cell_space_interior_points(room, 0.001);
     require(result.state_point.has_value(),
-            "State must be selected from the AABB-nearest valid polygon centroid");
+            "State must be selected from a valid polygon centroid");
     require(result.reference_status == ReferencePointStatus::Succeeded,
             "Floor Reference generation failed");
 
