@@ -147,7 +147,7 @@ module ULOL
             return if pids.empty?
 
             # Build one dirty set, then serialize the entire eligible geometry
-            # once. Native V5 marks every dirty index in the same load_batch.
+            # once. Native marks every dirty index in the same load_batch.
             resolved_cells = pids.filter_map do |persistent_id|
               @feature_registry.find_cell_space_by_persistent_id(persistent_id)
             end.uniq
