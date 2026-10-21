@@ -8,7 +8,7 @@ module ULOL
       module ValidityNativeBridge
         REQUEST_MAGIC = "IGMLVLD\0".b.freeze
         RESULT_MAGIC = "IGMLVRS\0".b.freeze
-        PROTOCOL_VERSION = 1
+        VALIDITY_FORMAT_ID = 1
         NORMAL_TOLERANCE = 0.000001
         POLL_INTERVAL_SECONDS = 0.01
         RESULT_FIXED_SIZE = 80
@@ -150,7 +150,7 @@ module ULOL
         def encode_requests(requests, cell_count)
           buffer = String.new(capacity: 32 + requests.length * 24, encoding: Encoding::BINARY)
           buffer << REQUEST_MAGIC
-          append_pack(buffer, [PROTOCOL_VERSION, requests.length, 0], 'Q<Q<Q<')
+          append_pack(buffer, [VALIDITY_FORMAT_ID, requests.length, 0], 'Q<Q<Q<')
 
           requests.each do |request|
             row = Hash(request)
@@ -174,7 +174,7 @@ module ULOL
           raise ProtocolError, 'validity result magic mismatch' unless reader.read_bytes(8) == RESULT_MAGIC
 
           version = reader.read_u64
-          raise ProtocolError, "unsupported validity result version #{version}" unless version == PROTOCOL_VERSION
+          raise ProtocolError, "unsupported validity result version #{version}" unless version == VALIDITY_FORMAT_ID
 
           count = checked_count(reader.read_u64, 'validity result count')
           raise ProtocolError, 'validity result reserved field is non-zero' unless reader.read_u64.zero?
