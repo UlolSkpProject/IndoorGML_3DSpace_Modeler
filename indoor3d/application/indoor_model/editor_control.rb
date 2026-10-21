@@ -42,16 +42,22 @@ module ULOL
             end
 
             Array(@cell_spaces).each do |cell|
-              next unless cell&.valid?
+              begin
+                next unless cell&.valid?
 
-              group = cell.valid_sketchup_group
-              next unless group && selected[group.object_id].equal?(group)
+                group = cell.valid_sketchup_group
+                next unless group && selected[group.object_id].equal?(group)
 
-              cell_id = cell.id.to_s
-              next if cell_id.empty?
+                cell_id = cell.id.to_s
+                next if cell_id.empty?
 
-              cell_ids[cell_id] = true
-              watched << { entity: group, kind: :cell, cell_id: cell_id }.freeze
+                cell_ids[cell_id] = true
+                watched << { entity: group, kind: :cell, cell_id: cell_id }.freeze
+              rescue StandardError
+                # A stale/deleted CellSpace cannot clear the selection of
+                # unrelated, still-valid CellSpaces.
+                next
+              end
             end
 
             @dual_graph_selection_snapshot = {
