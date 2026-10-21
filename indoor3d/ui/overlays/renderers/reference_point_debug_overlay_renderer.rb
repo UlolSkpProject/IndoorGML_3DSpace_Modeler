@@ -84,9 +84,12 @@ module ULOL
 
         def render_points_by_kind
           grouped = @indoor_model.debug_reference_points_by_kind
+          visible_cell_ids = visible_debug_cell_ids
           grouped.each_with_object({}) do |(kind, owned_points), result|
             result[kind] = Array(owned_points).flat_map do |record|
               next [] unless record.is_a?(Hash) && record[:cell_id] && record[:point]
+              next [] unless debug_cell_visible?(record[:cell_id], visible_cell_ids)
+
               @transform_context.overlay_cell_reference_points(
                 [record[:point]], record[:cell_id]
               )
@@ -94,6 +97,24 @@ module ULOL
           end
         rescue StandardError
           {}
+        end
+
+        def visible_debug_cell_ids
+          return nil unless @indoor_model.respond_to?(:cell_spaces) &&
+                            @indoor_model.respond_to?(:dual_overlay_state_visible?)
+
+          Array(@indoor_model.cell_spaces).each_with_object({}) do |cell_space, visible|
+            next unless cell_space
+            next unless @indoor_model.dual_overlay_state_visible?(cell_space.duality_state)
+
+            visible[cell_space.id.to_s] = true
+          end
+        rescue StandardError
+          {}
+        end
+
+        def debug_cell_visible?(cell_id, visible_cell_ids)
+          visible_cell_ids.nil? || visible_cell_ids[cell_id.to_s] == true
         end
       end
     end

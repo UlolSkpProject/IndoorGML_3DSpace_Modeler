@@ -120,11 +120,31 @@ module ULOL
         end
 
         def each_graph
+          visible_cell_ids = visible_debug_cell_ids
           Array(@indoor_model.debug_reference_graphs).each do |graph|
             next unless graph && graph[:nodes] && graph[:edges]
+            next unless debug_cell_visible?(graph[:cell_id], visible_cell_ids)
 
             yield graph
           end
+        end
+
+        def visible_debug_cell_ids
+          return nil unless @indoor_model.respond_to?(:cell_spaces) &&
+                            @indoor_model.respond_to?(:dual_overlay_state_visible?)
+
+          Array(@indoor_model.cell_spaces).each_with_object({}) do |cell_space, visible|
+            next unless cell_space
+            next unless @indoor_model.dual_overlay_state_visible?(cell_space.duality_state)
+
+            visible[cell_space.id.to_s] = true
+          end
+        rescue StandardError
+          {}
+        end
+
+        def debug_cell_visible?(cell_id, visible_cell_ids)
+          visible_cell_ids.nil? || visible_cell_ids[cell_id.to_s] == true
         end
 
         # World Top view and near-Top views suffer depth occlusion when the
