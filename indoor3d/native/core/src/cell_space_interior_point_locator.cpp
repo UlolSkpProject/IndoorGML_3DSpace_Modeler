@@ -34,7 +34,7 @@ constexpr double ROOM_FLOOR_CUMULATIVE_REFLEX_DEGREES = 30.0;
 constexpr double ROOM_FLOOR_TURN_NOISE_DEGREES = 0.25;
 // SketchUp/native coordinates are inches; standard references use +1000 mm.
 constexpr double ROOM_REFERENCE_FLOOR_OFFSET = 1000.0 / 25.4;
-// Protect the Native V7 reference/debug serialization size bound.
+// Bound Native reference and diagnostic point buffers.
 constexpr std::size_t MAX_ROOM_REFERENCE_POINTS = 4096;
 constexpr std::size_t MAX_ROOM_REFERENCE_DEBUG_POINTS =
     MAX_ROOM_REFERENCE_POINTS * 3;
@@ -717,7 +717,7 @@ bool clear_path(
 
 } // namespace
 
-// Floor-region experiment: use the SketchUp-triangulated Floor surface as
+// Floor-region generation uses the SketchUp-triangulated Floor surface as
 // a constrained mesh. Greedily merge only edge-adjacent, exactly coplanar
 // triangles whose UNION has one simple, convex boundary. A hole always
 // leaves multiple boundary rings and can never pass this validation.
