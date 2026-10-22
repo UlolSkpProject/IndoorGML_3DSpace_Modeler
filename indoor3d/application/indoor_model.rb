@@ -91,6 +91,7 @@ module ULOL
           @debug_reference_graph_overlay_by_cell_id&.clear
           @cell_space_observed_ids.clear
           @space_features_observed_ids.clear
+          Utils::Transformation.clear_root_world_transform_cache(@model) if @model
           @selection_observed_model_id = nil
           @entities_observed_ids.clear
           @primal_group = nil
