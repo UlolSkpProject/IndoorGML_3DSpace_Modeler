@@ -14,6 +14,12 @@ module ULOL
         def initialize(indoor_model:, transform_context:)
           @indoor_model = indoor_model
           @transform_context = transform_context
+          @root_segments_by_transition_id = {}
+          @world_segments_by_transition_id = {}
+          @dirty_root_transition_ids = {}
+          @world_transform_dirty = true
+          @assembly_dirty = true
+          @full_cache_reset = true
           @transition_render_segment_cache = {}
           @render_transition_line_points = nil
           @render_transition_line_points_dirty = true
@@ -27,11 +33,18 @@ module ULOL
         def invalidate
           @render_transition_line_points = nil
           @render_transition_line_points_dirty = true
+          @assembly_dirty = true
           @render_visible_transition_segments = []
           clear_selection_batches
         end
 
         def clear_cache
+          @root_segments_by_transition_id.clear
+          @world_segments_by_transition_id.clear
+          @dirty_root_transition_ids.clear
+          @world_transform_dirty = true
+          @assembly_dirty = true
+          @full_cache_reset = true
           @transition_render_segment_cache&.clear
           @render_transition_revision = nil
           @render_transition_exclusion_key = nil
