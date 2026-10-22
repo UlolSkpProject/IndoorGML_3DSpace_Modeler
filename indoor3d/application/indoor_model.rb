@@ -91,6 +91,7 @@ module ULOL
           @debug_reference_graph_overlay_by_cell_id&.clear
           @cell_space_observed_ids.clear
           @space_features_observed_ids.clear
+          Utils::Transformation.clear_root_world_transform_cache(@model) if @model
           @selection_observed_model_id = nil
           @entities_observed_ids.clear
           @primal_group = nil
@@ -131,7 +132,8 @@ module ULOL
           @adjacency_service = AdjacencyService.new(
             @feature_registry,
             transition_builder: method(:create_or_update_transition_for_pair),
-            transition_eraser: method(:erase_transition_for_pair_key)
+            transition_eraser: method(:erase_transition_for_pair_key),
+            snapshot_builder: method(:adjacency_snapshot_for_cell_space)
           )
           @topology_coordinator = TopologyCoordinator.new(adjacency_service: @adjacency_service)
           @runtime_restorer = RuntimeRestorer.new(

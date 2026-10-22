@@ -196,8 +196,20 @@ class StateOverlayRendererTransformCacheTest < Minitest::Test
 
     draw
 
-    assert_equal [210, 120], last_x_coordinates
-    assert_equal %w[state-a state-b state-a], @context.root_local_calls
+    assert_equal [210, 220], last_x_coordinates
+    assert_equal %w[state-a state-b state-a state-b], @context.root_local_calls
+    assert_equal 2, @context.batch_calls
+  end
+
+  def test_unselected_primal_transform_change_rebuilds_all_state_points
+    draw
+    @context.primal_offset = 200
+
+    draw
+
+    assert_equal [210, 220], last_x_coordinates
+    assert_equal %w[state-a state-b state-a state-b], @context.root_local_calls
+    assert_equal 2, @context.batch_calls
   end
 
   def test_selected_primal_rebuilds_all_state_points_when_transform_changes

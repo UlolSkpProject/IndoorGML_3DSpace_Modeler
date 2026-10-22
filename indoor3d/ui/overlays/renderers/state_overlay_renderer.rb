@@ -134,7 +134,10 @@ module ULOL
         private
 
         def prepare_state_points
-          if @render_state_points_dirty
+          primal_transform_key = current_primal_transform_key
+          return if primal_transform_key.nil?
+
+          if @render_state_points_dirty || primal_transform_key != @primal_transform_key
             rebuild_state_points
           else
             refresh_selected_state_points

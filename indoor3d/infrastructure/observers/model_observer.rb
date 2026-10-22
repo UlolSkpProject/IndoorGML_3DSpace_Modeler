@@ -75,6 +75,13 @@ module ULOL
         def handle_active_path_changed(model, source:)
           IndoorCore::Logger.puts "[IndoorGML] active path changed source=#{source}"
           indoor_model = IndoorModel.for(model)
+          # Capture the Primal World frame before the user drills into a
+          # CellSpace, even when no 3D overlay redraw has occurred yet.
+          active_path = model.active_path
+          primal_group = indoor_model.primal_group
+          if primal_group&.valid? && active_path&.length == 1 && active_path.first == primal_group
+            Utils::Transformation.root_transformation_in_model(primal_group)
+          end
           unless indoor_model.transaction_replay_pending?
             indoor_model.active_path_changed(model)
           end

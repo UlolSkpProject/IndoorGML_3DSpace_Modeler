@@ -16,6 +16,7 @@ module ULOL
           @root_segments_by_transition_id = {}
           @world_segments_by_transition_id = {}
           @dirty_root_transition_ids = {}
+          @world_transform_cache_key = nil
           @world_transform_dirty = true
           @assembly_dirty = true
           @full_cache_reset = true
@@ -37,6 +38,7 @@ module ULOL
           @root_segments_by_transition_id.clear
           @world_segments_by_transition_id.clear
           @dirty_root_transition_ids.clear
+          @world_transform_cache_key = nil
           @world_transform_dirty = true
           @assembly_dirty = true
           @full_cache_reset = true
@@ -91,6 +93,15 @@ module ULOL
         end
 
         def transition_line_points(excluded_cell_ids: nil)
+          # Observer callbacks can arrive before the Primal World frame is
+          # available (notably while an active path is changing). Never bake
+          # the root-local points as World points in that transient state, and
+          # self-heal on the first draw after a valid frame becomes available.
+          unless synchronize_world_transform_cache
+            clear_selection_batches
+            return EMPTY_LINE_POINTS
+          end
+
           excluded_cells = transition_excluded_cell_lookup(excluded_cell_ids)
           exclusion_key = excluded_cells.keys.sort
           if @assembly_dirty || @render_transition_line_points.nil? ||
@@ -250,6 +261,20 @@ module ULOL
         end
 
         private
+
+        def synchronize_world_transform_cache
+          return true unless @transform_context.respond_to?(:overlay_render_context_cache_key)
+
+          current_key = @transform_context.overlay_render_context_cache_key
+          return false if current_key.nil?
+          return true if current_key == @world_transform_cache_key
+
+          @world_transform_cache_key = current_key
+          invalidate_world_transform
+          true
+        rescue StandardError
+          false
+        end
 
         def clear_selection_batches
           @render_selection_batch_key = nil

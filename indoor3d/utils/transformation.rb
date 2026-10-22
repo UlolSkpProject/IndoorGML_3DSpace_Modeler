@@ -4,6 +4,7 @@ module ULOL
   module Indoor3DGmlModeler
     module Utils
       module Transformation
+        RootWorldTransformUnavailableError = Class.new(StandardError)
 
         def self.entity_transformation_in_active_context(entity)
           entity_world_transformation(entity)
@@ -43,6 +44,25 @@ module ULOL
           entity&.transformation || Geom::Transformation.new
         end
 
+        # Converts a World frame to the representation expected by
+        # Entity#transformation= in the current edit context. SketchUp exposes
+        # non-active children of an open root in World coordinates, while the
+        # same entity outside that context uses root-local coordinates.
+        def self.entity_transformation_from_world_under_root(entity, root_group, world_transformation)
+          return world_transformation unless root_group&.valid?
+
+          active_path = Sketchup.active_model&.active_path
+          if active_path&.include?(root_group) && active_path.last != entity
+            return world_transformation
+          end
+
+          root_transformation_in_model(root_group).inverse * world_transformation
+        rescue RootWorldTransformUnavailableError
+          raise
+        rescue StandardError
+          world_transformation
+        end
+
         def self.entity_world_transformation(entity)
           return entity.transformation unless entity&.valid?
 
@@ -58,30 +78,81 @@ module ULOL
           entity&.transformation || Geom::Transformation.new
         end
 
+        # This method always returns CellSpace Local -> Primal Local, regardless
+        # of SketchUp's active editing context.
         def self.entity_transformation_in_root(entity, root_group)
           return entity.transformation unless entity&.valid?
           return entity.transformation unless root_group&.valid?
 
-          # A direct child already stores its transform in the root container's
-          # coordinate system. Avoid converting root-local -> model -> root-local.
-          return entity.transformation if entity.parent == parent_container_for(root_group)
-
-          root_transformation_in_model(root_group).inverse * entity_world_transformation_under_root(entity, root_group)
+          root_world = root_transformation_in_model(root_group)
+          entity_world = entity_world_transformation_under_root(entity, root_group)
+          root_world.inverse * entity_world
+        rescue RootWorldTransformUnavailableError
+          raise
         rescue StandardError
           entity&.transformation || Geom::Transformation.new
         end
 
+        # The root instance's transformation is reinterpreted by SketchUp
+        # while editing a descendant. Keep the last verified World frame,
+        # refreshed whenever the root is directly observable (model root or
+        # the root's own edit context). Never accept a descendant-edit frame
+        # as a replacement for the root's World transformation.
         def self.root_transformation_in_model(root_group)
           return Geom::Transformation.new unless root_group&.valid?
 
           model = Sketchup.active_model
           active_path = model&.active_path
-          return model.edit_transform if active_path&.last == root_group
+          if active_path&.include?(root_group)
+            if active_path.last == root_group
+              frame = model.edit_transform
+              remember_root_world_transformation(model, root_group, frame)
+              return frame
+            end
 
-          root_group.transformation
+            cached = cached_root_world_transformation(model, root_group)
+            return cached if cached
+
+            raise RootWorldTransformUnavailableError,
+                  'Primal World transformation unavailable during nested editing'
+          end
+
+          frame = root_group.transformation
+          remember_root_world_transformation(model, root_group, frame)
+          frame
+        rescue RootWorldTransformUnavailableError
+          raise
         rescue StandardError
-          Geom::Transformation.new
+          cached_root_world_transformation(model, root_group) || Geom::Transformation.new
         end
+
+        def self.clear_root_world_transform_cache(model)
+          @root_world_transform_cache_by_model&.delete(model.object_id) if model
+        end
+
+        def self.remember_root_world_transformation(model, root_group, frame)
+          return unless model && root_group && frame
+
+          @root_world_transform_cache_by_model ||= {}
+          frames = (@root_world_transform_cache_by_model[model.object_id] ||= {})
+          frames[root_world_cache_key(root_group)] = frame.to_a.map(&:to_f).freeze
+        end
+        private_class_method :remember_root_world_transformation
+
+        def self.cached_root_world_transformation(model, root_group)
+          return nil unless model && root_group
+
+          values = @root_world_transform_cache_by_model&.dig(
+            model.object_id, root_world_cache_key(root_group)
+          )
+          Geom::Transformation.new(values) if values
+        end
+        private_class_method :cached_root_world_transformation
+
+        def self.root_world_cache_key(root_group)
+          root_group.respond_to?(:persistent_id) ? root_group.persistent_id : root_group.object_id
+        end
+        private_class_method :root_world_cache_key
 
         def self.root_local_point_to_model(point, root_group)
           return point unless point.is_a?(Geom::Point3d)

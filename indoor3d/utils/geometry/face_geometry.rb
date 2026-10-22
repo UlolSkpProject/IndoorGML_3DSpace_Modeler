@@ -4,13 +4,19 @@ module ULOL
   module Indoor3DGmlModeler
     module Utils
       module Geometry
-        def self.adjacency_snapshot(entity)
+        def self.adjacency_snapshot(entity, transformation = nil)
           return nil unless entity&.valid?
           return nil unless entity.respond_to?(:definition) && entity.respond_to?(:transformation)
 
-          transformation = entity.transformation
+          explicit_transformation = !transformation.nil?
+          transformation ||= entity.transformation
+          bounds = if explicit_transformation
+                     snapshot_transformed_definition_bounds(entity, transformation)
+                   else
+                     snapshot_bounds(entity.bounds)
+                   end
           snapshot = {
-            bounds: snapshot_bounds(entity.bounds),
+            bounds: bounds,
             faces: snapshot_faces(entity, transformation)
           }
           deep_freeze(snapshot)
@@ -112,6 +118,26 @@ module ULOL
           }
         end
         private_class_method :snapshot_bounds
+
+        # Entity#bounds follows SketchUp's current edit context, while the
+        # caller-supplied transformation deliberately targets a stable parent
+        # frame (Primal-local for IndoorGML). Build bounds in that same frame.
+        def self.snapshot_transformed_definition_bounds(entity, transformation)
+          bounds = entity.definition.bounds
+          min = bounds.min
+          max = bounds.max
+          points = [
+            [min.x, min.y, min.z], [min.x, min.y, max.z],
+            [min.x, max.y, min.z], [min.x, max.y, max.z],
+            [max.x, min.y, min.z], [max.x, min.y, max.z],
+            [max.x, max.y, min.z], [max.x, max.y, max.z]
+          ].map { |coordinates| Geom::Point3d.new(*coordinates).transform(transformation) }
+          {
+            min: %i[x y z].map { |axis| points.map { |point| point.public_send(axis).to_f }.min },
+            max: %i[x y z].map { |axis| points.map { |point| point.public_send(axis).to_f }.max }
+          }
+        end
+        private_class_method :snapshot_transformed_definition_bounds
 
         def self.snapshot_faces(entity, transformation)
           entity.definition.entities.grep(Sketchup::Face).map do |face|
