@@ -31,9 +31,10 @@ module ULOL
     module Utils
       module Geometry
         class << self
-          attr_accessor :test_snapshot
+          attr_accessor :test_snapshot, :test_snapshot_transformation
 
-          def adjacency_snapshot(_entity)
+          def adjacency_snapshot(_entity, transformation = nil)
+            self.test_snapshot_transformation = transformation
             @test_snapshot
           end
         end
@@ -89,6 +90,7 @@ class NativeStateLocalRefreshTest < Minitest::Test
       @original_methods[name] = Bridge.method(name)
     end
     ULOL::Indoor3DGmlModeler::Utils::Geometry.test_snapshot = { faces: [] }
+    ULOL::Indoor3DGmlModeler::Utils::Geometry.test_snapshot_transformation = nil
     @opened = nil
     @commits = 0
     @frames_at_commit = nil
@@ -126,7 +128,8 @@ class NativeStateLocalRefreshTest < Minitest::Test
       }
     end
     cell = FakeCell.new('cell-1', 'Door')
-    entity = FakeEntity.new(42, FakeTransform.new)
+    initial_transformation = FakeTransform.new
+    entity = FakeEntity.new(42, initial_transformation)
 
     point = Harness.new(cell, entity).send(:native_state_local_point_for_entity, entity) do |center|
       assert_equal [1.0, 2.0, 3.0], [center.x, center.y, center.z]
@@ -136,6 +139,8 @@ class NativeStateLocalRefreshTest < Minitest::Test
     assert_equal [1.0, 2.0, 3.0], [point.x, point.y, point.z]
     assert_equal ['cell-1'], @opened[1]
     assert_equal 'Door', @opened[2][0][:category_code]
+    assert_same initial_transformation,
+                ULOL::Indoor3DGmlModeler::Utils::Geometry.test_snapshot_transformation
     assert_equal 1, @commits
     assert_equal [entity.transformation], @frames_at_commit
     assert_equal 1, @closes

@@ -301,7 +301,8 @@ module ULOL
             end
 
             parent_point = Geom::Point3d.new(values[0], values[1], values[2])
-            raw_center = parent_point.transform(group.transformation.inverse)
+            cell_frame = cell_space_root_local_transformation(cell_space)
+            raw_center = parent_point.transform(cell_frame.inverse)
             snapped_center = snap_local_grid_point(
               raw_center,
               LOCAL_GRID_TOLERANCE_MM

@@ -132,7 +132,8 @@ module ULOL
           @adjacency_service = AdjacencyService.new(
             @feature_registry,
             transition_builder: method(:create_or_update_transition_for_pair),
-            transition_eraser: method(:erase_transition_for_pair_key)
+            transition_eraser: method(:erase_transition_for_pair_key),
+            snapshot_builder: method(:adjacency_snapshot_for_cell_space)
           )
           @topology_coordinator = TopologyCoordinator.new(adjacency_service: @adjacency_service)
           @runtime_restorer = RuntimeRestorer.new(

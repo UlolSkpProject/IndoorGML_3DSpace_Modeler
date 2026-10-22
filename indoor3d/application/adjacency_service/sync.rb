@@ -9,10 +9,11 @@ module ULOL
 
         attr_reader :last_metrics
 
-        def initialize(registry, transition_builder:, transition_eraser:)
+        def initialize(registry, transition_builder:, transition_eraser:, snapshot_builder: nil)
           @registry = registry
           @transition_builder = transition_builder
           @transition_eraser = transition_eraser
+          @snapshot_builder = snapshot_builder
           @last_metrics = {}
         end
 
@@ -110,7 +111,11 @@ module ULOL
           entries = []
           source_cells.each_with_index do |cell_space, index|
             if cell_space && cell_space.valid? && cell_space.duality_state&.valid?
-              snapshot = Utils::Geometry.adjacency_snapshot(cell_space.sketchup_group)
+              snapshot = if @snapshot_builder
+                           @snapshot_builder.call(cell_space)
+                         else
+                           Utils::Geometry.adjacency_snapshot(cell_space.sketchup_group)
+                         end
               entries << { cell_space: cell_space, snapshot: snapshot } if snapshot
             end
 

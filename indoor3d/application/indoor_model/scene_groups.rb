@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../adjacency_service/native_bridge'
+require_relative '../../utils/transformation'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -569,7 +570,13 @@ module ULOL
                     'standalone Native State calculation cannot reuse an active shared session'
             end
 
-            snapshot = Utils::Geometry.adjacency_snapshot(cell_space_entity)
+            snapshot = Utils::Geometry.adjacency_snapshot(
+              cell_space_entity,
+              Utils::Transformation.entity_transformation_in_root(
+                cell_space_entity,
+                @primal_group
+              )
+            )
             unless snapshot
               raise NativeAdjacencyBridge::ProtocolError,
                     'CellSpace geometry snapshot is unavailable for Native State calculation'
@@ -635,7 +642,11 @@ module ULOL
             # Only registered CellSpaces have a stable graph key consumed by
             # Transition routing. Temporary creation-time probes are discarded.
             parent_point = Geom::Point3d.new(values[0], values[1], values[2])
-            local_point = parent_point.transform(cell_space_entity.transformation.inverse)
+            cell_frame = Utils::Transformation.entity_transformation_in_root(
+              cell_space_entity,
+              @primal_group
+            )
+            local_point = parent_point.transform(cell_frame.inverse)
             if runtime_cell_space
               unless apply_center
                 raise NativeAdjacencyBridge::ProtocolError,
@@ -661,7 +672,8 @@ module ULOL
             raise ArgumentError, 'Native State point must contain 3 coordinates' unless values.length == 3
 
             parent_point = Geom::Point3d.new(values[0], values[1], values[2])
-            local_point = parent_point.transform(group.transformation.inverse)
+            cell_frame = cell_space_root_local_transformation(cell_space)
+            local_point = parent_point.transform(cell_frame.inverse)
             apply_cell_space_local_center(group, local_point)
             remember_cell_space_change_snapshot(group)
             local_point
@@ -677,9 +689,17 @@ module ULOL
           def native_state_fixed_parent_z_for_entity(cell_space_entity, offset)
             return nil if offset.nil?
 
-            local_z = fixed_local_z_from_world_offset(cell_space_entity, offset)
+            cell_frame = Utils::Transformation.entity_transformation_in_root(
+              cell_space_entity,
+              @primal_group
+            )
+            local_z = fixed_local_z_from_world_offset(
+              cell_space_entity,
+              offset,
+              transformation: cell_frame
+            )
             Geom::Point3d.new(0.0, 0.0, local_z)
-                         .transform(cell_space_entity.transformation)
+                         .transform(cell_frame)
                          .z
                          .to_f
           rescue StandardError => e
@@ -712,9 +732,13 @@ module ULOL
             center
           end
 
-          def fixed_local_z_from_world_offset(cell_space_entity, offset_from_world_bottom)
+          def fixed_local_z_from_world_offset(
+            cell_space_entity,
+            offset_from_world_bottom,
+            transformation: nil
+          )
             bounds = cell_space_entity.definition.bounds
-            transform = cell_space_entity.transformation
+            transform = transformation || cell_space_entity.transformation
             world_min_z = bounds_corners(bounds).map { |point| point.transform(transform).z }.min
             world_target = Geom::Point3d.new(transform.origin.x, transform.origin.y, world_min_z + offset_from_world_bottom)
             world_target.transform(transform.inverse).z
@@ -745,6 +769,16 @@ module ULOL
             recenter_cell_space_geometry(
               cell_space.sketchup_group,
               fixed_z_offset_from_bottom: fixed_state_height_offset(cell_space)
+            )
+          end
+
+          def adjacency_snapshot_for_cell_space(cell_space)
+            group = cell_space&.sketchup_group
+            return nil unless group&.valid?
+
+            Utils::Geometry.adjacency_snapshot(
+              group,
+              cell_space_root_local_transformation(cell_space)
             )
           end
 

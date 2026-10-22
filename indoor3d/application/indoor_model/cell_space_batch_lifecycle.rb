@@ -503,7 +503,7 @@ module ULOL
             session_entries = Array(@feature_registry.cell_spaces).uniq.filter_map do |cell_space|
               next unless cell_space&.valid? && cell_space.duality_state&.valid?
 
-              snapshot = Utils::Geometry.adjacency_snapshot(cell_space.sketchup_group)
+              snapshot = adjacency_snapshot_for_cell_space(cell_space)
               next unless snapshot
 
               { cell_space: cell_space, snapshot: snapshot }

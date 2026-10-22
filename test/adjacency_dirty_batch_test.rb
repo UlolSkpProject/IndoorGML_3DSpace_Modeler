@@ -130,4 +130,24 @@ class AdjacencyDirtyBatchTest < Minitest::Test
 
     assert_equal [[0]], dirty_calls
   end
+
+  def test_snapshot_builder_controls_the_coordinate_frame
+    cell = FakeCell.new('A')
+    registry = FakeRegistry.new([cell], [])
+    snapshots = []
+    service = Core::AdjacencyService.new(
+      registry,
+      transition_builder: proc { |_left, _right| },
+      transition_eraser: proc { |_key| },
+      snapshot_builder: proc do |candidate|
+        snapshots << candidate.id
+        { cell_id: candidate.id, frame: :primal_local }
+      end
+    )
+
+    entries = service.send(:adjacency_snapshot_entries)
+
+    assert_equal ['A'], snapshots
+    assert_equal :primal_local, entries.first[:snapshot][:frame]
+  end
 end
