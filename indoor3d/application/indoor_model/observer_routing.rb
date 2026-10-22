@@ -10,6 +10,7 @@ module ULOL
             return false unless entity&.valid?
             return true if restore_validation_primal_group_lock(entity)
 
+            @classified_space_features_transform_change = nil
             change_kind = classify_space_features_change(entity)
             return false if change_kind.nil?
 
@@ -17,10 +18,17 @@ module ULOL
             when :name
               handle_space_features_name_changed(entity)
             when :transform
-              handle_space_features_transform_changed(entity)
+              change = @classified_space_features_transform_change || {}
+              handle_space_features_transform_changed(
+                entity,
+                previous_snapshot: change[:previous],
+                current_snapshot: change[:current]
+              )
             else
               handle_space_features_etc_changed(entity)
             end
+          ensure
+            @classified_space_features_transform_change = nil
           end
 
           def restore_validation_primal_group_lock(entity)
@@ -74,6 +82,10 @@ module ULOL
               end
 
               if scaled_transform_values?(current_snapshot[:transformation])
+                @classified_space_features_transform_change = {
+                  previous: previous_snapshot,
+                  current: current_snapshot
+                }
                 log_space_features_change(entity, :transform, [:transformation], previous_snapshot, current_snapshot)
                 return :transform
               end
@@ -92,6 +104,10 @@ module ULOL
               if changed_fields.include?(:name)
                 :name
               elsif changed_fields.include?(:transformation)
+                @classified_space_features_transform_change = {
+                  previous: previous_snapshot,
+                  current: current_snapshot
+                }
                 :transform
               else
                 :etc
@@ -110,13 +126,148 @@ module ULOL
             true
           end
 
-          def handle_space_features_transform_changed(entity)
+          def handle_space_features_transform_changed(entity, previous_snapshot: nil, current_snapshot: nil)
             return true if reject_scaled_space_features_transform(entity)
 
-            invalidate_overlay_primal_render_transform
+            if primal_axes_rebased?(previous_snapshot, current_snapshot)
+              rebuilt = rebuild_transitions_for_primal_axes_change
+              clear_overlay_transition_cache
+              IndoorCore::Logger.puts(
+                "[IndoorGML] Primal axes rebased: rebuilt #{rebuilt} Transition curves"
+              )
+            else
+              invalidate_overlay_primal_render_transform
+            end
             remember_space_features_change_snapshot(entity)
             Sketchup.active_model&.active_view&.invalidate
             true
+          end
+
+          # SketchUp reports both a rigid Primal move and Change Axes as an
+          # instance transformation change. Change Axes additionally applies
+          # the inverse frame delta to direct children so their World frames
+          # stay fixed. Detect that invariant before deciding which Transition
+          # cache layer is safe to retain.
+          def primal_axes_rebased?(previous_snapshot, current_snapshot)
+            previous_values = previous_snapshot&.[](:transformation)
+            current_values = current_snapshot&.[](:transformation)
+            return false unless transformation_values?(previous_values) &&
+                                transformation_values?(current_values)
+
+            previous_root = Geom::Transformation.new(previous_values)
+            current_root = Geom::Transformation.new(current_values)
+            root_rebase = current_root.inverse * previous_root
+
+            frame_result = primal_axes_cell_frame_evidence(
+              previous_root,
+              current_root,
+              root_rebase
+            )
+            return true if frame_result == :rebase
+
+            primal_axes_transition_endpoint_evidence(
+              previous_root,
+              current_root,
+              root_rebase
+            ) == :rebase
+          rescue StandardError => e
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Primal axes classification failed: #{e.class}: #{e.message}"
+            )
+            false
+          end
+
+          def primal_axes_cell_frame_evidence(previous_root, current_root, root_rebase)
+            samples = Array(@cell_spaces).filter_map do |cell_space|
+              group = cell_space&.valid_sketchup_group
+              next unless group
+
+              previous_values = cell_space_change_snapshot_for(group)&.[](:transformation)
+              next unless transformation_values?(previous_values)
+
+              previous_local = Geom::Transformation.new(previous_values)
+              current_local = cell_space_root_local_transformation(cell_space)
+              next unless current_local.respond_to?(:to_a)
+
+              {
+                rebased: transformations_close?(current_local, root_rebase * previous_local) &&
+                  transformations_close?(current_root * current_local, previous_root * previous_local),
+                unchanged: transformations_close?(current_local, previous_local)
+              }
+            end
+            primal_axes_evidence_result(samples)
+          end
+
+          def primal_axes_transition_endpoint_evidence(previous_root, current_root, root_rebase)
+            endpoints = {}
+            Array(@transitions).each do |transition|
+              [[transition&.cell1, transition&.state1_point],
+               [transition&.cell2, transition&.state2_point]].each do |cell_space, previous_point|
+                next unless cell_space&.valid? && previous_point.is_a?(Geom::Point3d)
+
+                endpoints[cell_space.id.to_s] ||= [cell_space, previous_point]
+              end
+            end
+
+            samples = endpoints.values.filter_map do |cell_space, previous_point|
+              current_local = cell_space_root_local_transformation(cell_space)
+              next unless current_local.respond_to?(:origin)
+
+              current_point = current_local.origin
+              {
+                rebased: points_close?(current_point, previous_point.transform(root_rebase)) &&
+                  points_close?(current_point.transform(current_root), previous_point.transform(previous_root)),
+                unchanged: points_close?(current_point, previous_point)
+              }
+            end
+            primal_axes_evidence_result(samples)
+          end
+
+          def primal_axes_evidence_result(samples)
+            evidence = Array(samples)
+            return :unknown if evidence.empty?
+
+            rebased = evidence.count { |sample| sample[:rebased] }
+            unchanged = evidence.count { |sample| sample[:unchanged] }
+            required = [(evidence.length * 0.8).ceil, 1].max
+            rebased >= required && rebased > unchanged ? :rebase : :motion
+          end
+
+          def rebuild_transitions_for_primal_axes_change
+            # Native reference graphs stay CellSpace-local. update_transition
+            # reprojects their waypoint anchors with each CellSpace's current
+            # Primal-local transform and replaces the transient curve inputs.
+            Array(@transitions).count do |transition|
+              transition&.valid? && update_transition(transition)
+            rescue StandardError => e
+              IndoorCore::Logger.puts(
+                "[IndoorGML] Primal axes Transition rebuild failed " \
+                "transition=#{transition&.id}: #{e.class}: #{e.message}"
+              )
+              false
+            end
+          end
+
+          def transformation_values?(values)
+            values.is_a?(Array) && values.length == 16 &&
+              values.all? { |value| value.is_a?(Numeric) && value.finite? }
+          end
+
+          def transformations_close?(first, second)
+            first_values = first&.to_a
+            second_values = second&.to_a
+            return false unless transformation_values?(first_values) &&
+                                transformation_values?(second_values)
+
+            first_values.each_index.all? do |index|
+              (first_values[index].to_f - second_values[index].to_f).abs <= 0.000001
+            end
+          end
+
+          def points_close?(first, second)
+            return false unless first.is_a?(Geom::Point3d) && second.is_a?(Geom::Point3d)
+
+            first.distance(second) <= 0.001
           end
 
           def handle_space_features_etc_changed(entity)
