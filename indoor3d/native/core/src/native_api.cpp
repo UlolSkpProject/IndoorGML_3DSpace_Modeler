@@ -138,7 +138,7 @@ VALUE adjacency_native_commit_reference_graph_batch(VALUE self, VALUE transform_
     const std::size_t size=static_cast<std::size_t>(RSTRING_LEN(transform_bytes));
     if(size%(16*sizeof(double))!=0)
         rb_raise(rb_eArgError,"invalid Reference CellSpace frame payload");
-    return protect_native_call([transform_bytes,size]() {
+    return protect_native_call([transform_bytes,size]() mutable {
         // Allocate and decode inside the exception boundary; input stays
         // alive until its bytes have been copied into Native-owned storage.
         std::vector<std::array<double,16>> frames(size/(16*sizeof(double)));
