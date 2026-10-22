@@ -343,6 +343,14 @@ module ULOL
             @editor_session.invalidate_overlay_primal_render_transform
           end
 
+          def invalidate_overlay_transitions(transitions)
+            @editor_session.invalidate_overlay_transitions(transitions)
+          end
+
+          def remove_overlay_transitions(transitions)
+            @editor_session.remove_overlay_transitions(transitions)
+          end
+
           def finish_overlay_transition_transform_preview(model = @model, source: :commit)
             @editor_session.finish_overlay_transition_transform_preview(model, source: source)
           end

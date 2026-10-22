@@ -250,7 +250,7 @@ module ULOL
 
             register_transition_with_states(transition)
             write_transition_attributes(transition)
-            invalidate_overlay_transition_points
+            invalidate_overlay_transitions([transition])
             transition
           end
 
@@ -280,10 +280,10 @@ module ULOL
           def erase_transition(transition)
             return if transition.nil?
 
+            remove_overlay_transitions([transition])
             unregister_transition_from_states(transition)
             transition.erase!
             @feature_registry.remove_transition(transition)
-            invalidate_overlay_transition_points
           end
 
           def cell_pair_key(cell1, cell2)

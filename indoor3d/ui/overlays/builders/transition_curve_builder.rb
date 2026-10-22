@@ -60,7 +60,12 @@ module ULOL
         end
 
         def remove_transitions(transition_ids)
-          Array(transition_ids).compact.each do |identity|
+          Array(transition_ids).compact.each do |transition_or_identity|
+            identity = if transition_or_identity.respond_to?(:id)
+                         transition_render_cache_identity(transition_or_identity)
+                       else
+                         transition_or_identity
+                       end
             @root_segments_by_transition_id.delete(identity)
             @world_segments_by_transition_id.delete(identity)
             @dirty_root_transition_ids.delete(identity)

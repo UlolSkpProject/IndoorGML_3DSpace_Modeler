@@ -53,13 +53,16 @@ class TransitionStateReferenceSyncTest < Minitest::Test
   class Harness
     include Core::IndoorModel::Topology
 
-    attr_reader :registry, :transition_writes, :state_writes
+    attr_reader :registry, :transition_writes, :state_writes,
+                :invalidated_transitions, :removed_transitions
 
     def initialize
       @feature_registry = Core::FeatureRegistry.new
       @registry = @feature_registry
       @transition_writes = []
       @state_writes = []
+      @invalidated_transitions = []
+      @removed_transitions = []
     end
 
     def cell_pair_key(first, second)
@@ -81,6 +84,14 @@ class TransitionStateReferenceSyncTest < Minitest::Test
     end
 
     def invalidate_overlay_transition_points; end
+
+    def invalidate_overlay_transitions(transitions)
+      @invalidated_transitions.concat(transitions)
+    end
+
+    def remove_overlay_transitions(transitions)
+      @removed_transitions.concat(transitions)
+    end
 
     def sync_pair(first, second, runtime: false)
       name = runtime ? :create_or_update_runtime_transition_for_pair :
@@ -124,6 +135,8 @@ class TransitionStateReferenceSyncTest < Minitest::Test
     assert_same original, @model.sync_pair(@first, @second)
     assert_links(original, @original_first, @original_second)
     assert_equal 1, @original_first.transitions.count(original)
+    assert_equal [original, original, original], @model.invalidated_transitions
+    assert_empty @model.removed_transitions
   end
 
   def test_persistent_path_replaces_stale_state_even_if_old_transition_is_valid
@@ -140,6 +153,8 @@ class TransitionStateReferenceSyncTest < Minitest::Test
     assert_nil @model.registry.feature_by_id(old_id)
     assert_same fresh, @model.registry.feature_by_id(fresh.id)
     refute old_transition.valid?
+    assert_includes @model.removed_transitions, old_transition
+    assert_includes @model.invalidated_transitions, fresh
     assert_same fresh, @model.sync_pair(@second, @first)
   end
 

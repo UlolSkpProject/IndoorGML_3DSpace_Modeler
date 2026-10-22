@@ -635,6 +635,14 @@ module ULOL
           overlay_controller.invalidate_primal_render_transform
         end
 
+        def invalidate_overlay_transitions(transitions)
+          overlay_controller.invalidate_transitions(transitions)
+        end
+
+        def remove_overlay_transitions(transitions)
+          overlay_controller.remove_transitions(transitions)
+        end
+
         def finish_overlay_transition_transform_preview(model = Sketchup.active_model, source: :commit)
           changed = overlay_controller.finish_transition_transform_preview(source: source)
           invalidate_view(model) if changed

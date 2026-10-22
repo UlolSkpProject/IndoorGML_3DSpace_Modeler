@@ -137,6 +137,18 @@ module ULOL
             IndoorCore::Logger.puts "[IndoorGML] Overlay Primal transform invalidation failed: #{e.class}: #{e.message}"
           end
 
+          def invalidate_transitions(transitions)
+            @space_overlay&.invalidate_transitions(transitions)
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Overlay Transition invalidation failed: #{e.class}: #{e.message}"
+          end
+
+          def remove_transitions(transitions)
+            @space_overlay&.remove_transitions(transitions)
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Overlay Transition removal failed: #{e.class}: #{e.message}"
+          end
+
           def finish_transition_transform_preview(source: :commit)
             return false unless @space_overlay&.respond_to?(:finish_transition_transform_preview)
 
