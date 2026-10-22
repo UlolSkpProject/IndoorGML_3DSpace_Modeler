@@ -64,6 +64,20 @@ class TransitionCurveBuilderTest < Minitest::Test
     end
   end
 
+  class OffsetTransform < FakeTransform
+    def overlay_render_context_cache_key
+      [:offset, 100]
+    end
+
+    def overlay_render_context_snapshot
+      { cache_key: overlay_render_context_cache_key }
+    end
+
+    def overlay_render_point_from_snapshot(point, _snapshot)
+      Point.new(point.x + 100.0, point.y, point.z)
+    end
+  end
+
   def point(x)
     Point.new(x.to_f, 0.0, 0.0)
   end
@@ -93,6 +107,15 @@ class TransitionCurveBuilderTest < Minitest::Test
     assert_empty groups[:default]
     assert_equal [0.0, 1.0, 1.0, 2.0], xs(groups[:first])
     assert_equal [2.0, 3.0, 3.0, 4.0], xs(groups[:second])
+  end
+
+  def test_curve_is_built_root_local_before_segments_are_rendered
+    @model.curve = [point(0), point(1), point(2), point(3), point(4)]
+    builder = Builder.new(indoor_model: @model, transform_context: OffsetTransform.new)
+
+    assert_equal [0.0, 1.0, 2.0, 3.0, 4.0], xs(builder.transition_curve_input(@transition)[:points])
+    assert_equal [100.0, 101.0, 101.0, 102.0, 102.0, 103.0, 103.0, 104.0],
+                 xs(builder.transition_line_points)
   end
 
   def test_direction_change_is_rounded_with_local_quadratic_bezier

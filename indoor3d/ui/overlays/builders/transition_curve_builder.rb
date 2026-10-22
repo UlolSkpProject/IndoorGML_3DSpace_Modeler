@@ -164,10 +164,10 @@ module ULOL
           empty_transition_segment_groups
         end
 
-        # All coordinates here are root-local until one common render transform
-        # is applied. The exact Transition endpoints are retained independently
-        # of the selected State reference node.
-        def transition_curve_input(transition, render_snapshot = nil)
+        # Build the canonical curve input in Primal/root-local coordinates.
+        # Rendering applies the Primal -> model transform only after rounding
+        # and interpolation have produced the final line segments.
+        def transition_curve_input(transition, _render_snapshot = nil)
           point1 = transition.state1_point || @transform_context.overlay_state_root_local_point(transition.state1)
           point2 = transition.state2_point || @transform_context.overlay_state_root_local_point(transition.state2)
           waypoint = transition.selected_waypoint
@@ -183,12 +183,10 @@ module ULOL
           end
           root_path << point2
 
-          rendered = root_path.map { |point| render_transition_point(point, render_snapshot) }
-          rendered = deduplicate_consecutive_points(rendered)
+          root_path = deduplicate_consecutive_points(root_path)
           protected_indices = if waypoint
-                                rendered_waypoint = render_transition_point(waypoint, render_snapshot)
-                                waypoint_index = closest_point_index(rendered, rendered_waypoint)
-                                waypoint_index && waypoint_index.positive? && waypoint_index < rendered.length - 1 ?
+                                waypoint_index = closest_point_index(root_path, waypoint)
+                                waypoint_index && waypoint_index.positive? && waypoint_index < root_path.length - 1 ?
                                   [waypoint_index] : []
                               else
                                 []
@@ -196,11 +194,10 @@ module ULOL
           departure_directions = {}
           if protected_indices.any?
             normal = waypoint_departure_normal(transition)
-            rendered_normal = render_transition_vector(normal, render_snapshot) if normal
-            departure_directions[protected_indices.first] = rendered_normal if rendered_normal
+            departure_directions[protected_indices.first] = normal if normal
           end
           {
-            points: rendered,
+            points: root_path,
             protected_indices: protected_indices,
             departure_directions: departure_directions
           }
@@ -493,12 +490,27 @@ module ULOL
             return cached[:segments] if cached && cached[:fingerprint] == fingerprint
           end
 
-          segments = transition_curve_segments_from_input(transition, input)
+          root_segments = transition_curve_segments_from_input(transition, input)
+          segments = render_transition_segment_groups(root_segments, render_snapshot)
           if fingerprint
             @transition_render_segment_cache.clear if @transition_render_segment_cache.length > transition_render_cache_limit
             @transition_render_segment_cache[identity] = { fingerprint: fingerprint, segments: segments }
           end
           segments
+        end
+
+        def render_transition_segment_groups(root_segments, render_snapshot)
+          {
+            default: Array(root_segments[:default]).map do |point|
+              render_transition_point(point, render_snapshot)
+            end,
+            first: Array(root_segments[:first]).map do |point|
+              render_transition_point(point, render_snapshot)
+            end,
+            second: Array(root_segments[:second]).map do |point|
+              render_transition_point(point, render_snapshot)
+            end
+          }
         end
 
         def transition_render_fingerprint(input, context_key)
