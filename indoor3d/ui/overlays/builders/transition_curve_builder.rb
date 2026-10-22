@@ -51,6 +51,39 @@ module ULOL
           invalidate
         end
 
+        def invalidate_transitions(transitions)
+          Array(transitions).compact.each do |transition|
+            @dirty_root_transition_ids[transition_render_cache_identity(transition)] = true
+          end
+          invalidate_assembly unless @dirty_root_transition_ids.empty?
+          true
+        end
+
+        def remove_transitions(transition_ids)
+          Array(transition_ids).compact.each do |identity|
+            @root_segments_by_transition_id.delete(identity)
+            @world_segments_by_transition_id.delete(identity)
+            @dirty_root_transition_ids.delete(identity)
+          end
+          invalidate_assembly
+          true
+        end
+
+        def invalidate_world_transform
+          @world_transform_dirty = true
+          invalidate_assembly
+          true
+        end
+
+        def invalidate_assembly
+          @render_transition_line_points = nil
+          @render_transition_line_points_dirty = true
+          @assembly_dirty = true
+          @render_visible_transition_segments = []
+          clear_selection_batches
+          true
+        end
+
         def transition_line_points(excluded_cell_ids: nil)
           excluded_cells = transition_excluded_cell_lookup(excluded_cell_ids)
           exclusion_key = excluded_cells.keys.sort
@@ -85,11 +118,15 @@ module ULOL
         end
 
         def build_render_transition_line_points(excluded_cells = {})
+          prepare_transition_segment_caches
           points = []
           accepted = []
+          active_identities = {}
           render_snapshot = transition_render_context_snapshot
           context_key = render_snapshot&.[](:cache_key) || transition_render_context_cache_key
           @indoor_model.transitions.each do |transition|
+            identity = transition_render_cache_identity(transition)
+            active_identities[identity] = true
             next if transition_excluded?(transition, excluded_cells)
             next unless overlay_transition_visible?(transition)
 
@@ -110,7 +147,10 @@ module ULOL
             }
             accepted << entry
           end
+          prune_inactive_transition_segments(active_identities)
           @render_visible_transition_segments = accepted
+          @assembly_dirty = false
+          @full_cache_reset = false
           points
         end
 
@@ -483,20 +523,59 @@ module ULOL
 
         def cached_transition_render_segments(transition, context_key, render_snapshot)
           input = transition_curve_input(transition, render_snapshot)
-          fingerprint = transition_render_fingerprint(input, context_key)
+          root_fingerprint = transition_root_fingerprint(input)
           identity = transition_render_cache_identity(transition)
-          if fingerprint
-            cached = @transition_render_segment_cache[identity]
-            return cached[:segments] if cached && cached[:fingerprint] == fingerprint
+          root_entry = @root_segments_by_transition_id[identity]
+          if @dirty_root_transition_ids.delete(identity) || !root_entry ||
+             root_entry[:fingerprint] != root_fingerprint
+            root_entry = {
+              fingerprint: root_fingerprint,
+              segments: transition_curve_segments_from_input(transition, input)
+            }
+            @root_segments_by_transition_id[identity] = root_entry
+            @world_segments_by_transition_id.delete(identity)
           end
 
-          root_segments = transition_curve_segments_from_input(transition, input)
-          segments = render_transition_segment_groups(root_segments, render_snapshot)
-          if fingerprint
-            @transition_render_segment_cache.clear if @transition_render_segment_cache.length > transition_render_cache_limit
-            @transition_render_segment_cache[identity] = { fingerprint: fingerprint, segments: segments }
+          world_entry = @world_segments_by_transition_id[identity]
+          if !world_entry || world_entry[:context_key] != context_key ||
+             world_entry[:root_fingerprint] != root_entry[:fingerprint]
+            world_entry = {
+              context_key: context_key,
+              root_fingerprint: root_entry[:fingerprint],
+              segments: render_transition_segment_groups(root_entry[:segments], render_snapshot)
+            }
+            @world_segments_by_transition_id[identity] = world_entry
           end
-          segments
+          world_entry[:segments]
+        end
+
+        def prepare_transition_segment_caches
+          if @full_cache_reset
+            @root_segments_by_transition_id.clear
+            @world_segments_by_transition_id.clear
+            @dirty_root_transition_ids.clear
+          elsif @world_transform_dirty
+            @world_segments_by_transition_id.clear
+          end
+          @world_transform_dirty = false
+        end
+
+        def prune_inactive_transition_segments(active_identities)
+          @root_segments_by_transition_id.delete_if { |identity, _entry| !active_identities[identity] }
+          @world_segments_by_transition_id.delete_if { |identity, _entry| !active_identities[identity] }
+          @dirty_root_transition_ids.delete_if { |identity, _dirty| !active_identities[identity] }
+        end
+
+        def transition_root_fingerprint(input)
+          [
+            Array(input[:points]).map { |point| point_coordinates(point) },
+            Array(input[:protected_indices]),
+            Hash(input[:departure_directions] || {}).sort_by { |index, _direction| index }.map do |index, direction|
+              [index, point_coordinates(direction)]
+            end
+          ]
+        rescue StandardError
+          nil
         end
 
         def render_transition_segment_groups(root_segments, render_snapshot)
@@ -516,14 +595,7 @@ module ULOL
         def transition_render_fingerprint(input, context_key)
           return nil if context_key.nil?
 
-          [
-            context_key,
-            Array(input[:points]).map { |point| point_coordinates(point) },
-            Array(input[:protected_indices]),
-            Hash(input[:departure_directions] || {}).sort_by { |index, _direction| index }.map do |index, direction|
-              [index, point_coordinates(direction)]
-            end
-          ]
+          [context_key, transition_root_fingerprint(input)]
         rescue StandardError
           nil
         end

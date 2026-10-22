@@ -11,12 +11,13 @@ class TransitionCurveBuilderTest < Minitest::Test
                           :selected_waypoint_normal1, :selected_waypoint_normal2)
 
   class FakeModel
-    attr_accessor :transitions, :curve, :revisions, :state_visibility
+    attr_accessor :transitions, :curve, :curves, :revisions, :state_visibility
     attr_reader :route_snapshot_calls, :reference_curve_calls
 
     def initialize(transition)
       @transitions = [transition]
       @curve = nil
+      @curves = {}
       @revisions = {}
       @state_visibility = {}
       @route_snapshot_calls = []
@@ -25,7 +26,7 @@ class TransitionCurveBuilderTest < Minitest::Test
 
     def reference_transition_curve(first_cell_id, second_cell_id, _waypoint)
       @reference_curve_calls << [first_cell_id, second_cell_id]
-      @curve
+      @curves.fetch([first_cell_id, second_cell_id], @curve)
     end
 
     def reference_graph_route_snapshot_key_for(cell_id)
@@ -384,5 +385,38 @@ class TransitionCurveBuilderTest < Minitest::Test
     assert_equal [10.0, 14.0], xs(@builder.transition_line_points(excluded_cell_ids: ['A']))
     assert_equal [0.0, 4.0], xs(@builder.transition_line_points(excluded_cell_ids: ['C']))
     assert_equal [0.0, 4.0, 10.0, 14.0], xs(@builder.transition_line_points)
+  end
+
+  def test_invalidating_one_transition_replaces_only_its_segment_caches
+    other = Transition.new('T2', point(10), point(14), point(12), 'C', 'D', :state3, :state4)
+    @model.transitions = [@transition, other]
+    @model.curves[['A', 'B']] = [point(0), point(1), point(2), point(4)]
+    @model.curves[['C', 'D']] = [point(10), point(11), point(12), point(14)]
+    @builder.transition_line_points
+    roots_before = @builder.instance_variable_get(:@root_segments_by_transition_id).dup
+    worlds_before = @builder.instance_variable_get(:@world_segments_by_transition_id).dup
+
+    @builder.invalidate_transitions([@transition])
+    @builder.transition_line_points
+    roots_after = @builder.instance_variable_get(:@root_segments_by_transition_id)
+    worlds_after = @builder.instance_variable_get(:@world_segments_by_transition_id)
+
+    refute_same roots_before['T'], roots_after['T']
+    refute_same worlds_before['T'], worlds_after['T']
+    assert_same roots_before['T2'], roots_after['T2']
+    assert_same worlds_before['T2'], worlds_after['T2']
+  end
+
+  def test_removing_transition_drops_its_segment_caches_before_reassembly
+    @model.curve = [point(0), point(1), point(2), point(4)]
+    @builder.transition_line_points
+    assert @builder.instance_variable_get(:@root_segments_by_transition_id).key?('T')
+
+    @model.transitions = []
+    @builder.remove_transitions(['T'])
+
+    assert_empty @builder.transition_line_points
+    refute @builder.instance_variable_get(:@root_segments_by_transition_id).key?('T')
+    refute @builder.instance_variable_get(:@world_segments_by_transition_id).key?('T')
   end
 end
