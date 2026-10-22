@@ -44,6 +44,25 @@ module ULOL
           entity&.transformation || Geom::Transformation.new
         end
 
+        # Converts a World frame to the representation expected by
+        # Entity#transformation= in the current edit context. SketchUp exposes
+        # non-active children of an open root in World coordinates, while the
+        # same entity outside that context uses root-local coordinates.
+        def self.entity_transformation_from_world_under_root(entity, root_group, world_transformation)
+          return world_transformation unless root_group&.valid?
+
+          active_path = Sketchup.active_model&.active_path
+          if active_path&.include?(root_group) && active_path.last != entity
+            return world_transformation
+          end
+
+          root_transformation_in_model(root_group).inverse * world_transformation
+        rescue RootWorldTransformUnavailableError
+          raise
+        rescue StandardError
+          world_transformation
+        end
+
         def self.entity_world_transformation(entity)
           return entity.transformation unless entity&.valid?
 

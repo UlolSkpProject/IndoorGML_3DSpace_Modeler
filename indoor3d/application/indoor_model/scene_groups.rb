@@ -121,8 +121,10 @@ module ULOL
 
             cell_space_entity.make_unique if cell_space_entity.respond_to?(:make_unique)
 
-            root_world = Utils::Transformation.root_transformation_in_model(@primal_group)
-            old_world = root_world * cell_space_entity.transformation
+            old_world = Utils::Transformation.entity_world_transformation_under_root(
+              cell_space_entity,
+              @primal_group
+            )
             axes = dominant_vertical_face_axes(cell_space_entity, old_world)
             source = :dominant_vertical_face_normal
             unless axes
@@ -146,7 +148,11 @@ module ULOL
             definition_entities.transform_entities(geometry_transform, entities)
             set_group_transformation(
               cell_space_entity,
-              root_world.inverse * desired_world
+              Utils::Transformation.entity_transformation_from_world_under_root(
+                cell_space_entity,
+                @primal_group,
+                desired_world
+              )
             )
 
             IndoorCore::Logger.puts(
@@ -686,9 +692,18 @@ module ULOL
           def apply_cell_space_local_center(cell_space_entity, center)
             return center if center.distance(ORIGIN) <= 0.001
 
+            current_world = Utils::Transformation.entity_world_transformation_under_root(
+              cell_space_entity,
+              @primal_group
+            )
+            desired_world = current_world * Geom::Transformation.translation(center)
             set_group_transformation(
               cell_space_entity,
-              cell_space_entity.transformation * Geom::Transformation.translation(center)
+              Utils::Transformation.entity_transformation_from_world_under_root(
+                cell_space_entity,
+                @primal_group,
+                desired_world
+              )
             )
             cell_space_entity.definition.entities.transform_entities(
               Geom::Transformation.translation(center.vector_to(ORIGIN)),

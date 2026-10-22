@@ -128,6 +128,34 @@ class TransformationActivePathTest < Minitest::Test
     end
   end
 
+  def test_world_frame_is_converted_to_the_assignment_frame_for_each_edit_context
+    desired_world = Geom::Transformation.frame(900, -300, Math::PI / 8)
+
+    set_context(nil)
+    assert_frame(
+      @root_frame.inverse * desired_world,
+      Transform.entity_transformation_from_world_under_root(
+        @second, @primal, desired_world
+      )
+    )
+
+    set_context([@primal])
+    assert_frame(
+      desired_world,
+      Transform.entity_transformation_from_world_under_root(
+        @second, @primal, desired_world
+      )
+    )
+
+    set_context([@primal, @first])
+    assert_frame(
+      desired_world,
+      Transform.entity_transformation_from_world_under_root(
+        @second, @primal, desired_world
+      )
+    )
+  end
+
   private
 
   def set_context(path)
