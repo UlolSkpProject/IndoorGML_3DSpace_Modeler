@@ -114,6 +114,7 @@ module ULOL
           end
           unless activated
             @editing = false
+            @indoor_model.clear_dual_graph_selection_cache
             active_path_controller.reset_target
             @indoor_model.detach_edit_selection_observer(model)
             restore_validation_focus_rendering_options
@@ -152,7 +153,7 @@ module ULOL
             return false
           end
           defer_validation_focus_visibility
-          invalidate_overlay_transition_points
+          invalidate_overlay_transition_visibility
           selection_changed
           invalidate_view(Sketchup.active_model())
           true
@@ -180,6 +181,7 @@ module ULOL
             restore_validation_focus_visibility
             normalize_visibility_for_non_edit_mode
             @editing = false
+            @indoor_model.clear_dual_graph_selection_cache
             active_path_controller.reset_target
             reset_edit_mode_visibility_filter
             restore_validation_focus_rendering_options
@@ -217,7 +219,9 @@ module ULOL
         end
 
         def visible_storeys
-          visibility_controller.visible_storeys
+          return visibility_controller.visible_storeys if visibility_controller.storey_filter_active?
+
+          StoreyFilter.options_for(@indoor_model.cell_spaces).map { |option| option[:value] }
         end
 
         def visible_cell_type_labels
@@ -233,7 +237,7 @@ module ULOL
           )
           return true unless changed
 
-          invalidate_overlay_transition_points
+          invalidate_overlay_transition_visibility
           apply_edit_mode_visibility_filter
           selection_changed
           true
@@ -243,7 +247,7 @@ module ULOL
         end
 
         def refresh_visibility_filter
-          invalidate_overlay_transition_points
+          invalidate_overlay_transition_visibility
           validation_focus_active? ? apply_validation_focus_visibility : apply_edit_mode_visibility_filter
         end
 
@@ -309,7 +313,7 @@ module ULOL
             return false
           end
           update_validation_error_geometry(row_id)
-          invalidate_overlay_transition_points
+          invalidate_overlay_transition_visibility
           invalidate_view(Sketchup.active_model())
           zoom_validation_focus_highlight(row_id: row_id) unless row_id.to_s.empty?
           true
@@ -415,7 +419,7 @@ module ULOL
           apply_validation_focus_visibility
           overlay_controller.invalidate_validation_geometry_cache
           update_validation_error_geometry(validation_focus_controller.highlight_row_id)
-          invalidate_overlay_transition_points
+          invalidate_overlay_transition_visibility
           invalidate_view(Sketchup.active_model())
           true
         rescue StandardError => e
@@ -505,7 +509,7 @@ module ULOL
           validation_focus_controller.clear
           overlay_controller.clear_validation_geometry
           overlay_controller.invalidate_validation_geometry_cache
-          invalidate_overlay_transition_points
+          invalidate_overlay_transition_visibility
         end
 
         def update_validation_error_geometry(row_id)
@@ -568,7 +572,7 @@ module ULOL
           else
             active_path_controller.reconcile_after_runtime_restore(model, editing: @editing)
           end
-          invalidate_overlay_transition_points
+          clear_overlay_transition_cache
           selection_changed if @editing
           invalidate_view(model)
           true
@@ -582,9 +586,14 @@ module ULOL
         end
 
         def selection_changed
+          @indoor_model.refresh_dual_graph_selection_cache
           return unless @editing
 
+          overlay_controller.invalidate_transition_selection
           @dialog.update_selection(@indoor_model.selected_edit_mode_snapshot)
+          # Selection-only highlight passes must redraw without rebuilding
+          # State positions, Transition routes or Native Ref-Graphs.
+          invalidate_view(@indoor_model.model) if dual_overlay_visible?
         end
 
         def cleanup_before_quit
@@ -603,6 +612,7 @@ module ULOL
             restore_validation_focus_visibility
             normalize_visibility_for_non_edit_mode if restoring_edit_visibility
             @editing = false
+            @indoor_model.clear_dual_graph_selection_cache
             active_path_controller.reset
             restore_validation_focus_rendering_options
             reset_edit_mode_visibility_filter
@@ -615,7 +625,47 @@ module ULOL
         end
 
         def invalidate_overlay_transition_points
+          # Topology refresh can replace a CellSpace Group without triggering
+          # a SelectionObserver event. Reconcile its cached ownership here,
+          # not on camera redraw.
+          @indoor_model.refresh_dual_graph_selection_cache if @editing
           overlay_controller.invalidate_transition_points
+        end
+
+        def invalidate_overlay_primal_render_transform
+          overlay_controller.invalidate_primal_render_transform
+        end
+
+        def invalidate_overlay_transitions(transitions)
+          overlay_controller.invalidate_transitions(transitions)
+        end
+
+        def remove_overlay_transitions(transitions)
+          overlay_controller.remove_transitions(transitions)
+        end
+
+        def invalidate_overlay_transition_visibility
+          overlay_controller.invalidate_transition_visibility
+        end
+
+        def clear_overlay_transition_cache
+          overlay_controller.clear_transition_cache
+        end
+
+        def finish_overlay_transition_transform_preview(model = Sketchup.active_model, source: :commit)
+          changed = overlay_controller.finish_transition_transform_preview(source: source)
+          invalidate_view(model) if changed
+          changed
+        end
+
+        def begin_overlay_transition_topology_sync(cell_ids)
+          overlay_controller.begin_transition_topology_sync(cell_ids)
+        end
+
+        def complete_overlay_transition_topology_sync(cell_ids, model = Sketchup.active_model)
+          changed = overlay_controller.complete_transition_topology_sync(cell_ids)
+          invalidate_view(model) if changed
+          changed
         end
 
         private
@@ -760,7 +810,7 @@ module ULOL
               begin
                 if validation_focus_active?
                   apply_validation_focus_visibility
-                  invalidate_overlay_transition_points
+                  invalidate_overlay_transition_visibility
                   selection_changed
                   invalidate_view(Sketchup.active_model())
                 end
@@ -837,7 +887,7 @@ module ULOL
             geometry_visible: -> { geometry_visible? },
             with_unlocked: ->(entity, &block) { with_unlocked(entity, &block) },
             invalidate_view: ->(model) { invalidate_view(model) },
-            invalidate_overlay: -> { invalidate_overlay_transition_points }
+            invalidate_overlay: -> { invalidate_overlay_transition_visibility }
           )
         end
 

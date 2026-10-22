@@ -20,11 +20,25 @@ module ULOL
         end
 
         def onTransactionUndo(model)
+          finish_transition_transform_preview(model, source: :undo)
           handle_transaction_replayed(model, source: :undo)
         end
 
         def onTransactionRedo(model)
+          finish_transition_transform_preview(model, source: :redo)
           handle_transaction_replayed(model, source: :redo)
+        end
+
+        def onTransactionCommit(model)
+          finish_transition_transform_preview(model, source: :commit)
+        end
+
+        def onTransactionAbort(model)
+          finish_transition_transform_preview(model, source: :abort)
+        end
+
+        def onTransactionEmpty(model)
+          finish_transition_transform_preview(model, source: :empty)
         end
 
         def onDeleteModel(model)
@@ -46,6 +60,17 @@ module ULOL
         end
 
         private
+
+        def finish_transition_transform_preview(model, source:)
+          indoor_model = IndoorModel.for(model)
+          return unless indoor_model.respond_to?(:finish_overlay_transition_transform_preview)
+
+          indoor_model.finish_overlay_transition_transform_preview(model, source: source)
+        rescue StandardError => e
+          IndoorCore::Logger.puts(
+            "[IndoorGML] Transition transform #{source} handling failed: #{e.class}: #{e.message}"
+          )
+        end
 
         def handle_active_path_changed(model, source:)
           IndoorCore::Logger.puts "[IndoorGML] active path changed source=#{source}"

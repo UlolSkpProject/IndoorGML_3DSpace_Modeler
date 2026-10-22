@@ -4,95 +4,8 @@ module ULOL
   module Indoor3DGmlModeler
     module Utils
       module Geometry
-        def self.find_shell_inner_centroid(cell_space_entity, fixed_z: nil)
-          center = cell_space_entity.definition.bounds.center
-          faces = local_shell_faces(cell_space_entity)
-          raise ArgumentError, 'CellSpace shell has no analyzable faces' if faces.empty?
-
-          tolerance = SHELL_CENTER_TOLERANCE
-          if fixed_z
-            fixed_center = point_with_fixed_z(center, fixed_z)
-            if fixed_z_inside_bounds?(cell_space_entity.definition.bounds, fixed_z) &&
-               shell_contains_point?(faces, fixed_center, tolerance) &&
-               shell_distance(faces, fixed_center) > tolerance
-              return fixed_center
-            end
-
-            best_point, best_distance, best_divisions = adaptive_inner_sample(
-              faces,
-              cell_space_entity.definition.bounds,
-              tolerance,
-              fixed_z: fixed_z
-            )
-            unless best_point
-              best_point, = face_inset_inner_sample(
-                faces,
-                cell_space_entity.definition.bounds,
-                tolerance,
-                fixed_z: fixed_z
-              )
-              return best_point if best_point
-            end
-            return find_shell_inner_centroid(cell_space_entity) unless best_point
-
-            refined_point = refined_inner_sample(
-              faces,
-              cell_space_entity.definition.bounds,
-              best_point,
-              best_distance,
-              best_divisions,
-              SHELL_CENTER_REFINE_DIVISIONS,
-              tolerance,
-              fixed_z: fixed_z
-            ).first
-            return refined_point || best_point
-          end
-
-          return center if shell_contains_point?(faces, center, tolerance) && shell_distance(faces, center) > tolerance
-
-          best_point, best_distance, best_divisions = adaptive_inner_sample(
-            faces,
-            cell_space_entity.definition.bounds,
-            tolerance
-          )
-          unless best_point
-            best_point, = face_inset_inner_sample(
-              faces,
-              cell_space_entity.definition.bounds,
-              tolerance
-            )
-            return best_point if best_point
-
-            raise ArgumentError, 'Unable to locate a verified point inside the CellSpace shell'
-          end
-
-          refined_point = refined_inner_sample(
-            faces,
-            cell_space_entity.definition.bounds,
-            best_point,
-            best_distance,
-            best_divisions,
-            SHELL_CENTER_REFINE_DIVISIONS,
-            tolerance
-          ).first
-          refined_point || best_point
-        rescue StandardError => e
-          if defined?(IndoorCore::Logger)
-            IndoorCore::Logger.puts "[IndoorGML] Shell inner centroid failed: #{e.class}: #{e.message}"
-          end
-          raise
-        end
-
-        #=============================================================================================================#
-
-        def self.local_shell_faces(entity)
-          return [] unless entity&.valid?
-          return [] unless entity.respond_to?(:definition) && entity.definition&.valid?
-
-          shell_face_records(entity.definition.entities.grep(Sketchup::Face))
-        end
-        private_class_method :local_shell_faces
-
+        # Retained for source-shell classification. State interior-point search is
+        # Native-only and is not implemented in Ruby.
         def self.shell_contains_point_in_faces?(faces, point, tolerance = SHELL_CENTER_TOLERANCE)
           records = shell_face_records(faces)
           return false if records.empty?
@@ -114,17 +27,13 @@ module ULOL
             inners = loops.reject { |loop| loop == outer || loop.length < 3 }
             axis = dominant_axis(normal)
             {
-              face: face,
-              outer: outer,
-              inners: inners,
-              loops: loops.select { |loop| loop.length >= 2 },
               outer_2d: outer.map { |vertex| project_point_for_axis(vertex, axis) },
               inners_2d: inners.map do |loop|
                 loop.map { |vertex| project_point_for_axis(vertex, axis) }
               end,
-              loop_edges: loops.select { |loop| loop.length >= 2 }
-                               .flat_map { |loop| loop_edges(loop) },
-              ray_denominators: ray_directions.map { |direction| dot_product(normal, direction) },
+              ray_denominators: ray_directions.map do |direction|
+                dot_product(normal, direction)
+              end,
               normal: normal,
               plane_point: outer.first,
               axis: axis
@@ -151,7 +60,6 @@ module ULOL
             remaining = directions.length - index - 1
             return false if inside_votes + remaining < required_votes
           end
-
           false
         end
         private_class_method :shell_contains_point?
@@ -187,7 +95,8 @@ module ULOL
                         end
           return nil if denominator.abs <= tolerance
 
-          distance = dot_product(point.vector_to(face[:plane_point]), face[:normal]) / denominator
+          distance =
+            dot_product(point.vector_to(face[:plane_point]), face[:normal]) / denominator
           return nil if distance <= tolerance
 
           hit = offset_point(point, direction, distance)
@@ -209,215 +118,12 @@ module ULOL
             write_index += 1
             last_distance = distance
           end
-          distances.slice!(write_index, distances.length - write_index) if write_index < distances.length
+          if write_index < distances.length
+            distances.slice!(write_index, distances.length - write_index)
+          end
           distances
         end
         private_class_method :unique_sorted_distances
-
-        def self.best_inner_sample(faces, bounds, divisions, tolerance, fixed_z: nil)
-          best_inner_point(
-            faces,
-            shell_sample_points(bounds.min, bounds.max, divisions, include_edges: false, fixed_z: fixed_z),
-            tolerance
-          )
-        end
-        private_class_method :best_inner_sample
-
-        def self.adaptive_inner_sample(faces, bounds, tolerance, fixed_z: nil)
-          SHELL_CENTER_ADAPTIVE_DIVISIONS.each do |divisions|
-            point, distance = best_inner_sample(
-              faces,
-              bounds,
-              divisions,
-              tolerance,
-              fixed_z: fixed_z
-            )
-            return [point, distance, divisions] if point
-          end
-
-          [nil, nil, nil]
-        end
-        private_class_method :adaptive_inner_sample
-
-        # Axis-aligned grids can miss a narrow or oblique concave volume even
-        # when SketchUp reports a valid manifold solid. A triangle centroid is
-        # guaranteed to lie on its source face, so testing short offsets on both
-        # sides gives us verified candidates without trusting face orientation.
-        def self.face_inset_inner_sample(faces, bounds, tolerance, fixed_z: nil)
-          best_point = nil
-          best_distance = -Float::INFINITY
-          offsets = face_inset_offsets(bounds, tolerance)
-
-          faces.each do |face|
-            source_face = face[:face]
-            next unless source_face&.valid?
-
-            normal = source_face.normal
-            next unless normal&.valid? && normal.length > tolerance
-
-            normal = normal.clone
-            normal.normalize!
-            face_triangle_centers(source_face).each do |center|
-              offsets.each do |offset|
-                [offset, -offset].each do |signed_offset|
-                  point = offset_point(center, normal, signed_offset)
-                  point = point_with_fixed_z(point, fixed_z) if fixed_z
-                  next unless shell_contains_point?(faces, point, tolerance)
-
-                  distance = shell_distance(faces, point)
-                  next if distance <= tolerance || distance <= best_distance
-
-                  best_point = point
-                  best_distance = distance
-                end
-              end
-            end
-          end
-
-          [best_point, best_distance]
-        rescue StandardError => e
-          IndoorCore::Logger.puts "[IndoorGML] Face-inset inner sample failed: #{e.class}: #{e.message}" if defined?(IndoorCore::Logger)
-          [nil, nil]
-        end
-        private_class_method :face_inset_inner_sample
-
-        def self.face_inset_offsets(bounds, tolerance)
-          extents = [bounds.width, bounds.height, bounds.depth].map(&:to_f).select { |value| value > tolerance }
-          scale = extents.min || tolerance
-          [
-            tolerance * 10.0,
-            scale * 0.001,
-            scale * 0.005,
-            scale * 0.01,
-            scale * 0.02,
-            scale * 0.05,
-            scale * 0.10,
-            scale * 0.20
-          ].select { |value| value > tolerance }.uniq.sort
-        end
-        private_class_method :face_inset_offsets
-
-        def self.face_triangle_centers(face)
-          mesh = face.mesh(0)
-          mesh.polygons.filter_map do |polygon|
-            points = polygon.first(3).map { |index| mesh.point_at(index.abs) }
-            next if points.length < 3 || points.any?(&:nil?)
-
-            Geom::Point3d.new(
-              points.sum(&:x) / 3.0,
-              points.sum(&:y) / 3.0,
-              points.sum(&:z) / 3.0
-            )
-          end
-        end
-        private_class_method :face_triangle_centers
-
-        def self.refined_inner_sample(faces, bounds, point, distance, coarse_divisions, refine_divisions, tolerance, fixed_z: nil)
-          step = shell_sample_step(bounds, coarse_divisions)
-          min_point = clamp_point_to_bounds(
-            Geom::Point3d.new(point.x - step.x, point.y - step.y, point.z - step.z),
-            bounds
-          )
-          max_point = clamp_point_to_bounds(
-            Geom::Point3d.new(point.x + step.x, point.y + step.y, point.z + step.z),
-            bounds
-          )
-          best_inner_point(
-            faces,
-            shell_sample_points(min_point, max_point, refine_divisions, include_edges: true, fixed_z: fixed_z),
-            tolerance,
-            point,
-            distance
-          )
-        end
-        private_class_method :refined_inner_sample
-
-        def self.best_inner_point(faces, points, tolerance, initial_point = nil, initial_distance = nil)
-          best_point = initial_point
-          best_distance = initial_distance || -Float::INFINITY
-          points.each do |point|
-            next unless shell_contains_point?(faces, point, tolerance)
-
-            distance = shell_distance(faces, point)
-            next if distance <= tolerance || distance <= best_distance
-
-            best_point = point
-            best_distance = distance
-          end
-          [best_point, best_distance]
-        end
-        private_class_method :best_inner_point
-
-        def self.shell_sample_points(min_point, max_point, divisions, include_edges:, fixed_z: nil)
-          return [] if fixed_z && (fixed_z < min_point.z || fixed_z > max_point.z)
-
-          ranges = [:x, :y, :z].map do |axis|
-            min = min_point.public_send(axis).to_f
-            max = max_point.public_send(axis).to_f
-            next [fixed_z.to_f] if axis == :z && fixed_z
-
-            if include_edges
-              (0..divisions).map { |index| min + ((max - min) * index / divisions.to_f) }
-            else
-              (1..divisions).map { |index| min + ((max - min) * index / (divisions + 1).to_f) }
-            end
-          end
-
-          ranges[0].product(ranges[1], ranges[2]).map { |x, y, z| Geom::Point3d.new(x, y, z) }
-        end
-        private_class_method :shell_sample_points
-
-        def self.point_with_fixed_z(point, fixed_z)
-          Geom::Point3d.new(point.x, point.y, fixed_z)
-        end
-        private_class_method :point_with_fixed_z
-
-        def self.fixed_z_inside_bounds?(bounds, fixed_z)
-          fixed_z >= bounds.min.z && fixed_z <= bounds.max.z
-        end
-        private_class_method :fixed_z_inside_bounds?
-
-        def self.shell_sample_step(bounds, divisions)
-          Geom::Vector3d.new(
-            (bounds.max.x - bounds.min.x).to_f / (divisions + 1).to_f,
-            (bounds.max.y - bounds.min.y).to_f / (divisions + 1).to_f,
-            (bounds.max.z - bounds.min.z).to_f / (divisions + 1).to_f
-          )
-        end
-        private_class_method :shell_sample_step
-
-        def self.clamp_point_to_bounds(point, bounds)
-          Geom::Point3d.new(
-            [[point.x, bounds.min.x].max, bounds.max.x].min,
-            [[point.y, bounds.min.y].max, bounds.max.y].min,
-            [[point.z, bounds.min.z].max, bounds.max.z].min
-          )
-        end
-        private_class_method :clamp_point_to_bounds
-
-        def self.shell_distance(faces, point)
-          minimum = nil
-          faces.each do |face|
-            distance = point_to_face_distance(point, face)
-            minimum = distance if minimum.nil? || distance < minimum
-          end
-          minimum || 0.0
-        end
-        private_class_method :shell_distance
-
-        def self.point_to_face_distance(point, face)
-          signed_distance = dot_product(face[:plane_point].vector_to(point), face[:normal])
-          projected = offset_point(point, face[:normal], -signed_distance)
-          return signed_distance.abs if point_in_face_region?(projected, face, SHELL_CENTER_TOLERANCE)
-
-          minimum = nil
-          face[:loop_edges].each do |edge_start, edge_end|
-            distance = point_to_segment_distance(point, edge_start, edge_end)
-            minimum = distance if minimum.nil? || distance < minimum
-          end
-          minimum || signed_distance.abs
-        end
-        private_class_method :point_to_face_distance
 
         def self.point_in_face_region?(point, face, tolerance)
           point_2d = project_point_for_axis(point, face[:axis])
@@ -431,31 +137,12 @@ module ULOL
 
         def self.project_point_for_axis(point, axis)
           case axis
-          when :x
-            [point.y.to_f, point.z.to_f]
-          when :y
-            [point.x.to_f, point.z.to_f]
-          else
-            [point.x.to_f, point.y.to_f]
+          when :x then [point.y.to_f, point.z.to_f]
+          when :y then [point.x.to_f, point.z.to_f]
+          else [point.x.to_f, point.y.to_f]
           end
         end
         private_class_method :project_point_for_axis
-
-        def self.loop_edges(loop)
-          loop.each_index.map { |index| [loop[index], loop[(index + 1) % loop.length]] }
-        end
-        private_class_method :loop_edges
-
-        def self.point_to_segment_distance(point, segment_start, segment_end)
-          segment = segment_start.vector_to(segment_end)
-          length_squared = dot_product(segment, segment)
-          return point.distance(segment_start) if length_squared <= 0.000001
-
-          ratio = dot_product(segment_start.vector_to(point), segment) / length_squared
-          ratio = [[ratio, 0.0].max, 1.0].min
-          point.distance(offset_point(segment_start, segment, ratio))
-        end
-        private_class_method :point_to_segment_distance
 
         def self.offset_point(point, direction, distance)
           Geom::Point3d.new(

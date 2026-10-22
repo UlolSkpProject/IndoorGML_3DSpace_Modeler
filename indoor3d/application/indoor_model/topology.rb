@@ -53,6 +53,7 @@ module ULOL
 
             cell_spaces = validation_focus_highlight_cell_spaces
             metrics = topology_coordinator.synchronize_within(cell_spaces)
+            complete_overlay_transition_topology_sync(cell_spaces.map(&:id))
             mark_validation_focus_topology_dirty
             metrics
           rescue StandardError => e
@@ -96,6 +97,7 @@ module ULOL
             if validation_focus_row_local_topology_sync?
               mark_validation_focus_topology_dirty
               if @editor_session.validation_focus_highlight_row_include_cell?(cell_space)
+                begin_overlay_transition_topology_sync([cell_space.id])
                 synchronize_validation_focus_row_topology
               end
               return
@@ -104,6 +106,7 @@ module ULOL
             entity = cell_space.valid_sketchup_group
             return unless entity
 
+            begin_overlay_transition_topology_sync([cell_space.id])
             dirty_topology_queue.mark(entity.persistent_id)
             schedule_dirty_cell_space_sync
           rescue StandardError => e
@@ -143,24 +146,35 @@ module ULOL
             dirty_topology_queue.unschedule!
             return if pids.empty?
 
-            processing_index = nil
+            # Build one dirty set, then serialize the entire eligible geometry
+            # once. Native marks every dirty index in the same load_batch.
+            resolved_cells = pids.filter_map do |persistent_id|
+              @feature_registry.find_cell_space_by_persistent_id(persistent_id)
+            end.uniq
+            dirty_cells = resolved_cells.select do |cell_space|
+              cell_space&.valid? && cell_space.duality_state&.valid?
+            end
+            if dirty_cells.empty?
+              complete_overlay_transition_topology_sync(resolved_cells.map(&:id))
+              return
+            end
+
             with_transparent_cell_space_operation('IndoorGML Dirty CellSpace Sync') do
               sync do
-                pids.each_with_index do |persistent_id, index|
-                  processing_index = index
-                  cell_space = @feature_registry.find_cell_space_by_persistent_id(persistent_id)
-                  next unless cell_space&.valid?
-
-                  synchronize_adjacency_and_transitions_for_cell_space(cell_space)
+                topology_coordinator.synchronize_dirty(dirty_cells)
+                dirty_cells.each do |cell_space|
                   remember_cell_space_change_snapshot(cell_space.sketchup_group)
                 end
               end
             end
-            processing_index = nil
+            complete_overlay_transition_topology_sync(dirty_cells.map(&:id))
             Sketchup.active_model.active_view.invalidate if Sketchup.active_model&.active_view
             invalidate_overlay_transition_points
           rescue StandardError => e
-            requeue_dirty_cell_space_pids(pids, processing_index)
+            # A batch can fail after an individual Transition was applied.
+            # Retrying the entire dirty set restores consistency, rather than
+            # discarding partially processed cells.
+            requeue_dirty_cell_space_pids(pids, nil)
             dirty_topology_queue.unschedule!
             schedule_dirty_cell_space_sync unless dirty_topology_queue.empty?
             IndoorCore::Logger.puts "[IndoorGML] Dirty CellSpace sync failed: #{e.class}: #{e.message}"
@@ -215,7 +229,13 @@ module ULOL
 
             pair_key = cell_pair_key(cell1, cell2)
             transition = @feature_registry.transition_for_pair(pair_key)
-            unless transition&.valid?
+            if transition && !transition_current_for_pair?(transition, cell1, cell2)
+              # A State can remain valid after its CellSpace replaces the
+              # duality object. Discard all stale backlinks before rebuilding.
+              erase_transition(transition)
+              transition = nil
+            end
+            unless transition
               transition = Transition.new(
                 cell1.duality_state,
                 cell2.duality_state,
@@ -230,8 +250,24 @@ module ULOL
 
             register_transition_with_states(transition)
             write_transition_attributes(transition)
-            invalidate_overlay_transition_points
+            invalidate_overlay_transitions([transition])
             transition
+          end
+
+          # The same CellSpace pair may be passed in reverse order. Object
+          # identity, rather than matching feature IDs or State#valid?, is the
+          # necessary condition for reusing a Transition after State restore.
+          def transition_current_for_pair?(transition, cell1, cell2)
+            return false unless transition.valid?
+
+            (transition.cell1.equal?(cell1) &&
+             transition.cell2.equal?(cell2) &&
+             transition.state1.equal?(cell1.duality_state) &&
+             transition.state2.equal?(cell2.duality_state)) ||
+              (transition.cell1.equal?(cell2) &&
+               transition.cell2.equal?(cell1) &&
+               transition.state1.equal?(cell2.duality_state) &&
+               transition.state2.equal?(cell1.duality_state))
           end
 
           def erase_transition_for_pair_key(pair_key)
@@ -239,16 +275,15 @@ module ULOL
             return if transition.nil?
 
             erase_transition(transition)
-            @feature_registry.delete_adjacent_pair(pair_key)
           end
 
           def erase_transition(transition)
             return if transition.nil?
 
+            remove_overlay_transitions([transition])
             unregister_transition_from_states(transition)
             transition.erase!
             @feature_registry.remove_transition(transition)
-            invalidate_overlay_transition_points
           end
 
           def cell_pair_key(cell1, cell2)
@@ -284,10 +319,7 @@ module ULOL
 
             @transitions.select { |transition| transition.connected_to?(state) }.each do |transition|
               pair_key = transition_cell_pair_key(transition)
-              if pair_key
-                @feature_registry.delete_transition_for_pair(pair_key)
-                @feature_registry.delete_adjacent_pair(pair_key)
-              end
+              @feature_registry.delete_transition_for_pair(pair_key) if pair_key
               erase_transition(transition)
             end
           end
@@ -322,6 +354,8 @@ module ULOL
               transition.cell2.sketchup_group,
               state1_point: state_root_local_position(transition.state1),
               state2_point: state_root_local_position(transition.state2),
+              cell1_id: transition.cell1_id,
+              cell2_id: transition.cell2_id,
               transformation1: cell_space_root_local_transformation(transition.cell1),
               transformation2: cell_space_root_local_transformation(transition.cell2)
             )
@@ -414,7 +448,11 @@ module ULOL
 
             pair_key = cell_pair_key(cell1, cell2)
             transition = @feature_registry.transition_for_pair(pair_key)
-            unless transition&.valid?
+            if transition && !transition_current_for_pair?(transition, cell1, cell2)
+              erase_runtime_transition_for_pair_key(pair_key)
+              transition = nil
+            end
+            unless transition
               transition = Transition.new(
                 cell1.duality_state,
                 cell2.duality_state,
@@ -438,7 +476,6 @@ module ULOL
             unregister_runtime_transition_from_states(transition)
             transition.erase!
             @feature_registry.remove_transition(transition)
-            @feature_registry.delete_adjacent_pair(pair_key)
           end
 
           def register_runtime_transition_with_states(transition)

@@ -13,7 +13,6 @@ module ULOL
 
         require_relative 'cell_space_lifecycle_service'
         require_relative 'cell_space_conversion'
-        require_relative 'cell_space_logging_policy'
         require_relative 'topology_coordinator'
         require_relative 'indoor_model/runtime_support.rb'
         require_relative 'indoor_model/scene_groups.rb'
@@ -23,7 +22,6 @@ module ULOL
         require_relative 'indoor_model/observer_routing.rb'
         require_relative 'indoor_model/entity_relocation.rb'
         require_relative 'indoor_model/primal_normalization.rb'
-        require_relative 'indoor_model/local_vertex_normalization.rb'
         require_relative 'indoor_model/local_grid_coordinate.rb'
         require_relative 'indoor_model/local_grid_geometry_close.rb'
         require_relative 'indoor_model/local_grid_runtime_dispatch.rb'
@@ -41,7 +39,6 @@ module ULOL
         include ObserverRouting
         include EntityRelocation
         include PrimalNormalization
-        include LocalVertexNormalization
         include LocalGridCoordinate
         include EditorControl
         include CellSpaceBatchLifecycle
@@ -84,10 +81,14 @@ module ULOL
 
         def cleanup_for_model_close
           IndoorGmlConverter::Val3dityRunner.terminate_for_model(@model, wait_ms: 0)
+          NativeAdjacencyBridge.erase_reference_graphs(
+            Array(@feature_registry&.cell_spaces).map(&:id)
+          ) if defined?(NativeAdjacencyBridge)
           @editor_session.close_dialog_only()
           detach_edit_selection_observer(@model)
           clear_transaction_replay! if respond_to?(:clear_transaction_replay!)
           reset_runtime_collections
+          @debug_reference_graph_overlay_by_cell_id&.clear
           @cell_space_observed_ids.clear
           @space_features_observed_ids.clear
           @selection_observed_model_id = nil
@@ -113,6 +114,7 @@ module ULOL
           @space_features_change_snapshots = {}
           @selection_observed_model_id = nil
           @entities_observed_ids = {}
+          @debug_reference_graph_overlay_by_cell_id = {}
           @syncing = false
           @erasing = false
           @relocating_entity = false

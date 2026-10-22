@@ -22,9 +22,7 @@ module ULOL
           @cell_spaces_by_persistent_id = {}
           @cell_spaces_by_entity_id_for_removed_callback = {}
           @cell_spaces_by_normalized_id = {}
-          @adjacent_cell_space_pairs = {}
           @transitions_by_cell_pair = {}
-          @adjacent_pair_keys_by_cell_id = {}
           @transition_pair_keys_by_cell_id = {}
           @features_by_id = {}
         end
@@ -37,7 +35,6 @@ module ULOL
             cell_spaces_by_entity_object: @cell_spaces_by_entity_object.dup,
             cell_spaces_by_persistent_id: @cell_spaces_by_persistent_id.dup,
             cell_spaces_by_entity_id_for_removed_callback: @cell_spaces_by_entity_id_for_removed_callback.dup,
-            adjacent_cell_space_pairs: @adjacent_cell_space_pairs.dup,
             transitions_by_cell_pair: @transitions_by_cell_pair.dup
           }
         end
@@ -49,10 +46,9 @@ module ULOL
           @cell_spaces_by_entity_object = Hash(snapshot[:cell_spaces_by_entity_object]).dup
           @cell_spaces_by_persistent_id = Hash(snapshot[:cell_spaces_by_persistent_id]).dup
           @cell_spaces_by_entity_id_for_removed_callback = Hash(snapshot[:cell_spaces_by_entity_id_for_removed_callback]).dup
-          @adjacent_cell_space_pairs = Hash(snapshot[:adjacent_cell_space_pairs]).dup
           @transitions_by_cell_pair = Hash(snapshot[:transitions_by_cell_pair]).dup
           rebuild_cell_space_normalized_id_index
-          rebuild_pair_key_indexes
+          rebuild_transition_pair_key_index
           rebuild_feature_id_index
         end
 
@@ -162,29 +158,6 @@ module ULOL
           Hash(@transition_pair_keys_by_cell_id[cell_id.to_s]).keys
         end
 
-        def set_adjacent_pair(pair_key, cell1, cell2)
-          @adjacent_cell_space_pairs[pair_key] = [cell1, cell2]
-          index_pair_key(@adjacent_pair_keys_by_cell_id, pair_key)
-        end
-
-        def delete_adjacent_pair(pair_key)
-          pair = @adjacent_cell_space_pairs.delete(pair_key)
-          unindex_pair_key(@adjacent_pair_keys_by_cell_id, pair_key) if pair
-          pair
-        end
-
-        def adjacent_pair_keys
-          @adjacent_cell_space_pairs.keys
-        end
-
-        def adjacent_pair?(pair_key)
-          @adjacent_cell_space_pairs.key?(pair_key)
-        end
-
-        def adjacent_pair_keys_for_cell(cell_id)
-          Hash(@adjacent_pair_keys_by_cell_id[cell_id.to_s]).keys
-        end
-
         def feature_id_in_use?(id, excluding: nil)
           id = id.to_s
           return false if id.empty?
@@ -227,12 +200,8 @@ module ULOL
                .sub(/\Acell_/, '')
         end
 
-        def rebuild_pair_key_indexes
-          @adjacent_pair_keys_by_cell_id = {}
+        def rebuild_transition_pair_key_index
           @transition_pair_keys_by_cell_id = {}
-          @adjacent_cell_space_pairs.each_key do |pair_key|
-            index_pair_key(@adjacent_pair_keys_by_cell_id, pair_key)
-          end
           @transitions_by_cell_pair.each_key do |pair_key|
             index_pair_key(@transition_pair_keys_by_cell_id, pair_key)
           end

@@ -8,27 +8,36 @@ module ULOL
           def initialize
             @visible_storeys = []
             @visible_cell_types = []
+            @storey_filter_active = false
             @cell_space_render_visibility = {}
           end
 
           attr_reader :visible_storeys, :visible_cell_types
 
+          def storey_filter_active?
+            @storey_filter_active
+          end
+
           def set_filter(storeys:, cell_types:)
             next_storeys = Array(storeys).dup
             next_cell_types = Array(cell_types).dup
-            changed = @visible_storeys != next_storeys || @visible_cell_types != next_cell_types
+            changed = !@storey_filter_active ||
+                      @visible_storeys != next_storeys ||
+                      @visible_cell_types != next_cell_types
             @visible_storeys = next_storeys
             @visible_cell_types = next_cell_types
+            @storey_filter_active = true
             changed
           end
 
           def filter_active?
-            @visible_storeys.any? || @visible_cell_types.any?
+            @storey_filter_active || @visible_cell_types.any?
           end
 
           def reset_filter
             @visible_storeys = []
             @visible_cell_types = []
+            @storey_filter_active = false
             @cell_space_render_visibility = {}
           end
 

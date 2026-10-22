@@ -74,7 +74,6 @@ module ULOL
             erase_transitions_for_demotion_batch(plan[:transitions])
             erase_states_for_demotion_batch(plan[:states])
             unregister_cell_spaces_for_demotion_batch(plan[:cell_spaces])
-            erase_adjacency_for_demotion_batch(plan[:cell_spaces])
             clear_indoor_attributes_for_demotion_batch(plan[:groups])
             cleanup_demoted_group_runtime_tracking_batch(plan[:groups])
           end
@@ -89,10 +88,7 @@ module ULOL
           def erase_transitions_for_demotion_batch(transitions)
             Array(transitions).each do |transition|
               pair_key = transition_cell_pair_key(transition)
-              if pair_key
-                @feature_registry.delete_transition_for_pair(pair_key)
-                @feature_registry.delete_adjacent_pair(pair_key)
-              end
+              @feature_registry.delete_transition_for_pair(pair_key) if pair_key
               erase_transition(transition)
             end
           end
@@ -105,15 +101,13 @@ module ULOL
           end
 
           def unregister_cell_spaces_for_demotion_batch(cell_spaces)
-            Array(cell_spaces).each { |cell_space| unregister_cell_space(cell_space) }
-          end
-
-          # This only removes adjacency records involving the demoted cells. It
-          # never runs adjacency discovery or topology synchronization.
-          def erase_adjacency_for_demotion_batch(cell_spaces)
-            Array(cell_spaces).each do |cell_space|
-              erase_adjacency_for_cell_space(cell_space)
-            end
+            targets = Array(cell_spaces)
+            NativeAdjacencyBridge.erase_reference_graphs(targets.map(&:id)) if
+              defined?(NativeAdjacencyBridge)
+            @erasing_native_reference_graph_batch = true
+            targets.each { |cell_space| unregister_cell_space(cell_space) }
+          ensure
+            @erasing_native_reference_graph_batch = false
           end
 
           # Attribute cleanup intentionally runs after Transition/State removal.

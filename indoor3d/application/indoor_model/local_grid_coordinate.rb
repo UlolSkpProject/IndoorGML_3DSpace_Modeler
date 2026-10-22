@@ -104,7 +104,7 @@ module ULOL
                   apply_initial_cell_space_materials if initial_model_load
                   rebuild_runtime_transitions_from_cell_adjacency
                 end
-                invalidate_overlay_transition_points
+                clear_overlay_transition_cache
                 apply_indoor_lock_policy
                 @editor_session.apply_display_state
                 IndoorCore::Logger.puts(
@@ -156,8 +156,6 @@ module ULOL
           #   1. decide/apply the final local frame;
           #   2. recenter using a translation snapped to the 0.001 mm grid.
           #
-          # LVN is optional functionality and must only run through its explicit
-          # console/API entrypoint.
           def initialize_cell_space_coordinates_local_grid(cell_space)
             raise ArgumentError, 'CellSpace is invalid during Local Grid initialization' unless cell_space&.valid?
 
@@ -174,7 +172,7 @@ module ULOL
 
           # Refresh policy:
           # - evaluate/apply the local frame;
-          # - recenter without implicitly invoking optional LVN.
+          # - recenter the geometry in the local frame.
           def refresh_cell_space_coordinates_local_grid(cell_space)
             return false unless cell_space&.valid?
 
@@ -282,40 +280,66 @@ module ULOL
             true
           end
 
-          def recenter_cell_space_geometry_local_grid(
-            cell_space_entity,
-            fixed_z_offset_from_bottom: nil
+          def apply_native_state_parent_point_local_grid(
+            cell_space,
+            coordinates,
+            frame_report: nil
           )
-            fixed_z = if fixed_z_offset_from_bottom.nil?
-                        nil
-                      else
-                        fixed_local_z_from_world_offset(
-                          cell_space_entity,
-                          fixed_z_offset_from_bottom
-                        )
-                      end
-            raw_center = Utils::Geometry.find_shell_inner_centroid(
-              cell_space_entity,
-              fixed_z: fixed_z
-            )
-            return local_grid_recenter_report(false, raw_center, raw_center) if
-              raw_center.distance(ORIGIN) <= 0.001
+            group = cell_space&.sketchup_group
+            raise ArgumentError, 'CellSpace is invalid during Local Grid Native State apply' unless
+              cell_space&.valid? && group&.valid?
 
+            values = Array(coordinates).map(&:to_f)
+            unless values.length == 3 && values.all?(&:finite?)
+              raise ArgumentError, 'Native State point must contain 3 finite coordinates'
+            end
+
+            parent_point = Geom::Point3d.new(values[0], values[1], values[2])
+            raw_center = parent_point.transform(group.transformation.inverse)
             snapped_center = snap_local_grid_point(
               raw_center,
               LOCAL_GRID_TOLERANCE_MM
             )
+            applied = snapped_center.distance(ORIGIN) > 0.001
+            apply_cell_space_local_center(group, snapped_center) if applied
+            remember_cell_space_change_snapshot(group)
 
-            set_group_transformation(
+            recenter_report = local_grid_recenter_report(
+              applied,
+              raw_center,
+              snapped_center
+            )
+            log_local_grid_coordinate_report(
+              cell_space,
+              frame_report || local_grid_frame_report(false, false, nil, nil),
+              recenter_report,
+              normalized: :unchecked
+            )
+            snapped_center
+          end
+
+          def recenter_cell_space_geometry_local_grid(
+            cell_space_entity,
+            fixed_z_offset_from_bottom: nil
+          )
+            raw_center = nil
+            snapped_center = nil
+            applied = false
+            native_state_local_point_for_entity(
               cell_space_entity,
-              cell_space_entity.transformation * Geom::Transformation.translation(snapped_center)
-            )
-            cell_space_entity.definition.entities.transform_entities(
-              Geom::Transformation.translation(snapped_center.vector_to(ORIGIN)),
-              cell_space_entity.definition.entities.to_a
-            )
+              fixed_z_offset_from_bottom: fixed_z_offset_from_bottom
+            ) do |center|
+              raw_center = center
+              snapped_center = if center.distance(ORIGIN) <= 0.001
+                                 center
+                               else
+                                 snap_local_grid_point(center, LOCAL_GRID_TOLERANCE_MM)
+                               end
+              applied = snapped_center.distance(ORIGIN) > 0.001
+              apply_cell_space_local_center(cell_space_entity, snapped_center) if applied
+            end
 
-            local_grid_recenter_report(true, raw_center, snapped_center)
+            local_grid_recenter_report(applied, raw_center, snapped_center)
           end
 
           def local_grid_recenter_report(applied, raw_center, snapped_center)

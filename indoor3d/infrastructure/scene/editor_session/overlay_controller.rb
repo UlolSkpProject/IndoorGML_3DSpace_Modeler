@@ -131,6 +131,69 @@ module ULOL
             IndoorCore::Logger.puts "[IndoorGML] Overlay transition cache invalidation failed: #{e.class}: #{e.message}"
           end
 
+          def invalidate_primal_render_transform
+            @space_overlay&.invalidate_primal_render_transform
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Overlay Primal transform invalidation failed: #{e.class}: #{e.message}"
+          end
+
+          def invalidate_transitions(transitions)
+            @space_overlay&.invalidate_transitions(transitions)
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Overlay Transition invalidation failed: #{e.class}: #{e.message}"
+          end
+
+          def remove_transitions(transitions)
+            @space_overlay&.remove_transitions(transitions)
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Overlay Transition removal failed: #{e.class}: #{e.message}"
+          end
+
+          def invalidate_transition_visibility
+            @space_overlay&.invalidate_transition_visibility
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Overlay visibility invalidation failed: #{e.class}: #{e.message}"
+          end
+
+          def invalidate_transition_selection
+            @space_overlay&.invalidate_transition_selection
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Overlay selection invalidation failed: #{e.class}: #{e.message}"
+          end
+
+          def clear_transition_cache
+            @space_overlay&.clear_transition_cache
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Overlay Transition cache reset failed: #{e.class}: #{e.message}"
+          end
+
+          def finish_transition_transform_preview(source: :commit)
+            return false unless @space_overlay&.respond_to?(:finish_transition_transform_preview)
+
+            @space_overlay.finish_transition_transform_preview(source: source)
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Overlay transition transform finish failed: #{e.class}: #{e.message}"
+            false
+          end
+
+          def begin_transition_topology_sync(cell_ids)
+            return false unless @space_overlay&.respond_to?(:begin_transition_topology_sync)
+
+            @space_overlay.begin_transition_topology_sync(cell_ids)
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Overlay transition topology begin failed: #{e.class}: #{e.message}"
+            false
+          end
+
+          def complete_transition_topology_sync(cell_ids)
+            return false unless @space_overlay&.respond_to?(:complete_transition_topology_sync)
+
+            @space_overlay.complete_transition_topology_sync(cell_ids)
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Overlay transition topology completion failed: #{e.class}: #{e.message}"
+            false
+          end
+
           def invalidate_view(model)
             model.active_view.invalidate if model&.active_view
           end

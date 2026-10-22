@@ -7,7 +7,7 @@ module ULOL
     module IndoorCore
       class AdjacencyService
         module GeometryQuery
-          def self.common_face_waypoint_candidates(entity1, entity2, state1_point: nil, state2_point: nil, transformation1: nil, transformation2: nil, tolerance: Utils::Geometry::ADJACENCY_TOLERANCE)
+          def self.common_face_waypoint_candidates(entity1, entity2, state1_point: nil, state2_point: nil, cell1_id: nil, cell2_id: nil, transformation1: nil, transformation2: nil, tolerance: Utils::Geometry::ADJACENCY_TOLERANCE)
             return [] unless entity1&.valid? && entity2&.valid?
 
             bounds1 = transformed_bounds(entity1, transformation1)
@@ -19,9 +19,21 @@ module ULOL
 
             max_area = candidates.map { |candidate| candidate[:area] }.max
             candidates.select { |candidate| (candidate[:area] - max_area).abs <= tolerance.to_f }
-                      .map do |candidate|
+                      .filter_map do |candidate|
+                        anchors = reference_waypoint_anchor_points(
+                          cell1_id, cell2_id, candidate[:centroid],
+                          transformation1: transformation1, transformation2: transformation2
+                        )
+                        point = adjusted_waypoint(
+                          candidate,
+                          anchors&.fetch(0, nil) || state1_point,
+                          anchors&.fetch(1, nil) || state2_point,
+                          tolerance
+                        )
+                        next unless valid_shared_waypoint?(point, candidate, tolerance)
+
                         {
-                          point: adjusted_waypoint(candidate, state1_point, state2_point, tolerance),
+                          point: point,
                           normal1: candidate[:normal1],
                           normal2: candidate[:normal2]
                         }
@@ -104,6 +116,28 @@ module ULOL
           end
           private_class_method :adjusted_waypoint
 
+          def self.reference_waypoint_anchor_points(cell1_id, cell2_id, waypoint,
+                                                        transformation1: nil, transformation2: nil)
+            return nil if cell1_id.to_s.empty? || cell2_id.to_s.empty?
+            return nil unless waypoint.is_a?(Geom::Point3d)
+            return nil unless defined?(NativeAdjacencyBridge)
+
+            coordinates = NativeAdjacencyBridge.reference_waypoint_anchors(
+              cell1_id, cell2_id, waypoint,
+              transformation1: transformation1, transformation2: transformation2
+            )
+            points = Array(coordinates).map do |point|
+              values = Array(point)
+              next unless values.length == 3
+
+              Geom::Point3d.new(*values)
+            end.compact
+            points.length == 2 ? points : nil
+          rescue StandardError
+            nil
+          end
+          private_class_method :reference_waypoint_anchor_points
+
           def self.shared_z_range(face1, face2)
             ranges = [face1, face2].map do |face|
               points = Array(face[:points])
@@ -154,9 +188,29 @@ module ULOL
           def self.point_in_face?(point, face, axis, tolerance)
             polygon = Utils::Geometry.project_points_for_axis(face[:points], axis)
             point_2d = Utils::Geometry.project_points_for_axis([point], axis).first
-            Utils::Geometry.point_in_polygon_2d?(point_2d, polygon, tolerance)
+            return false unless Utils::Geometry.point_in_polygon_2d?(point_2d, polygon, tolerance)
+
+            # Inner loops are voids: their interiors and boundaries are not Face.
+            Array(face[:inner_loops]).none? do |loop|
+              hole = Utils::Geometry.project_points_for_axis(loop, axis)
+              Utils::Geometry.point_in_polygon_2d?(point_2d, hole, tolerance)
+            end
           end
           private_class_method :point_in_face?
+
+          def self.valid_shared_waypoint?(point, candidate, tolerance)
+            return false unless point.is_a?(Geom::Point3d)
+
+            face1 = candidate[:face1]
+            face2 = candidate[:face2]
+            normal = candidate[:normal1]
+            return false unless face1 && face2 && normal.is_a?(Geom::Vector3d)
+
+            axis = Utils::Geometry.dominant_axis(normal)
+            point_in_face?(point, face1, axis, tolerance) &&
+              point_in_face?(point, face2, axis, tolerance)
+          end
+          private_class_method :valid_shared_waypoint?
 
           def self.clamp(value, min, max)
             [[value.to_f, min.to_f].max, max.to_f].min

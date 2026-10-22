@@ -92,7 +92,8 @@ module SeoulSpaceToolbar
 
       @built = true
     rescue StandardError => e
-      puts "[SeoulSpaceToolbar] Build failed: #{e.class}: #{e.message}"
+      # puts "[SeoulSpaceToolbar] Build failed: #{e.class}: #{e.message}"
+      nil
     end
 
     def append_group(key)
@@ -112,7 +113,8 @@ module SeoulSpaceToolbar
       @built_groups[key] = true
       @toolbar.show if was_visible
     rescue StandardError => e
-      puts "[SeoulSpaceToolbar] Late group append failed (#{key}): #{e.class}: #{e.message}"
+      # puts "[SeoulSpaceToolbar] Late group append failed (#{key}): #{e.class}: #{e.message}"
+      nil
     end
 
     def append_group_items(group, separator:)

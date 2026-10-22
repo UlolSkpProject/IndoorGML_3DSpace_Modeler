@@ -18,7 +18,8 @@ module ULOL
           cell_space.set_storey(storey)
           @recenter_cell_space_geometry.call(
             cell_space.sketchup_group,
-            fixed_z_offset_from_bottom: @fixed_state_height_offset.call(cell_space)
+            fixed_z_offset_from_bottom: @fixed_state_height_offset.call(cell_space),
+            defer_center: true
           )
           @name_cell_space_entity.call(cell_space)
         end
@@ -108,22 +109,35 @@ module ULOL
             return [] if plan.empty?
 
             created = []
+            created_sources = []
+            native_state_cells = []
             with_validation_focus_mutation_batch do
               with_bulk_cell_space_conversion do
                 with_indoor_model_operation(operation_name, force: true) do
                   prepare_cell_space_batch_environment
                   plan.each do |request|
+                    original_source = request[:source]
+                    staged_source = copy_group_under_primal_space(original_source)
                     service = request[:local_grid] ?
                       cell_space_lifecycle_service_local_grid :
                       cell_space_lifecycle_service
-                    created << service.create_from_group_deferred(
-                      request[:source],
+                    created_cell = service.create_from_group_deferred(
+                      staged_source,
                       cell_type: request[:cell_type],
                       category_code: request[:category_code],
                       storey: request[:storey]
                     )
+                    created << created_cell
+                    created_sources << [created_cell, original_source]
+                    native_state_cells << created_cell unless request[:local_grid]
                   end
-                  finalize_cell_space_batch(created)
+                  finalize_cell_space_batch(created, state_cells: native_state_cells)
+                  created.select! { |cell_space| cell_space&.valid? }
+                  created_sources.each do |cell_space, original_source|
+                    next unless cell_space&.valid?
+
+                    original_source.erase! if original_source&.valid?
+                  end
                 end
               end
             end
@@ -215,6 +229,7 @@ module ULOL
                         cell_type: entry[:cell_type],
                         category_code: entry[:category_code]
                       )
+                      clear_reference_graph_overlay_for(entry[:cell_space])
                       changed << entry[:cell_space]
                     end
                     finalize_cell_space_batch(changed)
@@ -251,6 +266,121 @@ module ULOL
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Selected CellSpace type update failed: #{e.class}: #{e.message}"
             false
+          end
+
+          def debug_reference_points
+            debug_reference_points_by_kind.values.flatten
+          end
+
+          # Runtime-only debug graphs preserve their CellSpace owner.
+          def debug_reference_graphs
+            return [] if ReferenceGraphDebugMode.mode == :off
+
+            Array((@debug_reference_graph_overlay_by_cell_id || {}).values)
+          end
+
+          def reference_cell_space_transformation(cell_id)
+            cell = Array(@feature_registry&.cell_spaces).find do |candidate|
+              candidate.id.to_s == cell_id.to_s && candidate.valid?
+            end
+            return nil unless cell&.sketchup_group&.valid?
+
+            cell_space_root_local_transformation(cell)
+          end
+
+          # Native's exact completed Floor partition boundaries. These are
+          # independent of the selected graph-reduction stage.
+          def debug_floor_partitions
+            []
+          end
+
+          def reference_transition_curve(first_cell_id, second_cell_id, waypoint)
+            transforms = [
+              reference_cell_space_transformation(first_cell_id),
+              reference_cell_space_transformation(second_cell_id)
+            ]
+            coordinates = NativeAdjacencyBridge.reference_transition_curve(
+              first_cell_id, second_cell_id, waypoint,
+              transformation1: transforms[0], transformation2: transforms[1]
+            )
+            return nil if coordinates.nil? || coordinates.empty?
+
+            coordinates.map { |point| Geom::Point3d.new(*point) }.freeze
+          rescue StandardError => error
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Native Reference Transition Curve unavailable " \
+              "cells=#{first_cell_id},#{second_cell_id}: #{error.class}: #{error.message}"
+            ) if defined?(IndoorCore::Logger)
+            nil
+          end
+
+          # Both caches hold immutable snapshots. Object identity changes
+          # whenever a graph or State selection is regenerated; this lightweight
+          # revision check catches replacements without relying on overlay
+          # invalidation from another subsystem.
+          def reference_graph_route_snapshot_key_for(cell_id)
+            transform = reference_cell_space_transformation(cell_id)
+            [NativeAdjacencyBridge.reference_revision(cell_id), transform&.to_a]
+          end
+
+          def debug_reference_points_by_kind
+            return {} if ReferenceGraphDebugMode.mode == :off
+
+            points_by_kind = {}
+            Array((@debug_reference_graph_overlay_by_cell_id || {}).values).each do |graph|
+              Array(graph[:nodes]).each do |node|
+                point = node[:point]
+                next unless point
+
+                kind = %i[state collapse_representative legacy_protected].include?(node[:role]) ? 5 : 4
+                points_by_kind[kind] ||= []
+                points_by_kind[kind] << {
+                  cell_id: graph[:cell_id], point: point
+                }.freeze
+              end
+            end
+            points_by_kind.transform_values!(&:freeze)
+            points_by_kind.freeze
+          end
+
+          # Explicit one-shot console query. No graph or radius is populated by
+          # normal CellSpace refresh; the overlay only owns this display copy.
+          def request_reference_graph_debug(stage)
+            selected = stage.to_sym
+            unless %i[before collapsed optimized los_graph connectivity_repair short_path_graph].include?(selected)
+              raise ArgumentError, 'expected :before, :collapsed, :optimized, :los_graph, :connectivity_repair or :short_path_graph'
+            end
+
+            snapshots = {}
+            Array(@feature_registry&.cell_spaces).each do |cell_space|
+              next unless cell_space&.valid?
+
+              graph = NativeAdjacencyBridge.reference_graph(cell_space.id, selected)
+              next unless graph
+
+              node_roles = Array(graph[:node_roles])
+              nodes = Array(graph[:nodes]).each_with_index.map do |coordinates, index|
+                {
+                  point: Geom::Point3d.new(*coordinates),
+                  role: node_roles[index] || :reference
+                }.freeze
+              end.freeze
+              snapshots[cell_space.id] = {
+                cell_id: cell_space.id,
+                nodes: nodes,
+                edges: Array(graph[:edges]).freeze,
+                stage: selected
+              }.freeze
+            end
+            @debug_reference_graph_overlay_by_cell_id = snapshots
+            @model&.active_view&.invalidate
+            snapshots.length
+          end
+
+          def clear_reference_graph_debug
+            @debug_reference_graph_overlay_by_cell_id = {}
+            @model&.active_view&.invalidate
+            true
           end
 
           private
@@ -332,16 +462,261 @@ module ULOL
             cell_spaces,
             synchronize_topology: true,
             apply_lock_policy: true,
-            clear_dirty_topology: true
+            clear_dirty_topology: true,
+            state_cells: []
           )
             valid_cell_spaces = Array(cell_spaces).select { |cell_space| cell_space&.valid? }
             return {} if valid_cell_spaces.empty?
 
-            apply_cell_space_materials_batch(valid_cell_spaces)
-            metrics = synchronize_topology ? synchronize_topology_after_bulk_conversion : {}
-            apply_indoor_lock_policy() if apply_lock_policy
-            clear_bulk_dirty_topology() if clear_dirty_topology
-            metrics || {}
+            with_native_state_geometry_session(state_cells) do |state_batch|
+              failures = Array(state_batch&.[](:failures))
+              failed_ids = failures.each_with_object({}) do |failure, output|
+                output[failure[:cell_id].to_s] = true
+                cell_space = failure[:cell_space]
+                cell_space_lifecycle_service.erase(cell_space) if cell_space&.valid?
+              end
+              successful_cell_spaces = valid_cell_spaces.select do |cell_space|
+                cell_space&.valid? && !failed_ids.key?(cell_space.id.to_s)
+              end
+              apply_cell_space_materials_batch(successful_cell_spaces)
+              metrics = synchronize_topology ? synchronize_topology_after_bulk_conversion : {}
+              apply_indoor_lock_policy() if apply_lock_policy
+              clear_bulk_dirty_topology() if clear_dirty_topology
+              Hash(metrics || {}).merge(
+                native_state_failures: failures.map { |failure| native_state_failure_summary(failure) }
+              )
+            end
+          end
+
+          def with_native_state_geometry_session(state_cells, point_applier: nil)
+            pending = Array(state_cells).select { |cell_space| cell_space&.valid? }.uniq
+            return yield({ successful: [].freeze, failures: [].freeze }.freeze) if pending.empty?
+
+            unless defined?(NativeAdjacencyBridge) &&
+                   NativeAdjacencyBridge.shared_session_supported?
+              raise NativeAdjacencyBridge::ProtocolError,
+                    'Native State backend is unavailable; rebuild indoor_gml_native.so'
+            end
+
+            state_point_applier = point_applier || method(:apply_native_state_parent_point)
+            pending_by_id = pending.each_with_object({}) { |cell_space, out| out[cell_space.id] = cell_space }
+            session_entries = Array(@feature_registry.cell_spaces).uniq.filter_map do |cell_space|
+              next unless cell_space&.valid? && cell_space.duality_state&.valid?
+
+              snapshot = Utils::Geometry.adjacency_snapshot(cell_space.sketchup_group)
+              next unless snapshot
+
+              { cell_space: cell_space, snapshot: snapshot }
+            end
+
+            available_ids = session_entries.each_with_object({}) do |entry, out|
+              out[entry[:cell_space].id] = true
+            end
+            missing = pending.reject { |cell_space| available_ids[cell_space.id] }
+            unless missing.empty?
+              raise NativeAdjacencyBridge::ProtocolError,
+                    "Native State snapshot missing for CellSpace(s): #{missing.map(&:id).join(', ')}"
+            end
+
+            snapshots = session_entries.map { |entry| entry[:snapshot] }
+            keys = session_entries.map { |entry| entry[:cell_space].id }
+            state_options = session_entries.map do |entry|
+              cell_space = entry[:cell_space]
+              unless pending_by_id.key?(cell_space.id)
+                next({
+                  needs_state: false,
+                  category_code: cell_space.category_code
+                })
+              end
+
+              fixed_offset = fixed_state_height_offset(cell_space)
+              fixed_z = native_state_fixed_parent_z(cell_space)
+              if !fixed_offset.nil? && fixed_z.nil?
+                raise NativeAdjacencyBridge::ProtocolError,
+                      "Native State fixed-Z preparation failed for #{cell_space.id}"
+              end
+
+              {
+                needs_state: true,
+                fixed_z: fixed_z,
+                category_code: cell_space.category_code
+              }
+            end
+            state_progress = native_state_progress_sink
+            emit_native_state_progress(
+              state_progress,
+              event: :stage_start,
+              stage: :state_position,
+              name: 'State 내부점 계산',
+              total: pending_by_id.length,
+              message: "State 내부점 계산: 0 / #{pending_by_id.length}"
+            )
+            last_state_progress = -1
+
+            begin
+              NativeAdjacencyBridge.open_geometry_session(
+                snapshots,
+                keys: keys,
+                state_options: state_options
+              )
+              state_result = NativeAdjacencyBridge.compute_reference_from_open_session do |_event, payload|
+                current = payload[:current].to_i
+                total = payload[:total].to_i
+                next if current == last_state_progress
+
+                last_state_progress = current
+                emit_native_state_progress(
+                  state_progress,
+                  event: :stage_progress,
+                  stage: :state_position,
+                  name: 'State 내부점 계산',
+                  total: total,
+                  completed: current,
+                  message: "State 내부점 계산: #{current} / #{total}"
+                )
+              end
+              state_metrics = Hash(state_result[:metrics])
+              emit_native_state_progress(
+                state_progress,
+                event: :stage_finish,
+                stage: :state_position,
+                name: 'State 내부점 계산',
+                total: pending_by_id.length,
+                completed: pending_by_id.length,
+                message: 'State 내부점 계산 완료',
+                telemetry: {
+                  native_success_count: state_metrics[:state_success_count].to_i,
+                  volume_centroid_success_count:
+                    state_metrics[:state_volume_centroid_success_count].to_i,
+                  bvh_count: state_metrics[:state_bvh_count].to_i,
+                  duration: state_metrics[:state_duration].to_f
+                }
+              )
+            rescue StandardError => e
+              NativeAdjacencyBridge.close_geometry_session
+              IndoorCore::Logger.puts(
+                "[IndoorGML] Native State batch failed: #{e.class}: #{e.message}"
+              ) if defined?(IndoorCore::Logger)
+              raise
+            end
+
+            results = Hash(state_result[:results])
+            successful = []
+            failures = []
+            session_entries.each_with_index do |entry, index|
+              cell_space = pending_by_id[entry[:cell_space].id]
+              next unless cell_space
+
+              # An integer ExitCode identifies normal candidate failure;
+              # native execution and protocol errors still raise separately.
+              unless results.key?(index)
+                raise NativeAdjacencyBridge::ProtocolError,
+                      "Native Reference result missing for #{cell_space.id}"
+              end
+              outcome = Hash(results[index])
+              coordinates = outcome[:state_point]
+              exit_code = outcome[:exit_code]
+              diagnostics = Hash(outcome[:diagnostics])
+              unless exit_code == 0
+                label = NativeAdjacencyBridge::STATE_EXIT_CODES.fetch(exit_code, :unknown)
+                details = diagnostics.map { |key, value| "#{key}=#{value}" }.join(', ')
+                failures << native_state_failure(
+                  cell_space,
+                  exit_code: exit_code,
+                  diagnostics: diagnostics,
+                  reason: "Native State unavailable for #{cell_space.id}: " \
+                          "ExitCode=#{exit_code} (#{label}); #{details}"
+                )
+                clear_reference_graph_overlay_for(cell_space)
+                next
+              end
+
+              if diagnostics[:failed_polygons].to_i.positive? ||
+                 diagnostics[:floor_faces].to_i > diagnostics[:prepared_faces].to_i ||
+                 diagnostics[:rejected_outside].to_i.positive? ||
+                 diagnostics[:rejected_clearance].to_i.positive? ||
+                 diagnostics[:rejected_centroids].to_i.positive?
+                details = diagnostics.map { |key, value| "#{key}=#{value}" }.join(', ')
+                IndoorCore::Logger.puts(
+                  "[IndoorGML] Native State partial for #{cell_space.id}: " \
+                  "ExitCode=0 (success); #{details}"
+                ) if defined?(IndoorCore::Logger)
+              end
+
+              clear_reference_graph_overlay_for(cell_space)
+              unless coordinates
+                details = diagnostics.map { |key, value| "#{key}=#{value}" }.join(', ')
+                failures << native_state_failure(
+                  cell_space,
+                  exit_code: 50,
+                  diagnostics: diagnostics,
+                  reason: "Native State result omitted State for #{cell_space.id}; #{details}"
+                )
+                next
+              end
+              state_point_applier.call(cell_space, coordinates)
+              successful << cell_space
+            end
+
+            # Read the actual post-State/post-Local-grid transforms, never infer
+            # them from raw Native State (snapping may shift the local origin).
+            NativeAdjacencyBridge.commit_reference_graph_batch(
+              session_entries.map do |entry|
+                reference_cell_space_transformation(entry[:cell_space].id)
+              end
+            )
+            yield({ successful: successful.freeze, failures: failures.freeze }.freeze)
+          ensure
+            if defined?(NativeAdjacencyBridge) &&
+               NativeAdjacencyBridge.shared_session_active?
+              NativeAdjacencyBridge.close_geometry_session
+            end
+          end
+
+          def clear_reference_graph_overlay_for(cell_space)
+            return false unless cell_space
+
+            @debug_reference_graph_overlay_by_cell_id&.delete(cell_space.id)
+            true
+          end
+
+          def native_state_failure(cell_space, exit_code:, diagnostics:, reason:)
+            failure = {
+              cell_space: cell_space,
+              cell_id: cell_space.id.to_s,
+              exit_code: exit_code.to_i,
+              diagnostics: Hash(diagnostics).freeze,
+              reason: reason.to_s.freeze
+            }.freeze
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Native State skipped #{cell_space.id}: #{failure[:reason]}"
+            ) if defined?(IndoorCore::Logger)
+            failure
+          end
+
+          def native_state_failure_summary(failure)
+            {
+              cell_id: failure[:cell_id].to_s,
+              exit_code: failure[:exit_code].to_i,
+              diagnostics: Hash(failure[:diagnostics]).freeze,
+              reason: failure[:reason].to_s
+            }.freeze
+          end
+
+          def native_state_progress_sink
+            return nil unless defined?(ProductionProgress::AdjacencyProgressContext)
+
+            ProductionProgress::AdjacencyProgressContext.current
+          rescue StandardError
+            nil
+          end
+
+          def emit_native_state_progress(sink, **payload)
+            return false unless sink&.respond_to?(:call)
+
+            sink.call(payload.freeze)
+          rescue StandardError
+            false
           end
 
           def apply_cell_space_materials_batch(cell_spaces)

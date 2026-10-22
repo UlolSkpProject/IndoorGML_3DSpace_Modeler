@@ -10,15 +10,12 @@ module ULOL
         # - used for initial model/extension load and explicit hard refreshes
         # - may evaluate/rewrite CellSpace local axes
         # - finishes with a 0.001 mm grid-snapped recenter
-        # - never invokes optional LVN implicitly
         #
         # Soft refresh:
         # - runtime/topology reconstruction only
         # - never evaluates or rewrites local axes
-        # - never invokes LVN
         # - never recenters CellSpace geometry
         #
-        # LVN remains available through its explicit console/API entrypoint.
 
         def refresh_runtime_data(initial_model_load: false)
           if initial_model_load
@@ -52,12 +49,29 @@ module ULOL
               sync do
                 prepare_primal_children_for_initial_load if initial_model_load
                 restore_runtime_from_current_model(persist_repaired_ids: true)
-                hard_refresh_runtime_cell_spaces_local_grid
-                apply_initial_cell_space_materials if initial_model_load
-                rebuild_runtime_transitions_from_cell_adjacency
+
+                state_cells, frame_reports = prepare_runtime_cell_space_frames_local_grid
+                point_applier = proc do |cell_space, coordinates|
+                  apply_native_state_parent_point_local_grid(
+                    cell_space,
+                    coordinates,
+                    frame_report: frame_reports[cell_space.id]
+                  )
+                end
+
+                with_native_state_geometry_session(
+                  state_cells,
+                  point_applier: point_applier
+                ) do
+                  state_cells.each do |cell_space|
+                    write_cell_space_attributes(cell_space)
+                  end
+                  apply_initial_cell_space_materials if initial_model_load
+                  rebuild_runtime_transitions_from_cell_adjacency
+                end
               end
 
-              invalidate_overlay_transition_points
+              clear_overlay_transition_cache
               apply_indoor_lock_policy
               @editor_session.apply_display_state
 
@@ -82,7 +96,7 @@ module ULOL
                 rebuild_runtime_transitions_from_cell_adjacency
               end
 
-              invalidate_overlay_transition_points
+              clear_overlay_transition_cache
               apply_indoor_lock_policy
               @editor_session.apply_display_state
 
@@ -108,6 +122,45 @@ module ULOL
           end
           return if cell_space.nil? || !cell_space.valid?
 
+          refresh_cell_space_after_geometry_close_local_grid(cell_space)
+          local_grid_state_refresh_on_close[cell_space.id] = true
+        end
+
+        # Overall Edit Mode finish must not rebuild whole-model runtime/topology
+        # when the runtime registry is still consistent. Geometry-specific local
+        # frame work is already handled by cell_space_closed, and dirty CellSpaces
+        # already have an incremental topology sync path.
+        def finish_editing
+          return super unless local_grid_coordinate_enabled?
+          return false if validation_focus_recheck_running?
+
+          closing_cell_space = @editor_session.editing_cell_space
+          closing_cell_id = closing_cell_space&.id
+          local_grid_state_refresh_on_close.delete(closing_cell_id) if closing_cell_id
+
+          with_guard_flag(:@finishing_editing) do
+            finished = @editor_session.finish()
+            if finished
+              # InstanceObserver#onClose is not guaranteed for every programmatic
+              # active-path close. Guarantee one State/Reference refresh here.
+              refreshed_on_close = closing_cell_id &&
+                                   local_grid_state_refresh_on_close.delete(closing_cell_id)
+              if closing_cell_space&.valid? && !refreshed_on_close
+                refresh_cell_space_after_geometry_close_local_grid(closing_cell_space)
+              end
+              normalize_primal_children_for_finish()
+              finalize_local_grid_runtime_after_edit_finish
+            end
+            finished
+          end
+        ensure
+          local_grid_state_refresh_on_close.delete(closing_cell_id) if closing_cell_id
+        end
+
+        private
+
+        def refresh_cell_space_after_geometry_close_local_grid(cell_space)
+          entity = cell_space.sketchup_group
           with_transparent_cell_space_operation('IndoorGML CellSpace Geometry Close Local Grid') do
             sync do
               finish_cell_space_geometry_local_grid(cell_space)
@@ -124,27 +177,12 @@ module ULOL
           end
 
           remember_cell_space_change_snapshot(cell_space.sketchup_group)
+          true
         end
 
-        # Overall Edit Mode finish must not rebuild whole-model runtime/topology
-        # when the runtime registry is still consistent. Geometry-specific local
-        # frame work is already handled by cell_space_closed, and dirty CellSpaces
-        # already have an incremental topology sync path.
-        def finish_editing
-          return super unless local_grid_coordinate_enabled?
-          return false if validation_focus_recheck_running?
-
-          with_guard_flag(:@finishing_editing) do
-            finished = @editor_session.finish()
-            if finished
-              normalize_primal_children_for_finish()
-              finalize_local_grid_runtime_after_edit_finish
-            end
-            finished
-          end
+        def local_grid_state_refresh_on_close
+          @local_grid_state_refresh_on_close ||= {}
         end
-
-        private
 
         def finalize_local_grid_runtime_after_edit_finish
           if local_grid_runtime_refresh_required_after_edit_finish?
@@ -179,38 +217,29 @@ module ULOL
           true
         end
 
-        def hard_refresh_runtime_cell_spaces_local_grid
-          @cell_spaces.each do |cell_space|
+        def prepare_runtime_cell_space_frames_local_grid
+          prepared = []
+          reports = {}
+
+          Array(@cell_spaces).each do |cell_space|
             next unless cell_space&.valid?
 
-            hard_refresh_cell_space_coordinates_local_grid(cell_space)
-            write_cell_space_attributes(cell_space)
-          rescue StandardError => e
-            IndoorCore::Logger.puts(
-              '[IndoorGML] Runtime CellSpace Local Grid hard refresh skipped: ' \
-              "cell=#{cell_space&.id} #{e.class}: #{e.message}"
-            )
+            begin
+              ensure_cell_space_is_child_of_primal_space!(cell_space)
+              frame_report = align_cell_space_local_frame_local_grid(
+                cell_space.sketchup_group
+              )
+              prepared << cell_space
+              reports[cell_space.id] = frame_report
+            rescue StandardError => e
+              IndoorCore::Logger.puts(
+                '[IndoorGML] Runtime CellSpace Local Grid frame preparation skipped: ' \
+                "cell=#{cell_space&.id} #{e.class}: #{e.message}"
+              )
+            end
           end
-        end
 
-        def hard_refresh_cell_space_coordinates_local_grid(cell_space)
-          return false unless cell_space&.valid?
-
-          ensure_cell_space_is_child_of_primal_space!(cell_space)
-          group = cell_space.sketchup_group
-          frame_report = align_cell_space_local_frame_local_grid(group)
-          recenter_report = recenter_cell_space_geometry_local_grid(
-            group,
-            fixed_z_offset_from_bottom: fixed_state_height_offset(cell_space)
-          )
-
-          log_local_grid_coordinate_report(
-            cell_space,
-            frame_report,
-            recenter_report,
-            normalized: :unchecked
-          )
-          true
+          [prepared.freeze, reports.freeze]
         end
       end
     end

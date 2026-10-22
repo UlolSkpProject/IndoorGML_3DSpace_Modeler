@@ -82,6 +82,10 @@ module ULOL
           @adjacency_service.synchronize_for(cell_space)
         end
 
+        def synchronize_dirty(cell_spaces)
+          @adjacency_service.synchronize_dirty(cell_spaces)
+        end
+
         def synchronize_all(**kwargs)
           @adjacency_service.synchronize_all(**kwargs)
         end

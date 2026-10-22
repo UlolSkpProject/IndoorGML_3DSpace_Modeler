@@ -86,8 +86,9 @@ module ULOL
           {
             title: title,
             description: '선택한 Solid Group을 CellSpace로 변환합니다.',
-            building_types: building_types.map { |value, label| { value: value.to_s, label: label.to_s } },
-            selected_building: TagCellSpaceAdapter.building_type.to_s,
+            building_types: [{ value: '', label: '건축물 구분 선택' }] +
+              building_types.map { |value, label| { value: value.to_s, label: label.to_s } },
+            selected_building: ModelBuildingType.from_model(Sketchup.active_model),
             cell_space_options: options.map { |option| { value: option[:label].to_s, label: option[:label].to_s } },
             selected_cell_space: default_option[:label].to_s,
             storey: default_storey.to_s.empty? ? CellSpace::DEFAULT_STOREY : default_storey.to_s
@@ -101,7 +102,9 @@ module ULOL
           storey = (values['storey'] || values[:storey]).to_s.strip
 
           building_types = SharedTagCatalog::BUILDING_TYPES
-          selected_building = building_types.key?(building_type.to_s) ? building_type.to_s : TagCellSpaceAdapter.building_type.to_s
+          selected_building = building_type.to_s
+          raise ArgumentError, '건축물 구분을 선택하세요.' unless building_types.key?(selected_building)
+
           TagCellSpaceAdapter.set_building_type(Sketchup.active_model, selected_building)
 
           options = CellSpaceCategory.selection_options

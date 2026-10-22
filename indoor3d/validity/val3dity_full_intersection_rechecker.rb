@@ -8,8 +8,9 @@ module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       module IndoorGmlConverter
-        # Full-Solid Boolean implementation retained only as the conservative
-        # confirmation and recovery engine for the clipped-mesh rechecker.
+        # SketchUp Full-Solid Boolean fallback for Native 701 results that
+        # remain uncertain. Native validity is the primary geometry authority;
+        # this path preserves the previously successful SketchUp recovery cases.
         class Val3dityFullIntersectionRechecker
           def initialize(indoor_model:, tolerance:, model: nil, logger: nil)
             @indoor_model = indoor_model

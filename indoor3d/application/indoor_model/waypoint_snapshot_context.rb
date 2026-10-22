@@ -18,6 +18,8 @@ module ULOL
               context,
               state1_point: state_root_local_position(transition.state1),
               state2_point: state_root_local_position(transition.state2),
+              cell1_id: transition.cell1_id,
+              cell2_id: transition.cell2_id,
               tolerance: Utils::Geometry::ADJACENCY_TOLERANCE
             )
 

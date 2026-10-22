@@ -1,14 +1,16 @@
 # frozen_string_literal: true
 
+require_relative '../adjacency_service/native_bridge'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
       class IndoorModel
         module SceneGroups
           STATE_FIXED_HEIGHT_OFFSET = 1000.mm unless const_defined?(:STATE_FIXED_HEIGHT_OFFSET, false)
-          # Temporary feature flag. When enabled, CellSpace local-center
-          # calculation aligns local X to the dominant vertical-wall normal.
-          # Local Z remains world Z; the horizontal OBB is only a fallback.
+          # Local-frame alignment policy: X follows the dominant vertical-wall
+          # direction. When wall orientation is unavailable, use the horizontal
+          # minimum-area OBB. World-space geometry remains fixed; local Z is upright.
           ALIGN_CELL_SPACE_LOCAL_CENTER_TO_DOMINANT_WALLS = true unless const_defined?(
             :ALIGN_CELL_SPACE_LOCAL_CENTER_TO_DOMINANT_WALLS,
             false
@@ -93,16 +95,23 @@ module ULOL
           end
 
           def clone_group_under_primal_space(sketchup_group)
+            cell_space_entity = copy_group_under_primal_space(sketchup_group)
+            sketchup_group.erase! if sketchup_group.valid?
+            cell_space_entity
+          end
+
+          # Creates the same direct PrimalSpaceFeatures copy as
+          # clone_group_under_primal_space while retaining the source until a
+          # deferred Native State batch confirms this CellSpace succeeded.
+          def copy_group_under_primal_space(sketchup_group)
             local_transformation = @primal_group.transformation.inverse * Utils::Transformation.entity_transformation_for_current_context(sketchup_group)
-            cell_space_entity = EntityCopyHelper.copy_instance(
+            EntityCopyHelper.copy_instance(
               source: sketchup_group,
               target_entities: @primal_group.entities,
               transformation: local_transformation,
               convert_to_group: true,
               make_unique: true
             )
-            sketchup_group.erase! if sketchup_group.valid?
-            cell_space_entity
           end
 
           def align_cell_space_local_axes_to_dominant_walls(cell_space_entity)
@@ -502,25 +511,190 @@ module ULOL
             candidate[:alignment] > current[:alignment]
           end
 
-          def recenter_cell_space_geometry(cell_space_entity, fixed_z_offset_from_bottom: nil)
+          def recenter_cell_space_geometry(
+            cell_space_entity,
+            fixed_z_offset_from_bottom: nil,
+            defer_center: false
+          )
             with_indoor_model_operation('IndoorGML Recenter CellSpace Geometry', transparent: true) do
-              if ALIGN_CELL_SPACE_LOCAL_CENTER_TO_DOMINANT_WALLS
-                align_cell_space_local_axes_to_dominant_walls(cell_space_entity)
-              end
-              fixed_z = fixed_z_offset_from_bottom.nil? ? nil : fixed_local_z_from_world_offset(cell_space_entity, fixed_z_offset_from_bottom)
-              center = Utils::Geometry.find_shell_inner_centroid(cell_space_entity, fixed_z: fixed_z)
-              # IndoorCore::Logger.puts "[IndoorGML] recenter_cell_space_geometry center=#{center} distance=#{center.distance(ORIGIN)}"
-              next if center.distance(ORIGIN) <= 0.001
+              prepare_cell_space_geometry_for_state(cell_space_entity)
+              next true if defer_center
 
-              set_group_transformation(
+              recenter_prepared_cell_space_geometry(
                 cell_space_entity,
-                cell_space_entity.transformation * Geom::Transformation.translation(center)
-              )
-              cell_space_entity.definition.entities.transform_entities(
-                Geom::Transformation.translation(center.vector_to(ORIGIN)),
-                cell_space_entity.definition.entities.to_a
+                fixed_z_offset_from_bottom: fixed_z_offset_from_bottom
               )
             end
+          end
+
+          def prepare_cell_space_geometry_for_state(cell_space_entity)
+            if ALIGN_CELL_SPACE_LOCAL_CENTER_TO_DOMINANT_WALLS
+              align_cell_space_local_axes_to_dominant_walls(cell_space_entity)
+            end
+            true
+          end
+
+          def recenter_prepared_cell_space_geometry(
+            cell_space_entity,
+            fixed_z_offset_from_bottom: nil
+          )
+            native_state_local_point_for_entity(
+              cell_space_entity,
+              fixed_z_offset_from_bottom: fixed_z_offset_from_bottom
+            ) do |center|
+              apply_cell_space_local_center(cell_space_entity, center)
+            end
+          end
+
+          def native_state_local_point_for_entity(
+            cell_space_entity,
+            fixed_z_offset_from_bottom: nil,
+            &apply_center
+          )
+            unless cell_space_entity&.valid?
+              raise ArgumentError, 'CellSpace entity is invalid during Native State calculation'
+            end
+            unless NativeAdjacencyBridge.shared_session_supported?
+              raise NativeAdjacencyBridge::ProtocolError,
+                    'Native State backend is unavailable; rebuild indoor_gml_native.so'
+            end
+            if NativeAdjacencyBridge.shared_session_active?
+              raise NativeAdjacencyBridge::ProtocolError,
+                    'standalone Native State calculation cannot reuse an active shared session'
+            end
+
+            snapshot = Utils::Geometry.adjacency_snapshot(cell_space_entity)
+            unless snapshot
+              raise NativeAdjacencyBridge::ProtocolError,
+                    'CellSpace geometry snapshot is unavailable for Native State calculation'
+            end
+
+            runtime_cell_space = find_cell_space_for_entity(cell_space_entity)
+            fixed_z = native_state_fixed_parent_z_for_entity(
+              cell_space_entity,
+              fixed_z_offset_from_bottom
+            )
+            if !fixed_z_offset_from_bottom.nil? && fixed_z.nil?
+              raise NativeAdjacencyBridge::ProtocolError,
+                    'fixed-Z preparation failed for Native State calculation'
+            end
+
+            key = runtime_cell_space&.id ||
+                  if cell_space_entity.respond_to?(:persistent_id)
+                    cell_space_entity.persistent_id
+                  else
+                    cell_space_entity.object_id
+                  end
+            opened = false
+            NativeAdjacencyBridge.open_geometry_session(
+              [snapshot],
+              keys: [key],
+              state_options: [{
+                needs_state: true,
+                fixed_z: fixed_z,
+                category_code: runtime_cell_space&.category_code
+              }]
+            )
+            opened = true
+            result = NativeAdjacencyBridge.compute_reference_from_open_session
+            outcome = Hash(result[:results])[0]
+            unless outcome
+              raise NativeAdjacencyBridge::ProtocolError,
+                    'Native State backend omitted the requested result'
+            end
+            outcome = Hash(outcome)
+            exit_code = outcome[:exit_code].to_i
+            diagnostics = Hash(outcome[:diagnostics])
+            unless exit_code.zero?
+              label = NativeAdjacencyBridge::STATE_EXIT_CODES.fetch(exit_code, :unknown)
+              details = diagnostics.map { |name, value| "#{name}=#{value}" }.join(', ')
+              raise NativeAdjacencyBridge::StateUnavailableError.new(
+                "Native State unavailable: ExitCode=#{exit_code} (#{label}); #{details}",
+                exit_code: exit_code,
+                diagnostics: diagnostics
+              )
+            end
+
+            coordinates = outcome[:state_point]
+            unless coordinates
+              raise NativeAdjacencyBridge::ProtocolError,
+                    'Native State backend did not return an interior point'
+            end
+
+            values = Array(coordinates).map(&:to_f)
+            unless values.length == 3 && values.all?(&:finite?)
+              raise NativeAdjacencyBridge::ProtocolError,
+                    'Native State backend returned invalid coordinates'
+            end
+            # Only registered CellSpaces have a stable graph key consumed by
+            # Transition routing. Temporary creation-time probes are discarded.
+            parent_point = Geom::Point3d.new(values[0], values[1], values[2])
+            local_point = parent_point.transform(cell_space_entity.transformation.inverse)
+            if runtime_cell_space
+              unless apply_center
+                raise NativeAdjacencyBridge::ProtocolError,
+                      'Persistent Reference graph requires a post-State frame'
+              end
+              apply_center.call(local_point)
+              final_frame = reference_cell_space_transformation(runtime_cell_space.id)
+              NativeAdjacencyBridge.commit_reference_graph_batch([final_frame])
+            else
+              apply_center.call(local_point) if apply_center
+            end
+            local_point
+          ensure
+            NativeAdjacencyBridge.close_geometry_session if opened
+          end
+
+          def apply_native_state_parent_point(cell_space, coordinates)
+            group = cell_space&.sketchup_group
+            raise ArgumentError, 'CellSpace is invalid during Native State apply' unless
+              cell_space&.valid? && group&.valid?
+
+            values = Array(coordinates).map(&:to_f)
+            raise ArgumentError, 'Native State point must contain 3 coordinates' unless values.length == 3
+
+            parent_point = Geom::Point3d.new(values[0], values[1], values[2])
+            local_point = parent_point.transform(group.transformation.inverse)
+            apply_cell_space_local_center(group, local_point)
+            remember_cell_space_change_snapshot(group)
+            local_point
+          end
+
+          def native_state_fixed_parent_z(cell_space)
+            offset = fixed_state_height_offset(cell_space)
+            return nil if offset.nil?
+
+            native_state_fixed_parent_z_for_entity(cell_space.sketchup_group, offset)
+          end
+
+          def native_state_fixed_parent_z_for_entity(cell_space_entity, offset)
+            return nil if offset.nil?
+
+            local_z = fixed_local_z_from_world_offset(cell_space_entity, offset)
+            Geom::Point3d.new(0.0, 0.0, local_z)
+                         .transform(cell_space_entity.transformation)
+                         .z
+                         .to_f
+          rescue StandardError => e
+            IndoorCore::Logger.puts(
+              "[IndoorGML] Native State fixed Z preparation failed: #{e.class}: #{e.message}"
+            )
+            nil
+          end
+
+          def apply_cell_space_local_center(cell_space_entity, center)
+            return center if center.distance(ORIGIN) <= 0.001
+
+            set_group_transformation(
+              cell_space_entity,
+              cell_space_entity.transformation * Geom::Transformation.translation(center)
+            )
+            cell_space_entity.definition.entities.transform_entities(
+              Geom::Transformation.translation(center.vector_to(ORIGIN)),
+              cell_space_entity.definition.entities.to_a
+            )
+            center
           end
 
           def fixed_local_z_from_world_offset(cell_space_entity, offset_from_world_bottom)

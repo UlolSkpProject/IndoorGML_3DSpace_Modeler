@@ -104,7 +104,7 @@ module ULOL
               when TOPOLOGY_ACTION_SYNCHRONIZE
                 synchronize_adjacency_and_transitions_for_cell_space(entry[:cell_space])
               when TOPOLOGY_ACTION_ERASE_TRANSITIONS
-                erase_transitions_for_state_preserving_adjacency(entry[:duality_state])
+                erase_transitions_for_state(entry[:duality_state])
               end
               type_change_progress_call(
                 progress,
@@ -127,23 +127,6 @@ module ULOL
                 end
               }
             )
-          end
-
-          def erase_transitions_for_state_preserving_adjacency(state)
-            return [] if state.nil?
-
-            transitions = Array(@transitions).select do |transition|
-              transition.connected_to?(state)
-            end
-            transitions.each do |transition|
-              pair_key = transition_cell_pair_key(transition)
-              @feature_registry.delete_transition_for_pair(pair_key) if pair_key
-              erase_transition(transition)
-            end
-            if !transitions.empty? && respond_to?(:mark_validation_focus_topology_dirty)
-              mark_validation_focus_topology_dirty
-            end
-            transitions
           end
 
           def start_cell_space_type_change_stage(progress, total)

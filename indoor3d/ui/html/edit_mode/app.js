@@ -166,7 +166,7 @@ function renderVisibilityFilter(filter) {
 }
 
 function renderFilterGroup(container, options, selectedValues, name) {
-  var state = filterSelectionState(options, selectedValues);
+  var state = filterSelectionState(options, selectedValues, true);
 
   container.innerHTML = '';
 
@@ -181,7 +181,7 @@ function renderFilterGroup(container, options, selectedValues, name) {
 }
 
 function renderStoreyFilterGroup(container, options, selectedValues) {
-  var state = filterSelectionState(options, selectedValues);
+  var state = filterSelectionState(options, selectedValues, false);
   var groups = [
     { title: '지상층', options: [] },
     { title: '지하층', options: [] }
@@ -222,7 +222,7 @@ function renderStoreyFilterGroup(container, options, selectedValues) {
   });
 }
 
-function filterSelectionState(options, selectedValues) {
+function filterSelectionState(options, selectedValues, emptyMeansAll) {
   var selected = selectedSet(selectedValues);
   var optionValues = normalizeArray(options).map(function (option) {
     return String(option.value);
@@ -230,7 +230,8 @@ function filterSelectionState(options, selectedValues) {
   var selectedOptionCount = optionValues.filter(function (value) {
     return selected[value] === true;
   }).length;
-  var allSelected = selectedValues.length === 0 || (optionValues.length > 0 && selectedOptionCount === optionValues.length);
+  var allSelected = (emptyMeansAll && selectedValues.length === 0) ||
+    (optionValues.length > 0 && selectedOptionCount === optionValues.length);
 
   return {
     selected: selected,
@@ -288,7 +289,7 @@ function commitVisibilityFilter() {
   if (suppressFilterEvents) return;
   if (fixMode) return;
 
-  var selectedStoreys = filterValuesForCommit(storeyFilterOptions);
+  var selectedStoreys = checkedFilterValues(storeyFilterOptions);
   var selectedTypes = filterValuesForCommit(typeFilterOptions);
 
   invokeSketchup('setEditModeVisibilityFilter', [
@@ -305,7 +306,7 @@ function onFilterOptionChanged(event) {
   var isStorey = input.name === 'storeyFilter';
   var container = isStorey ? storeyFilterOptions : typeFilterOptions;
 
-  if (!checkedFilterValues(container).length) {
+  if (!isStorey && !checkedFilterValues(container).length) {
     checkAllFilterOptions(container);
   }
 

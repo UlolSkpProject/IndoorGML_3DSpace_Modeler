@@ -102,20 +102,34 @@ module ULOL
                 cell_space
               end,
               synchronize_all: proc do
-                # Persist every newly-created CellSpace once before topology starts,
-                # preserving the old topology-visible attribute state and the
-                # existing IndoorModel snapshot side effects. The batch dedup cache
-                # then turns repeated transition/state persistence for unchanged
-                # CellSpaces into no-ops.
-                @attribute_serializer.with_cell_space_write_flush do
-                  created.each do |cell_space|
-                    next unless cell_space&.valid?
-
-                    write_attributes(cell_space)
+                state_cells = local_grid ? [] : created
+                with_native_state_geometry_session(state_cells) do |state_batch|
+                  failures = Array(state_batch&.[](:failures))
+                  failed_ids = failures.each_with_object({}) do |failure, output|
+                    output[failure[:cell_id].to_s] = true
+                    cell_space = failure[:cell_space]
+                    lifecycle.erase(cell_space) if cell_space&.valid?
                   end
+                  created.reject! do |cell_space|
+                    !cell_space&.valid? || failed_ids.key?(cell_space.id.to_s)
+                  end
+                  # Persist every newly-created CellSpace once before topology starts,
+                  # preserving the old topology-visible attribute state and the
+                  # existing IndoorModel snapshot side effects. The batch dedup cache
+                  # then turns repeated transition/state persistence for unchanged
+                  # CellSpaces into no-ops.
+                  @attribute_serializer.with_cell_space_write_flush do
+                    created.each do |cell_space|
+                      next unless cell_space&.valid?
+
+                      write_attributes(cell_space)
+                    end
+                  end
+                  apply_cell_space_materials_batch(created)
+                  Hash(synchronize_topology_after_bulk_conversion || {}).merge(
+                    native_state_failures: failures.map { |failure| native_state_failure_summary(failure) }
+                  )
                 end
-                apply_cell_space_materials_batch(created)
-                synchronize_topology_after_bulk_conversion
               end,
               apply_lock_policy: proc { apply_indoor_lock_policy },
               runtime_snapshot: proc { bulk_conversion_runtime_snapshot },

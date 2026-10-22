@@ -105,7 +105,8 @@ module SeoulSpacePluginsMenu
 
       @built = true
     rescue StandardError => e
-      puts "[SeoulSpacePluginsMenu] Build failed: #{e.class}: #{e.message}"
+      # puts "[SeoulSpacePluginsMenu] Build failed: #{e.class}: #{e.message}"
+      nil
     end
 
     def append_group(key)
@@ -119,7 +120,8 @@ module SeoulSpacePluginsMenu
       group[:builder].call(target_menu)
       @built_groups[key] = true
     rescue StandardError => e
-      puts "[SeoulSpacePluginsMenu] Late group append failed (#{key}): #{e.class}: #{e.message}"
+      # puts "[SeoulSpacePluginsMenu] Late group append failed (#{key}): #{e.class}: #{e.message}"
+      nil
     end
   end
 end
@@ -161,9 +163,6 @@ module ULOL
     require_relative 'infrastructure/preferences/dual_overlay_preferences'
 
     require_relative 'application/storey_filter'
-    require_relative 'application/local_vertex_normalizer'
-    require_relative 'application/local_vertex_normalizer/coplanar_shared_edge_groups'
-    require_relative 'application/local_vertex_normalizer/pipeline'
 
     require_relative 'infrastructure/scene/scene_group_guard'
     require_relative 'infrastructure/scene/entity_copy_helper'
@@ -174,6 +173,7 @@ module ULOL
     require_relative 'application/feature_registry'
     require_relative 'application/adjacency_service/geometry_query'
     require_relative 'application/adjacency_service/sync'
+    require_relative 'application/adjacency_service/reference_graph_debug_mode'
     require_relative 'application/indoor_model/runtime_support'
     require_relative 'application/indoor_model/scene_groups'
     require_relative 'application/indoor_model/feature_lifecycle'
@@ -181,7 +181,6 @@ module ULOL
     require_relative 'application/indoor_model/observer_routing'
     require_relative 'application/indoor_model/entity_relocation'
     require_relative 'application/indoor_model/primal_normalization'
-    require_relative 'application/indoor_model/local_vertex_normalization'
     require_relative 'application/indoor_model/edit_mode_selection_projection'
     require_relative 'application/indoor_model/editor_control'
     require_relative 'application/indoor_model'
@@ -199,6 +198,8 @@ module ULOL
     require_relative 'ui/overlays/indoor_mode_screen_overlay'
     require_relative 'ui/overlays/builders/transition_curve_builder'
     require_relative 'ui/overlays/renderers/state_overlay_renderer'
+    require_relative 'ui/overlays/renderers/reference_point_debug_overlay_renderer'
+    require_relative 'ui/overlays/renderers/reference_graph_debug_overlay_renderer'
     require_relative 'ui/overlays/renderers/transition_overlay_renderer'
     require_relative 'ui/overlays/dual_graph_space_overlay'
     require_relative 'ui/html_dialog_metrics'

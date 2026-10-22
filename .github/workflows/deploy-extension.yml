@@ -1,4 +1,4 @@
-﻿name: Deploy Extension
+name: Deploy Extension
 
 on:
   workflow_dispatch:
@@ -17,7 +17,7 @@ on:
 
   push:
     tags:
-      - "v*"
+      - 'v*'
 
 permissions:
   contents: write
@@ -32,5 +32,6 @@ jobs:
       distribution: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.distribution || '' }}
       category: SeoulSpace
       release_note_url: "https://u-lo-l.notion.site/Indoor-Modeler-35fbe883973b80d1be3be90372b712ed"
+      native_so_only: true
     secrets:
       DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}

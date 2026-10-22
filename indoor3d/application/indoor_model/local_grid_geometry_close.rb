@@ -58,7 +58,6 @@ module ULOL
           #   frame evaluation/alignment
           #   -> snapped recenter
           #
-          # Optional LVN is intentionally excluded and remains console/API opt-in.
           def cell_space_closed(entity)
             return super unless local_grid_coordinate_enabled?
             return if observer_routing_suppressed? || @syncing || @erasing

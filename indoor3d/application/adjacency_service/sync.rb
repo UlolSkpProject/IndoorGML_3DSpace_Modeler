@@ -19,19 +19,13 @@ module ULOL
         def synchronize_for(cell_space)
           return if cell_space.nil? || !cell_space.valid? || !cell_space.duality_state&.valid?
 
-          @registry.cell_spaces.each do |other_cell_space|
-            next if other_cell_space.nil? || other_cell_space == cell_space
-            next unless other_cell_space.valid? && other_cell_space.duality_state&.valid?
+          raise NotImplementedError, 'Adjacency calculation requires the Native geometry backend'
+        end
 
-            pair_key = cell_pair_key(cell_space, other_cell_space)
-            adjacency_axis = Utils::Geometry.adjacency_axis(cell_space.sketchup_group, other_cell_space.sketchup_group)
-            if transition_allowed_for_axis?(adjacency_axis)
-              @registry.set_adjacent_pair(pair_key, cell_space, other_cell_space)
-              @transition_builder.call(cell_space, other_cell_space)
-            else
-              @transition_eraser.call(pair_key)
-            end
-          end
+        def synchronize_dirty(cell_spaces)
+          return if Array(cell_spaces).empty?
+
+          raise NotImplementedError, 'Adjacency calculation requires the Native geometry backend'
         end
 
         def synchronize_all(transition_builder: nil, transition_eraser: nil, progress: nil)
@@ -85,12 +79,10 @@ module ULOL
         def erase_for(cell_space)
           return if cell_space.nil?
 
-          pair_keys = if @registry.respond_to?(:adjacent_pair_keys_for_cell) &&
-                         @registry.respond_to?(:transition_pair_keys_for_cell)
-                        @registry.adjacent_pair_keys_for_cell(cell_space.id) |
-                          @registry.transition_pair_keys_for_cell(cell_space.id)
+          pair_keys = if @registry.respond_to?(:transition_pair_keys_for_cell)
+                        @registry.transition_pair_keys_for_cell(cell_space.id)
                       else
-                        (@registry.adjacent_pair_keys | @registry.transition_pair_keys).select do |pair_key|
+                        @registry.transition_pair_keys.select do |pair_key|
                           pair_key.split(':').include?(cell_space.id)
                         end
                       end
@@ -150,123 +142,8 @@ module ULOL
           entries.freeze
         end
 
-        def compute_pair_results(entries, tolerance:, progress: nil)
-          snapshots = entries.map { |entry| entry[:snapshot] }.freeze
-          candidate_started_at = monotonic_time
-          pair_indices = candidate_pair_indices(snapshots, tolerance, progress: progress)
-          @last_candidate_generation_duration = elapsed_since(candidate_started_at)
-          @last_pair_comparison_count = pair_indices.length
-          return [] if pair_indices.empty?
-
-          started_at = monotonic_time
-          compute_pair_chunk(snapshots, pair_indices, tolerance, progress: progress)
-        ensure
-          @last_detailed_computation_duration = elapsed_since(started_at) if started_at
-        end
-
-        def candidate_pair_indices(snapshots, tolerance, progress: nil)
-          pairs = []
-          count = snapshots.length
-          total = count * (count - 1) / 2
-          completed = 0
-          emit_stage_start(
-            progress,
-            stage: :candidate_generation,
-            name: 'Adjacency 후보 생성',
-            total: total,
-            message: "Adjacency 후보 pair 생성: 0 / #{total}"
-          )
-
-          (0...count).each do |index1|
-            ((index1 + 1)...count).each do |index2|
-              if candidate_bounds_touch?(
-                snapshots[index1][:bounds],
-                snapshots[index2][:bounds],
-                tolerance
-              )
-                pairs << [index1, index2]
-              end
-
-              completed += 1
-              emit_stage_progress(
-                progress,
-                stage: :candidate_generation,
-                name: 'Adjacency 후보 생성',
-                total: total,
-                completed: completed,
-                message: "Adjacency 후보 pair 생성: #{completed} / #{total}"
-              ) if progress_checkpoint?(completed, total)
-            end
-          end
-
-          emit_stage_finish(
-            progress,
-            stage: :candidate_generation,
-            name: 'Adjacency 후보 생성',
-            total: total,
-            completed: total,
-            message: "Adjacency 후보 생성 완료: #{pairs.length}개",
-            telemetry: {
-              evaluated_pair_count: total,
-              candidate_pair_count: pairs.length
-            }
-          )
-          pairs.freeze
-        end
-
-        def candidate_bounds_touch?(bounds1, bounds2, tolerance)
-          candidate_axis_overlap_or_touch?(bounds1[:min][0], bounds1[:max][0], bounds2[:min][0], bounds2[:max][0], tolerance) &&
-            candidate_axis_overlap_or_touch?(bounds1[:min][1], bounds1[:max][1], bounds2[:min][1], bounds2[:max][1], tolerance) &&
-            candidate_axis_overlap_or_touch?(bounds1[:min][2], bounds1[:max][2], bounds2[:min][2], bounds2[:max][2], tolerance)
-        end
-
-        def candidate_axis_overlap_or_touch?(min1, max1, min2, max2, tolerance)
-          [min1, min2].max <= [max1, max2].min + tolerance
-        end
-
-        def compute_pair_chunk(snapshots, pair_indices, tolerance, progress: nil)
-          total = pair_indices.length
-          emit_stage_start(
-            progress,
-            stage: :detailed_computation,
-            name: 'Adjacency 상세 판정',
-            total: total,
-            message: "Adjacency 상세 판정: 0 / #{total}"
-          )
-
-          results = []
-          pair_indices.each_with_index do |(index1, index2), index|
-            axis = Utils::Geometry.adjacency_axis_from_snapshots(
-              snapshots[index1],
-              snapshots[index2],
-              tolerance: tolerance
-            )
-            results << [index1, index2, axis] unless axis.nil?
-
-            completed = index + 1
-            emit_stage_progress(
-              progress,
-              stage: :detailed_computation,
-              name: 'Adjacency 상세 판정',
-              total: total,
-              completed: completed,
-              message: "Adjacency 상세 판정: #{completed} / #{total}"
-            ) if progress_checkpoint?(completed, total)
-          end
-
-          emit_stage_finish(
-            progress,
-            stage: :detailed_computation,
-            name: 'Adjacency 상세 판정',
-            total: total,
-            completed: total,
-            message: "Adjacency 상세 판정 완료: #{results.length}개 인접",
-            telemetry: {
-              candidate_pair_count: total,
-              adjacent_pair_count: results.length
-            }
-          )
-          results
+        def compute_pair_results(_entries, tolerance:, progress: nil)
+          raise NotImplementedError, 'Adjacency calculation requires the Native geometry backend'
         end
 
         def apply_pair_results(entries, pair_results, transition_builder:, transition_eraser:, stale_pair_keys: nil, progress: nil)
@@ -274,7 +151,7 @@ module ULOL
           pair_results.each do |index1, index2, adjacency_axis|
             cell1 = entries[index1][:cell_space]
             cell2 = entries[index2][:cell_space]
-            next unless transition_allowed_for_axis?(adjacency_axis)
+            next unless transition_pair_eligible?(cell1, cell2, adjacency_axis)
 
             pair_key = cell_pair_key(cell1, cell2)
             next_pairs[pair_key] = [cell1, cell2]
@@ -304,8 +181,7 @@ module ULOL
               message: "Transition 반영: #{completed} / #{total}"
             ) if progress_checkpoint?(completed, total)
           end
-          next_pairs.each do |pair_key, (cell1, cell2)|
-            @registry.set_adjacent_pair(pair_key, cell1, cell2)
+          next_pairs.each do |_pair_key, (cell1, cell2)|
             transition_builder.call(cell1, cell2)
             completed += 1
             emit_stage_progress(
@@ -334,7 +210,7 @@ module ULOL
 
         def stale_pair_keys(next_pair_keys)
           next_pair_key_set = next_pair_keys.each_with_object({}) { |pair_key, set| set[pair_key] = true }
-          (@registry.adjacent_pair_keys | @registry.transition_pair_keys).reject do |pair_key|
+          @registry.transition_pair_keys.reject do |pair_key|
             next_pair_key_set[pair_key]
           end
         end
@@ -345,26 +221,26 @@ module ULOL
           cells.each_with_index do |cell1, index|
             cells[(index + 1)..].to_a.each do |cell2|
               pair_key = cell_pair_key(cell1, cell2)
-              adjacent = if @registry.respond_to?(:adjacent_pair?)
-                           @registry.adjacent_pair?(pair_key)
-                         else
-                           @registry.adjacent_pair_keys.include?(pair_key)
-                         end
               transition = if @registry.respond_to?(:transition_for_pair)
                              !@registry.transition_for_pair(pair_key).nil?
                            else
                              @registry.transition_pair_keys.include?(pair_key)
                            end
-              next unless adjacent || transition
-
-              keys << pair_key
+              keys << pair_key if transition
             end
           end
           keys
         end
 
-        def transition_allowed_for_axis?(adjacency_axis)
-          return !adjacency_axis.nil?
+        def transition_pair_eligible?(cell1, cell2, adjacency_axis)
+          return false if adjacency_axis.nil?
+          return false if cell1.nil? || cell2.nil? || cell1.equal?(cell2)
+          return false unless cell1.valid? && cell2.valid?
+          return false unless cell1.navigable? && cell2.navigable?
+          return false unless cell1.duality_state&.valid?
+          return false unless cell2.duality_state&.valid?
+
+          true
         end
 
         def reset_run_metrics
