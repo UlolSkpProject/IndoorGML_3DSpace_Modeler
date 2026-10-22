@@ -14,7 +14,7 @@ module ULOL
       end
 
       set_constant.call(:EXTENSION_NAME, 'IndoorGML Modeler'.freeze)
-      set_constant.call(:EXTENSION_VERSION, '1.0.7'.freeze)
+      set_constant.call(:EXTENSION_VERSION, '1.0.8'.freeze)
       set_constant.call(:EXTENSION_CREATOR, 'ULOL'.freeze)
       set_constant.call(
         :EXTENSION_DESCRIPTION,

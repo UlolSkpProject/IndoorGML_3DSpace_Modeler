@@ -2,7 +2,7 @@
 
 > SketchUp 2026에서 solid group을 IndoorGML CellSpace로 변환하고, dual graph를 편집·검증·Export하는 Ruby Extension입니다.
 
-![Version](https://img.shields.io/badge/version-1.0.7-blue)
+![Version](https://img.shields.io/badge/version-1.0.8-blue)
 ![SketchUp](https://img.shields.io/badge/SketchUp-2026-brightgreen)
 ![IndoorGML](https://img.shields.io/badge/IndoorGML-1.0.3-orange)
 ![val3dity](https://img.shields.io/badge/val3dity-2.2.0-lightgrey)
@@ -65,7 +65,7 @@ Validation은 오류 위치 확인, 수정, 재검사까지 지원합니다.
 | 항목 | 값 | 정의 |
 | --- | --- | --- |
 | IndoorGML storage format version | `1.0.3` | `Definition::INDOOR_GML_VERSION` |
-| Extension package version | `1.0.7` | `Indoor3DGmlModeler::EXTENSION_VERSION` |
+| Extension package version | `1.0.8` | `Indoor3DGmlModeler::EXTENSION_VERSION` |
 | IndoorGML XML schema version | `1.0` | `Definition::INDOOR_GML_SCHEMA_VERSION` |
 | Validator runtime | `val3dity-windows-x64-v2.2.0` | `Val3dityRunner::VENDOR_ROOT` |
 
