@@ -87,13 +87,16 @@ class TransitionCurveBuilderTest < Minitest::Test
   end
 
   class MutableTransform < FakeTransform
-    attr_accessor :offset
+    attr_accessor :offset, :available
 
     def initialize(offset)
       @offset = offset
+      @available = true
     end
 
     def overlay_render_context_cache_key
+      return nil unless available
+
       [:offset, offset]
     end
 
@@ -457,6 +460,47 @@ class TransitionCurveBuilderTest < Minitest::Test
 
     assert_same root_before, builder.instance_variable_get(:@root_segments_by_transition_id)['T']
     assert_equal curve_calls, @model.reference_curve_calls.length
+  end
+
+  def test_primal_transform_key_change_self_invalidates_stale_world_segments
+    @model.curve = [point(0), point(1), point(2), point(4)]
+    transform = MutableTransform.new(100)
+    builder = Builder.new(indoor_model: @model, transform_context: transform)
+    first = builder.transition_line_points
+    root_before = builder.instance_variable_get(:@root_segments_by_transition_id)['T']
+    world_before = builder.instance_variable_get(:@world_segments_by_transition_id)['T']
+    curve_calls = @model.reference_curve_calls.length
+
+    transform.offset = 200
+    second = builder.transition_line_points
+
+    assert_equal [200.0, 201.0, 201.0, 202.0, 202.0, 204.0], xs(second)
+    refute_same first, second
+    assert_same root_before, builder.instance_variable_get(:@root_segments_by_transition_id)['T']
+    refute_same world_before, builder.instance_variable_get(:@world_segments_by_transition_id)['T']
+    assert_equal curve_calls, @model.reference_curve_calls.length
+    assert_same second, builder.transition_line_points
+  end
+
+  def test_unavailable_primal_frame_never_bakes_root_local_points_as_world_cache
+    @model.curve = [point(0), point(1), point(2), point(4)]
+    transform = MutableTransform.new(100)
+    transform.available = false
+    builder = Builder.new(indoor_model: @model, transform_context: transform)
+
+    assert_empty builder.transition_line_points
+    assert_empty builder.instance_variable_get(:@root_segments_by_transition_id)
+    assert_empty builder.instance_variable_get(:@world_segments_by_transition_id)
+    assert_empty @model.reference_curve_calls
+
+    transform.available = true
+    assert_equal [100.0, 101.0, 101.0, 102.0, 102.0, 104.0], xs(builder.transition_line_points)
+
+    builder.transition_line_batches(selected_cell_ids: { 'A' => true })
+    transform.available = false
+    unavailable = builder.transition_line_batches(selected_cell_ids: { 'A' => true })
+    assert_empty unavailable[:normal]
+    assert_empty unavailable[:highlight]
   end
 
   def test_visibility_invalidation_only_reassembles_cached_world_segments
