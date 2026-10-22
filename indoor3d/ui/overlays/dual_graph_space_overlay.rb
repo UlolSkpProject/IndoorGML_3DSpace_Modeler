@@ -46,6 +46,22 @@ module ULOL
           @transition_curve_builder.remove_transitions(transitions)
         end
 
+        def invalidate_transition_visibility
+          @transition_curve_builder.invalidate_visibility
+          @state_renderer.clear_cache
+          true
+        end
+
+        def invalidate_transition_selection
+          @transition_curve_builder.invalidate_selection
+        end
+
+        def clear_transition_cache
+          @transition_curve_builder.clear_cache
+          @state_renderer.clear_cache
+          true
+        end
+
         # CellSpace transitions stay suppressed across commit until topology has
         # been synchronized. Primal transforms do not alter adjacency and can be
         # released immediately at transaction completion.

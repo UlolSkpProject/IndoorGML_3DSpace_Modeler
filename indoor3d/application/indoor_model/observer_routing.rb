@@ -316,7 +316,7 @@ module ULOL
             if @editor_session&.validation_focus_active?
               @editor_session.clear_validation_focus
             end
-            invalidate_overlay_transition_points
+            clear_overlay_transition_cache
             Sketchup.active_model&.active_view&.invalidate
             true
           end

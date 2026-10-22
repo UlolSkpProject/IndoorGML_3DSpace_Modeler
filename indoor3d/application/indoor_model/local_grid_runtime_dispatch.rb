@@ -71,7 +71,7 @@ module ULOL
                 end
               end
 
-              invalidate_overlay_transition_points
+              clear_overlay_transition_cache
               apply_indoor_lock_policy
               @editor_session.apply_display_state
 
@@ -96,7 +96,7 @@ module ULOL
                 rebuild_runtime_transitions_from_cell_adjacency
               end
 
-              invalidate_overlay_transition_points
+              clear_overlay_transition_cache
               apply_indoor_lock_policy
               @editor_session.apply_display_state
 

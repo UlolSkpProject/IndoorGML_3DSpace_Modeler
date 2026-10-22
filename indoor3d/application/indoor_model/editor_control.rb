@@ -351,6 +351,14 @@ module ULOL
             @editor_session.remove_overlay_transitions(transitions)
           end
 
+          def invalidate_overlay_transition_visibility
+            @editor_session.invalidate_overlay_transition_visibility
+          end
+
+          def clear_overlay_transition_cache
+            @editor_session.clear_overlay_transition_cache
+          end
+
           def finish_overlay_transition_transform_preview(model = @model, source: :commit)
             @editor_session.finish_overlay_transition_transform_preview(model, source: source)
           end

@@ -20,7 +20,7 @@ module ULOL
                   apply_initial_cell_space_materials if initial_model_load
                   rebuild_runtime_transitions_from_cell_adjacency
                 end
-                invalidate_overlay_transition_points
+                clear_overlay_transition_cache
                 apply_indoor_lock_policy()
                 @editor_session.apply_display_state()
                 IndoorCore::Logger.puts "[IndoorGML] Runtime refreshed: cells=#{@cell_spaces.length}, states=#{@states.length}, transitions=#{@transitions.length}"

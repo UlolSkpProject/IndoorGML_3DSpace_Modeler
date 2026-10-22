@@ -89,6 +89,15 @@ module ULOL
           true
         end
 
+        def invalidate_visibility
+          invalidate_assembly
+        end
+
+        def invalidate_selection
+          clear_selection_batches
+          true
+        end
+
         def transition_line_points(excluded_cell_ids: nil)
           excluded_cells = transition_excluded_cell_lookup(excluded_cell_ids)
           exclusion_key = excluded_cells.keys.sort
@@ -622,8 +631,6 @@ module ULOL
               point_coordinates(transition.state2_point),
               point_coordinates(transition.selected_waypoint),
               point_coordinates(waypoint_departure_normal(transition)),
-              overlay_state_visible?(transition.state1),
-              overlay_state_visible?(transition.state2),
               route_snapshot_key(transition.cell1_id),
               route_snapshot_key(transition.cell2_id)
             ]

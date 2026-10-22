@@ -455,4 +455,47 @@ class TransitionCurveBuilderTest < Minitest::Test
     assert_same root_before, builder.instance_variable_get(:@root_segments_by_transition_id)['T']
     assert_equal curve_calls, @model.reference_curve_calls.length
   end
+
+  def test_visibility_invalidation_only_reassembles_cached_world_segments
+    @model.curve = [point(0), point(1), point(2), point(3), point(4)]
+    @builder.transition_line_points
+    roots_before = @builder.instance_variable_get(:@root_segments_by_transition_id).dup
+    worlds_before = @builder.instance_variable_get(:@world_segments_by_transition_id).dup
+    curve_calls = @model.reference_curve_calls.length
+
+    @model.state_visibility[:state2] = false
+    @builder.invalidate_visibility
+    assert_equal [0.0, 1.0, 1.0, 2.0], xs(@builder.transition_line_points)
+
+    assert_same roots_before['T'], @builder.instance_variable_get(:@root_segments_by_transition_id)['T']
+    assert_same worlds_before['T'], @builder.instance_variable_get(:@world_segments_by_transition_id)['T']
+    assert_equal curve_calls, @model.reference_curve_calls.length
+  end
+
+  def test_selection_invalidation_rebuilds_only_partition_batches
+    @model.curve = [point(0), point(1), point(2), point(3), point(4)]
+    first = @builder.transition_line_batches(selected_cell_ids: { 'A' => true })
+    full_before = @builder.transition_line_points
+    curve_calls = @model.reference_curve_calls.length
+
+    @builder.invalidate_selection
+    second = @builder.transition_line_batches(selected_cell_ids: { 'A' => true })
+
+    refute_same first, second
+    assert_same full_before, @builder.transition_line_points
+    assert_equal curve_calls, @model.reference_curve_calls.length
+  end
+
+  def test_full_cache_reset_rebuilds_root_segments
+    @model.curve = [point(0), point(1), point(2), point(4)]
+    @builder.transition_line_points
+    root_before = @builder.instance_variable_get(:@root_segments_by_transition_id)['T']
+    curve_calls = @model.reference_curve_calls.length
+
+    @builder.clear_cache
+    @builder.transition_line_points
+
+    refute_same root_before, @builder.instance_variable_get(:@root_segments_by_transition_id)['T']
+    assert_operator @model.reference_curve_calls.length, :>, curve_calls
+  end
 end

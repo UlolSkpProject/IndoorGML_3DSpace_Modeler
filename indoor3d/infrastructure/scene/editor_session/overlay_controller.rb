@@ -149,6 +149,24 @@ module ULOL
             IndoorCore::Logger.puts "[IndoorGML] Overlay Transition removal failed: #{e.class}: #{e.message}"
           end
 
+          def invalidate_transition_visibility
+            @space_overlay&.invalidate_transition_visibility
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Overlay visibility invalidation failed: #{e.class}: #{e.message}"
+          end
+
+          def invalidate_transition_selection
+            @space_overlay&.invalidate_transition_selection
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Overlay selection invalidation failed: #{e.class}: #{e.message}"
+          end
+
+          def clear_transition_cache
+            @space_overlay&.clear_transition_cache
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Overlay Transition cache reset failed: #{e.class}: #{e.message}"
+          end
+
           def finish_transition_transform_preview(source: :commit)
             return false unless @space_overlay&.respond_to?(:finish_transition_transform_preview)
 
