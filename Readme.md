@@ -73,7 +73,7 @@ Validation은 오류 위치 확인, 수정, 재검사까지 지원합니다.
 
 ## Validation Contract
 
-Validation은 XML well-formedness 확인과 val3dity 2.2.0 검사를 수행합니다. XSD validation은 수행하지 않습니다. 모든 val3dity 실행에는 GML 좌표 단위 기준 `--planarity_d2p_tol 0.025`가 적용됩니다.
+Validation은 XML well-formedness 확인과 val3dity 2.2.0 검사를 수행합니다. XSD validation은 수행하지 않습니다. 모든 val3dity 실행에는 물리적 거리 `0.025mm`를 GML 좌표 단위로 환산한 `--planarity_d2p_tol`이 적용됩니다. SketchUp 모델 단위가 mm일 때 값은 `0.025`입니다.
 
 빠른 검사는 Geometry를 변경하지 않으며, `--overlap_tol -1`로 val3dity를 실행한 뒤 Extension 701/704 재검사를 수행합니다.
 
@@ -345,7 +345,7 @@ GML 좌표:
 2. isolated validation workspace와 임시 `input.gml` 생성
 3. val3dity 2.2.0 실행
    - `--overlap_tol -1`
-   - `--planarity_d2p_tol 0.025`
+   - `--planarity_d2p_tol`: `0.025mm`를 현재 SketchUp 모델의 GML 출력 단위로 변환
 4. report의 701/704 오류 대상 ID를 현재 SketchUp CellSpace와 연결
 5. 현재 모델의 원본 face/boundary를 분석하고 필요한 Boolean만 독립 복제본에서 수행
 6. 최종 JSON과 HTML report 생성

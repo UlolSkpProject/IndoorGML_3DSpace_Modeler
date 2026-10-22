@@ -195,11 +195,12 @@ module ULOL
             args.concat(['--overlap_tol', format_tolerance(@overlap_tol)]) unless @overlap_tol.nil?
             args.concat(['-r', @report_json_path])
 
+            indoor_model = @indoor_model || IndoorModel.current
             session = Val3dityProcessAdapter.new(
               args: args,
-              current_dir: VENDOR_ROOT
+              current_dir: VENDOR_ROOT,
+              model: @model || indoor_model&.model
             )
-            indoor_model = @indoor_model || IndoorModel.current
             totals = validation_progress_totals(indoor_model)
             session.start(
               total_states: totals[:states],
