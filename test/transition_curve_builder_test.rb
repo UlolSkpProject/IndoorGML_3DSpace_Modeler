@@ -11,8 +11,9 @@ class TransitionCurveBuilderTest < Minitest::Test
                           :selected_waypoint_normal1, :selected_waypoint_normal2)
 
   class FakeModel
-    attr_accessor :transitions, :curve, :curves, :revisions, :state_visibility
-    attr_reader :route_snapshot_calls, :reference_curve_calls
+    attr_writer :transitions
+    attr_accessor :curve, :curves, :revisions, :state_visibility
+    attr_reader :route_snapshot_calls, :reference_curve_calls, :transition_enumerations
 
     def initialize(transition)
       @transitions = [transition]
@@ -22,6 +23,12 @@ class TransitionCurveBuilderTest < Minitest::Test
       @state_visibility = {}
       @route_snapshot_calls = []
       @reference_curve_calls = []
+      @transition_enumerations = 0
+    end
+
+    def transitions
+      @transition_enumerations += 1
+      @transitions
     end
 
     def reference_transition_curve(first_cell_id, second_cell_id, _waypoint)
@@ -199,20 +206,7 @@ class TransitionCurveBuilderTest < Minitest::Test
     assert_in_delta 1.0, incoming.first.x, 1.0e-9
   end
 
-  def test_waypoint_departure_normal_is_part_of_render_fingerprint
-    @transition.selected_waypoint_normal1 = point3(1, 0)
-    @model.curve = [point(0), point(1), point(2), point(4)]
-    first = @builder.transition_curve_input(@transition)
-    first_key = @builder.send(:transition_render_fingerprint, first, [:identity])
-
-    @transition.selected_waypoint_normal1 = point3(0, 1)
-    second = @builder.transition_curve_input(@transition)
-    second_key = @builder.send(:transition_render_fingerprint, second, [:identity])
-
-    refute_equal first_key, second_key
-  end
-
-  def test_waypoint_normal_change_rebuilds_assembled_cache_without_explicit_invalidate
+  def test_waypoint_normal_change_rebuilds_only_after_transition_invalidation
     @transition.state2_point = point3(2, 1)
     @transition.selected_waypoint = point3(1, 1)
     @transition.selected_waypoint_normal1 = point3(1, 0)
@@ -220,6 +214,8 @@ class TransitionCurveBuilderTest < Minitest::Test
     first = @builder.transition_line_points
 
     @transition.selected_waypoint_normal1 = point3(1, 1)
+    assert_same first, @builder.transition_line_points
+    @builder.invalidate_transitions([@transition])
     second = @builder.transition_line_points
 
     refute_equal second.map { |value| [value.x, value.y, value.z] },
@@ -272,33 +268,22 @@ class TransitionCurveBuilderTest < Minitest::Test
     assert_empty @builder.transition_line_points
   end
 
-  def test_route_coordinates_change_transition_cache_fingerprint
-    @model.curve = [point(0), point(1), point(2), point(4)]
-    first_input = @builder.transition_curve_input(@transition)
-    original_key = @builder.send(:transition_render_fingerprint, first_input, [:identity])
-
-    @model.curve = [point(0), point(1.5), point(2), point(4)]
-    second_input = @builder.transition_curve_input(@transition)
-    changed_key = @builder.send(:transition_render_fingerprint, second_input, [:identity])
-
-    refute_equal original_key, changed_key
-  end
-
-  def test_cellspace_transform_change_invalidates_cache_without_graph_revision_change
+  def test_cellspace_transform_event_invalidates_transition_without_revision_scan
     @model.curve = [point(0), point(1), point(2), point(4)]
     @model.revisions['A'] = [7, [:local_to_root, 0]]
     before = @builder.transition_line_points
 
-    # Revision 7 stays constant: moving the CellSpace must still rebuild.
     @model.curve = [point(0), point(1.5), point(2), point(4)]
     @model.revisions['A'] = [7, [:local_to_root, 12]]
+    @builder.invalidate_transitions([@transition])
     after = @builder.transition_line_points
 
     refute_equal xs(before), xs(after)
     assert_equal [0.0, 1.5, 1.5, 2.0, 2.0, 4.0], xs(after)
+    assert_empty @model.route_snapshot_calls
   end
 
-  def test_route_change_rebuilds_assembled_cache_without_explicit_invalidate
+  def test_route_change_is_not_detected_until_transition_event_arrives
     @model.curve = [point(0), point(1), point(2), point(4)]
     @model.revisions['A'] = [:first_graph]
     first = @builder.transition_line_points
@@ -306,10 +291,15 @@ class TransitionCurveBuilderTest < Minitest::Test
 
     @model.curve = [point(0), point(1.5), point(2), point(4)]
     @model.revisions['A'] = [:next_graph]
+    assert_same first, @builder.transition_line_points
+    assert_equal [0.0, 1.0, 1.0, 2.0, 2.0, 4.0], xs(@builder.transition_line_points)
+
+    @builder.invalidate_transitions([@transition])
     second = @builder.transition_line_points
     assert_equal [0.0, 1.5, 1.5, 2.0, 2.0, 4.0], xs(second)
     refute_equal xs(first), xs(second)
     assert_same second, @builder.transition_line_points
+    assert_empty @model.route_snapshot_calls
   end
 
   def test_excluded_cell_transition_is_neither_calculated_nor_rendered
@@ -371,6 +361,19 @@ class TransitionCurveBuilderTest < Minitest::Test
     assert_same first[:normal], second[:normal]
     assert_same first[:highlight], second[:highlight]
     assert_equal curve_calls, @model.reference_curve_calls.length
+  end
+
+  def test_unchanged_redraw_does_not_scan_transitions_or_native_revisions
+    @model.curve = [point(0), point(1), point(2), point(3), point(4)]
+    first = @builder.transition_line_points
+    enumerations = @model.transition_enumerations
+    curve_calls = @model.reference_curve_calls.length
+
+    5.times { assert_same first, @builder.transition_line_points }
+
+    assert_equal enumerations, @model.transition_enumerations
+    assert_equal curve_calls, @model.reference_curve_calls.length
+    assert_empty @model.route_snapshot_calls
   end
 
   def test_selected_transition_respects_visibility_and_topology_suppression

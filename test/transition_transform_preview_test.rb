@@ -107,14 +107,19 @@ class TransitionTransformPreviewTest < Minitest::Test
   end
 
   class Builder
-    attr_reader :invalidations
+    attr_reader :invalidations, :world_invalidations
 
     def initialize
       @invalidations = 0
+      @world_invalidations = 0
     end
 
     def invalidate
       @invalidations += 1
+    end
+
+    def invalidate_world_transform
+      @world_invalidations += 1
     end
   end
 
@@ -204,6 +209,18 @@ class TransitionTransformPreviewTest < Minitest::Test
 
     refute @overlay.send(:update_transition_transform_preview)
     refute @overlay.finish_transition_transform_preview(source: :commit)
+    assert_equal 0, @builder.invalidations
+  end
+
+  def test_selected_primal_transform_marks_only_world_cache_dirty
+    @selection.entities = [@primal]
+    @overlay.instance_variable_get(:@indoor_model).refresh_dual_graph_selection_cache
+    refute @overlay.send(:update_transition_transform_preview)
+
+    @primal.transformation = Transform.new(150)
+    assert @overlay.send(:update_transition_transform_preview)
+
+    assert_equal 1, @builder.world_invalidations
     assert_equal 0, @builder.invalidations
   end
 

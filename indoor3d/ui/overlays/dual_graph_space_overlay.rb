@@ -205,6 +205,7 @@ module ULOL
           changed_transition_transform_snapshots(@transition_transform_snapshots, current_snapshots).each do |snapshot|
             if snapshot[:kind] == :primal
               @primal_transform_preview_active = true
+              @transition_curve_builder.invalidate_world_transform
             else
               cell_id = snapshot[:cell_id].to_s
               @transition_transforming_cell_ids[cell_id] = true unless cell_id.empty?

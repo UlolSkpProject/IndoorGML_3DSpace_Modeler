@@ -5,7 +5,6 @@ module ULOL
     module IndoorCore
       class TransitionCurveBuilder
         EMPTY_LINE_POINTS = [].freeze
-        MIN_TRANSITION_RENDER_CACHE_LIMIT = 2048
         CURVE_CORNER_TRIM_RATIO = 0.2
         CURVE_SAMPLES_PER_CORNER = 6
         CURVE_DIRECTION_EPSILON = 1.0e-6
@@ -20,10 +19,7 @@ module ULOL
           @world_transform_dirty = true
           @assembly_dirty = true
           @full_cache_reset = true
-          @transition_render_segment_cache = {}
           @render_transition_line_points = nil
-          @render_transition_line_points_dirty = true
-          @render_transition_revision = nil
           @render_transition_exclusion_key = nil
           @render_visible_transition_segments = []
           @render_transition_generation = 0
@@ -32,7 +28,6 @@ module ULOL
 
         def invalidate
           @render_transition_line_points = nil
-          @render_transition_line_points_dirty = true
           @assembly_dirty = true
           @render_visible_transition_segments = []
           clear_selection_batches
@@ -45,8 +40,6 @@ module ULOL
           @world_transform_dirty = true
           @assembly_dirty = true
           @full_cache_reset = true
-          @transition_render_segment_cache&.clear
-          @render_transition_revision = nil
           @render_transition_exclusion_key = nil
           invalidate
         end
@@ -82,7 +75,6 @@ module ULOL
 
         def invalidate_assembly
           @render_transition_line_points = nil
-          @render_transition_line_points_dirty = true
           @assembly_dirty = true
           @render_visible_transition_segments = []
           clear_selection_batches
@@ -101,16 +93,9 @@ module ULOL
         def transition_line_points(excluded_cell_ids: nil)
           excluded_cells = transition_excluded_cell_lookup(excluded_cell_ids)
           exclusion_key = excluded_cells.keys.sort
-          # Ref-Graph snapshots are immutable and replaced on regeneration.
-          # Detect new snapshots even if no external overlay invalidation fired.
-          revision = transition_render_revision(excluded_cells)
-          revision_changed = !@render_transition_revision.nil? && @render_transition_revision != revision
-          mark_all_transition_roots_dirty if revision_changed
-          if @render_transition_line_points_dirty || @render_transition_line_points.nil? ||
-             @render_transition_revision != revision || @render_transition_exclusion_key != exclusion_key
+          if @assembly_dirty || @render_transition_line_points.nil? ||
+             @render_transition_exclusion_key != exclusion_key
             @render_transition_line_points = build_render_transition_line_points(excluded_cells)
-            @render_transition_line_points_dirty = false
-            @render_transition_revision = revision
             @render_transition_exclusion_key = exclusion_key
             @render_transition_generation += 1
             clear_selection_batches
@@ -139,7 +124,6 @@ module ULOL
           accepted = []
           active_identities = {}
           render_snapshot = transition_render_context_snapshot
-          context_key = render_snapshot&.[](:cache_key) || transition_render_context_cache_key
           @indoor_model.transitions.each do |transition|
             identity = transition_render_cache_identity(transition)
             active_identities[identity] = true
@@ -150,7 +134,7 @@ module ULOL
             second_visible = overlay_state_visible?(transition.state2)
             next unless first_visible || second_visible
 
-            segments = cached_transition_render_segments(transition, context_key, render_snapshot)
+            segments = cached_transition_render_segments(transition, render_snapshot)
             points.concat(segments[:default]) if first_visible && second_visible
             points.concat(segments[:first]) if first_visible
             points.concat(segments[:second]) if second_visible
@@ -537,37 +521,22 @@ module ULOL
           nil
         end
 
-        def cached_transition_render_segments(transition, context_key, render_snapshot)
+        def cached_transition_render_segments(transition, render_snapshot)
           identity = transition_render_cache_identity(transition)
-          root_entry = @root_segments_by_transition_id[identity]
-          if @dirty_root_transition_ids.delete(identity) || !root_entry
+          root_segments = @root_segments_by_transition_id[identity]
+          if @dirty_root_transition_ids.delete(identity) || !root_segments
             input = transition_curve_input(transition, render_snapshot)
-            root_fingerprint = transition_root_fingerprint(input)
-            root_entry = {
-              fingerprint: root_fingerprint,
-              segments: transition_curve_segments_from_input(transition, input)
-            }
-            @root_segments_by_transition_id[identity] = root_entry
+            root_segments = transition_curve_segments_from_input(transition, input)
+            @root_segments_by_transition_id[identity] = root_segments
             @world_segments_by_transition_id.delete(identity)
           end
 
-          world_entry = @world_segments_by_transition_id[identity]
-          if !world_entry || world_entry[:context_key] != context_key ||
-             world_entry[:root_fingerprint] != root_entry[:fingerprint]
-            world_entry = {
-              context_key: context_key,
-              root_fingerprint: root_entry[:fingerprint],
-              segments: render_transition_segment_groups(root_entry[:segments], render_snapshot)
-            }
-            @world_segments_by_transition_id[identity] = world_entry
+          world_segments = @world_segments_by_transition_id[identity]
+          unless world_segments
+            world_segments = render_transition_segment_groups(root_segments, render_snapshot)
+            @world_segments_by_transition_id[identity] = world_segments
           end
-          world_entry[:segments]
-        end
-
-        def mark_all_transition_roots_dirty
-          @indoor_model.transitions.each do |transition|
-            @dirty_root_transition_ids[transition_render_cache_identity(transition)] = true
-          end
+          world_segments
         end
 
         def prepare_transition_segment_caches
@@ -587,18 +556,6 @@ module ULOL
           @dirty_root_transition_ids.delete_if { |identity, _dirty| !active_identities[identity] }
         end
 
-        def transition_root_fingerprint(input)
-          [
-            Array(input[:points]).map { |point| point_coordinates(point) },
-            Array(input[:protected_indices]),
-            Hash(input[:departure_directions] || {}).sort_by { |index, _direction| index }.map do |index, direction|
-              [index, point_coordinates(direction)]
-            end
-          ]
-        rescue StandardError
-          nil
-        end
-
         def render_transition_segment_groups(root_segments, render_snapshot)
           {
             default: Array(root_segments[:default]).map do |point|
@@ -611,32 +568,6 @@ module ULOL
               render_transition_point(point, render_snapshot)
             end
           }
-        end
-
-        def transition_render_fingerprint(input, context_key)
-          return nil if context_key.nil?
-
-          [context_key, transition_root_fingerprint(input)]
-        rescue StandardError
-          nil
-        end
-
-        def transition_render_revision(excluded_cells = {})
-          @indoor_model.transitions.filter_map do |transition|
-            next if transition_excluded?(transition, excluded_cells)
-
-            [
-              transition_render_cache_identity(transition),
-              point_coordinates(transition.state1_point),
-              point_coordinates(transition.state2_point),
-              point_coordinates(transition.selected_waypoint),
-              point_coordinates(waypoint_departure_normal(transition)),
-              route_snapshot_key(transition.cell1_id),
-              route_snapshot_key(transition.cell2_id)
-            ]
-          end
-        rescue StandardError
-          nil
         end
 
         def transition_excluded_cell_lookup(cell_ids)
@@ -652,12 +583,6 @@ module ULOL
           excluded_cells[transition.cell1_id.to_s] || excluded_cells[transition.cell2_id.to_s]
         rescue StandardError
           false
-        end
-
-        def route_snapshot_key(cell_id)
-          return nil unless @indoor_model.respond_to?(:reference_graph_route_snapshot_key_for)
-
-          @indoor_model.reference_graph_route_snapshot_key_for(cell_id)
         end
 
         def point_coordinates(point)
@@ -680,33 +605,12 @@ module ULOL
           nil
         end
 
-        def transition_render_context_cache_key
-          return nil unless @transform_context.respond_to?(:overlay_render_context_cache_key)
-
-          @transform_context.overlay_render_context_cache_key
-        rescue StandardError
-          nil
-        end
-
         def render_transition_point(point, render_snapshot)
           if render_snapshot && @transform_context.respond_to?(:overlay_render_point_from_snapshot)
             return @transform_context.overlay_render_point_from_snapshot(point, render_snapshot)
           end
 
           @transform_context.overlay_render_point(point)
-        end
-
-        def render_transition_vector(vector, render_snapshot)
-          if render_snapshot && @transform_context.respond_to?(:overlay_render_vector_from_snapshot)
-            return @transform_context.overlay_render_vector_from_snapshot(vector, render_snapshot)
-          end
-          if @transform_context.respond_to?(:overlay_render_vector)
-            return @transform_context.overlay_render_vector(vector)
-          end
-
-          vector
-        rescue StandardError
-          vector
         end
 
         def overlay_transition_visible?(transition)
@@ -736,11 +640,6 @@ module ULOL
           { default: [], first: [], second: [] }
         end
 
-        def transition_render_cache_limit
-          [@indoor_model.transitions.length * 2, MIN_TRANSITION_RENDER_CACHE_LIMIT].max
-        rescue StandardError
-          MIN_TRANSITION_RENDER_CACHE_LIMIT
-        end
       end
     end
   end
