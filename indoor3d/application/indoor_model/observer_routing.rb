@@ -113,7 +113,7 @@ module ULOL
           def handle_space_features_transform_changed(entity)
             return true if reject_scaled_space_features_transform(entity)
 
-            invalidate_overlay_transition_points
+            invalidate_overlay_primal_render_transform
             remember_space_features_change_snapshot(entity)
             Sketchup.active_model&.active_view&.invalidate
             true
@@ -177,7 +177,7 @@ module ULOL
                 set_group_transformation(entity, revert_transform)
               end
             end
-            invalidate_overlay_transition_points
+            invalidate_overlay_primal_render_transform
             remember_space_features_change_snapshot(entity)
             Sketchup.active_model&.active_view&.invalidate
             IndoorCore::Logger.puts "[IndoorGML] Primal scale rejected and transform restored: entity_id=#{entity.entityID}"

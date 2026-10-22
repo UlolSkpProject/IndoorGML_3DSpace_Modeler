@@ -90,6 +90,8 @@ module ULOL
           # Ref-Graph snapshots are immutable and replaced on regeneration.
           # Detect new snapshots even if no external overlay invalidation fired.
           revision = transition_render_revision(excluded_cells)
+          revision_changed = !@render_transition_revision.nil? && @render_transition_revision != revision
+          mark_all_transition_roots_dirty if revision_changed
           if @render_transition_line_points_dirty || @render_transition_line_points.nil? ||
              @render_transition_revision != revision || @render_transition_exclusion_key != exclusion_key
             @render_transition_line_points = build_render_transition_line_points(excluded_cells)
@@ -522,12 +524,11 @@ module ULOL
         end
 
         def cached_transition_render_segments(transition, context_key, render_snapshot)
-          input = transition_curve_input(transition, render_snapshot)
-          root_fingerprint = transition_root_fingerprint(input)
           identity = transition_render_cache_identity(transition)
           root_entry = @root_segments_by_transition_id[identity]
-          if @dirty_root_transition_ids.delete(identity) || !root_entry ||
-             root_entry[:fingerprint] != root_fingerprint
+          if @dirty_root_transition_ids.delete(identity) || !root_entry
+            input = transition_curve_input(transition, render_snapshot)
+            root_fingerprint = transition_root_fingerprint(input)
             root_entry = {
               fingerprint: root_fingerprint,
               segments: transition_curve_segments_from_input(transition, input)
@@ -547,6 +548,12 @@ module ULOL
             @world_segments_by_transition_id[identity] = world_entry
           end
           world_entry[:segments]
+        end
+
+        def mark_all_transition_roots_dirty
+          @indoor_model.transitions.each do |transition|
+            @dirty_root_transition_ids[transition_render_cache_identity(transition)] = true
+          end
         end
 
         def prepare_transition_segment_caches
@@ -601,24 +608,21 @@ module ULOL
         end
 
         def transition_render_revision(excluded_cells = {})
-          [
-            transition_render_context_cache_key,
-            @indoor_model.transitions.filter_map do |transition|
-              next if transition_excluded?(transition, excluded_cells)
+          @indoor_model.transitions.filter_map do |transition|
+            next if transition_excluded?(transition, excluded_cells)
 
-              [
-                transition_render_cache_identity(transition),
-                point_coordinates(transition.state1_point),
-                point_coordinates(transition.state2_point),
-                point_coordinates(transition.selected_waypoint),
-                point_coordinates(waypoint_departure_normal(transition)),
-                overlay_state_visible?(transition.state1),
-                overlay_state_visible?(transition.state2),
-                route_snapshot_key(transition.cell1_id),
-                route_snapshot_key(transition.cell2_id)
-              ]
-            end
-          ]
+            [
+              transition_render_cache_identity(transition),
+              point_coordinates(transition.state1_point),
+              point_coordinates(transition.state2_point),
+              point_coordinates(transition.selected_waypoint),
+              point_coordinates(waypoint_departure_normal(transition)),
+              overlay_state_visible?(transition.state1),
+              overlay_state_visible?(transition.state2),
+              route_snapshot_key(transition.cell1_id),
+              route_snapshot_key(transition.cell2_id)
+            ]
+          end
         rescue StandardError
           nil
         end

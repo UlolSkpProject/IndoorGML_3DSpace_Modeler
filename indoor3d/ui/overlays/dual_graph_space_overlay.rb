@@ -32,6 +32,12 @@ module ULOL
           @state_renderer.clear_cache
         end
 
+        def invalidate_primal_render_transform
+          @transition_curve_builder.invalidate_world_transform
+          @state_renderer.clear_cache
+          true
+        end
+
         # CellSpace transitions stay suppressed across commit until topology has
         # been synchronized. Primal transforms do not alter adjacency and can be
         # released immediately at transaction completion.

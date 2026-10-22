@@ -131,6 +131,12 @@ module ULOL
             IndoorCore::Logger.puts "[IndoorGML] Overlay transition cache invalidation failed: #{e.class}: #{e.message}"
           end
 
+          def invalidate_primal_render_transform
+            @space_overlay&.invalidate_primal_render_transform
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Overlay Primal transform invalidation failed: #{e.class}: #{e.message}"
+          end
+
           def finish_transition_transform_preview(source: :commit)
             return false unless @space_overlay&.respond_to?(:finish_transition_transform_preview)
 

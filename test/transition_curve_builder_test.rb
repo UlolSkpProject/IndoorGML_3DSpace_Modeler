@@ -79,6 +79,26 @@ class TransitionCurveBuilderTest < Minitest::Test
     end
   end
 
+  class MutableTransform < FakeTransform
+    attr_accessor :offset
+
+    def initialize(offset)
+      @offset = offset
+    end
+
+    def overlay_render_context_cache_key
+      [:offset, offset]
+    end
+
+    def overlay_render_context_snapshot
+      { cache_key: overlay_render_context_cache_key }
+    end
+
+    def overlay_render_point_from_snapshot(point, _snapshot)
+      Point.new(point.x + offset, point.y, point.z)
+    end
+  end
+
   def point(x)
     Point.new(x.to_f, 0.0, 0.0)
   end
@@ -418,5 +438,21 @@ class TransitionCurveBuilderTest < Minitest::Test
     assert_empty @builder.transition_line_points
     refute @builder.instance_variable_get(:@root_segments_by_transition_id).key?('T')
     refute @builder.instance_variable_get(:@world_segments_by_transition_id).key?('T')
+  end
+
+  def test_primal_transform_reprojects_world_segments_without_rebuilding_root_curve
+    @model.curve = [point(0), point(1), point(2), point(4)]
+    transform = MutableTransform.new(100)
+    builder = Builder.new(indoor_model: @model, transform_context: transform)
+    assert_equal [100.0, 101.0, 101.0, 102.0, 102.0, 104.0], xs(builder.transition_line_points)
+    root_before = builder.instance_variable_get(:@root_segments_by_transition_id)['T']
+    curve_calls = @model.reference_curve_calls.length
+
+    transform.offset = 200
+    builder.invalidate_world_transform
+    assert_equal [200.0, 201.0, 201.0, 202.0, 202.0, 204.0], xs(builder.transition_line_points)
+
+    assert_same root_before, builder.instance_variable_get(:@root_segments_by_transition_id)['T']
+    assert_equal curve_calls, @model.reference_curve_calls.length
   end
 end
