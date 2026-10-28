@@ -43,6 +43,7 @@ module ULOL
             @open_report_callback = nil
             @validation_focus_callback = nil
             @fix_validation_callback = nil
+            @validation_fix_attempt_callback = nil
             @cancel_callback = nil
             @request_close_callback = nil
             @ready_callback = nil
@@ -182,6 +183,19 @@ module ULOL
             @fix_validation_callback = block
           end
 
+          def on_validation_fix_attempt(&block)
+            @validation_fix_attempt_callback = block
+          end
+
+          def complete_validation_fix_attempt(payload)
+            execute_or_queue(
+              "if (typeof completeValidationFixAttempt === 'function') " \
+              "completeValidationFixAttempt(#{JSON.generate(payload)});"
+            )
+          rescue StandardError => e
+            IndoorCore::Logger.puts "[IndoorGML] Validation fix result update failed: #{e.class}: #{e.message}"
+          end
+
           def on_cancel(&block)
             @cancel_callback = block
           end
@@ -195,6 +209,7 @@ module ULOL
             @open_report_callback = nil
             @validation_focus_callback = nil
             @fix_validation_callback = nil
+            @validation_fix_attempt_callback = nil
             @cancel_callback = nil
             @request_close_callback = nil
             @ready_callback = nil
@@ -271,6 +286,9 @@ module ULOL
             end
             dialog.add_action_callback('fixValidationErrors') do |_context|
               @fix_validation_callback&.call
+            end
+            dialog.add_action_callback('attemptValidationFix') do |_context, code, row_id|
+              @validation_fix_attempt_callback&.call(code, row_id)
             end
             dialog.add_action_callback('cancelValidation') do |_context|
               @cancel_callback&.call

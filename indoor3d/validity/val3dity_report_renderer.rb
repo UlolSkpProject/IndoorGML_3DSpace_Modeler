@@ -67,6 +67,9 @@ module ULOL
                   .filter-row { display: flex; gap: 7px; margin-bottom: 10px; overflow-x: auto; padding-bottom: 2px; }
                   .filter-btn { flex: 0 0 auto; padding: 8px 13px; border: 1px solid #4a4945; border-radius: 8px; background: transparent; color: #b9b6ae; cursor: pointer; font-size: 12px; font-weight: 700; }
                   .filter-btn.active { border-color: #327a4f; background: #12261a; color: #d8d6d0; }
+                  .fix-attempt { flex: 0 0 auto; padding: 6px 9px; border: 1px solid #315d9b; border-radius: 6px; background: #17243b; color: #8ab4f8; cursor: pointer; font-size: 10px; font-weight: 700; white-space: nowrap; }
+                  .fix-attempt:hover { background: #1d2d4a; border-color: #4278c7; }
+                  .fix-attempt:disabled { cursor: wait; opacity: .55; }
                   .report-actions { display: flex; justify-content: flex-end; }
                   .report-action { min-width: 92px; padding: 8px 12px; border: 1px solid #5a5953; border-radius: 7px; background: #343432; color: #e8e6e0; cursor: pointer; font-size: 12px; font-weight: 700; white-space: nowrap; }
                   .report-action:hover { background: #3d3d3a; border-color: #6a6962; }
@@ -81,7 +84,7 @@ module ULOL
                   .recheck-row.c600.focused { border-color: #d6a36d; box-shadow: inset 0 0 0 1px rgba(214, 163, 109, .6); }
                   .recheck-row.c700.focused { border-color: #f472b6; box-shadow: inset 0 0 0 1px rgba(244, 114, 182, .6); }
                   .recheck-row.c900.focused { border-color: #fef08a; box-shadow: inset 0 0 0 1px rgba(254, 240, 138, .6); }
-                  .recheck-row summary { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 8px 9px; cursor: pointer; list-style: none; }
+                  .recheck-row summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 8px 9px; cursor: pointer; list-style: none; }
                   .recheck-row summary::-webkit-details-marker { display: none; }
                   .recheck-row[open] summary { border-bottom: 1px solid #33322f; }
                   .recheck-summary-main { display: flex; align-items: center; gap: 7px; min-width: 0; }
@@ -469,8 +472,33 @@ module ULOL
                     requestValidationFocusRowChange(row);
                   });
                 });
+                document.querySelectorAll('.row-fix-attempt').forEach(function(button) {
+                  button.addEventListener('click', function(event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    var rowId = button.getAttribute('data-row-id') || '';
+                    var code = button.getAttribute('data-code') || '';
+                    console.log(rowId + '_' + code + '_수정시도');
+                    button.disabled = true;
+                    if (typeof sketchup !== 'undefined' && sketchup.attemptValidationFix) {
+                      sketchup.attemptValidationFix(code, rowId);
+                    } else {
+                      button.disabled = false;
+                    }
+                  });
+                });
+                window.completeValidationFixAttempt = function(payload) {
+                  payload = payload || {};
+                  var selector = '.row-fix-attempt[data-row-id="' +
+                    String(payload.rowId || '').replace(/"/g, '\\"') + '"]';
+                  document.querySelectorAll(selector).forEach(function(button) {
+                    button.disabled = false;
+                    button.title = payload.message || '';
+                  });
+                  console.log(payload.message || 'validation fix attempt completed');
+                };
                 document.addEventListener('click', function(event) {
-                  if (event.target.closest('.validation-error-row') || event.target.closest('.filter-btn')) return;
+                  if (event.target.closest('.validation-error-row') || event.target.closest('.filter-btn') || event.target.closest('.fix-attempt')) return;
                   requestValidationFocusRowChange(null);
                 });
                 window.clearValidationFocusSelection = function() {
@@ -599,6 +627,7 @@ module ULOL
                     #{occurrence}
                   </span>
                   <span class="summary-distance">#{distance}</span>
+                  <button class="fix-attempt row-fix-attempt" type="button" data-row-id="#{html_escape(group[:id])}" data-code="#{html_escape(code)}">수정 시도</button>
                 </summary>
                 <div class="recheck-detail">
                   #{Array(group[:members]).each_with_index.map { |row, index| error_group_member_html(row, raw_report, index) }.join}

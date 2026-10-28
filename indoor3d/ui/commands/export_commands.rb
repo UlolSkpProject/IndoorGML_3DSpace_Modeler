@@ -6,6 +6,7 @@ require_relative '../../validity/validation_run_workspace'
 require_relative '../../validity/validation_session'
 require_relative '../../validity/val3dity_report_schema'
 require_relative '../../validity/validation_focus_report_mapper'
+require_relative '../../validity/validation_auto_fix_service'
 
 module ULOL
   module Indoor3DGmlModeler
@@ -365,6 +366,29 @@ module ULOL
             next unless session.guard_report_action
 
             begin_validation_report_edit_mode(result.report, session) unless result.valid?
+          end
+          progress&.on_validation_fix_attempt do |code, row_id|
+            next unless session.guard_report_action
+
+            begin_validation_report_edit_mode(result.report, session) unless result.valid?
+            fix_result = IndoorGmlConverter::ValidationAutoFixService.new(
+              indoor_model: session.indoor_model,
+              report: result.report
+            ).attempt(code: code, row_id: row_id)
+            Logger.puts "[IndoorGML] #{fix_result.summary}"
+            progress&.complete_validation_fix_attempt(fix_result.to_h)
+          rescue StandardError => e
+            Logger.puts "[IndoorGML] Validation fix attempt failed: #{e.class}: #{e.message}"
+            progress&.complete_validation_fix_attempt(
+              code: code.to_s,
+              rowId: row_id.to_s,
+              attempted: 0,
+              fixed: 0,
+              skipped: 0,
+              failed: 1,
+              message: "자동 수정 중 오류가 발생했습니다: #{e.message}",
+              details: ["#{e.class}: #{e.message}"]
+            )
           end
 
           if result.error?
