@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'validation_overlay_service'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -32,29 +34,29 @@ module ULOL
             end
             @screen_overlay = nil
             @space_overlay = nil
-            @validation_overlay = nil
-            @validation_geometry_resolver = nil
+            @validation_overlay_service = nil
             @registered = false
             @model = nil
           end
 
           def ensure_registered(model)
             if @registered && @model == model
+              registered = validation_overlay_service.ensure_registered(model)
               update_enabled_from_model
-              return
+              return registered
             end
             return unless model.respond_to?(:overlays)
 
             @screen_overlay ||= @screen_overlay_factory.call
             @space_overlay ||= @space_overlay_factory.call
-            @validation_overlay ||= @validation_overlay_factory.call
             remove_stale_instances(model)
             model.overlays.add(@screen_overlay)
             model.overlays.add(@space_overlay)
-            model.overlays.add(@validation_overlay) if @validation_overlay
             @registered = true
             @model = model
+            validation_registered = validation_overlay_service.ensure_registered(model)
             update_enabled_from_model
+            validation_registered
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Edit mode overlay registration failed: #{e.class}: #{e.message}"
           end
@@ -62,67 +64,44 @@ module ULOL
           def set_enabled(enabled)
             set_overlay_enabled(@screen_overlay, enabled)
             set_overlay_enabled(@space_overlay, enabled)
-            set_overlay_enabled(
-              @validation_overlay,
-              enabled && validation_focus_active?
-            )
+            validation_overlay_service.set_enabled(enabled && validation_focus_active?)
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Edit mode overlay enable failed: #{e.class}: #{e.message}"
+            false
           end
 
           def update_enabled(editing:, dual_overlay_visible:)
             set_overlay_enabled(@screen_overlay, editing == true)
             set_overlay_enabled(@space_overlay, dual_overlay_visible == true)
-            set_overlay_enabled(
-              @validation_overlay,
-              editing == true && validation_focus_active?
-            )
+            validation_overlay_service.set_enabled(editing == true && validation_focus_active?)
           end
 
           def set_validation_geometry(row)
             return clear_validation_geometry unless row.is_a?(Hash)
 
-            @validation_geometry_resolver ||= @validation_geometry_resolver_factory.call
-            return clear_validation_geometry unless @validation_geometry_resolver
-
-            geometry = @validation_geometry_resolver.resolve(row)
-            @validation_overlay&.set_geometry(geometry)
-            geometry
-          rescue StandardError => e
-            IndoorCore::Logger.puts(
-              "[IndoorGML] Validation geometry overlay update failed: " \
-              "#{e.class}: #{e.message}"
-            )
-            clear_validation_geometry
+            validation_overlay_service.show(@indoor_model.model || @model, row)
           end
 
           def clear_validation_geometry
-            @validation_overlay&.clear
-            nil
-          rescue StandardError => e
-            IndoorCore::Logger.puts(
-              "[IndoorGML] Validation geometry overlay clear failed: " \
-              "#{e.class}: #{e.message}"
-            )
-            nil
+            validation_overlay_service.clear
           end
 
+          # Only actual geometry/runtime changes invalidate model-specific overlap
+          # evidence. Row switching and deselection use clear_validation_geometry.
           def invalidate_validation_geometry_cache
-            if @validation_geometry_resolver&.respond_to?(:clear_cache)
-              @validation_geometry_resolver.clear_cache
-            elsif defined?(IndoorGmlConverter::ValidationErrorGeometryResolver)
-              model = @indoor_model.respond_to?(:model) ? @indoor_model.model : nil
-              IndoorGmlConverter::ValidationErrorGeometryResolver.clear_overlap_geometry(
-                model: model
-              ) if model
-            end
-            true
-          rescue StandardError => e
-            IndoorCore::Logger.puts(
-              "[IndoorGML] Validation geometry overlay cache invalidation failed: " \
-              "#{e.class}: #{e.message}"
+            validation_overlay_service.invalidate_geometry_cache
+          end
+
+          def end_validation_session
+            validation_overlay_service.end_session
+          end
+
+          def validation_overlay_service
+            @validation_overlay_service ||= ValidationOverlayService.new(
+              indoor_model: @indoor_model,
+              overlay_factory: @validation_overlay_factory,
+              resolver_factory: @validation_geometry_resolver_factory
             )
-            false
           end
 
           def invalidate_transition_points
@@ -220,14 +199,10 @@ module ULOL
               DualGraphSpaceOverlay::OVERLAY_ID,
               COMPATIBILITY_EDIT_MODE_OVERLAY_ID
             ]
-            if defined?(ValidationErrorGeometryOverlay::OVERLAY_ID)
-              stale_ids << ValidationErrorGeometryOverlay::OVERLAY_ID
-            end
             model.overlays.each do |overlay|
               next unless stale_ids.include?(overlay.overlay_id)
               next if overlay.equal?(@screen_overlay) ||
-                      overlay.equal?(@space_overlay) ||
-                      overlay.equal?(@validation_overlay)
+                      overlay.equal?(@space_overlay)
 
               stale_overlays << overlay
             end

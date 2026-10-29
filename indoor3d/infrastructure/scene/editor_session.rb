@@ -187,7 +187,10 @@ module ULOL
           selection_changed
           invalidate_view(Sketchup.active_model())
           focus_started = validation_result_focus_service.begin_session(@indoor_model.model)
-          return true if focus_started[:ok]
+          if focus_started[:ok]
+            update_overlay_enabled
+            return true
+          end
 
           IndoorCore::Logger.puts "[IndoorGML] Validation Focus coordinator startup failed: #{focus_started[:errors].inspect}"
           restore_validation_focus_visibility
@@ -594,8 +597,10 @@ module ULOL
           restore_validation_focus_camera if restore_camera
           validation_focus_controller.clear
           @validation_result_focus_service&.discard
-          overlay_controller.clear_validation_geometry
-          overlay_controller.invalidate_validation_geometry_cache
+          overlay_cleared = overlay_controller.end_validation_session
+          unless overlay_cleared
+            IndoorCore::Logger.puts '[IndoorGML] Validation overlay session cleanup failed'
+          end
           invalidate_overlay_transition_visibility
         end
 
@@ -872,7 +877,7 @@ module ULOL
             apply_visibility: -> { apply_validation_focus_visibility },
             apply_rendering: -> { apply_rendering_context(@indoor_model.model, @indoor_model.model&.active_path) },
             show_overlay: ->(row_id) { update_validation_error_geometry(row_id) },
-            clear_overlay: -> { overlay_controller.clear_validation_geometry; true },
+            clear_overlay: -> { overlay_controller.clear_validation_geometry },
             schedule_camera: ->(row_id) { zoom_validation_focus_highlight(row_id: row_id) },
             restore_camera: -> { restore_validation_focus_camera },
             restore_context: -> { reset_validation_focus_row_edit_context },
