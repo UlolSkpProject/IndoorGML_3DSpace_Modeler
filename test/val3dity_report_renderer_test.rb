@@ -11,7 +11,11 @@ class Val3dityReportRendererTest < Minitest::Test
 
     assert_equal 2, html.scan('class="fix-attempt row-fix-attempt"').length
     assert_includes html, 'data-row-id="validation-error-row-0" data-code="104">수정 시도</button>'
-    assert_includes html, 'data-row-id="validation-error-row-1" data-code="203">수정 시도</button>'
+    refute_includes html, 'data-row-id="validation-error-row-1" data-code="201">수정 시도</button>'
+    assert_includes html, 'data-row-id="validation-error-row-2" data-code="203">수정 시도</button>'
+    refute_includes html, 'data-row-id="validation-error-row-3" data-code="206">수정 시도</button>'
+    refute_includes html, 'data-row-id="validation-error-row-4" data-code="306">수정 시도</button>'
+    refute_includes html, 'data-row-id="validation-error-row-5" data-code="405">수정 시도</button>'
     assert_includes html, "console.log(rowId + '_' + code + '_수정시도');"
     assert_includes html, 'sketchup.attemptValidationFix(code, rowId);'
     assert_includes html, 'window.completeValidationFixAttempt = function(payload)'
@@ -50,9 +54,29 @@ class Val3dityReportRendererTest < Minitest::Test
               'id' => 'solid_cell_beta',
               'errors' => [
                 {
+                  'code' => 201,
+                  'description' => 'INTERSECTION_RINGS',
+                  'id' => 'polygon_4_cell_beta'
+                },
+                {
                   'code' => 203,
                   'description' => 'NON_PLANAR_POLYGON_DISTANCE_PLANE',
                   'id' => 'polygon_5_cell_beta'
+                },
+                {
+                  'code' => 206,
+                  'description' => 'INNER_RING_OUTSIDE',
+                  'id' => 'polygon_6_cell_beta'
+                },
+                {
+                  'code' => 306,
+                  'description' => 'SHELL_SELF_INTERSECTION',
+                  'id' => 'solid_cell_beta'
+                },
+                {
+                  'code' => 405,
+                  'description' => 'WRONG_ORIENTATION_SHELL',
+                  'id' => 'solid_cell_beta'
                 }
               ]
             }

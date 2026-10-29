@@ -63,7 +63,11 @@ module ULOL
             face_refs = geometry_face_refs(row).select do |face|
               cell_ids.empty? || cell_ids.include?(face[:cell_id])
             end
-            append_face_geometry(geometry, face_refs)
+            append_face_geometry(
+              geometry,
+              face_refs,
+              vertex_edge_only: vertex_edge_only_error?(row)
+            )
             append_overlap_geometry(geometry, cell_ids, row)
             geometry[:status] = geometry_present?(geometry) ? :ready : :empty
             geometry
@@ -85,6 +89,7 @@ module ULOL
             {
               status: :empty,
               face_triangles: [],
+              face_vertices: [],
               face_edges: [],
               overlap_triangles: [],
               overlap_edges: [],
@@ -95,7 +100,15 @@ module ULOL
           end
 
           def geometry_present?(geometry)
-            !geometry[:face_triangles].empty? || !geometry[:overlap_triangles].empty?
+            !geometry[:face_triangles].empty? ||
+              !geometry[:face_vertices].empty? ||
+              !geometry[:face_edges].empty? ||
+              !geometry[:overlap_triangles].empty? ||
+              !geometry[:overlap_edges].empty?
+          end
+
+          def vertex_edge_only_error?(row)
+            (row[:code] || row['code']).to_s[/\d+/].to_i == 201
           end
 
           def geometry_face_refs(row)
@@ -117,7 +130,7 @@ module ULOL
             end.reject(&:empty?).uniq
           end
 
-          def append_face_geometry(geometry, face_refs)
+          def append_face_geometry(geometry, face_refs, vertex_edge_only: false)
             Array(face_refs).each do |reference|
               cell_space = cell_space_for(reference[:cell_id])
               group = cell_space&.valid_sketchup_group
@@ -129,11 +142,23 @@ module ULOL
 
               transform = cell_group_world_transformation(group)
               snapshot = face_geometry(face, transform)
-              geometry[:face_triangles].concat(snapshot[:triangles])
-              geometry[:face_edges].concat(snapshot[:edges])
+              append_face_snapshot(
+                geometry,
+                snapshot,
+                vertex_edge_only: vertex_edge_only
+              )
             rescue StandardError => e
               geometry[:unresolved_faces] << reference.merge(reason: "#{e.class}: #{e.message}")
             end
+          end
+
+          def append_face_snapshot(geometry, snapshot, vertex_edge_only:)
+            if vertex_edge_only
+              geometry[:face_vertices].concat(snapshot[:vertices])
+            else
+              geometry[:face_triangles].concat(snapshot[:triangles])
+            end
+            geometry[:face_edges].concat(snapshot[:edges])
           end
 
           def append_overlap_geometry(geometry, cell_ids, row)
@@ -227,7 +252,10 @@ module ULOL
                 ]
               end
             end
-            { triangles: triangles, edges: edges }
+            vertices = face.loops.flat_map(&:vertices).uniq.map do |vertex|
+              world_point(vertex.position, transform)
+            end
+            { triangles: triangles, vertices: vertices, edges: edges }
           end
 
           def boolean_intersection_geometry(group1, group2)
