@@ -9,6 +9,9 @@ module ULOL
 
         FACE_FILL_COLOR = Sketchup::Color.new(225, 44, 142, 112)
         FACE_EDGE_COLOR = Sketchup::Color.new(255, 116, 205, 255)
+        FACE_VERTEX_COLOR = Sketchup::Color.new(255, 210, 238, 255)
+        FACE_VERTEX_SIZE_PIXELS = 10
+        FACE_VERTEX_STYLE = 2
         OVERLAP_FILL_COLOR = Sketchup::Color.new(255, 82, 24, 156)
         OVERLAP_EDGE_COLOR = Sketchup::Color.new(255, 205, 56, 255)
 
@@ -40,6 +43,7 @@ module ULOL
 
           draw_triangles(view, @face_triangle_points, FACE_FILL_COLOR)
           draw_lines(view, @geometry[:face_edges], FACE_EDGE_COLOR, 4)
+          draw_points(view, @geometry[:face_vertices])
           draw_triangles(view, @overlap_triangle_points, OVERLAP_FILL_COLOR)
           draw_lines(view, @geometry[:overlap_edges], OVERLAP_EDGE_COLOR, 3)
         rescue StandardError => e
@@ -94,6 +98,18 @@ module ULOL
           view.draw(GL_LINES, render_points)
         end
 
+        def draw_points(view, points)
+          render_points = Array(points)
+          return if render_points.empty?
+
+          view.draw_points(
+            render_points,
+            FACE_VERTEX_SIZE_PIXELS,
+            FACE_VERTEX_STYLE,
+            FACE_VERTEX_COLOR
+          )
+        end
+
         def geometry_points
           @geometry_points
         end
@@ -103,6 +119,7 @@ module ULOL
           @overlap_triangle_points = @geometry[:overlap_triangles].flatten(1)
           @geometry_points =
             @face_triangle_points +
+            @geometry[:face_vertices] +
             @geometry[:face_edges] +
             @overlap_triangle_points +
             @geometry[:overlap_edges]
@@ -125,6 +142,7 @@ module ULOL
           source = geometry.is_a?(Hash) ? geometry : {}
           {
             face_triangles: Array(source[:face_triangles]),
+            face_vertices: Array(source[:face_vertices]),
             face_edges: Array(source[:face_edges]),
             overlap_triangles: Array(source[:overlap_triangles]),
             overlap_edges: Array(source[:overlap_edges])
@@ -134,6 +152,7 @@ module ULOL
         def empty_geometry
           {
             face_triangles: [],
+            face_vertices: [],
             face_edges: [],
             overlap_triangles: [],
             overlap_edges: []

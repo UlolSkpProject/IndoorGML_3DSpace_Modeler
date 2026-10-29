@@ -20,7 +20,7 @@ class ValidationAutoFixServiceTest < Minitest::Test
     end
   end
 
-  Vertex = Struct.new(:position, :edges)
+  Vertex = Struct.new(:position, :edges, :faces)
   Loop = Struct.new(:vertices, :edges)
   Face = Struct.new(:loops)
 
@@ -45,7 +45,7 @@ class ValidationAutoFixServiceTest < Minitest::Test
   end
 
   def test_supported_codes_include_orientation_repairs
-    assert_equal [102, 104, 303, 307], Service::SUPPORTED_CODES
+    assert_equal [102, 104, 203, 303, 307], Service::SUPPORTED_CODES
   end
 
   def test_degree_two_edge_plan_collapses_one_endpoint
@@ -127,10 +127,36 @@ class ValidationAutoFixServiceTest < Minitest::Test
     assert_equal [repeated, other], duplicates
   end
 
+  def test_203_accepts_vertex_when_every_adjacent_face_is_quadrilateral
+    target = Struct.new(:vertices).new(Array.new(5))
+    first_quad = Struct.new(:vertices).new(Array.new(4))
+    second_quad = Struct.new(:vertices).new(Array.new(4))
+    candidate = vertex(0.0, 0.0)
+    candidate.faces.concat([target, first_quad, second_quad])
+
+    assert @service.send(:adjacent_faces_all_quadrilateral?, candidate, target)
+  end
+
+  def test_203_rejects_vertex_when_an_adjacent_face_is_not_quadrilateral
+    target = Struct.new(:vertices).new(Array.new(5))
+    quad = Struct.new(:vertices).new(Array.new(4))
+    triangle = Struct.new(:vertices).new(Array.new(3))
+    candidate = vertex(0.0, 0.0)
+    candidate.faces.concat([target, quad, triangle])
+
+    refute @service.send(:adjacent_faces_all_quadrilateral?, candidate, target)
+  end
+
+  def test_203_auto_fix_uses_point_zero_one_millimeter_tolerance
+    expected_inches = 0.01 / 25.4
+
+    assert_in_delta expected_inches, @service.send(:planarity_tolerance_inches), 1.0e-12
+  end
+
   def test_unsupported_error_code_is_reported_without_geometry_access
     service = Service.new(indoor_model: nil, report: {})
 
-    result = service.attempt(code: '203', row_id: 'validation-error-row-0')
+    result = service.attempt(code: '201', row_id: 'validation-error-row-0')
 
     assert_equal 0, result.attempted
     assert_equal 0, result.fixed
@@ -141,7 +167,7 @@ class ValidationAutoFixServiceTest < Minitest::Test
   private
 
   def vertex(x, y, z = 0.0)
-    Vertex.new(Point.new(x, y, z), [])
+    Vertex.new(Point.new(x, y, z), [], [])
   end
 
   def attach_extra_edge(id, source)

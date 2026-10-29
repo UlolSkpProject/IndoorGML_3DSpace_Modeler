@@ -669,6 +669,13 @@ module ULOL
             distance = recheck_row ? format_report_recheck_measure(recheck_row) : ''
             refs = Val3dityReportSchema.grouped_error_row_refs(group)
             occurrence = group[:count].to_i > 1 ? "<span class=\"occurrence-badge\">상세 #{group[:count].to_i}건</span>" : ''
+            fix_attempt = if [201, 206, 306, 405].include?(code[/\d+/].to_i)
+                            ''
+                          else
+                            <<~HTML.chomp
+                              <button class="fix-attempt row-fix-attempt" type="button" data-row-id="#{html_escape(group[:id])}" data-code="#{html_escape(code)}">수정 시도</button>
+                            HTML
+                          end
             <<~HTML
               <details class="recheck-row validation-error-row #{error_code_color_class(code)}" data-row-id="#{html_escape(group[:id])}" data-code="#{html_escape(code)}" data-cells="#{html_escape(refs[:cells].join(','))}" data-states="#{html_escape(refs[:states].join(','))}" data-transitions="#{html_escape(refs[:transitions].join(','))}">
                 <summary>
@@ -678,7 +685,7 @@ module ULOL
                     #{occurrence}
                   </span>
                   <span class="summary-distance">#{distance}</span>
-                  <button class="fix-attempt row-fix-attempt" type="button" data-row-id="#{html_escape(group[:id])}" data-code="#{html_escape(code)}">수정 시도</button>
+                  #{fix_attempt}
                 </summary>
                 <div class="recheck-detail">
                   #{Array(group[:members]).each_with_index.map { |row, index| error_group_member_html(row, raw_report, index) }.join}

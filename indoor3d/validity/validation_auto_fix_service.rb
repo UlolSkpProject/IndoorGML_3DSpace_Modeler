@@ -14,9 +14,10 @@ module ULOL
         # Face. Every mutation is isolated in its own undo operation and is
         # rolled back unless the CellSpace remains a positive-volume manifold.
         class ValidationAutoFixService
-          SUPPORTED_CODES = [102, 104, 303, 307].freeze
+          SUPPORTED_CODES = [102, 104, 203, 303, 307].freeze
           ORIENTATION_CODES = [303, 307].freeze
           DEFAULT_SNAP_TOLERANCE = 0.001
+          AUTO_FIX_PLANARITY_TOLERANCE_MM = 0.01
           LENGTH_EPSILON = 1.0e-9
           CONGRUENT_EDGE_RELATIVE_TOLERANCE = 0.1
 
@@ -95,6 +96,8 @@ module ULOL
 
               if normalized_code == 104
                 repair_duplicate_edges(row, face_targets, result)
+              elsif normalized_code == 203
+                repair_non_planar_faces(row, face_targets, result)
               elsif ORIENTATION_CODES.include?(normalized_code)
                 repair_face_orientations(row, face_targets, result, normalized_code)
               else
@@ -234,6 +237,169 @@ module ULOL
                 result.messages << "#{row[:id]}: face 방향 수정 후 solid 검증 실패로 rollback"
               end
             end
+          end
+
+          def repair_non_planar_faces(row, face_targets, result)
+            tolerance = planarity_tolerance_inches
+            face_targets.group_by { |target| entity_key(target[:group]) }.each_value do |group_targets|
+              group = group_targets.first[:group]
+              cell_space = group_targets.first[:cell_space]
+              transform = cell_group_world_transformation(group)
+              plans = group_targets.filter_map do |target|
+                plan = non_planar_vertex_plan(target[:face], transform, tolerance)
+                unless plan
+                  result.skipped += 1
+                  result.messages << "#{row[:id]}: 인접 face가 모두 사각형인 안전한 vertex를 찾지 못해 수동 수정이 필요합니다."
+                  next
+                end
+                plan.merge(face: target[:face])
+              end
+              next if plans.empty?
+
+              moves = compatible_planarity_moves(plans, tolerance)
+              unless moves
+                result.skipped += plans.length
+                result.messages << "#{row[:id]}: 동일 vertex의 투영 위치가 충돌해 수동 수정이 필요합니다."
+                next
+              end
+
+              result.attempted += plans.length
+              source_face_count = group.definition.entities.grep(Sketchup::Face).length
+              source_edge_count = group.definition.entities.grep(Sketchup::Edge).length
+              repaired = run_repair_operation('Fix IndoorGML validation error 203', group) do
+                apply_vertex_projection_moves(group, moves)
+                valid_cell_space_group?(group) &&
+                  group.definition.entities.grep(Sketchup::Face).length == source_face_count &&
+                  group.definition.entities.grep(Sketchup::Edge).length == source_edge_count
+              end
+              record_repair_result(
+                result,
+                row,
+                cell_space,
+                group,
+                repaired,
+                plans.length,
+                '사각형 인접 face vertex 평면 투영'
+              )
+            end
+          end
+
+          def non_planar_vertex_plan(face, transform, tolerance)
+            vertices = Array(face&.outer_loop&.vertices)
+            return nil if vertices.length < 4
+
+            world_points = vertices.map { |vertex| vertex.position.transform(transform) }
+            candidates = vertices.each_index.filter_map do |index|
+              reference_points = world_points.each_with_index.filter_map do |point, point_index|
+                point unless point_index == index
+              end
+              plane = fit_plane(reference_points)
+              next unless plane
+
+              distance = point_plane_distance(world_points[index], plane)
+              next unless distance > tolerance + LENGTH_EPSILON
+
+              {
+                vertex: vertices[index],
+                projected_world: project_point_to_plane(world_points[index], plane),
+                distance: distance
+              }
+            end.sort_by { |candidate| -candidate[:distance] }
+
+            candidate = candidates.find do |item|
+              adjacent_faces_all_quadrilateral?(item[:vertex], face)
+            end
+            return nil unless candidate
+
+            projected_local = candidate[:projected_world].transform(transform.inverse)
+            proposed_points = world_points.each_with_index.map do |point, index|
+              same_entity?(vertices[index], candidate[:vertex]) ? candidate[:projected_world] : point
+            end
+            return nil if fitted_plane_max_distance(proposed_points) > tolerance + LENGTH_EPSILON
+
+            adjacent_faces = Array(candidate[:vertex].faces).reject { |item| same_entity?(item, face) }
+            affected_faces = [face, *adjacent_faces].uniq { |item| entity_key(item) }
+            return nil unless affected_faces.all? do |affected_face|
+              proposed_face_points = Array(affected_face.outer_loop.vertices).map do |vertex|
+                same_entity?(vertex, candidate[:vertex]) ? projected_local : vertex.position
+              end
+              fitted_plane_max_distance(proposed_face_points) <= tolerance + LENGTH_EPSILON
+            end
+
+            {
+              vertex: candidate[:vertex],
+              target: Geom::Point3d.new(projected_local.x, projected_local.y, projected_local.z),
+              distance: candidate[:distance]
+            }
+          rescue StandardError
+            nil
+          end
+
+          def adjacent_faces_all_quadrilateral?(vertex, target_face)
+            adjacent = Array(vertex&.faces).select do |face|
+              entity_valid?(face) && !same_entity?(face, target_face)
+            end
+            !adjacent.empty? && adjacent.all? { |face| Array(face.vertices).length == 4 }
+          end
+
+          def compatible_planarity_moves(plans, tolerance)
+            Array(plans).each_with_object({}) do |plan, moves|
+              key = entity_key(plan[:vertex])
+              existing = moves[key]
+              if existing && existing[:target].distance(plan[:target]).to_f > tolerance
+                return nil
+              end
+              moves[key] ||= { vertex: plan[:vertex], target: plan[:target] }
+            end.values
+          end
+
+          def apply_vertex_projection_moves(group, moves)
+            vertices = Array(moves).map { |move| move[:vertex] }
+            vectors = Array(moves).map do |move|
+              move[:vertex].position.vector_to(move[:target])
+            end
+            group.definition.entities.transform_by_vectors(vertices, vectors)
+          end
+
+          def fitted_plane_max_distance(points)
+            plane = fit_plane(points)
+            return Float::INFINITY unless plane
+
+            Array(points).map { |point| point_plane_distance(point, plane) }.max.to_f
+          end
+
+          def fit_plane(points)
+            source = Array(points)
+            return nil if source.length < 3
+
+            plane = Geom.fit_plane_to_points(source)
+            return nil unless plane && plane.length == 4
+            return nil if plane[0].to_f**2 + plane[1].to_f**2 + plane[2].to_f**2 <= LENGTH_EPSILON
+
+            plane.map(&:to_f)
+          rescue StandardError
+            nil
+          end
+
+          def point_plane_distance(point, plane)
+            a, b, c, d = plane
+            denominator = Math.sqrt((a * a) + (b * b) + (c * c))
+            return Float::INFINITY if denominator <= LENGTH_EPSILON
+
+            ((a * point.x.to_f) + (b * point.y.to_f) + (c * point.z.to_f) + d).abs / denominator
+          end
+
+          def project_point_to_plane(point, plane)
+            a, b, c, d = plane
+            denominator = (a * a) + (b * b) + (c * c)
+            raise 'Invalid best-fit plane.' if denominator <= LENGTH_EPSILON
+
+            scale = ((a * point.x.to_f) + (b * point.y.to_f) + (c * point.z.to_f) + d) / denominator
+            Geom::Point3d.new(
+              point.x.to_f - (a * scale),
+              point.y.to_f - (b * scale),
+              point.z.to_f - (c * scale)
+            )
           end
 
           def repair_short_edges(row, face_targets, result)
@@ -559,6 +725,10 @@ module ULOL
             tolerance / factor
           rescue ArgumentError, TypeError
             DEFAULT_SNAP_TOLERANCE
+          end
+
+          def planarity_tolerance_inches
+            AUTO_FIX_PLANARITY_TOLERANCE_MM / 25.4
           end
 
           def cell_group_world_transformation(group)
