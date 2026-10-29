@@ -12,6 +12,45 @@ module ULOL
           STRICT_VALIDITY_KEY = Val3dityReportSchema::STRICT_VALIDITY_KEY
           VALIDATION_STATUS_KEY = Val3dityReportSchema::VALIDATION_STATUS_KEY
           OVERLAP_TOLERANCE_KEY = Val3dityReportSchema::OVERLAP_TOLERANCE_KEY
+          ERROR_CODE_LABELS = {
+            '101' => '꼭지점 개수 부족',
+            '102' => '겹쳐진 인접 꼭지점',
+            '103' => '닫히지 않은 모서리',
+            '104' => '모서리 자기 교차',
+            '201' => '모서리 간 교차',
+            '202' => '중복 모서리',
+            '203' => '평면 내 꼭지점 높이 편차',
+            '204' => '면 뒤틀림',
+            '205' => '면 내부 영역 단절',
+            '206' => '내부 모서리 외곽 이탈',
+            '207' => '내부 모서리 중첩',
+            '208' => '내·외부 모서리 방향 동일',
+            '300' => '솔리드 외곽 구성 실패',
+            '301' => '솔리드 구성 면 부족',
+            '302' => '닫히지 않은 솔리드',
+            '303' => '모서리·꼭지점 면 접합 오류',
+            '305' => '솔리드 내 연결 요소 분리',
+            '306' => '솔리드 내 자기 교차',
+            '307' => '솔리드 면 방향 오류',
+            '401' => '솔리드 내부 경계 교차',
+            '402' => '솔리드 내부 경계 중복',
+            '403' => '내부 빈 공간 외곽 이탈',
+            '404' => '솔리드 내부 공간 단절',
+            '405' => '솔리드 면 앞뒤 방향 오류',
+            '501' => '복합 솔리드 내 형상 겹침',
+            '502' => '복합 솔리드 내 중복 형상',
+            '503' => '복합 솔리드 내 형상 분리',
+            '701' => 'CellSpace 겹침',
+            '702' => 'State의 CellSpace 이탈',
+            '703' => 'CellSpace·State 연결 오류',
+            '704' => '공간 인접 관계·Transition 불일치',
+            '901' => '입력 파일 오류',
+            '902' => '비어 있는 형상',
+            '903' => '검사 설정값 오류',
+            '904' => '지원하지 않는 파일 형식',
+            '999' => '알 수 없는 검사 오류',
+            'XML_INPUT_ERROR' => 'XML 입력 오류'
+          }.freeze
           def render(raw_report)
             fallback_report_html(raw_report)
           end
@@ -77,11 +116,12 @@ module ULOL
                   .report-action:hover { background: #3d3d3a; border-color: #6a6962; }
                   .recheck-list { display: grid; gap: 8px; }
                   .error-code-card { overflow: hidden; background: #222220; border: 1px solid #373633; border-radius: 9px; }
-                  .error-code-card > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 8px; padding: 10px; cursor: pointer; list-style: none; }
+                  .error-code-card > summary { display: grid; grid-template-columns: minmax(0, 1fr) minmax(110px, 1.4fr) minmax(0, 1fr); align-items: center; gap: 8px; padding: 10px; cursor: pointer; list-style: none; }
                   .error-code-card > summary::-webkit-details-marker { display: none; }
                   .error-code-card[open] > summary { border-bottom: 1px solid #373633; }
-                  .error-code-card > summary > .toggle-triangle { grid-column: 1; justify-self: start; }
-                  .error-code-heading { grid-column: 2; display: inline-flex; align-items: center; justify-content: center; gap: 8px; justify-self: center; }
+                  .error-code-heading { grid-column: 1; display: inline-flex; align-items: center; gap: 7px; justify-self: start; min-width: 0; }
+                  .error-code-heading > .toggle-triangle { flex: 0 0 auto; margin-right: 0; }
+                  .error-code-label { grid-column: 2; min-width: 0; color: #b9b6ae; font-size: 10px; font-weight: 700; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
                   .error-code-card > summary > .bulk-fix-attempt { grid-column: 3; justify-self: end; }
                   .error-code-count { color: #85827b; font-size: 10px; font-weight: 700; }
                   .error-code-items { display: grid; gap: 7px; padding: 8px; }
@@ -637,6 +677,23 @@ module ULOL
                   return succeeded;
                 }
 
+                function validationFixFailureReasons(payload) {
+                  var countPattern = /^성공\\s+\\d+건\\s*\\/\\s*실패\\s+\\d+건$/;
+                  var lines = String(payload.feedbackMessage || '').split(/\\r?\\n/).map(function(line) {
+                    return line.trim();
+                  }).filter(function(line) {
+                    return line && !countPattern.test(line);
+                  });
+                  if (lines.length === 0) {
+                    lines = Array.isArray(payload.details) ? payload.details.map(String).filter(Boolean) : [];
+                  }
+                  if (lines.length === 0) {
+                    var message = String(payload.message || '').trim();
+                    if (message && !countPattern.test(message)) lines.push(message);
+                  }
+                  return lines.filter(function(line, index) { return lines.indexOf(line) === index; });
+                }
+
                 function completeValidationBulkFixAttempt(payload, succeeded) {
                   var code = String(payload.code || '');
                   var rowId = String(payload.rowId || '');
@@ -648,10 +705,18 @@ module ULOL
                     attempt.success += 1;
                   } else {
                     attempt.failure += 1;
+                    var reasons = validationFixFailureReasons(payload);
+                    var reason = reasons.length > 0 ? reasons.join(' / ') : '수정하지 못했습니다.';
+                    var label = attempt.labels[rowId] || '대상 요소';
+                    attempt.failureReasons.push(label + ': ' + reason);
                   }
                   if (Object.keys(attempt.pending).length > 0) return true;
 
                   delete validationBulkFixAttempts[code];
+                  var feedbackLines = ['성공 ' + attempt.success + '건 / 실패 ' + attempt.failure + '건'];
+                  attempt.failureReasons.forEach(function(reason) {
+                    feedbackLines.push('• ' + reason);
+                  });
                   var aggregate = {
                     code: code,
                     rowId: '',
@@ -661,7 +726,7 @@ module ULOL
                     failed: attempt.failure,
                     message: '성공 ' + attempt.success + '건 / 실패 ' + attempt.failure + '건',
                     feedbackTitle: attempt.failure > 0 ? '자동 수정 실패' : '자동 수정 성공',
-                    feedbackMessage: '성공 ' + attempt.success + '건 / 실패 ' + attempt.failure + '건'
+                    feedbackMessage: feedbackLines.join('\\n')
                   };
                   console.log(aggregate.message);
                   showValidationFixMessagebox(aggregate);
@@ -715,10 +780,21 @@ module ULOL
                     var code = button.getAttribute('data-code') || '';
                     var rowButtons = Array.prototype.slice.call(card.querySelectorAll('.row-fix-attempt:not(:disabled)'));
                     var pending = {};
+                    var labels = {};
                     rowButtons.forEach(function(rowButton) {
-                      pending[rowButton.getAttribute('data-row-id') || ''] = true;
+                      var rowId = rowButton.getAttribute('data-row-id') || '';
+                      var row = rowButton.closest('.validation-error-row');
+                      var cellName = row && row.querySelector('.cell-name');
+                      pending[rowId] = true;
+                      labels[rowId] = cellName ? cellName.textContent.trim() : '대상 요소';
                     });
-                    validationBulkFixAttempts[code] = { pending: pending, success: 0, failure: 0 };
+                    validationBulkFixAttempts[code] = {
+                      pending: pending,
+                      labels: labels,
+                      success: 0,
+                      failure: 0,
+                      failureReasons: []
+                    };
                     rowButtons.forEach(function(rowButton) {
                       rowButton.click();
                     });
@@ -867,6 +943,7 @@ module ULOL
 
           def error_code_card_html(code, groups, raw_report = nil)
             color_class = error_code_color_class(code)
+            code_label = error_code_label(code)
             bulk_fix_attempt = if auto_fix_supported_code?(code)
                                  <<~HTML.chomp
                                    <button class="fix-attempt bulk-fix-attempt" type="button" data-code="#{html_escape(code)}">일괄 수정 시도</button>
@@ -877,11 +954,12 @@ module ULOL
             <<~HTML
               <details class="error-code-card #{color_class}" data-code="#{html_escape(code)}">
                 <summary>
-                  <span class="toggle-triangle" aria-hidden="true"></span>
                   <span class="error-code-heading">
+                    <span class="toggle-triangle" aria-hidden="true"></span>
                     <span class="code-badge #{color_class}">#{html_escape(code)}</span>
                     <span class="error-code-count">#{groups.length}건</span>
                   </span>
+                  <span class="error-code-label" title="#{html_escape(code_label)}">#{html_escape(code_label)}</span>
                   #{bulk_fix_attempt}
                 </summary>
                 <div class="error-code-items">
@@ -889,6 +967,10 @@ module ULOL
                 </div>
               </details>
             HTML
+          end
+
+          def error_code_label(code)
+            ERROR_CODE_LABELS.fetch(code.to_s, '검사 오류')
           end
 
           def error_item_card_html(group, raw_report = nil)

@@ -19,16 +19,25 @@ class Val3dityReportRendererTest < Minitest::Test
     assert_equal all_codes, card_codes.sort
     assert_equal all_codes.length, html.scan(/class="error-code-card /).length
     assert_includes html, '>일괄 수정 시도</button>'
-    assert_includes html, 'grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);'
-    assert_includes html, '.error-code-heading { grid-column: 2;'
-    assert_match(/<span class="error-code-heading">\s*<span class="code-badge c100">102<\/span>\s*<span class="error-code-count">1건<\/span>/, html)
+    assert_includes html, 'grid-template-columns: minmax(0, 1fr) minmax(110px, 1.4fr) minmax(0, 1fr);'
+    assert_includes html, '.error-code-heading { grid-column: 1;'
+    assert_includes html, '.error-code-label { grid-column: 2;'
+    assert_match(/<span class="error-code-heading">\s*<span class="toggle-triangle"[^>]*><\/span>\s*<span class="code-badge c100">102<\/span>\s*<span class="error-code-count">1건<\/span>/, html)
+    assert_includes html, '<span class="error-code-label" title="겹쳐진 인접 꼭지점">겹쳐진 인접 꼭지점</span>'
+    assert_includes html, '<span class="error-code-label" title="평면 내 꼭지점 높이 편차">평면 내 꼭지점 높이 편차</span>'
+    assert_includes html, '<span class="error-code-label" title="면 뒤틀림">면 뒤틀림</span>'
+    assert_includes html, '<span class="error-code-label" title="솔리드 내 자기 교차">솔리드 내 자기 교차</span>'
     assert_includes html, 'sketchup.attemptValidationFix(code, rowId);'
     assert_includes html, "card.querySelectorAll('.row-fix-attempt:not(:disabled)')"
     assert_includes html, 'rowButton.click();'
     refute_includes html, "beginValidationFixAttempt(button, code, '');"
     assert_includes html, 'var validationBulkFixAttempts = {};'
+    assert_includes html, 'function validationFixFailureReasons(payload)'
     assert_includes html, 'function completeValidationBulkFixAttempt(payload, succeeded)'
-    assert_includes html, "feedbackMessage: '성공 ' + attempt.success + '건 / 실패 ' + attempt.failure + '건'"
+    assert_includes html, "attempt.failureReasons.push(label + ': ' + reason);"
+    assert_includes html, "feedbackLines.push('• ' + reason);"
+    assert_includes html, 'feedbackMessage: feedbackLines.join'
+    assert_includes html, 'failureReasons: []'
     assert_includes html, 'if (!completeValidationBulkFixAttempt(payload, succeeded))'
     assert_includes html, 'window.completeValidationFixAttempt = function(payload)'
     assert_includes html, "button.classList.add(succeeded ? 'is-success' : 'is-failure');"
