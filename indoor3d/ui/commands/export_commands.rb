@@ -262,8 +262,14 @@ module ULOL
                 :keep_open
               end
             else
-              session.complete(reason: :closed)
-              :close
+              indoor_model = session.indoor_model
+              if indoor_model.validation_focus_active? && !indoor_model.close_validation_result_focus
+                Logger.puts '[IndoorGML] Validation report close refused: Scene restore incomplete'
+                :keep_open
+              else
+                session.complete(reason: :closed)
+                :close
+              end
             end
           end
         end
@@ -329,9 +335,11 @@ module ULOL
             refs = row || incoming_refs
             row_cell_ids = validation_focus_cell_ids_for_refs(refs, indoor_model)
             if row_cell_ids.empty?
+              next false unless row_id.to_s.empty?
               next true unless indoor_model.validation_focus_active?
 
-              next indoor_model.set_validation_focus_highlight([], code)
+              changed = indoor_model.set_validation_focus_highlight([], code)
+              next changed ? indoor_model.validation_focus_result : false
             end
 
             unless indoor_model.validation_focus_active?
@@ -350,10 +358,13 @@ module ULOL
             refs = row || incoming_refs
             row_cell_ids = validation_focus_cell_ids_for_refs(refs, indoor_model)
             if row_cell_ids.empty?
-              next indoor_model.set_validation_focus_highlight([], row ? row[:code] : code)
+              next false unless row_id.to_s.empty?
+
+              changed = indoor_model.set_validation_focus_highlight([], row ? row[:code] : code)
+              next changed ? indoor_model.validation_focus_result : false
             end
 
-            indoor_model.set_validation_focus_highlight(
+            changed = indoor_model.set_validation_focus_highlight(
               row_cell_ids,
               row ? row[:code] : code,
               row_id: row_id,
@@ -361,6 +372,7 @@ module ULOL
               states: refs[:states],
               transitions: refs[:transitions]
             )
+            changed ? indoor_model.validation_focus_result : false
           end
           progress&.on_fix_validation_errors do
             next unless session.guard_report_action
@@ -435,6 +447,9 @@ module ULOL
           return false if session&.running?
           return true unless session&.result_ready? || progress&.visible?
 
+          if session&.result_ready? && session.indoor_model.validation_focus_active?
+            return false unless session.indoor_model.close_validation_result_focus
+          end
           progress.close if progress&.respond_to?(:close)
           if session&.result_ready?
             session.complete(reason: :restarted)

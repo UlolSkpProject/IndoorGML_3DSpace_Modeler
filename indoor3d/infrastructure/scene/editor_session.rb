@@ -14,6 +14,7 @@ module ULOL
         require_relative '../../utils/transformation'
         require_relative 'editor_session/edit_active_path_controller'
         require_relative 'editor_session/validation_focus_visibility_service'
+        require_relative 'editor_session/validation_result_focus_service'
         require_relative 'editor_session/edit_visibility_service'
         include BatchProgress
 
@@ -185,7 +186,14 @@ module ULOL
           invalidate_overlay_transition_visibility
           selection_changed
           invalidate_view(Sketchup.active_model())
-          true
+          focus_started = validation_result_focus_service.begin_session(@indoor_model.model)
+          return true if focus_started[:ok]
+
+          IndoorCore::Logger.puts "[IndoorGML] Validation Focus coordinator startup failed: #{focus_started[:errors].inspect}"
+          restore_validation_focus_visibility
+          restore_rendering_after_failed_validation_entry(was_editing)
+          clear_validation_focus
+          false
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Validation focus edit mode failed: #{e.class}: #{e.message}"
           restore_rendering_after_failed_validation_entry(was_editing)
@@ -209,11 +217,17 @@ module ULOL
           with_active_path_enforcement_suspended do
             active_path_controller.prepare_for_finish(model)
             if was_validation_focus
-              return false unless restore_validation_focus_visibility
+              cleanup = validation_result_focus_service.end_session(
+                model: model,
+                restore_visibility: -> { restore_validation_focus_visibility },
+                restore_rendering: -> { restore_validation_focus_rendering_options },
+                restore_camera: false # Stage 1 restores after ActivePath close.
+              )
+              return false unless cleanup[:ok]
             else
               normalize_visibility_for_non_edit_mode
+              return false unless restore_validation_focus_rendering_options
             end
-            return false unless restore_validation_focus_rendering_options
             @editing = false
             @indoor_model.clear_dual_graph_selection_cache
             active_path_controller.reset_target
@@ -221,14 +235,14 @@ module ULOL
             clear_validation_focus(restore_camera: false)
             @indoor_model.detach_edit_selection_observer(model)
             active_path_controller.close(model)
-            restore_validation_focus_camera
+            camera_restore = restore_validation_focus_camera
             active_path_controller.clear_previous_path
             update_overlay_enabled()
             @dialog.close()
             apply_lock_policy()
             apply_geometry_visibility() unless was_validation_focus
             invalidate_view(model)
-            true
+            camera_restore[:ok] == true
           end
         end
 
@@ -324,54 +338,66 @@ module ULOL
         end
 
         def set_validation_focus_highlight(cell_gml_ids, code = nil, row_id: nil, row_cells: nil, states: nil, transitions: nil)
-          cancel_validation_focus_zoom
-          @validation_focus_visibility_row_generation = @validation_focus_visibility_row_generation.to_i + 1
-          previous_focus_snapshot = validation_focus_controller.snapshot
-          clearing_row_selection = Array(cell_gml_ids).empty? && row_id.to_s.empty?
-          highlight_options = {}
-          highlight_options[:row_id] = row_id unless row_id.nil?
-          highlight_options[:row_cells] = row_cells unless row_cells.nil?
-          highlight_options[:states] = states unless states.nil?
-          highlight_options[:transitions] = transitions unless transitions.nil?
-          if highlight_options.empty?
-            validation_focus_controller.set_highlight(cell_gml_ids, code)
-          else
-            validation_focus_controller.set_highlight(cell_gml_ids, code, **highlight_options)
+          response = validation_result_focus_service.focus_row(
+            cell_gml_ids, code, row_id: row_id, row_cells: row_cells,
+            states: states, transitions: transitions
+          )
+          unless response[:ok]
+            IndoorCore::Logger.puts "[IndoorGML] Validation Result Focus failed: #{response[:errors].inspect}"
           end
-          if clearing_row_selection
-            context_restored = reset_validation_focus_row_edit_context
-            restore_validation_focus_camera
-            unless context_restored
-              validation_focus_controller.restore!(previous_focus_snapshot)
-              apply_rendering_context(Sketchup.active_model, Sketchup.active_model&.active_path)
-              IndoorCore::Logger.puts '[IndoorGML] Validation focus highlight clear failed: primal edit context was not restored'
-              return false
-            end
-          end
-          unless apply_validation_focus_visibility
-            if defined?(IndoorCore::Logger)
-              IndoorCore::Logger.puts '[IndoorGML] Validation focus highlight failed: visibility apply returned false'
-            end
-            validation_focus_controller.restore!(previous_focus_snapshot)
-            apply_rendering_context(Sketchup.active_model, Sketchup.active_model&.active_path)
+          response[:ok]
+        end
+
+        def last_validation_focus_result
+          validation_result_focus_service.last_result
+        end
+
+        # Report Dialog close ends the Validation Scene session, not the
+        # ordinary Edit Mode (which owns DualGraph, selection and lock policy).
+        def close_validation_result_focus
+          return true unless validation_focus_active?
+
+          model = @indoor_model.model
+          return false unless model && model.equal?(Sketchup.active_model)
+          return false unless reset_validation_focus_row_edit_context
+
+          cleanup = validation_result_focus_service.end_session(
+            model: model,
+            restore_visibility: -> { restore_validation_focus_visibility },
+            restore_rendering: -> { restore_rendering_after_failed_validation_entry(true) },
+            restore_camera: false
+          )
+          unless cleanup[:ok]
+            IndoorCore::Logger.puts "[IndoorGML] Validation report Scene restore failed: #{cleanup[:errors].inspect}"
             return false
           end
-          unless apply_rendering_context(Sketchup.active_model, Sketchup.active_model&.active_path)
-            validation_focus_controller.restore!(previous_focus_snapshot)
-            apply_validation_focus_visibility
-            apply_rendering_context(Sketchup.active_model, Sketchup.active_model&.active_path)
-            return false
-          end
-          update_validation_error_geometry(row_id)
-          invalidate_overlay_transition_visibility
-          invalidate_view(Sketchup.active_model())
-          unless row_id.to_s.empty?
-            camera_scheduled = zoom_validation_focus_highlight(row_id: row_id)
-            IndoorCore::Logger.puts '[IndoorGML] Validation focus camera could not be scheduled' unless camera_scheduled
-          end
+
+          camera = restore_validation_focus_camera
+          return false unless camera[:ok]
+
+          clear_validation_focus(restore_camera: false)
+          update_overlay_enabled
+          return false unless apply_rendering_context(model, model.active_path)
+
+          invalidate_view(model)
           true
         rescue StandardError => e
-          IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight failed: #{e.class}: #{e.message}"
+          IndoorCore::Logger.puts "[IndoorGML] Validation report close restore failed: #{e.class}: #{e.message}"
+          false
+        end
+
+        def restore_validation_focus_previous_edit_context(path)
+          model = @indoor_model.model
+          primal = @indoor_model.primal_group
+          return false unless model && model.equal?(Sketchup.active_model)
+          return false if path.empty? || path.first != primal
+          return false unless path.all? { |entity| entity&.valid? }
+
+          active_path_controller.set_target_path(path)
+          active_path_controller.set(model, path)
+          apply_rendering_context(model, model.active_path)
+        rescue StandardError => e
+          IndoorCore::Logger.puts "[IndoorGML] Validation previous edit context restore failed: #{e.class}: #{e.message}"
           false
         end
 
@@ -385,6 +411,8 @@ module ULOL
           target_path = [primal_group]
           active_path_controller.set_target_path(target_path)
           active_path_controller.set(model, target_path)
+          return false unless apply_rendering_context(model, model.active_path)
+
           selection_changed()
           true
         rescue StandardError => e
@@ -565,6 +593,7 @@ module ULOL
           @validation_focus_visibility_row_generation = @validation_focus_visibility_row_generation.to_i + 1
           restore_validation_focus_camera if restore_camera
           validation_focus_controller.clear
+          @validation_result_focus_service&.discard
           overlay_controller.clear_validation_geometry
           overlay_controller.invalidate_validation_geometry_cache
           invalidate_overlay_transition_visibility
@@ -737,17 +766,18 @@ module ULOL
             restoring_edit_visibility = @editing || validation_focus_active?
             @dialog.close_without_finish()
             if validation_focus_active?
-              restored = restore_validation_focus_visibility
-              unless restored
-                IndoorCore::Logger.puts '[IndoorGML] Edit model close: Validation visibility restore incomplete'
+              cleanup = validation_result_focus_service.end_session(
+                model: @indoor_model.model,
+                restore_visibility: -> { restore_validation_focus_visibility },
+                restore_rendering: -> { restore_validation_focus_rendering_options }
+              )
+              unless cleanup[:ok]
+                IndoorCore::Logger.puts "[IndoorGML] Edit model close: Validation Scene restore incomplete: #{cleanup[:errors].inspect}"
                 return false
               end
             elsif restoring_edit_visibility
               normalize_visibility_for_non_edit_mode
-            end
-            unless restore_validation_focus_rendering_options
-              IndoorCore::Logger.puts '[IndoorGML] Edit model close: RenderingOptions restore incomplete'
-              return false
+              return false unless restore_validation_focus_rendering_options
             end
             @editing = false
             @indoor_model.clear_dual_graph_selection_cache
@@ -830,6 +860,30 @@ module ULOL
         def validation_camera_controller
           @validation_camera_controller ||= ValidationCameraController.new
         end
+
+        def validation_result_focus_service
+          @validation_result_focus_service ||= ValidationResultFocusService.new(
+            indoor_model: @indoor_model,
+            focus: validation_focus_controller,
+            cancel_async: -> do
+              cancel_validation_focus_zoom
+              @validation_focus_visibility_row_generation = @validation_focus_visibility_row_generation.to_i + 1
+            end,
+            apply_visibility: -> { apply_validation_focus_visibility },
+            apply_rendering: -> { apply_rendering_context(@indoor_model.model, @indoor_model.model&.active_path) },
+            show_overlay: ->(row_id) { update_validation_error_geometry(row_id) },
+            clear_overlay: -> { overlay_controller.clear_validation_geometry; true },
+            schedule_camera: ->(row_id) { zoom_validation_focus_highlight(row_id: row_id) },
+            restore_camera: -> { restore_validation_focus_camera },
+            restore_context: -> { reset_validation_focus_row_edit_context },
+            restore_previous_context: ->(path) { restore_validation_focus_previous_edit_context(path) },
+            refresh: -> do
+              invalidate_overlay_transition_visibility
+              invalidate_view(@indoor_model.model)
+            end
+          )
+        end
+
 
         # Report dialog close must invalidate any pending Row camera work
         # without touching Validation, Visibility, Overlay or Edit state.

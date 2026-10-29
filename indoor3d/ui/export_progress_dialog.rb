@@ -305,22 +305,39 @@ module ULOL
           def handle_validation_focus_cells(dialog, cell_ids, code, state_ids, transition_ids, row_id)
             deselection = Array(cell_ids).empty? && Array(state_ids).empty? &&
                           Array(transition_ids).empty? && row_id.to_s.empty?
-            callback_completed = false
+            payload = { ok: false, rowId: row_id.to_s, status: 'failed', message: 'Focus callback was unavailable' }
             begin
-              result = @validation_focus_callback&.call(
-                Array(cell_ids),
-                code.to_s,
-                Array(state_ids),
-                Array(transition_ids),
-                row_id.to_s
+              response = @validation_focus_callback&.call(
+                Array(cell_ids), code.to_s, Array(state_ids), Array(transition_ids), row_id.to_s
               )
-              callback_completed = !result.nil? && result != false
+              if response.is_a?(Hash)
+                ok = response[:ok] == true || response['ok'] == true
+                payload = {
+                  ok: ok,
+                  rowId: row_id.to_s,
+                  status: (response[:status] || response['status'] || (ok ? 'success' : 'failed')).to_s,
+                  warnings: Array(response[:warnings] || response['warnings']),
+                  message: (response[:message] || response['message'] || response[:errors] || response['errors']).to_s
+                }
+              else
+                accepted = !response.nil? && response != false
+                payload = {
+                  ok: accepted, rowId: row_id.to_s,
+                  status: accepted ? 'success' : 'failed',
+                  message: accepted ? '' : 'Validation Focus operation failed'
+                }
+              end
+            rescue StandardError => e
+              payload[:message] = "#{e.class}: #{e.message}"
+              IndoorCore::Logger.puts "[IndoorGML] Validation Focus callback failed: #{payload[:message]}"
             ensure
-              if deselection && callback_completed
+              function = deselection ? 'completeValidationFocusRowDeselection' : 'completeValidationFocusRowSelection'
+              begin
                 dialog.execute_script(
-                  'if (typeof completeValidationFocusRowDeselection === "function") ' \
-                  'completeValidationFocusRowDeselection();'
+                  "if (typeof #{function} === 'function') #{function}(#{JSON.generate(payload)});"
                 )
+              rescue StandardError => e
+                IndoorCore::Logger.puts "[IndoorGML] Validation Focus UI acknowledgement failed: #{e.class}: #{e.message}"
               end
             end
           end

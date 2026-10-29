@@ -101,6 +101,14 @@ module ULOL
             @editor_session.validation_focus_row(row_id)
           end
 
+          def validation_focus_result
+            @editor_session.last_validation_focus_result
+          end
+
+          def close_validation_result_focus
+            @editor_session.close_validation_result_focus
+          end
+
           def suspend_validation_focus_camera
             @editor_session.suspend_validation_focus_camera
           end

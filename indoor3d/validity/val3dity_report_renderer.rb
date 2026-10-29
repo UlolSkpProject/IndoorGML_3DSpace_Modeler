@@ -414,27 +414,28 @@ module ULOL
               <script>
                 var selectedValidationFocusRow = null;
                 var pendingValidationFocusRow = null;
+                var pendingValidationFocusChange = false;
                 var validationFocusDeselectionInProgress = false;
+                var validationFocusSelectionInProgress = false;
+                var attemptedValidationFocusRow = null;
 
                 function activateValidationFocusRow(row) {
                   if (!row) return;
-
                   var rowId = row.getAttribute('data-row-id') || '';
                   var cells = (row.getAttribute('data-cells') || '').split(',').filter(Boolean);
                   var states = (row.getAttribute('data-states') || '').split(',').filter(Boolean);
                   var transitions = (row.getAttribute('data-transitions') || '').split(',').filter(Boolean);
                   var code = row.getAttribute('data-code') || '';
-                  selectedValidationFocusRow = row;
-                  row.classList.add('focused');
-                  row.open = true;
-                  if ((cells.length > 0 || states.length > 0 || transitions.length > 0) && typeof sketchup !== 'undefined' && sketchup.focusValidationCells) {
-                    sketchup.focusValidationCells(cells, code, states, transitions, rowId);
-                  }
+                  if (typeof sketchup === 'undefined' || !sketchup.focusValidationCells) return;
+                  attemptedValidationFocusRow = row;
+                  validationFocusSelectionInProgress = true;
+                  sketchup.focusValidationCells(cells, code, states, transitions, rowId);
                 }
 
                 function requestValidationFocusRowChange(nextRow) {
-                  if (validationFocusDeselectionInProgress) {
+                  if (validationFocusDeselectionInProgress || validationFocusSelectionInProgress) {
                     pendingValidationFocusRow = nextRow;
+                    pendingValidationFocusChange = true;
                     return;
                   }
                   if (!selectedValidationFocusRow) {
@@ -443,23 +444,70 @@ module ULOL
                   }
 
                   pendingValidationFocusRow = selectedValidationFocusRow === nextRow ? null : nextRow;
+                  pendingValidationFocusChange = true;
                   validationFocusDeselectionInProgress = true;
-                  selectedValidationFocusRow = null;
                   if (typeof sketchup !== 'undefined' && sketchup.focusValidationCells) {
                     sketchup.focusValidationCells([], '', [], [], '');
                   } else {
-                    window.completeValidationFocusRowDeselection();
+                    window.completeValidationFocusRowDeselection({ok: false, message: 'Focus callback unavailable'});
                   }
                 }
 
-                window.completeValidationFocusRowDeselection = function() {
+                function reportValidationFocusFailure(payload) {
+                  var message = String((payload && payload.message) || 'Validation Focus operation failed');
+                  console.warn(message);
+                  if (attemptedValidationFocusRow) attemptedValidationFocusRow.title = message;
+                }
+
+                window.completeValidationFocusRowSelection = function(payload) {
+                  if (!validationFocusSelectionInProgress) return;
+                  var attempted = attemptedValidationFocusRow;
+                  if (!attempted) return;
+                  if (String(payload && payload.rowId || '') !== (attempted.getAttribute('data-row-id') || '')) return;
+                  validationFocusSelectionInProgress = false;
+                  attemptedValidationFocusRow = null;
+
+                  if (payload && payload.ok === true) {
+                    selectedValidationFocusRow = attempted;
+                    attempted.classList.add('focused');
+                    attempted.open = true;
+                    if (payload.status === 'partial') {
+                      var warningText = (payload.warnings || []).join('; ') || 'Partial Validation Focus';
+                      attempted.title = warningText;
+                      console.warn(warningText);
+                    } else {
+                      attempted.removeAttribute('title');
+                    }
+                  } else {
+                    attemptedValidationFocusRow = attempted;
+                    reportValidationFocusFailure(payload);
+                    attemptedValidationFocusRow = null;
+                  }
+
+                  var hasPending = pendingValidationFocusChange;
+                  var nextRow = pendingValidationFocusRow;
+                  pendingValidationFocusRow = null;
+                  pendingValidationFocusChange = false;
+                  if (hasPending) requestValidationFocusRowChange(nextRow);
+                };
+
+                window.completeValidationFocusRowDeselection = function(payload) {
+                  if (!validationFocusDeselectionInProgress) return;
+                  validationFocusDeselectionInProgress = false;
+                  if (!payload || payload.ok !== true) {
+                    reportValidationFocusFailure(payload);
+                    pendingValidationFocusRow = null;
+                    pendingValidationFocusChange = false;
+                    return; // Keep the previous focused Row. Never activate the queued Row.
+                  }
                   document.querySelectorAll('.validation-error-row.focused').forEach(function(item) {
                     item.classList.remove('focused');
                     item.open = false;
                   });
-                  validationFocusDeselectionInProgress = false;
+                  selectedValidationFocusRow = null;
                   var nextRow = pendingValidationFocusRow;
                   pendingValidationFocusRow = null;
+                  pendingValidationFocusChange = false;
                   activateValidationFocusRow(nextRow);
                 };
 
@@ -504,6 +552,9 @@ module ULOL
                 window.clearValidationFocusSelection = function() {
                   selectedValidationFocusRow = null;
                   pendingValidationFocusRow = null;
+                  pendingValidationFocusChange = false;
+                  attemptedValidationFocusRow = null;
+                  validationFocusSelectionInProgress = false;
                   validationFocusDeselectionInProgress = false;
                   document.querySelectorAll('.validation-error-row.focused').forEach(function(item) {
                     item.classList.remove('focused');
