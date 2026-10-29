@@ -15,7 +15,7 @@ module ULOL
         # back to SketchUp geometry. Every mutation is isolated in its own undo
         # operation and rolled back unless the result remains valid.
         class ValidationAutoFixService
-          SUPPORTED_CODES = [102, 104, 203, 303, 307, 701].freeze
+          SUPPORTED_CODES = Val3dityReportSchema::AUTO_FIX_SUPPORTED_CODES
           CELL_TARGET_CODES = [303, 307, 701].freeze
           ORIENTATION_CODES = [303, 307].freeze
           DEFAULT_SNAP_TOLERANCE = 0.001
@@ -42,12 +42,11 @@ module ULOL
             keyword_init: true
           ) do
             def success?
-              fixed.to_i.positive? && failed.to_i.zero?
+              fixed.to_i.positive? && (skipped.to_i + failed.to_i).zero?
             end
 
             def summary
-              prefix = row_id.to_s.empty? ? code.to_s : "#{row_id} / #{code}"
-              "#{prefix}: #{fixed.to_i}개 수정, #{skipped.to_i}개 건너뜀, #{failed.to_i}개 실패"
+              "성공 #{fixed.to_i}건 / 실패 #{skipped.to_i + failed.to_i}건"
             end
 
             def to_h
@@ -100,7 +99,7 @@ module ULOL
               if resolved_targets.empty?
                 result.skipped += 1
                 target_label = normalized_code == 701 ? 'CellSpace 쌍' : 'face'
-                result.messages << "#{row[:id]}: 대상 #{target_label}을 찾지 못했습니다."
+                result.messages << "대상 #{target_label}을 찾지 못했습니다."
                 next
               end
 
@@ -216,7 +215,7 @@ module ULOL
 
               if edges.empty?
                 result.skipped += 1
-                result.messages << "#{row[:id]}: 한 face에서 반복 사용된 edge가 없습니다."
+                result.messages << '한 face에서 반복 사용된 edge가 없습니다.'
                 next
               end
 
@@ -250,14 +249,14 @@ module ULOL
 
               if repaired
                 result.fixed += changed_count
-                result.messages << "#{row[:id]}: reversed face #{changed_count}개 방향 수정 완료"
+                result.messages << "reversed face #{changed_count}개 방향 수정 완료"
                 notify_cell_space_changed(cell_space, group)
               elsif changed_count.zero?
                 result.skipped += 1
-                result.messages << "#{row[:id]}: 뒤집을 reversed face가 없습니다."
+                result.messages << '뒤집을 reversed face가 없습니다.'
               else
                 result.failed += 1
-                result.messages << "#{row[:id]}: face 방향 수정 후 solid 검증 실패로 rollback"
+                result.messages << 'face 방향 수정 후 solid 검증 실패로 rollback'
               end
             end
           end
@@ -272,7 +271,7 @@ module ULOL
                 plan = non_planar_vertex_plan(target[:face], transform, tolerance)
                 unless plan
                   result.skipped += 1
-                  result.messages << "#{row[:id]}: 인접 face가 모두 사각형인 안전한 vertex를 찾지 못해 수동 수정이 필요합니다."
+                  result.messages << '인접 face가 모두 사각형인 안전한 vertex를 찾지 못해 수동 수정이 필요합니다.'
                   next
                 end
                 plan.merge(face: target[:face])
@@ -282,7 +281,7 @@ module ULOL
               moves = compatible_planarity_moves(plans, tolerance)
               unless moves
                 result.skipped += plans.length
-                result.messages << "#{row[:id]}: 동일 vertex의 투영 위치가 충돌해 수동 수정이 필요합니다."
+                result.messages << '동일 vertex의 투영 위치가 충돌해 수동 수정이 필요합니다.'
                 next
               end
 
@@ -311,14 +310,14 @@ module ULOL
             targets = Array(cell_targets).first(2)
             unless targets.length == 2
               result.skipped += 1
-              result.messages << "#{row[:id]}: 701 CellSpace 쌍을 찾지 못해 수동 수정이 필요합니다."
+              result.messages << '701 CellSpace 쌍을 찾지 못해 수동 수정이 필요합니다.'
               return
             end
 
             plan = overlap_projection_plan(targets)
             unless plan
               result.skipped += 1
-              result.messages << "#{row[:id]}: 1.5 mm 이하에서 안전하게 사영할 경계 face를 찾지 못해 수동 수정이 필요합니다."
+              result.messages << '1.5 mm 이하에서 안전하게 사영할 경계 face를 찾지 못해 수동 수정이 필요합니다.'
               return
             end
 
@@ -649,7 +648,7 @@ module ULOL
 
             if candidates_by_group.empty?
               result.skipped += 1
-              result.messages << "#{row[:id]}: snap tolerance 이내의 edge가 없습니다."
+              result.messages << 'snap tolerance 이내의 edge가 없습니다.'
               return
             end
 
@@ -681,7 +680,7 @@ module ULOL
               end
 
               if planned.empty?
-                result.messages << "#{row[:id]}: 안전한 degree-2/triangle/quad collapse 패턴이 아닙니다."
+                result.messages << '안전한 degree-2/triangle/quad collapse 패턴이 아닙니다.'
                 next
               end
 
@@ -907,11 +906,11 @@ module ULOL
           def record_repair_result(result, row, cell_space, group, repaired, count, label)
             if repaired
               result.fixed += count
-              result.messages << "#{row[:id]}: #{label} 완료"
+              result.messages << "#{label} 완료"
               notify_cell_space_changed(cell_space, group)
             else
               result.failed += count
-              result.messages << "#{row[:id]}: #{label} 후 solid 검증 실패로 rollback"
+              result.messages << "#{label} 후 solid 검증 실패로 rollback"
             end
           end
 

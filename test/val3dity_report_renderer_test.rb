@@ -9,26 +9,37 @@ class Val3dityReportRendererTest < Minitest::Test
   def test_groups_rows_by_error_code_with_bulk_and_row_fix_buttons
     html = Renderer.new.render(report_with_errors)
 
-    expected_codes = [102, 104, 201, 203, 204, 206, 303, 306, 307, 405, 701]
+    supported_codes = [102, 104, 203, 303, 307, 701]
+    all_codes = [102, 104, 201, 203, 204, 206, 303, 306, 307, 405, 701]
     row_button_codes = html.scan(/class="fix-attempt row-fix-attempt"[^>]*data-code="(\d+)"/).flatten.map(&:to_i)
     bulk_button_codes = html.scan(/class="fix-attempt bulk-fix-attempt"[^>]*data-code="(\d+)"/).flatten.map(&:to_i)
     card_codes = html.scan(/class="error-code-card [^"]*" data-code="(\d+)"/).flatten.map(&:to_i)
-    assert_equal expected_codes, row_button_codes.sort
-    assert_equal expected_codes, bulk_button_codes.sort
-    assert_equal expected_codes, card_codes.sort
-    assert_equal expected_codes.length, html.scan(/class="error-code-card /).length
+    assert_equal supported_codes, row_button_codes.sort
+    assert_equal supported_codes, bulk_button_codes.sort
+    assert_equal all_codes, card_codes.sort
+    assert_equal all_codes.length, html.scan(/class="error-code-card /).length
     assert_includes html, '>일괄 수정 시도</button>'
-    assert_includes html, "console.log(rowId + '_' + code + '_수정시도');"
-    assert_includes html, "console.log(code + '_일괄 수정 시도');"
+    assert_includes html, 'grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);'
+    assert_includes html, '.error-code-heading { grid-column: 2;'
+    assert_match(/<span class="error-code-heading">\s*<span class="code-badge c100">102<\/span>\s*<span class="error-code-count">1건<\/span>/, html)
     assert_includes html, 'sketchup.attemptValidationFix(code, rowId);'
-    assert_includes html, "beginValidationFixAttempt(button, code, '');"
+    assert_includes html, "card.querySelectorAll('.row-fix-attempt:not(:disabled)')"
+    assert_includes html, 'rowButton.click();'
+    refute_includes html, "beginValidationFixAttempt(button, code, '');"
+    assert_includes html, 'var validationBulkFixAttempts = {};'
+    assert_includes html, 'function completeValidationBulkFixAttempt(payload, succeeded)'
+    assert_includes html, "feedbackMessage: '성공 ' + attempt.success + '건 / 실패 ' + attempt.failure + '건'"
+    assert_includes html, 'if (!completeValidationBulkFixAttempt(payload, succeeded))'
     assert_includes html, 'window.completeValidationFixAttempt = function(payload)'
     assert_includes html, "button.classList.add(succeeded ? 'is-success' : 'is-failure');"
+    assert_includes html, "button.textContent = succeeded ? '성공' : '실패';"
+    assert_includes html, 'updateBulkFixButtonState(code);'
     assert_includes html, 'button.disabled = true;'
+    assert_includes html, 'opacity: .45;'
     assert_includes html, 'id="validation-fix-messagebox"'
     assert_includes html, 'role="alertdialog"'
     assert_includes html, 'function showValidationFixMessagebox(payload)'
-    assert_includes html, 'var effectiveFailed = failed + (payload.bulk === true ? skipped : 0);'
+    assert_includes html, 'var effectiveFailed = failed + skipped;'
     assert_includes html, 'showValidationFixMessagebox(payload);'
     assert_includes html, "title.textContent = payload.feedbackTitle || '자동 수정 결과';"
     assert_includes html, "body.textContent = payload.feedbackMessage || payload.message || '';"
@@ -41,6 +52,20 @@ class Val3dityReportRendererTest < Minitest::Test
     assert_equal 1, html.scan(/class="fix-attempt bulk-fix-attempt"[^>]*data-code="203"/).length
     assert_equal 2, html.scan(/class="fix-attempt row-fix-attempt"[^>]*data-code="203"/).length
     assert_match(/<span class="error-code-count">2건<\/span>/, html)
+  end
+
+  def test_excludes_non_indoor_gml_600_series_errors
+    report = report_with_errors
+    report['features'][0]['errors'] << {
+      'code' => 601,
+      'description' => 'BUILDINGPARTS_OVERLAP',
+      'id' => 'building_part_alpha'
+    }
+
+    html = Renderer.new.render(report)
+
+    refute_includes html, 'data-code="601"'
+    refute_includes html, 'BUILDINGPARTS_OVERLAP'
   end
 
   private

@@ -24,7 +24,8 @@ class ValidationFixFeedbackMessageTest < Minitest::Test
     )
 
     assert_equal '자동 수정 성공', payload[:feedbackTitle]
-    assert_includes payload[:feedbackMessage], '수정 1건 / 건너뜀 0건 / 실패 0건'
+    assert_includes payload[:feedbackMessage], '성공 1건 / 실패 0건'
+    refute_includes payload[:feedbackMessage], '건너뜀'
     assert_includes payload[:feedbackMessage], 'Window 경계 face 정사영 완료'
   end
 
@@ -37,25 +38,26 @@ class ValidationFixFeedbackMessageTest < Minitest::Test
     )
 
     assert_equal '자동 수정 실패', failed[:feedbackTitle]
-    assert_equal '자동 수정 불가 — 수동 수정 필요', skipped[:feedbackTitle]
+    assert_equal '자동 수정 실패', skipped[:feedbackTitle]
   end
 
-  def test_mixed_result_is_reported_as_partial_success
+  def test_mixed_result_is_reported_as_failure
     payload = @harness.validation_fix_feedback_payload(
       fixed: 1, skipped: 1, failed: 0, message: '일부 정상화, 수동 수정 필요'
     )
 
-    assert_equal '자동 수정 일부 성공', payload[:feedbackTitle]
+    assert_equal '자동 수정 실패', payload[:feedbackTitle]
+    assert_includes payload[:feedbackMessage], '성공 1건 / 실패 1건'
   end
 
-  def test_bulk_result_message_contains_only_success_and_failure_counts
+  def test_bulk_result_maps_skipped_attempts_to_failures
     payload = @harness.validation_fix_feedback_payload(
       code: 701, rowId: '', fixed: 7, skipped: 2, failed: 1,
       message: 'details must not be shown', details: ['verbose detail']
     )
 
     assert_equal true, payload[:bulk]
-    assert_equal '일괄 수정 결과', payload[:feedbackTitle]
-    assert_equal '성공 7건 / 실패 3건', payload[:feedbackMessage]
+    assert_equal '자동 수정 실패', payload[:feedbackTitle]
+    assert_includes payload[:feedbackMessage], '성공 7건 / 실패 3건'
   end
 end

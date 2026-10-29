@@ -313,6 +313,8 @@ class ValidationAutoFixServiceTest < Minitest::Test
     assert_equal 0, result.fixed
     assert_equal 1, result.skipped
     assert_match(/지원하지 않습니다/, result.messages.first)
+    assert_equal '성공 0건 / 실패 1건', result.summary
+    refute_match(/validation-error-row/, result.summary)
   end
 
   def test_blank_row_id_selects_every_row_for_supported_code

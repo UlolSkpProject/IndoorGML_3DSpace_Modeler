@@ -70,16 +70,19 @@ module ULOL
                   .fix-attempt:hover { background: #1d2d4a; border-color: #4278c7; }
                   .fix-attempt:disabled { cursor: default; }
                   .fix-attempt.is-pending:disabled { cursor: wait; opacity: .55; }
-                  .fix-attempt.is-success:disabled { border-color: #327a4f; background: #12261a; color: #74d66f; opacity: 1; }
-                  .fix-attempt.is-failure:disabled { border-color: #8b3833; background: #351918; color: #f97066; opacity: 1; }
+                  .fix-attempt.is-success:disabled { border-color: #327a4f; background: #12261a; color: #74d66f; opacity: .45; }
+                  .fix-attempt.is-failure:disabled { border-color: #8b3833; background: #351918; color: #f97066; opacity: .45; }
                   .report-actions { display: flex; justify-content: flex-end; }
                   .report-action { min-width: 92px; padding: 8px 12px; border: 1px solid #5a5953; border-radius: 7px; background: #343432; color: #e8e6e0; cursor: pointer; font-size: 12px; font-weight: 700; white-space: nowrap; }
                   .report-action:hover { background: #3d3d3a; border-color: #6a6962; }
                   .recheck-list { display: grid; gap: 8px; }
                   .error-code-card { overflow: hidden; background: #222220; border: 1px solid #373633; border-radius: 9px; }
-                  .error-code-card > summary { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 10px; cursor: pointer; list-style: none; }
+                  .error-code-card > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 8px; padding: 10px; cursor: pointer; list-style: none; }
                   .error-code-card > summary::-webkit-details-marker { display: none; }
                   .error-code-card[open] > summary { border-bottom: 1px solid #373633; }
+                  .error-code-card > summary > .toggle-triangle { grid-column: 1; justify-self: start; }
+                  .error-code-heading { grid-column: 2; display: inline-flex; align-items: center; justify-content: center; gap: 8px; justify-self: center; }
+                  .error-code-card > summary > .bulk-fix-attempt { grid-column: 3; justify-self: end; }
                   .error-code-count { color: #85827b; font-size: 10px; font-weight: 700; }
                   .error-code-items { display: grid; gap: 7px; padding: 8px; }
                   .error-code-items .recheck-row { background: #292927; }
@@ -90,7 +93,6 @@ module ULOL
                   .recheck-row.c300.focused { border-color: #f6b45b; box-shadow: inset 0 0 0 1px rgba(246, 180, 91, .6); }
                   .recheck-row.c400.focused { border-color: #22d3ee; box-shadow: inset 0 0 0 1px rgba(34, 211, 238, .6); }
                   .recheck-row.c500.focused { border-color: #bbf7b8; box-shadow: inset 0 0 0 1px rgba(187, 247, 184, .6); }
-                  .recheck-row.c600.focused { border-color: #d6a36d; box-shadow: inset 0 0 0 1px rgba(214, 163, 109, .6); }
                   .recheck-row.c700.focused { border-color: #f472b6; box-shadow: inset 0 0 0 1px rgba(244, 114, 182, .6); }
                   .recheck-row.c900.focused { border-color: #fef08a; box-shadow: inset 0 0 0 1px rgba(254, 240, 138, .6); }
                   .recheck-row summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 8px 9px; cursor: pointer; list-style: none; }
@@ -117,7 +119,6 @@ module ULOL
                   .code-badge.c300 { background: #44270d; color: #fdba74; }
                   .code-badge.c400 { background: #083344; color: #67e8f9; }
                   .code-badge.c500 { background: #1b3a1b; color: #bbf7d0; }
-                  .code-badge.c600 { background: #3b2716; color: #d6a36d; }
                   .code-badge.c700 { background: #4a1735; color: #f9a8d4; }
                   .code-badge.c900 { background: #3f3b12; color: #fef08a; }
                   .status-badge { color: #3ebc71; font-size: 11px; font-weight: 700; text-transform: uppercase; }
@@ -432,7 +433,6 @@ module ULOL
             return 'c300' if (300..399).include?(number)
             return 'c400' if (400..499).include?(number)
             return 'c500' if (500..599).include?(number)
-            return 'c600' if (600..699).include?(number)
             return 'c700' if (700..799).include?(number)
             return 'c900' if (900..999).include?(number)
 
@@ -449,6 +449,7 @@ module ULOL
                 var validationFocusSelectionInProgress = false;
                 var attemptedValidationFocusRow = null;
                 var validationFixMessageboxPreviousFocus = null;
+                var validationBulkFixAttempts = {};
 
                 function closeValidationFixMessagebox() {
                   var dialog = document.getElementById('validation-fix-messagebox');
@@ -471,7 +472,7 @@ module ULOL
                   var fixed = Number(payload.fixed || 0);
                   var failed = Number(payload.failed || 0);
                   var skipped = Number(payload.skipped || 0);
-                  var effectiveFailed = failed + (payload.bulk === true ? skipped : 0);
+                  var effectiveFailed = failed + skipped;
                   panel.setAttribute('data-variant', effectiveFailed > 0 ? 'error' : (fixed > 0 ? 'success' : 'warning'));
                   title.textContent = payload.feedbackTitle || '자동 수정 결과';
                   body.textContent = payload.feedbackMessage || payload.message || '';
@@ -609,16 +610,20 @@ module ULOL
                   button.disabled = true;
                   button.classList.remove('is-success', 'is-failure');
                   button.classList.add('is-pending');
+                  button.textContent = '처리 중';
+                  updateBulkFixButtonState(code);
                   if (typeof sketchup !== 'undefined' && sketchup.attemptValidationFix) {
                     sketchup.attemptValidationFix(code, rowId);
                   } else {
                     button.disabled = false;
                     button.classList.remove('is-pending');
+                    button.textContent = '수정 시도';
+                    updateBulkFixButtonState(code);
                   }
                 }
 
                 function completeValidationFixButton(button, payload) {
-                  if (!button) return;
+                  if (!button) return false;
                   var fixed = Number(payload.fixed || 0);
                   var skipped = Number(payload.skipped || 0);
                   var failed = Number(payload.failed || 0);
@@ -626,7 +631,70 @@ module ULOL
                   button.classList.remove('is-pending', 'is-success', 'is-failure');
                   button.classList.add(succeeded ? 'is-success' : 'is-failure');
                   button.disabled = true;
+                  button.textContent = succeeded ? '성공' : '실패';
                   button.title = payload.message || '';
+                  updateBulkFixButtonState(button.getAttribute('data-code') || '');
+                  return succeeded;
+                }
+
+                function completeValidationBulkFixAttempt(payload, succeeded) {
+                  var code = String(payload.code || '');
+                  var rowId = String(payload.rowId || '');
+                  var attempt = validationBulkFixAttempts[code];
+                  if (!attempt || !rowId || attempt.pending[rowId] !== true) return false;
+
+                  delete attempt.pending[rowId];
+                  if (succeeded) {
+                    attempt.success += 1;
+                  } else {
+                    attempt.failure += 1;
+                  }
+                  if (Object.keys(attempt.pending).length > 0) return true;
+
+                  delete validationBulkFixAttempts[code];
+                  var aggregate = {
+                    code: code,
+                    rowId: '',
+                    bulk: true,
+                    fixed: attempt.success,
+                    skipped: 0,
+                    failed: attempt.failure,
+                    message: '성공 ' + attempt.success + '건 / 실패 ' + attempt.failure + '건',
+                    feedbackTitle: attempt.failure > 0 ? '자동 수정 실패' : '자동 수정 성공',
+                    feedbackMessage: '성공 ' + attempt.success + '건 / 실패 ' + attempt.failure + '건'
+                  };
+                  console.log(aggregate.message);
+                  showValidationFixMessagebox(aggregate);
+                  return true;
+                }
+
+                function updateBulkFixButtonState(code) {
+                  var selector = '.error-code-card[data-code="' + String(code).replace(/"/g, '\\"') + '"]';
+                  var card = document.querySelector(selector);
+                  if (!card) return;
+                  var bulkButton = card.querySelector(':scope > summary .bulk-fix-attempt');
+                  if (!bulkButton) return;
+                  var rowButtons = Array.prototype.slice.call(card.querySelectorAll('.row-fix-attempt'));
+                  var hasAvailable = rowButtons.some(function(button) { return !button.disabled; });
+                  bulkButton.classList.remove('is-pending', 'is-success', 'is-failure');
+                  if (hasAvailable) {
+                    bulkButton.disabled = false;
+                    bulkButton.textContent = '일괄 수정 시도';
+                    return;
+                  }
+
+                  bulkButton.disabled = true;
+                  if (rowButtons.some(function(button) { return button.classList.contains('is-pending'); })) {
+                    bulkButton.classList.add('is-pending');
+                    bulkButton.textContent = '처리 중';
+                    return;
+                  }
+
+                  var succeeded = rowButtons.length > 0 && rowButtons.every(function(button) {
+                    return button.classList.contains('is-success');
+                  });
+                  bulkButton.classList.add(succeeded ? 'is-success' : 'is-failure');
+                  bulkButton.textContent = succeeded ? '성공' : '실패';
                 }
 
                 document.querySelectorAll('.row-fix-attempt').forEach(function(button) {
@@ -635,7 +703,6 @@ module ULOL
                     event.stopPropagation();
                     var rowId = button.getAttribute('data-row-id') || '';
                     var code = button.getAttribute('data-code') || '';
-                    console.log(rowId + '_' + code + '_수정시도');
                     beginValidationFixAttempt(button, code, rowId);
                   });
                 });
@@ -643,9 +710,18 @@ module ULOL
                   button.addEventListener('click', function(event) {
                     event.preventDefault();
                     event.stopPropagation();
+                    var card = button.closest('.error-code-card');
+                    if (!card) return;
                     var code = button.getAttribute('data-code') || '';
-                    console.log(code + '_일괄 수정 시도');
-                    beginValidationFixAttempt(button, code, '');
+                    var rowButtons = Array.prototype.slice.call(card.querySelectorAll('.row-fix-attempt:not(:disabled)'));
+                    var pending = {};
+                    rowButtons.forEach(function(rowButton) {
+                      pending[rowButton.getAttribute('data-row-id') || ''] = true;
+                    });
+                    validationBulkFixAttempts[code] = { pending: pending, success: 0, failure: 0 };
+                    rowButtons.forEach(function(rowButton) {
+                      rowButton.click();
+                    });
                   });
                 });
                 window.completeValidationFixAttempt = function(payload) {
@@ -655,12 +731,18 @@ module ULOL
                   var selector = rowId ?
                     '.row-fix-attempt[data-row-id="' + rowId.replace(/"/g, '\\"') + '"]' :
                     '.bulk-fix-attempt[data-code="' + code.replace(/"/g, '\\"') + '"]';
+                  var succeeded = false;
                   document.querySelectorAll(selector).forEach(function(button) {
-                    completeValidationFixButton(button, payload);
+                    succeeded = completeValidationFixButton(button, payload);
                   });
                   console.log(payload.message || 'validation fix attempt completed');
-                  showValidationFixMessagebox(payload);
+                  if (!completeValidationBulkFixAttempt(payload, succeeded)) {
+                    showValidationFixMessagebox(payload);
+                  }
                 };
+                document.querySelectorAll('.bulk-fix-attempt').forEach(function(button) {
+                  updateBulkFixButtonState(button.getAttribute('data-code') || '');
+                });
                 document.addEventListener('click', function(event) {
                   if (event.target.closest('.validation-fix-messagebox') || event.target.closest('.validation-error-row') || event.target.closest('.filter-btn') || event.target.closest('.fix-attempt')) return;
                   requestValidationFocusRowChange(null);
@@ -785,13 +867,22 @@ module ULOL
 
           def error_code_card_html(code, groups, raw_report = nil)
             color_class = error_code_color_class(code)
+            bulk_fix_attempt = if auto_fix_supported_code?(code)
+                                 <<~HTML.chomp
+                                   <button class="fix-attempt bulk-fix-attempt" type="button" data-code="#{html_escape(code)}">일괄 수정 시도</button>
+                                 HTML
+                               else
+                                 ''
+                               end
             <<~HTML
               <details class="error-code-card #{color_class}" data-code="#{html_escape(code)}">
                 <summary>
                   <span class="toggle-triangle" aria-hidden="true"></span>
-                  <span class="code-badge #{color_class}">#{html_escape(code)}</span>
-                  <span class="error-code-count">#{groups.length}건</span>
-                  <button class="fix-attempt bulk-fix-attempt" type="button" data-code="#{html_escape(code)}">일괄 수정 시도</button>
+                  <span class="error-code-heading">
+                    <span class="code-badge #{color_class}">#{html_escape(code)}</span>
+                    <span class="error-code-count">#{groups.length}건</span>
+                  </span>
+                  #{bulk_fix_attempt}
                 </summary>
                 <div class="error-code-items">
                   #{Array(groups).map { |group| error_item_card_html(group, raw_report) }.join}
@@ -806,9 +897,13 @@ module ULOL
             distance = recheck_row ? format_report_recheck_measure(recheck_row) : ''
             refs = Val3dityReportSchema.grouped_error_row_refs(group)
             occurrence = group[:count].to_i > 1 ? "<span class=\"occurrence-badge\">상세 #{group[:count].to_i}건</span>" : ''
-            fix_attempt = <<~HTML.chomp
-              <button class="fix-attempt row-fix-attempt" type="button" data-row-id="#{html_escape(group[:id])}" data-code="#{html_escape(code)}">수정 시도</button>
-            HTML
+            fix_attempt = if auto_fix_supported_code?(code)
+                            <<~HTML.chomp
+                              <button class="fix-attempt row-fix-attempt" type="button" data-row-id="#{html_escape(group[:id])}" data-code="#{html_escape(code)}">수정 시도</button>
+                            HTML
+                          else
+                            ''
+                          end
             <<~HTML
               <details class="recheck-row validation-error-row #{error_code_color_class(code)}" data-row-id="#{html_escape(group[:id])}" data-code="#{html_escape(code)}" data-cells="#{html_escape(refs[:cells].join(','))}" data-states="#{html_escape(refs[:states].join(','))}" data-transitions="#{html_escape(refs[:transitions].join(','))}">
                 <summary>
@@ -824,6 +919,10 @@ module ULOL
                 </div>
               </details>
             HTML
+          end
+
+          def auto_fix_supported_code?(code)
+            Val3dityReportSchema::AUTO_FIX_SUPPORTED_CODES.include?(error_code_number(code))
           end
 
           def error_group_member_html(row, raw_report, index)

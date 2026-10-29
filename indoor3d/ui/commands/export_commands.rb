@@ -588,30 +588,19 @@ module ULOL
           fixed = (data[:fixed] || data['fixed']).to_i
           skipped = (data[:skipped] || data['skipped']).to_i
           failed = (data[:failed] || data['failed']).to_i
-          if data[:bulk] == true || data['bulk'] == true || (row_id_present && row_id.empty?)
-            return data.merge(
-              bulk: true,
-              feedbackTitle: '일괄 수정 결과',
-              feedbackMessage: "성공 #{fixed}건 / 실패 #{skipped + failed}건"
-            )
-          end
-
-          title = if fixed.positive? && failed.zero? && skipped.zero?
-                    '자동 수정 성공'
-                  elsif fixed.positive?
-                    '자동 수정 일부 성공'
-                  elsif failed.positive?
-                    '자동 수정 실패'
-                  else
-                    '자동 수정 불가 — 수동 수정 필요'
-                  end
+          failure_count = skipped + failed
+          succeeded = fixed.positive? && failure_count.zero?
+          title = succeeded ? '자동 수정 성공' : '자동 수정 실패'
+          counts = "성공 #{fixed}건 / 실패 #{failure_count}건"
           summary = data[:message] || data['message']
+          summary = nil if summary.to_s == counts
           details = Array(data[:details] || data['details']).map(&:to_s).reject(&:empty?)
-          counts = "수정 #{fixed}건 / 건너뜀 #{skipped}건 / 실패 #{failed}건"
-          data.merge(
+          feedback = data.merge(
             feedbackTitle: title,
             feedbackMessage: [counts, summary, *details].map(&:to_s).reject(&:empty?).join("\n")
           )
+          feedback[:bulk] = true if data[:bulk] == true || data['bulk'] == true || (row_id_present && row_id.empty?)
+          feedback
         end
       end
     end

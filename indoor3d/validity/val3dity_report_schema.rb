@@ -14,6 +14,7 @@ module ULOL
           STRICT_ERRORS_REPORT_KEY = 'indoorgml_modeler_strict_errors'
           OVERLAP_TOLERANCE_KEY = 'indoorgml_modeler_overlap_tolerance'
           OVERLAP_RECHECK_CODES = [701, 704].freeze
+          AUTO_FIX_SUPPORTED_CODES = [102, 104, 203, 303, 307, 701].freeze
 
           module_function
 
@@ -57,7 +58,12 @@ module ULOL
                 end
               end
             end
-            rows
+            rows.reject { |row| non_indoor_gml_error_code?(row[:code]) }
+          end
+
+          def non_indoor_gml_error_code?(code)
+            digits = code.to_s[/\d+/]
+            digits && (600..699).cover?(digits.to_i)
           end
 
           def sorted_error_item_rows(raw_report)
