@@ -10,6 +10,8 @@ module ULOL
         require_relative 'editor_session/visibility_controller'
         require_relative 'editor_session/overlay_controller'
         require_relative 'editor_session/validation_focus_controller'
+        require_relative 'editor_session/validation_camera_controller'
+        require_relative '../../utils/transformation'
         require_relative 'editor_session/edit_active_path_controller'
         require_relative 'editor_session/edit_visibility_service'
         include BatchProgress
@@ -27,6 +29,8 @@ module ULOL
           @geometry_visible = model_boolean_attribute(GEOMETRY_VISIBLE_ATTRIBUTE, true)
           @validation_focus_controller = ValidationFocusController.new
           @validation_focus_zoom_generation = 0
+          @validation_focus_camera_session_id = 0
+          @validation_camera_controller = ValidationCameraController.new
           @lock_controller = LockController.new(indoor_model: @indoor_model)
           @visibility_controller = VisibilityController.new
           @overlay_controller = OverlayController.new(indoor_model: @indoor_model)
@@ -133,6 +137,7 @@ module ULOL
           ids = Array(cell_gml_ids).map(&:to_s).reject(&:empty?)
           return false if ids.empty?
 
+          @validation_focus_camera_session_id = @validation_focus_camera_session_id.to_i + 1
           validation_focus_controller.begin(ids)
           validation_focus_controller.set_focus_rows(row_states) if row_states
           capture_and_apply_validation_focus_rendering_options(ids.length)
@@ -185,9 +190,10 @@ module ULOL
             active_path_controller.reset_target
             reset_edit_mode_visibility_filter
             restore_validation_focus_rendering_options
-            clear_validation_focus
+            clear_validation_focus(restore_camera: false)
             @indoor_model.detach_edit_selection_observer(model)
             active_path_controller.close(model)
+            restore_validation_focus_camera
             active_path_controller.clear_previous_path
             update_overlay_enabled()
             @dialog.close()
@@ -302,9 +308,13 @@ module ULOL
           else
             validation_focus_controller.set_highlight(cell_gml_ids, code, **highlight_options)
           end
-          if clearing_row_selection && !reset_validation_focus_row_edit_context
-            IndoorCore::Logger.puts '[IndoorGML] Validation focus highlight clear failed: primal edit context was not restored'
-            return false
+          if clearing_row_selection
+            context_restored = reset_validation_focus_row_edit_context
+            restore_validation_focus_camera
+            unless context_restored
+              IndoorCore::Logger.puts '[IndoorGML] Validation focus highlight clear failed: primal edit context was not restored'
+              return false
+            end
           end
           unless apply_validation_focus_visibility
             if defined?(IndoorCore::Logger)
@@ -315,7 +325,10 @@ module ULOL
           update_validation_error_geometry(row_id)
           invalidate_overlay_transition_visibility
           invalidate_view(Sketchup.active_model())
-          zoom_validation_focus_highlight(row_id: row_id) unless row_id.to_s.empty?
+          unless row_id.to_s.empty?
+            camera_scheduled = zoom_validation_focus_highlight(row_id: row_id)
+            IndoorCore::Logger.puts '[IndoorGML] Validation focus camera could not be scheduled' unless camera_scheduled
+          end
           true
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight failed: #{e.class}: #{e.message}"
@@ -504,8 +517,10 @@ module ULOL
           edit_visibility_service.restore_validation_focus_visibility
         end
 
-        def clear_validation_focus
+        def clear_validation_focus(restore_camera: true)
           cancel_validation_focus_zoom
+          @validation_focus_camera_session_id = @validation_focus_camera_session_id.to_i + 1
+          restore_validation_focus_camera if restore_camera
           validation_focus_controller.clear
           overlay_controller.clear_validation_geometry
           overlay_controller.invalidate_validation_geometry_cache
@@ -690,83 +705,100 @@ module ULOL
           @validation_focus_controller ||= ValidationFocusController.new
         end
 
+        def validation_camera_controller
+          @validation_camera_controller ||= ValidationCameraController.new
+        end
+
+        # Report dialog close must invalidate any pending Row camera work
+        # without touching Validation, Visibility, Overlay or Edit state.
+        def suspend_validation_focus_camera
+          cancel_validation_focus_zoom
+          restore_validation_focus_camera
+        end
+
+        def restore_validation_focus_camera
+          result = validation_camera_controller.restore
+          unless result[:ok]
+            IndoorCore::Logger.puts "[IndoorGML] Validation focus Camera restore failed: #{result[:message]}"
+          end
+          result
+        end
+
         def zoom_validation_focus_highlight(row_id:)
           expected_row_id = row_id.to_s
           return false if expected_row_id.empty?
           return false unless defined?(UI) && UI.respond_to?(:start_timer)
 
-          @validation_focus_zoom_generation = @validation_focus_zoom_generation.to_i + 1
-          generation = @validation_focus_zoom_generation
-          schedule_validation_focus_camera_step(generation, expected_row_id, 'camera sequence') do
+          model = @indoor_model.model
+          return false unless model && Sketchup.active_model.equal?(model)
+          result = validation_camera_controller.capture(model)
+          unless result[:ok]
+            IndoorCore::Logger.puts "[IndoorGML] Validation focus Camera capture failed: #{result[:message]}"
+            return false
+          end
+
+          generation = @validation_focus_zoom_generation.to_i
+          session_id = @validation_focus_camera_session_id
+          schedule_validation_focus_camera_step(generation, expected_row_id, 'camera sequence',
+                                                model: model, session_id: session_id) do
             groups = validation_focus_highlight_groups
             next if groups.empty?
 
-            view = Sketchup.active_model()&.active_view
-            next unless view&.respond_to?(:zoom_extents)
+            bounds = validation_focus_bounds(groups)
+            next unless bounds
 
-            view.zoom_extents
-            next unless apply_validation_focus_camera_orientation(view, groups)
-
-            view.zoom(0.7)
-            view.invalidate
+            camera_result = validation_camera_controller.apply(
+              model,
+              orientation: :iso,
+              projection: :parallel,
+              zoom: :bounds,
+              target: bounds,
+              margin: ValidationCameraController::DEFAULT_MARGIN
+            )
+            unless camera_result[:ok]
+              IndoorCore::Logger.puts "[IndoorGML] Validation focus Camera failed: #{camera_result[:message]}"
+            end
           end
           true
         rescue StandardError => e
-          IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight zoom scheduling failed: #{e.class}: #{e.message}"
+          IndoorCore::Logger.puts "[IndoorGML] Validation focus camera scheduling failed: #{e.class}: #{e.message}"
           false
         end
 
-        def apply_validation_focus_camera_orientation(view, groups)
-          camera = view.respond_to?(:camera) ? view.camera : nil
-          return false unless camera&.respond_to?(:set)
-          bounds = validation_focus_bounds(groups)
-          return false unless bounds
-
-          target_point = bounds.center
-          direction = Geom::Vector3d.new(1.0, -1.0, 1.0)
-          direction.normalize!
-          current_eye = camera.respond_to?(:eye) ? camera.eye : nil
-          current_target = camera.respond_to?(:target) ? camera.target : nil
-          current_distance = if current_eye&.respond_to?(:distance) && current_target
-                               current_eye.distance(current_target).to_f.abs
-                             else
-                               0.0
-                             end
-          extent = [bounds.width.to_f, bounds.height.to_f, bounds.depth.to_f].max
-          distance = [current_distance, extent * 2.0, 1.0].max
-          required_z = bounds.max.z.to_f - target_point.z.to_f + [extent * 0.25, 1.0].max
-          distance = [distance, required_z / direction.z.to_f].max
-          eye_point = target_point.offset(direction, distance)
-
-          camera.set(
-            eye_point,
-            target_point,
-            Geom::Vector3d.new(-1.0, 1.0, 2.0)
-          )
-          true
-        end
-
+        # Definition bounds are local to the CellSpace instance. Transform each corner
+        # exactly once with the project's ActivePath-aware World transformation.
+        # Entity#bounds is parent-context AABB and must not be transformed again.
         def validation_focus_bounds(groups)
           bounds = Geom::BoundingBox.new
           Array(groups).each do |group|
             next unless group&.valid?
 
-            group_bounds = group.bounds
-            8.times { |index| bounds.add(group_bounds.corner(index)) }
+            local_bounds = group.definition.bounds
+            next unless local_bounds&.valid?
+
+            world_transform = Utils::Transformation.entity_world_transformation(group)
+            8.times do |index|
+              bounds.add(local_bounds.corner(index).transform(world_transform))
+            end
           end
           bounds.valid? ? bounds : nil
         end
 
-        def schedule_validation_focus_camera_step(generation, expected_row_id, label, &step)
+        def schedule_validation_focus_camera_step(generation, expected_row_id, label, model:, session_id:, &step)
           UI.start_timer(0, false) do
             begin
               next unless generation == @validation_focus_zoom_generation
+              next unless session_id == @validation_focus_camera_session_id
+              next unless model.equal?(@indoor_model.model) && model.equal?(Sketchup.active_model)
+              next if model.respond_to?(:valid?) && !model.valid?
+              next unless validation_camera_controller.captured_model?(model)
               next unless validation_focus_active?
               next unless validation_focus_controller.highlight_row_id.to_s == expected_row_id
 
               step.call
             rescue StandardError => e
               IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight #{label} failed: #{e.class}: #{e.message}"
+              restore_validation_focus_camera
             end
           end
         end

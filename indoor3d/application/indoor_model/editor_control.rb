@@ -101,6 +101,10 @@ module ULOL
             @editor_session.validation_focus_row(row_id)
           end
 
+          def suspend_validation_focus_camera
+            @editor_session.suspend_validation_focus_camera
+          end
+
           def recheck_validation_focus_errors
             if validation_focus_recheck_running?
               UiFeedback.defer_modal('오류 요소 재검사가 이미 실행 중입니다.')

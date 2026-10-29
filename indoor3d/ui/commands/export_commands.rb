@@ -453,6 +453,7 @@ module ULOL
         def validation_session_cancelled(session)
           return unless @validation_session.equal?(session)
 
+          session.indoor_model.suspend_validation_focus_camera if session.indoor_model.respond_to?(:suspend_validation_focus_camera)
           @validation_operation_running = false
           @validation_session = nil
           @validation_progress_dialog = nil unless session&.progress&.visible?
@@ -463,6 +464,7 @@ module ULOL
         def validation_session_completed(session)
           return unless @validation_session.equal?(session)
 
+          session.indoor_model.suspend_validation_focus_camera if session.indoor_model.respond_to?(:suspend_validation_focus_camera)
           @validation_operation_running = false
           @validation_session = nil
           @validation_progress_dialog = nil
