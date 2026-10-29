@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'validation_focus_visibility_service'
+
 module ULOL
   module Indoor3DGmlModeler
     module IndoorCore
@@ -13,6 +15,15 @@ module ULOL
             @with_unlocked = with_unlocked
             @invalidate_view = invalidate_view
             @invalidate_overlay = invalidate_overlay
+            @validation_visibility_generation = 0
+            @validation_visibility = ValidationFocusVisibilityService.new(
+              indoor_model: @indoor_model,
+              validation_focus_controller: @validation_focus_controller,
+              visibility_controller: @visibility_controller,
+              with_operation: ->(&block) { with_visibility_update_operation(&block) },
+              with_unlocked: @with_unlocked,
+              invalidate_view: @invalidate_view
+            )
           end
 
           def apply_geometry_visibility
@@ -28,49 +39,27 @@ module ULOL
             false
           end
 
+          attr_reader :validation_visibility_generation
+
+          def begin_validation_visibility_session
+            @validation_visibility_generation += 1
+            result = @validation_visibility.begin_session(
+              @indoor_model.model,
+              session_id: @validation_visibility_generation
+            )
+            log(result[:message]) unless result[:ok]
+            result[:ok]
+          end
+
           def apply_validation_focus_visibility
             return false unless validation_focus_active?
 
-            runtime_count = 0
-            visible_count = 0
-            hidden_count = 0
-            skipped_count = 0
-            applied = true
-            with_visibility_update_operation do
-              applied = false unless set_primal_group_visible(true)
-              Array(@indoor_model.cell_spaces).each do |cell_space|
-                runtime_count += 1
-                unless cell_space&.valid?
-                  skipped_count += 1
-                  next
-                end
-
-                group = cell_space.sketchup_group
-                unless @visibility_controller.cell_space_visibility_target?(group)
-                  skipped_count += 1
-                  next
-                end
-
-                visible = validation_visible_cell_space?(cell_space)
-                visible ? visible_count += 1 : hidden_count += 1
-                with_unlocked(group) do
-                  applied = false unless @visibility_controller.set_cell_space_render_visible(
-                    group,
-                    visible
-                  )
-                end
-              end
-            end
-            log(
-              "Validation focus visibility: runtime=#{runtime_count} " \
-              "focus=#{@validation_focus_controller.focus_id_count} " \
-              "visible=#{visible_count} hidden=#{hidden_count} skipped=#{skipped_count}"
+            result = @validation_visibility.apply(
+              @indoor_model.model,
+              session_id: @validation_visibility_generation
             )
-            invalidate_view(Sketchup.active_model)
-            applied
-          rescue StandardError => e
-            log("Validation focus visibility failed: #{e.class}: #{e.message}")
-            false
+            log(result[:message]) unless result[:ok]
+            result[:ok]
           end
 
           def validation_visible_cell_space?(cell_space)
@@ -83,10 +72,12 @@ module ULOL
           end
 
           def restore_validation_focus_visibility
-            normalize_cell_space_visibility_for_normal_mode
-          rescue StandardError => e
-            log("Validation focus visibility restore failed: #{e.class}: #{e.message}")
-            false
+            result = @validation_visibility.end_session(
+              @indoor_model.model,
+              session_id: @validation_visibility_generation
+            )
+            log(result[:message]) unless result[:ok]
+            result[:ok]
           end
 
           def apply_edit_mode_visibility_filter(ignore_validation: false)

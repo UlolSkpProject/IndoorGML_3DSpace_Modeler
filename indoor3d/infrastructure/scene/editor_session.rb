@@ -13,6 +13,7 @@ module ULOL
         require_relative 'editor_session/validation_camera_controller'
         require_relative '../../utils/transformation'
         require_relative 'editor_session/edit_active_path_controller'
+        require_relative 'editor_session/validation_focus_visibility_service'
         require_relative 'editor_session/edit_visibility_service'
         include BatchProgress
 
@@ -30,6 +31,7 @@ module ULOL
           @validation_focus_controller = ValidationFocusController.new
           @validation_focus_zoom_generation = 0
           @validation_focus_camera_session_id = 0
+          @validation_focus_visibility_row_generation = 0
           @validation_camera_controller = ValidationCameraController.new
           @lock_controller = LockController.new(indoor_model: @indoor_model)
           @visibility_controller = VisibilityController.new
@@ -125,7 +127,7 @@ module ULOL
             apply_lock_policy()
             return false
           end
-          apply_all_edit_mode_cell_space_visibility
+          apply_all_edit_mode_cell_space_visibility unless validation_focus_active?
           apply_geometry_visibility unless validation_focus_active?
           @dialog.show()
           selection_changed()
@@ -135,11 +137,15 @@ module ULOL
 
         def begin_validation_focus_editing(cell_gml_ids, row_states: nil)
           ids = Array(cell_gml_ids).map(&:to_s).reject(&:empty?)
-          return false if ids.empty?
+          return false if ids.empty? || validation_focus_active?
 
           @validation_focus_camera_session_id = @validation_focus_camera_session_id.to_i + 1
           validation_focus_controller.begin(ids)
           validation_focus_controller.set_focus_rows(row_states) if row_states
+          unless edit_visibility_service.begin_validation_visibility_session
+            clear_validation_focus
+            return false
+          end
           capture_and_apply_validation_focus_rendering_options(ids.length)
           started = @editing ? true : begin_editing
           unless started
@@ -181,10 +187,14 @@ module ULOL
           end
 
           model = Sketchup.active_model()
+          was_validation_focus = validation_focus_active?
           with_active_path_enforcement_suspended do
             active_path_controller.prepare_for_finish(model)
-            restore_validation_focus_visibility
-            normalize_visibility_for_non_edit_mode
+            if was_validation_focus
+              return false unless restore_validation_focus_visibility
+            else
+              normalize_visibility_for_non_edit_mode
+            end
             @editing = false
             @indoor_model.clear_dual_graph_selection_cache
             active_path_controller.reset_target
@@ -198,7 +208,7 @@ module ULOL
             update_overlay_enabled()
             @dialog.close()
             apply_lock_policy()
-            apply_geometry_visibility()
+            apply_geometry_visibility() unless was_validation_focus
             invalidate_view(model)
             true
           end
@@ -297,6 +307,8 @@ module ULOL
 
         def set_validation_focus_highlight(cell_gml_ids, code = nil, row_id: nil, row_cells: nil, states: nil, transitions: nil)
           cancel_validation_focus_zoom
+          @validation_focus_visibility_row_generation = @validation_focus_visibility_row_generation.to_i + 1
+          previous_focus_snapshot = validation_focus_controller.snapshot
           clearing_row_selection = Array(cell_gml_ids).empty? && row_id.to_s.empty?
           highlight_options = {}
           highlight_options[:row_id] = row_id unless row_id.nil?
@@ -312,6 +324,7 @@ module ULOL
             context_restored = reset_validation_focus_row_edit_context
             restore_validation_focus_camera
             unless context_restored
+              validation_focus_controller.restore!(previous_focus_snapshot)
               IndoorCore::Logger.puts '[IndoorGML] Validation focus highlight clear failed: primal edit context was not restored'
               return false
             end
@@ -320,6 +333,7 @@ module ULOL
             if defined?(IndoorCore::Logger)
               IndoorCore::Logger.puts '[IndoorGML] Validation focus highlight failed: visibility apply returned false'
             end
+            validation_focus_controller.restore!(previous_focus_snapshot)
             return false
           end
           update_validation_error_geometry(row_id)
@@ -429,7 +443,8 @@ module ULOL
         end
 
         def refresh_validation_focus_after_mutation
-          apply_validation_focus_visibility
+          return false unless apply_validation_focus_visibility
+
           overlay_controller.invalidate_validation_geometry_cache
           update_validation_error_geometry(validation_focus_controller.highlight_row_id)
           invalidate_overlay_transition_visibility
@@ -520,6 +535,7 @@ module ULOL
         def clear_validation_focus(restore_camera: true)
           cancel_validation_focus_zoom
           @validation_focus_camera_session_id = @validation_focus_camera_session_id.to_i + 1
+          @validation_focus_visibility_row_generation = @validation_focus_visibility_row_generation.to_i + 1
           restore_validation_focus_camera if restore_camera
           validation_focus_controller.clear
           overlay_controller.clear_validation_geometry
@@ -624,8 +640,15 @@ module ULOL
           begin
             restoring_edit_visibility = @editing || validation_focus_active?
             @dialog.close_without_finish()
-            restore_validation_focus_visibility
-            normalize_visibility_for_non_edit_mode if restoring_edit_visibility
+            if validation_focus_active?
+              restored = restore_validation_focus_visibility
+              unless restored
+                IndoorCore::Logger.puts '[IndoorGML] Edit model close: Validation visibility restore incomplete'
+                return false
+              end
+            elsif restoring_edit_visibility
+              normalize_visibility_for_non_edit_mode
+            end
             @editing = false
             @indoor_model.clear_dual_graph_selection_cache
             active_path_controller.reset
@@ -836,23 +859,31 @@ module ULOL
         def defer_validation_focus_visibility
           return false unless defined?(UI) && UI.respond_to?(:start_timer)
 
-          scheduled = false
+          model = @indoor_model.model
+          session_id = edit_visibility_service.validation_visibility_generation
+          row_generation = @validation_focus_visibility_row_generation
+          return false unless model && Sketchup.active_model.equal?(model)
+
           VALIDATION_FOCUS_VISIBILITY_REAPPLY_DELAYS.each do |delay|
             UI.start_timer(delay, false) do
               begin
-                if validation_focus_active?
-                  apply_validation_focus_visibility
+                next unless validation_focus_active?
+                next unless model.equal?(@indoor_model.model) && model.equal?(Sketchup.active_model)
+                next if model.respond_to?(:valid?) && !model.valid?
+                next unless session_id == edit_visibility_service.validation_visibility_generation
+                next unless row_generation == @validation_focus_visibility_row_generation
+
+                if apply_validation_focus_visibility
                   invalidate_overlay_transition_visibility
                   selection_changed
-                  invalidate_view(Sketchup.active_model())
+                  invalidate_view(model)
                 end
               rescue StandardError => e
                 IndoorCore::Logger.puts "[IndoorGML] Deferred validation focus visibility failed: #{e.class}: #{e.message}"
               end
             end
-            scheduled = true
           end
-          scheduled
+          true
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Deferred validation focus visibility scheduling failed: #{e.class}: #{e.message}"
           false
