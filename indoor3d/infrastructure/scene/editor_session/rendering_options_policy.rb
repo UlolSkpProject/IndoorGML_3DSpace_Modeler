@@ -94,6 +94,7 @@ module ULOL
               options = model.rendering_options
               raise 'RenderingOptions unavailable' unless options
 
+              reconciled = reconcile_managed_options(options, Array(values.to_a).map(&:first))
               scope_snapshot = (@snapshots[scope] ||= {})
               applied = []
               new_keys = []
@@ -104,12 +105,21 @@ module ULOL
 
                   current = options[key]
                   ensure_unmodified!(key, current)
-                  next if current == value
-
                   unless scope_snapshot.key?(key)
+                    # Capture even when the value already matches. Otherwise a
+                    # later external rewrite has no pre-scope baseline to
+                    # restore when the validation session closes.
                     scope_snapshot[key] = current
                     new_keys << key
                   end
+                  if current == value
+                    # A value that already matches is still owned by the
+                    # active policy. Tracking it lets a later SketchUp-side
+                    # rewrite be distinguished from the preserved baseline.
+                    @last_written[key] = value
+                    next
+                  end
+
                   # Register undo before the setter; SketchUp may mutate and raise.
                   applied << [key, current]
                   options[key] = value
@@ -128,11 +138,12 @@ module ULOL
                   scope_snapshot.delete(key) unless rollback_errors.key?("rollback:#{key}")
                 end
                 errors.merge!(rollback_errors)
-                invalidate(model) unless applied.empty?
-                return { ok: false, changed_keys: [], errors: errors }
+                invalidate(model) unless reconciled.empty? && applied.empty?
+                return { ok: false, changed_keys: reconciled, reconciled_keys: reconciled, errors: errors }
               end
-              invalidate(model) unless applied.empty?
-              { ok: true, changed_keys: applied.map(&:first), errors: {} }
+              changed = (reconciled + applied.map(&:first)).uniq
+              invalidate(model) unless changed.empty?
+              { ok: true, changed_keys: changed, reconciled_keys: reconciled, errors: {} }
             rescue StandardError => e
               failure(scope, e.message)
             end
@@ -145,6 +156,7 @@ module ULOL
               options = model.rendering_options
               raise 'RenderingOptions unavailable' unless options
 
+              reconciled = reconcile_managed_options(options, @snapshots[scope].keys)
               changed = []
               errors = {}
               @snapshots[scope].to_a.reverse_each do |key, original|
@@ -165,8 +177,12 @@ module ULOL
                   errors[key] = e.message
                 end
               end
+              changed = (reconciled + changed).uniq
               invalidate(model) unless changed.empty?
-              { ok: errors.empty?, restored: errors.empty?, changed_keys: changed, errors: errors }
+              {
+                ok: errors.empty?, restored: errors.empty?, changed_keys: changed,
+                reconciled_keys: reconciled, errors: errors
+              }
             rescue StandardError => e
               failure(scope, e.message)
             end
@@ -174,14 +190,19 @@ module ULOL
             def restore_all(model)
               errors = {}
               changed = []
+              reconciled = []
               %i[row session edit].each do |scope|
                 scope_result = restore(model, scope: scope)
                 changed.concat(Array(scope_result[:changed_keys]))
+                reconciled.concat(Array(scope_result[:reconciled_keys]))
                 errors[scope] = scope_result[:errors] unless scope_result[:ok]
                 break unless scope_result[:ok] # Do not overwrite an unresolved higher scope.
               end
               clear if errors.empty?
-              { ok: errors.empty?, changed_keys: changed, errors: errors }
+              {
+                ok: errors.empty?, changed_keys: changed.uniq,
+                reconciled_keys: reconciled.uniq, errors: errors
+              }
             end
 
             def clear
@@ -220,6 +241,27 @@ module ULOL
               raise "RenderingOptions[#{key}] changed outside policy manager"
             end
 
+            # SketchUp can rewrite edit-context RenderingOptions while a
+            # validation session owns them. Reassert the last managed value
+            # before applying or restoring a scope so a display-only drift does
+            # not poison the whole Row focus transaction. Scope snapshots stay
+            # untouched and therefore still restore the pre-session values.
+            def reconcile_managed_options(options, keys)
+              Array(keys).uniq.filter_map do |key|
+                next unless @last_written.key?(key)
+                next unless RenderingOptionsPolicy.rendering_option_key?(options, key)
+
+                expected = @last_written[key]
+                next if options[key] == expected
+
+                options[key] = expected
+                unless options[key] == expected
+                  raise "RenderingOptions[#{key}] reconciliation did not take effect"
+                end
+                key
+              end
+            end
+
             def rollback(options, applied)
               errors = {}
               applied.reverse_each do |key, original|
@@ -240,11 +282,11 @@ module ULOL
             end
 
             def result(**extra)
-              { ok: true, changed_keys: [], errors: {} }.merge(extra)
+              { ok: true, changed_keys: [], reconciled_keys: [], errors: {} }.merge(extra)
             end
 
             def failure(scope, message)
-              { ok: false, changed_keys: [], errors: { scope => message } }
+              { ok: false, changed_keys: [], reconciled_keys: [], errors: { scope => message } }
             end
           end
 

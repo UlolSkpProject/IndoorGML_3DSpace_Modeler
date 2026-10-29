@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'validation_focus_report_mapper'
+require_relative 'val3dity_full_intersection_rechecker'
 require_relative '../export/gml_exporter'
 require_relative '../utils/transformation'
 require_relative '../utils/geometry/source_group'
@@ -10,14 +11,23 @@ module ULOL
     module IndoorCore
       module IndoorGmlConverter
         # Applies narrowly-scoped, topology-preserving repairs for validation
-        # errors whose referenced polygon can be resolved back to a SketchUp
-        # Face. Every mutation is isolated in its own undo operation and is
-        # rolled back unless the CellSpace remains a positive-volume manifold.
+        # errors whose referenced polygon or CellSpace pair can be resolved
+        # back to SketchUp geometry. Every mutation is isolated in its own undo
+        # operation and rolled back unless the result remains valid.
         class ValidationAutoFixService
-          SUPPORTED_CODES = [102, 104, 203, 303, 307].freeze
+          SUPPORTED_CODES = [102, 104, 203, 303, 307, 701].freeze
+          CELL_TARGET_CODES = [303, 307, 701].freeze
           ORIENTATION_CODES = [303, 307].freeze
           DEFAULT_SNAP_TOLERANCE = 0.001
           AUTO_FIX_PLANARITY_TOLERANCE_MM = 0.01
+          AUTO_FIX_OVERLAP_MAX_THICKNESS_MM = 1.5
+          OVERLAP_MODIFICATION_PRIORITY = {
+            'window' => 0,
+            'door' => 1,
+            'elevator' => 2,
+            'room' => 3,
+            'stair' => 4
+          }.freeze
           LENGTH_EPSILON = 1.0e-9
           CONGRUENT_EDGE_RELATIVE_TOLERANCE = 0.1
 
@@ -65,11 +75,10 @@ module ULOL
             normalized_code = normalize_code(code)
             result = build_result(normalized_code, row_id)
             unless SUPPORTED_CODES.include?(normalized_code)
-              result.skipped += 1
+              result.skipped += unsupported_attempt_count(normalized_code, row_id)
               result.messages << "ErrorCode #{normalized_code} 자동 수정은 아직 지원하지 않습니다."
               return result
             end
-
             rows = selected_rows(normalized_code, row_id)
             if rows.empty?
               result.skipped += 1
@@ -80,28 +89,31 @@ module ULOL
             # Resolve Face objects before the first mutation. SketchUp can
             # reorder the definition's face collection while healing geometry.
             targets = rows.map do |row|
-              resolved = if ORIENTATION_CODES.include?(normalized_code)
+              resolved = if CELL_TARGET_CODES.include?(normalized_code)
                            resolved_cell_targets(row)
                          else
                            resolved_face_targets(row)
                          end
               [row, resolved]
             end
-            targets.each do |row, face_targets|
-              if face_targets.empty?
+            targets.each do |row, resolved_targets|
+              if resolved_targets.empty?
                 result.skipped += 1
-                result.messages << "#{row[:id]}: 대상 face를 찾지 못했습니다."
+                target_label = normalized_code == 701 ? 'CellSpace 쌍' : 'face'
+                result.messages << "#{row[:id]}: 대상 #{target_label}을 찾지 못했습니다."
                 next
               end
 
               if normalized_code == 104
-                repair_duplicate_edges(row, face_targets, result)
+                repair_duplicate_edges(row, resolved_targets, result)
               elsif normalized_code == 203
-                repair_non_planar_faces(row, face_targets, result)
+                repair_non_planar_faces(row, resolved_targets, result)
+              elsif normalized_code == 701
+                repair_cell_overlap(row, resolved_targets, result)
               elsif ORIENTATION_CODES.include?(normalized_code)
-                repair_face_orientations(row, face_targets, result, normalized_code)
+                repair_face_orientations(row, resolved_targets, result, normalized_code)
               else
-                repair_short_edges(row, face_targets, result)
+                repair_short_edges(row, resolved_targets, result)
               end
             end
             result
@@ -114,6 +126,15 @@ module ULOL
           end
 
           private
+
+          def unsupported_attempt_count(code, row_id)
+            return 1 unless row_id.to_s.empty?
+
+            count = Val3dityReportSchema.grouped_error_item_rows(@report || {}).count do |row|
+              normalize_code(row[:code]) == code
+            end
+            [count, 1].max
+          end
 
           def build_result(code, row_id)
             Result.new(
@@ -134,6 +155,8 @@ module ULOL
           def selected_rows(code, row_id)
             rows = ValidationFocusReportMapper.focus_row_states(@report, @indoor_model)
             rows = rows.select { |row| normalize_code(row[:code]) == code }
+            return rows if row_id.to_s.empty?
+
             rows.select { |row| row[:id].to_s == row_id.to_s }
           end
 
@@ -282,6 +305,222 @@ module ULOL
                 '사각형 인접 face vertex 평면 투영'
               )
             end
+          end
+
+          def repair_cell_overlap(row, cell_targets, result)
+            targets = Array(cell_targets).first(2)
+            unless targets.length == 2
+              result.skipped += 1
+              result.messages << "#{row[:id]}: 701 CellSpace 쌍을 찾지 못해 수동 수정이 필요합니다."
+              return
+            end
+
+            plan = overlap_projection_plan(targets)
+            unless plan
+              result.skipped += 1
+              result.messages << "#{row[:id]}: 1.5 mm 이하에서 안전하게 사영할 경계 face를 찾지 못해 수동 수정이 필요합니다."
+              return
+            end
+
+            group = plan[:target][:group]
+            cell_space = plan[:target][:cell_space]
+            source_face_count = group.definition.entities.grep(Sketchup::Face).length
+            source_edge_count = group.definition.entities.grep(Sketchup::Edge).length
+            source_volume = group.volume.to_f.abs
+            result.attempted += 1
+            repaired = run_repair_operation('Fix IndoorGML validation error 701', group) do
+              apply_vertex_projection_moves(group, plan[:moves])
+              repaired_volume = group.volume.to_f.abs
+              valid_cell_space_group?(group) &&
+                repaired_volume < source_volume - LENGTH_EPSILON &&
+                group.definition.entities.grep(Sketchup::Face).length == source_face_count &&
+                group.definition.entities.grep(Sketchup::Edge).length == source_edge_count &&
+                overlap_removed_after_projection?(targets)
+            end
+            record_repair_result(
+              result,
+              row,
+              cell_space,
+              group,
+              repaired,
+              1,
+              "#{cell_space.category_code} CellSpace 경계 face 정사영"
+            )
+          end
+
+          def overlap_projection_plan(targets)
+            tolerance = overlap_max_thickness_inches
+            analysis = overlap_rechecker(tolerance).pair_analysis(
+              report_cell_id(targets[0][:cell_space]),
+              report_cell_id(targets[1][:cell_space])
+            )
+            return nil unless analysis[:status] == :ok
+
+            intersection = Hash(analysis[:intersection])
+            return nil unless repairable_overlap_intersection?(intersection)
+            return nil unless intersection[:component_count].nil? ||
+                              intersection[:component_count].to_i == 1
+
+            modification_targets(targets).filter_map do |target|
+              overlap_projection_plan_for_target(
+                target,
+                targets,
+                analysis,
+                tolerance
+              )
+            end.min_by { |plan| [plan[:max_displacement], plan[:target_index]] }
+          rescue StandardError => e
+            log("701 overlap projection planning failed: #{e.class}: #{e.message}")
+            nil
+          end
+
+          def repairable_overlap_intersection?(intersection)
+            data = Hash(intersection)
+            if data[:status] == :reproduced
+              return data[:volume].to_f > LENGTH_EPSILON
+            end
+
+            data[:status] == :not_reproduced &&
+              data[:reason].to_s == 'REPRODUCED_INTERSECTION_WITHIN_OVERLAP_TOLERANCE' &&
+              data[:raw_reproduced_volume].to_f > LENGTH_EPSILON
+          end
+
+          def modification_targets(targets)
+            ranked = Array(targets).each_with_index.filter_map do |target, index|
+              rank = overlap_modification_rank(target[:cell_space])
+              [target, index, rank] unless rank.nil?
+            end
+            return [] if ranked.empty?
+
+            best_rank = ranked.map(&:last).min
+            ranked.select { |_target, _index, rank| rank == best_rank }
+                  .map { |target, index, _rank| target.merge(pair_index: index) }
+          end
+
+          def overlap_modification_rank(cell_space)
+            OVERLAP_MODIFICATION_PRIORITY[cell_space&.category_code.to_s.downcase]
+          end
+
+          def overlap_projection_plan_for_target(target, targets, analysis, tolerance)
+            target_index = target[:pair_index].to_i
+            candidates = Array(analysis[:adjacency_candidates]).select do |candidate|
+              overlap_candidate_within_limit?(candidate, tolerance)
+            end
+            candidates.filter_map do |candidate|
+              overlap_projection_plan_for_candidate(
+                target,
+                targets,
+                candidate,
+                tolerance
+              )
+            end.min_by do |plan|
+              [
+                plan[:max_displacement],
+                plan[:penetration_depth],
+                -plan[:overlap_area]
+              ]
+            end
+          end
+
+          def overlap_projection_plan_for_candidate(target, targets, candidate, tolerance)
+            target_index = target[:pair_index].to_i
+            source_face_index = target_index.zero? ? candidate[:face1_index] : candidate[:face2_index]
+            reference_face = target_index.zero? ? candidate[:face2] : candidate[:face1]
+            source_face = target[:group].definition.entities.grep(Sketchup::Face)[source_face_index.to_i]
+            return nil unless source_face&.valid?
+            return nil unless reference_face && Array(reference_face[:points]).length >= 3
+
+            reference_plane = plane_from_normal_and_point(
+              reference_face[:normal],
+              reference_face[:points].first
+            )
+            transform = target[:group].transformation
+            inverse = transform.inverse
+            moves = Array(source_face.vertices).map do |vertex|
+              parent_point = vertex.position.transform(transform)
+              projected_parent = project_point_to_plane(parent_point, reference_plane)
+              projected_local = projected_parent.transform(inverse)
+              {
+                vertex: vertex,
+                target: Geom::Point3d.new(
+                  projected_local.x, projected_local.y, projected_local.z
+                ),
+                displacement: parent_point.distance(projected_parent).to_f
+              }
+            end
+            return nil if moves.empty?
+            return nil if moves.any? { |move| move[:displacement] > tolerance + LENGTH_EPSILON }
+            return nil unless projected_vertex_neighborhood_planar?(moves)
+
+            {
+              target: target,
+              target_index: target_index,
+              reference: targets[1 - target_index],
+              source_face: source_face,
+              moves: moves,
+              max_displacement: moves.map { |move| move[:displacement] }.max.to_f,
+              penetration_depth: candidate[:penetration_depth].to_f,
+              overlap_area: candidate[:overlap_area].to_f
+            }
+          end
+
+          def overlap_candidate_within_limit?(candidate, tolerance)
+            depth = candidate[:penetration_depth].to_f
+            depth > LENGTH_EPSILON && depth <= tolerance + LENGTH_EPSILON
+          end
+
+          def projected_vertex_neighborhood_planar?(moves)
+            replacements = Array(moves).each_with_object({}) do |move, result|
+              result[entity_key(move[:vertex])] = move[:target]
+            end
+            affected_faces = Array(moves).flat_map do |move|
+              Array(move[:vertex].faces)
+            end.select { |face| entity_valid?(face) }
+               .uniq { |face| entity_key(face) }
+            return false if affected_faces.empty?
+
+            tolerance = planarity_tolerance_inches
+            affected_faces.all? do |face|
+              points = Array(face.outer_loop.vertices).map do |vertex|
+                replacements[entity_key(vertex)] || vertex.position
+              end
+              fitted_plane_max_distance(points) <= tolerance + LENGTH_EPSILON
+            end
+          end
+
+          def overlap_removed_after_projection?(targets)
+            analysis = overlap_rechecker(Utils::Geometry::VALIDATION_TOLERANCE).pair_analysis(
+              report_cell_id(targets[0][:cell_space]),
+              report_cell_id(targets[1][:cell_space])
+            )
+            return false unless analysis[:status] == :ok
+
+            intersection = Hash(analysis[:intersection])
+            intersection[:status] == :not_reproduced ||
+              intersection[:volume].to_f <= LENGTH_EPSILON
+          rescue StandardError
+            false
+          end
+
+          def overlap_rechecker(tolerance)
+            Val3dityFullIntersectionRechecker.new(
+              indoor_model: @indoor_model,
+              tolerance: tolerance,
+              model: @model,
+              logger: @logger
+            )
+          end
+
+          def report_cell_id(cell_space)
+            "cell_#{normalize_cell_id(cell_space&.id)}"
+          end
+
+          def plane_from_normal_and_point(normal, point)
+            nx = normal.x.to_f
+            ny = normal.y.to_f
+            nz = normal.z.to_f
+            d = -((nx * point.x.to_f) + (ny * point.y.to_f) + (nz * point.z.to_f))
+            [nx, ny, nz, d]
           end
 
           def non_planar_vertex_plan(face, transform, tolerance)
@@ -729,6 +968,10 @@ module ULOL
 
           def planarity_tolerance_inches
             AUTO_FIX_PLANARITY_TOLERANCE_MM / 25.4
+          end
+
+          def overlap_max_thickness_inches
+            AUTO_FIX_OVERLAP_MAX_THICKNESS_MM / 25.4
           end
 
           def cell_group_world_transformation(group)

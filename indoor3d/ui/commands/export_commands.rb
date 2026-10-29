@@ -388,10 +388,11 @@ module ULOL
               report: result.report
             ).attempt(code: code, row_id: row_id)
             Logger.puts "[IndoorGML] #{fix_result.summary}"
-            progress&.complete_validation_fix_attempt(fix_result.to_h)
+            fix_payload = validation_fix_feedback_payload(fix_result.to_h)
+            progress&.complete_validation_fix_attempt(fix_payload)
           rescue StandardError => e
             Logger.puts "[IndoorGML] Validation fix attempt failed: #{e.class}: #{e.message}"
-            progress&.complete_validation_fix_attempt(
+            failure_payload = validation_fix_feedback_payload(
               code: code.to_s,
               rowId: row_id.to_s,
               attempted: 0,
@@ -401,6 +402,7 @@ module ULOL
               message: "자동 수정 중 오류가 발생했습니다: #{e.message}",
               details: ["#{e.class}: #{e.message}"]
             )
+            progress&.complete_validation_fix_attempt(failure_payload)
           end
 
           if result.error?
@@ -577,6 +579,39 @@ module ULOL
 
         def validation_safe_id(value)
           value.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')
+        end
+
+        def validation_fix_feedback_payload(payload)
+          data = Hash(payload || {}).dup
+          row_id_present = data.key?(:rowId) || data.key?('rowId')
+          row_id = (data[:rowId] || data['rowId']).to_s
+          fixed = (data[:fixed] || data['fixed']).to_i
+          skipped = (data[:skipped] || data['skipped']).to_i
+          failed = (data[:failed] || data['failed']).to_i
+          if data[:bulk] == true || data['bulk'] == true || (row_id_present && row_id.empty?)
+            return data.merge(
+              bulk: true,
+              feedbackTitle: '일괄 수정 결과',
+              feedbackMessage: "성공 #{fixed}건 / 실패 #{skipped + failed}건"
+            )
+          end
+
+          title = if fixed.positive? && failed.zero? && skipped.zero?
+                    '자동 수정 성공'
+                  elsif fixed.positive?
+                    '자동 수정 일부 성공'
+                  elsif failed.positive?
+                    '자동 수정 실패'
+                  else
+                    '자동 수정 불가 — 수동 수정 필요'
+                  end
+          summary = data[:message] || data['message']
+          details = Array(data[:details] || data['details']).map(&:to_s).reject(&:empty?)
+          counts = "수정 #{fixed}건 / 건너뜀 #{skipped}건 / 실패 #{failed}건"
+          data.merge(
+            feedbackTitle: title,
+            feedbackMessage: [counts, summary, *details].map(&:to_s).reject(&:empty?).join("\n")
+          )
         end
       end
     end

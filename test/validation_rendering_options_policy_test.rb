@@ -222,13 +222,59 @@ class ValidationRenderingOptionsPolicyTest < Minitest::Test
     assert_equal @original, options.to_h
   end
 
-  def test_outside_service_modification_is_reported_as_conflict
+  def test_outside_service_modification_is_reconciled_before_restore
     apply(:edit, Policy.base_edit)
     @model.rendering_options['RenderMode'] = 99
-    failure = @manager.restore_all(@model)
-    refute failure[:ok]
-    assert_includes failure[:errors][:edit].keys, 'RenderMode'
-    assert @manager.captured?(:edit)
+    restored = @manager.restore_all(@model)
+    assert restored[:ok], restored[:errors].inspect
+    assert_includes restored[:reconciled_keys], 'RenderMode'
+    assert_equal @original, @model.rendering_options.to_h
+  end
+
+  def test_row_apply_reconciles_external_transparency_drift
+    apply(:edit, Policy.base_edit)
+    apply(:session, Policy.validation_session)
+    row_policy = Policy.context_values(validation_context(row: true))
+    apply(:row, row_policy)
+
+    @model.rendering_options['ModelTransparency'] = true
+    result = apply(:row, row_policy)
+
+    assert_includes result[:reconciled_keys], 'ModelTransparency'
+    assert_equal false, @model.rendering_options['ModelTransparency']
+    assert @manager.restore_all(@model)[:ok]
+    assert_equal @original, @model.rendering_options.to_h
+  end
+
+  def test_context_transition_after_external_drift_preserves_lower_scope_baseline
+    apply(:edit, Policy.base_edit)
+    apply(:session, Policy.validation_session)
+    @model.rendering_options['ModelTransparency'] = true
+
+    geometry = Policy.context_values(validation_context(row: true, group: true, cell: true))
+    result = apply(:row, geometry)
+
+    assert_includes result[:reconciled_keys], 'ModelTransparency'
+    assert_equal true, @model.rendering_options['ModelTransparency']
+    assert @manager.restore(@model, scope: :row)[:ok]
+    assert_equal false, @model.rendering_options['ModelTransparency']
+    assert @manager.restore_all(@model)[:ok]
+    assert_equal @original, @model.rendering_options.to_h
+  end
+
+  def test_restore_reconciles_drift_for_value_that_initially_matched
+    original = @original.merge('ModelTransparency' => false)
+    model = FakeModel.new(original)
+    manager = Policy::Manager.new
+    result = manager.apply(model, scope: :session, values: Policy.validation_session)
+    assert result[:ok], result[:errors].inspect
+
+    model.rendering_options['ModelTransparency'] = true
+    restored = manager.restore_all(model)
+
+    assert restored[:ok], restored[:errors].inspect
+    assert_includes restored[:reconciled_keys], 'ModelTransparency'
+    assert_equal original, model.rendering_options.to_h
   end
 
   def test_model_invalid_or_replaced_is_rejected_without_writes

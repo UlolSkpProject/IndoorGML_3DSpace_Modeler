@@ -12,7 +12,6 @@ module ULOL
           STRICT_VALIDITY_KEY = Val3dityReportSchema::STRICT_VALIDITY_KEY
           VALIDATION_STATUS_KEY = Val3dityReportSchema::VALIDATION_STATUS_KEY
           OVERLAP_TOLERANCE_KEY = Val3dityReportSchema::OVERLAP_TOLERANCE_KEY
-
           def render(raw_report)
             fallback_report_html(raw_report)
           end
@@ -69,11 +68,21 @@ module ULOL
                   .filter-btn.active { border-color: #327a4f; background: #12261a; color: #d8d6d0; }
                   .fix-attempt { flex: 0 0 auto; padding: 6px 9px; border: 1px solid #315d9b; border-radius: 6px; background: #17243b; color: #8ab4f8; cursor: pointer; font-size: 10px; font-weight: 700; white-space: nowrap; }
                   .fix-attempt:hover { background: #1d2d4a; border-color: #4278c7; }
-                  .fix-attempt:disabled { cursor: wait; opacity: .55; }
+                  .fix-attempt:disabled { cursor: default; }
+                  .fix-attempt.is-pending:disabled { cursor: wait; opacity: .55; }
+                  .fix-attempt.is-success:disabled { border-color: #327a4f; background: #12261a; color: #74d66f; opacity: 1; }
+                  .fix-attempt.is-failure:disabled { border-color: #8b3833; background: #351918; color: #f97066; opacity: 1; }
                   .report-actions { display: flex; justify-content: flex-end; }
                   .report-action { min-width: 92px; padding: 8px 12px; border: 1px solid #5a5953; border-radius: 7px; background: #343432; color: #e8e6e0; cursor: pointer; font-size: 12px; font-weight: 700; white-space: nowrap; }
                   .report-action:hover { background: #3d3d3a; border-color: #6a6962; }
                   .recheck-list { display: grid; gap: 8px; }
+                  .error-code-card { overflow: hidden; background: #222220; border: 1px solid #373633; border-radius: 9px; }
+                  .error-code-card > summary { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 10px; cursor: pointer; list-style: none; }
+                  .error-code-card > summary::-webkit-details-marker { display: none; }
+                  .error-code-card[open] > summary { border-bottom: 1px solid #373633; }
+                  .error-code-count { color: #85827b; font-size: 10px; font-weight: 700; }
+                  .error-code-items { display: grid; gap: 7px; padding: 8px; }
+                  .error-code-items .recheck-row { background: #292927; }
                   .recheck-row { background: #242422; border: 1px solid #2f2e2b; border-radius: 8px; }
                   .recheck-row.focused { border-color: #ef4444; box-shadow: inset 0 0 0 1px rgba(239, 68, 68, .55); }
                   .recheck-row.c100.focused { border-color: #f87171; box-shadow: inset 0 0 0 1px rgba(248, 113, 113, .6); }
@@ -85,6 +94,7 @@ module ULOL
                   .recheck-row.c700.focused { border-color: #f472b6; box-shadow: inset 0 0 0 1px rgba(244, 114, 182, .6); }
                   .recheck-row.c900.focused { border-color: #fef08a; box-shadow: inset 0 0 0 1px rgba(254, 240, 138, .6); }
                   .recheck-row summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 8px 9px; cursor: pointer; list-style: none; }
+                  .validation-error-row summary { grid-template-columns: minmax(0, 1fr) auto auto; }
                   .recheck-row summary::-webkit-details-marker { display: none; }
                   .recheck-row[open] summary { border-bottom: 1px solid #33322f; }
                   .recheck-summary-main { display: flex; align-items: center; gap: 7px; min-width: 0; }
@@ -121,6 +131,18 @@ module ULOL
                   .toggle-triangle { display: inline-block; width: 0; height: 0; margin-right: 8px; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 7px solid #85827b; transition: transform .12s ease-out; }
                   details[open] > summary .toggle-triangle { transform: rotate(90deg); }
                   code { background: #242422; border-radius: 4px; padding: 1px 4px; color: #d8d6d0; }
+                  .validation-fix-messagebox { position: fixed; inset: 0; z-index: 2200; display: flex; align-items: center; justify-content: center; padding: 12px; background: rgba(0, 0, 0, .62); }
+                  .validation-fix-messagebox[hidden] { display: none; }
+                  .validation-fix-messagebox-panel { width: min(360px, 100%); max-height: calc(100vh - 24px); overflow-y: auto; padding: 14px; background: #2b2b29; border: 1px solid #4a4945; border-radius: 8px; box-shadow: 0 10px 30px rgba(0, 0, 0, .58); }
+                  .validation-fix-messagebox-panel[data-variant="success"] { border-color: #327a4f; }
+                  .validation-fix-messagebox-panel[data-variant="warning"] { border-color: #8a6a2f; }
+                  .validation-fix-messagebox-panel[data-variant="error"] { border-color: #8b3833; }
+                  .validation-fix-messagebox-title { margin: 0 0 10px; color: #e8e6e0; font-size: 14px; font-weight: 700; }
+                  .validation-fix-messagebox-body { color: #b9b6ae; font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
+                  .validation-fix-messagebox-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
+                  .validation-fix-messagebox-close { min-width: 72px; padding: 7px 13px; border: 1px solid #315d9b; border-radius: 6px; background: #17243b; color: #dbe8ff; cursor: pointer; font-size: 12px; font-weight: 700; }
+                  .validation-fix-messagebox-close:hover { background: #1d2d4a; border-color: #4278c7; }
+                  .validation-fix-messagebox-close:focus-visible { outline: 2px solid #8ab4f8; outline-offset: 2px; }
                   @media (min-width: 700px) {
                     body { padding: 20px 0; }
                     main { max-width: 540px; padding: 0 10px; }
@@ -133,6 +155,15 @@ module ULOL
                   #{report_result_hero_section(raw_report)}
                   #{report_summary_section(raw_report)}
                   #{report_issue_sections(raw_report)}
+                  <div id="validation-fix-messagebox" class="validation-fix-messagebox" role="alertdialog" aria-modal="true" aria-labelledby="validation-fix-messagebox-title" aria-describedby="validation-fix-messagebox-body" hidden>
+                    <section id="validation-fix-messagebox-panel" class="validation-fix-messagebox-panel" data-variant="success">
+                      <h2 id="validation-fix-messagebox-title" class="validation-fix-messagebox-title"></h2>
+                      <div id="validation-fix-messagebox-body" class="validation-fix-messagebox-body"></div>
+                      <div class="validation-fix-messagebox-actions">
+                        <button id="validation-fix-messagebox-close" class="validation-fix-messagebox-close" type="button">확인</button>
+                      </div>
+                    </section>
+                  </div>
                   #{report_filter_script}
                 </main>
               </body>
@@ -229,9 +260,8 @@ module ULOL
                   <h2>#{html_escape(title)}</h2>
                   <span class="section-count">#{rows.length}건</span>
                 </div>
-                #{report_filter_row(rows)}
                 <div class="recheck-list">
-                  #{error_item_rows_html(rows, raw_report)}
+                  #{error_code_cards_html(rows, raw_report)}
                 </div>
               </section>
             HTML
@@ -418,6 +448,59 @@ module ULOL
                 var validationFocusDeselectionInProgress = false;
                 var validationFocusSelectionInProgress = false;
                 var attemptedValidationFocusRow = null;
+                var validationFixMessageboxPreviousFocus = null;
+
+                function closeValidationFixMessagebox() {
+                  var dialog = document.getElementById('validation-fix-messagebox');
+                  if (!dialog || dialog.hidden) return;
+                  dialog.hidden = true;
+                  var previousFocus = validationFixMessageboxPreviousFocus;
+                  validationFixMessageboxPreviousFocus = null;
+                  if (previousFocus && typeof previousFocus.focus === 'function') previousFocus.focus();
+                }
+
+                function showValidationFixMessagebox(payload) {
+                  var dialog = document.getElementById('validation-fix-messagebox');
+                  var panel = document.getElementById('validation-fix-messagebox-panel');
+                  var title = document.getElementById('validation-fix-messagebox-title');
+                  var body = document.getElementById('validation-fix-messagebox-body');
+                  var closeButton = document.getElementById('validation-fix-messagebox-close');
+                  if (!dialog || !panel || !title || !body || !closeButton) return false;
+
+                  payload = payload || {};
+                  var fixed = Number(payload.fixed || 0);
+                  var failed = Number(payload.failed || 0);
+                  var skipped = Number(payload.skipped || 0);
+                  var effectiveFailed = failed + (payload.bulk === true ? skipped : 0);
+                  panel.setAttribute('data-variant', effectiveFailed > 0 ? 'error' : (fixed > 0 ? 'success' : 'warning'));
+                  title.textContent = payload.feedbackTitle || '자동 수정 결과';
+                  body.textContent = payload.feedbackMessage || payload.message || '';
+                  validationFixMessageboxPreviousFocus = document.activeElement;
+                  dialog.hidden = false;
+                  window.requestAnimationFrame(function() { closeButton.focus(); });
+                  return true;
+                }
+
+                (function bindValidationFixMessagebox() {
+                  var dialog = document.getElementById('validation-fix-messagebox');
+                  var closeButton = document.getElementById('validation-fix-messagebox-close');
+                  if (!dialog || !closeButton) return;
+                  closeButton.addEventListener('click', closeValidationFixMessagebox);
+                  dialog.addEventListener('click', function(event) {
+                    if (event.target === dialog) closeValidationFixMessagebox();
+                  });
+                  document.addEventListener('keydown', function(event) {
+                    if (dialog.hidden) return;
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      closeValidationFixMessagebox();
+                    } else if (event.key === 'Tab') {
+                      event.preventDefault();
+                      closeButton.focus();
+                    }
+                  }, true);
+                })();
 
                 function activateValidationFocusRow(row) {
                   if (!row) return;
@@ -520,6 +603,32 @@ module ULOL
                     requestValidationFocusRowChange(row);
                   });
                 });
+
+                function beginValidationFixAttempt(button, code, rowId) {
+                  if (!button || button.disabled) return;
+                  button.disabled = true;
+                  button.classList.remove('is-success', 'is-failure');
+                  button.classList.add('is-pending');
+                  if (typeof sketchup !== 'undefined' && sketchup.attemptValidationFix) {
+                    sketchup.attemptValidationFix(code, rowId);
+                  } else {
+                    button.disabled = false;
+                    button.classList.remove('is-pending');
+                  }
+                }
+
+                function completeValidationFixButton(button, payload) {
+                  if (!button) return;
+                  var fixed = Number(payload.fixed || 0);
+                  var skipped = Number(payload.skipped || 0);
+                  var failed = Number(payload.failed || 0);
+                  var succeeded = fixed > 0 && skipped === 0 && failed === 0;
+                  button.classList.remove('is-pending', 'is-success', 'is-failure');
+                  button.classList.add(succeeded ? 'is-success' : 'is-failure');
+                  button.disabled = true;
+                  button.title = payload.message || '';
+                }
+
                 document.querySelectorAll('.row-fix-attempt').forEach(function(button) {
                   button.addEventListener('click', function(event) {
                     event.preventDefault();
@@ -527,26 +636,33 @@ module ULOL
                     var rowId = button.getAttribute('data-row-id') || '';
                     var code = button.getAttribute('data-code') || '';
                     console.log(rowId + '_' + code + '_수정시도');
-                    button.disabled = true;
-                    if (typeof sketchup !== 'undefined' && sketchup.attemptValidationFix) {
-                      sketchup.attemptValidationFix(code, rowId);
-                    } else {
-                      button.disabled = false;
-                    }
+                    beginValidationFixAttempt(button, code, rowId);
+                  });
+                });
+                document.querySelectorAll('.bulk-fix-attempt').forEach(function(button) {
+                  button.addEventListener('click', function(event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    var code = button.getAttribute('data-code') || '';
+                    console.log(code + '_일괄 수정 시도');
+                    beginValidationFixAttempt(button, code, '');
                   });
                 });
                 window.completeValidationFixAttempt = function(payload) {
                   payload = payload || {};
-                  var selector = '.row-fix-attempt[data-row-id="' +
-                    String(payload.rowId || '').replace(/"/g, '\\"') + '"]';
+                  var rowId = String(payload.rowId || '');
+                  var code = String(payload.code || '');
+                  var selector = rowId ?
+                    '.row-fix-attempt[data-row-id="' + rowId.replace(/"/g, '\\"') + '"]' :
+                    '.bulk-fix-attempt[data-code="' + code.replace(/"/g, '\\"') + '"]';
                   document.querySelectorAll(selector).forEach(function(button) {
-                    button.disabled = false;
-                    button.title = payload.message || '';
+                    completeValidationFixButton(button, payload);
                   });
                   console.log(payload.message || 'validation fix attempt completed');
+                  showValidationFixMessagebox(payload);
                 };
                 document.addEventListener('click', function(event) {
-                  if (event.target.closest('.validation-error-row') || event.target.closest('.filter-btn') || event.target.closest('.fix-attempt')) return;
+                  if (event.target.closest('.validation-fix-messagebox') || event.target.closest('.validation-error-row') || event.target.closest('.filter-btn') || event.target.closest('.fix-attempt')) return;
                   requestValidationFocusRowChange(null);
                 });
                 window.clearValidationFocusSelection = function() {
@@ -659,8 +775,29 @@ module ULOL
             text
           end
 
-          def error_item_rows_html(rows, raw_report = nil)
-            Array(rows).map { |group| error_item_card_html(group, raw_report) }.join
+          def error_code_cards_html(rows, raw_report = nil)
+            Array(rows)
+              .group_by { |group| report_row_code(group) }
+              .sort_by { |code, _groups| [error_code_number(code), code.to_s] }
+              .map { |code, groups| error_code_card_html(code, groups, raw_report) }
+              .join
+          end
+
+          def error_code_card_html(code, groups, raw_report = nil)
+            color_class = error_code_color_class(code)
+            <<~HTML
+              <details class="error-code-card #{color_class}" data-code="#{html_escape(code)}">
+                <summary>
+                  <span class="toggle-triangle" aria-hidden="true"></span>
+                  <span class="code-badge #{color_class}">#{html_escape(code)}</span>
+                  <span class="error-code-count">#{groups.length}건</span>
+                  <button class="fix-attempt bulk-fix-attempt" type="button" data-code="#{html_escape(code)}">일괄 수정 시도</button>
+                </summary>
+                <div class="error-code-items">
+                  #{Array(groups).map { |group| error_item_card_html(group, raw_report) }.join}
+                </div>
+              </details>
+            HTML
           end
 
           def error_item_card_html(group, raw_report = nil)
@@ -669,17 +806,12 @@ module ULOL
             distance = recheck_row ? format_report_recheck_measure(recheck_row) : ''
             refs = Val3dityReportSchema.grouped_error_row_refs(group)
             occurrence = group[:count].to_i > 1 ? "<span class=\"occurrence-badge\">상세 #{group[:count].to_i}건</span>" : ''
-            fix_attempt = if [201, 206, 306, 405].include?(code[/\d+/].to_i)
-                            ''
-                          else
-                            <<~HTML.chomp
-                              <button class="fix-attempt row-fix-attempt" type="button" data-row-id="#{html_escape(group[:id])}" data-code="#{html_escape(code)}">수정 시도</button>
-                            HTML
-                          end
+            fix_attempt = <<~HTML.chomp
+              <button class="fix-attempt row-fix-attempt" type="button" data-row-id="#{html_escape(group[:id])}" data-code="#{html_escape(code)}">수정 시도</button>
+            HTML
             <<~HTML
               <details class="recheck-row validation-error-row #{error_code_color_class(code)}" data-row-id="#{html_escape(group[:id])}" data-code="#{html_escape(code)}" data-cells="#{html_escape(refs[:cells].join(','))}" data-states="#{html_escape(refs[:states].join(','))}" data-transitions="#{html_escape(refs[:transitions].join(','))}">
                 <summary>
-                  <span class="code-badge #{error_code_color_class(code)}">#{html_escape(code)}</span>
                   <span class="recheck-summary-main">
                     <span class="cell-name" title="#{html_escape(group[:label])}">#{html_escape(group[:label])}</span>
                     #{occurrence}

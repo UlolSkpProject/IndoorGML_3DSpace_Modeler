@@ -119,6 +119,21 @@ class ValidationRenderingEditorSessionTest < Minitest::Test
     assert_equal count, @model.active_view.invalidate_count
   end
 
+  def test_row_policy_recovers_when_sketchup_changes_transparency
+    assert @session.capture_and_apply_edit_mode_rendering_options
+    assert @session.capture_and_apply_validation_focus_rendering_options(1)
+    @focus.active = true
+    @focus.highlight_row_id = 'A'
+    assert @session.apply_rendering_context(@model, [@primal])
+
+    @model.rendering_options['ModelTransparency'] = true
+
+    assert @session.apply_rendering_context(@model, [@primal])
+    assert_equal false, @model.rendering_options['ModelTransparency']
+    assert @session.restore_validation_focus_rendering_options
+    assert_equal @original, @model.rendering_options
+  end
+
   def test_failed_validation_entry_preserves_existing_edit_mode
     assert @session.capture_and_apply_edit_mode_rendering_options
     edit_baseline = @model.rendering_options.dup

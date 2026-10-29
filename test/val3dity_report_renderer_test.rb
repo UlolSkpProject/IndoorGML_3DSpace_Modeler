@@ -6,21 +6,41 @@ require_relative '../indoor3d/validity/val3dity_report_renderer'
 class Val3dityReportRendererTest < Minitest::Test
   Renderer = ULOL::Indoor3DGmlModeler::IndoorCore::IndoorGmlConverter::Val3dityReportRenderer
 
-  def test_renders_only_row_fix_attempt_buttons_with_console_logs
+  def test_groups_rows_by_error_code_with_bulk_and_row_fix_buttons
     html = Renderer.new.render(report_with_errors)
 
-    assert_equal 2, html.scan('class="fix-attempt row-fix-attempt"').length
-    assert_includes html, 'data-row-id="validation-error-row-0" data-code="104">수정 시도</button>'
-    refute_includes html, 'data-row-id="validation-error-row-1" data-code="201">수정 시도</button>'
-    assert_includes html, 'data-row-id="validation-error-row-2" data-code="203">수정 시도</button>'
-    refute_includes html, 'data-row-id="validation-error-row-3" data-code="206">수정 시도</button>'
-    refute_includes html, 'data-row-id="validation-error-row-4" data-code="306">수정 시도</button>'
-    refute_includes html, 'data-row-id="validation-error-row-5" data-code="405">수정 시도</button>'
+    expected_codes = [102, 104, 201, 203, 204, 206, 303, 306, 307, 405, 701]
+    row_button_codes = html.scan(/class="fix-attempt row-fix-attempt"[^>]*data-code="(\d+)"/).flatten.map(&:to_i)
+    bulk_button_codes = html.scan(/class="fix-attempt bulk-fix-attempt"[^>]*data-code="(\d+)"/).flatten.map(&:to_i)
+    card_codes = html.scan(/class="error-code-card [^"]*" data-code="(\d+)"/).flatten.map(&:to_i)
+    assert_equal expected_codes, row_button_codes.sort
+    assert_equal expected_codes, bulk_button_codes.sort
+    assert_equal expected_codes, card_codes.sort
+    assert_equal expected_codes.length, html.scan(/class="error-code-card /).length
+    assert_includes html, '>일괄 수정 시도</button>'
     assert_includes html, "console.log(rowId + '_' + code + '_수정시도');"
+    assert_includes html, "console.log(code + '_일괄 수정 시도');"
     assert_includes html, 'sketchup.attemptValidationFix(code, rowId);'
+    assert_includes html, "beginValidationFixAttempt(button, code, '');"
     assert_includes html, 'window.completeValidationFixAttempt = function(payload)'
-    refute_includes html, 'bulk-fix-attempt'
-    refute_includes html, '일괄 수정 시도'
+    assert_includes html, "button.classList.add(succeeded ? 'is-success' : 'is-failure');"
+    assert_includes html, 'button.disabled = true;'
+    assert_includes html, 'id="validation-fix-messagebox"'
+    assert_includes html, 'role="alertdialog"'
+    assert_includes html, 'function showValidationFixMessagebox(payload)'
+    assert_includes html, 'var effectiveFailed = failed + (payload.bulk === true ? skipped : 0);'
+    assert_includes html, 'showValidationFixMessagebox(payload);'
+    assert_includes html, "title.textContent = payload.feedbackTitle || '자동 수정 결과';"
+    assert_includes html, "body.textContent = payload.feedbackMessage || payload.message || '';"
+  end
+
+  def test_repeated_code_uses_one_collapsible_card_with_multiple_rows
+    html = Renderer.new.render(report_with_repeated_code)
+
+    assert_equal 1, html.scan(/class="error-code-card c200" data-code="203"/).length
+    assert_equal 1, html.scan(/class="fix-attempt bulk-fix-attempt"[^>]*data-code="203"/).length
+    assert_equal 2, html.scan(/class="fix-attempt row-fix-attempt"[^>]*data-code="203"/).length
+    assert_match(/<span class="error-code-count">2건<\/span>/, html)
   end
 
   private
@@ -77,6 +97,71 @@ class Val3dityReportRendererTest < Minitest::Test
                   'code' => 405,
                   'description' => 'WRONG_ORIENTATION_SHELL',
                   'id' => 'solid_cell_beta'
+                },
+                {
+                  'code' => 102,
+                  'description' => 'CONSECUTIVE_POINTS_SAME',
+                  'id' => 'polygon_7_cell_beta'
+                },
+                {
+                  'code' => 204,
+                  'description' => 'NON_PLANAR_POLYGON_NORMALS_DEVIATION',
+                  'id' => 'polygon_8_cell_beta'
+                },
+                {
+                  'code' => 303,
+                  'description' => 'NON_MANIFOLD_CASE',
+                  'id' => 'solid_cell_beta'
+                },
+                {
+                  'code' => 307,
+                  'description' => 'POLYGON_WRONG_ORIENTATION',
+                  'id' => 'polygon_9_cell_beta'
+                },
+                {
+                  'code' => 701,
+                  'description' => 'CELLS_OVERLAP',
+                  'id' => 'cell_alpha-cell_beta'
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  end
+
+  def report_with_repeated_code
+    {
+      'val3dity_version' => '2.2.0',
+      'validity' => false,
+      'strict_val3dity_validity' => false,
+      'indoorgml_modeler_validation_status' => 'invalid',
+      'features_overview' => [{ 'total' => 1, 'valid' => 0 }],
+      'primitives_overview' => [{ 'total' => 2, 'valid' => 0 }],
+      'parameters' => {},
+      'features' => [
+        {
+          'id' => 'IF_001',
+          'errors' => [],
+          'primitives' => [
+            {
+              'id' => 'solid_cell_alpha',
+              'errors' => [
+                {
+                  'code' => 203,
+                  'description' => 'NON_PLANAR_POLYGON_DISTANCE_PLANE',
+                  'id' => 'polygon_0_cell_alpha'
+                }
+              ]
+            },
+            {
+              'id' => 'solid_cell_beta',
+              'errors' => [
+                {
+                  'code' => 203,
+                  'description' => 'NON_PLANAR_POLYGON_DISTANCE_PLANE',
+                  'id' => 'polygon_1_cell_beta'
                 }
               ]
             }
