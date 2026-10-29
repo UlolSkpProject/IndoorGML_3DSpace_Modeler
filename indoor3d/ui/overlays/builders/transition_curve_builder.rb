@@ -318,13 +318,14 @@ module ULOL
             second_visible = entry[:second_visible]
             first_selected = selected_cells[entry[:cell1_id]] == true
             second_selected = selected_cells[entry[:cell2_id]] == true
+            transition_selected = first_selected || second_selected
             segments = entry[:segments]
 
             if first_visible && second_visible && !segments[:default].empty?
-              yield segments[:default], first_selected || second_selected
+              yield segments[:default], transition_selected
             end
-            yield segments[:first], first_selected if first_visible && !segments[:first].empty?
-            yield segments[:second], second_selected if second_visible && !segments[:second].empty?
+            yield segments[:first], transition_selected if first_visible && !segments[:first].empty?
+            yield segments[:second], transition_selected if second_visible && !segments[:second].empty?
           end
         end
 

@@ -7,7 +7,6 @@ module ULOL
         DUAL_TRANSITION_COLOR = Sketchup::Color.new(255, 255, 255, 125)
         # Purple sampled from the supplied dual-graph reference image.
         SELECTED_TRANSITION_COLOR = Sketchup::Color.new(48, 0, 137)
-        SELECTED_TRANSITION_LINE_WIDTH_PIXELS = 6
         TRANSITION_MIN_LINE_WIDTH_PIXELS = 2
         TRANSITION_LINE_WIDTH_PIXELS = 3
         TRANSITION_MAX_LINE_WIDTH_PIXELS = 4
@@ -43,7 +42,7 @@ module ULOL
         def draw_highlight(view, render_points)
           return if render_points.empty?
 
-          view.line_width = SELECTED_TRANSITION_LINE_WIDTH_PIXELS if view.respond_to?(:line_width=)
+          view.line_width = overlay_transition_line_width if view.respond_to?(:line_width=)
           view.drawing_color = SELECTED_TRANSITION_COLOR
           view.draw(GL_LINES, render_points)
         end

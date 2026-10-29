@@ -318,16 +318,17 @@ class TransitionCurveBuilderTest < Minitest::Test
     assert_empty @model.reference_curve_calls
   end
 
-  def test_selected_transition_highlights_only_the_selected_visible_half
+  def test_selected_transition_highlights_entire_route_from_either_endpoint
     @model.curve = [point(0), point(1), point(2), point(3), point(4)]
+    full = @builder.transition_line_points
 
     first = @builder.transition_line_batches(selected_cell_ids: { 'A' => true })[:highlight]
     second = @builder.transition_line_batches(selected_cell_ids: { 'B' => true })[:highlight]
     both = @builder.transition_line_batches(selected_cell_ids: { 'A' => true, 'B' => true })[:highlight]
 
-    assert_equal [0.0, 1.0, 1.0, 2.0], xs(first)
-    assert_equal [2.0, 3.0, 3.0, 4.0], xs(second)
-    assert_equal xs(first) + xs(second), xs(both)
+    assert_same full, first
+    assert_same full, second
+    assert_same full, both
     assert_empty @builder.transition_line_batches(selected_cell_ids: {})[:highlight]
     assert_empty @builder.transition_line_batches(selected_cell_ids: { 'C' => true })[:highlight]
   end
@@ -337,8 +338,8 @@ class TransitionCurveBuilderTest < Minitest::Test
 
     batches = @builder.transition_line_batches(selected_cell_ids: { 'A' => true })
 
-    assert_equal [2.0, 3.0, 3.0, 4.0], xs(batches[:normal])
-    assert_equal [0.0, 1.0, 1.0, 2.0], xs(batches[:highlight])
+    assert_empty batches[:normal]
+    assert_equal [0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0], xs(batches[:highlight])
   end
 
   def test_empty_and_complete_selection_alias_the_canonical_full_array
@@ -383,7 +384,8 @@ class TransitionCurveBuilderTest < Minitest::Test
     @model.curve = [point(0), point(1), point(2), point(3), point(4)]
     @model.state_visibility[:state1] = false
 
-    assert_empty @builder.transition_line_batches(selected_cell_ids: { 'A' => true })[:highlight]
+    assert_equal [2.0, 3.0, 3.0, 4.0],
+                 xs(@builder.transition_line_batches(selected_cell_ids: { 'A' => true })[:highlight])
     assert_equal [2.0, 3.0, 3.0, 4.0],
                  xs(@builder.transition_line_batches(selected_cell_ids: { 'B' => true })[:highlight])
     assert_empty @builder.transition_line_batches(
@@ -398,7 +400,7 @@ class TransitionCurveBuilderTest < Minitest::Test
     assert_equal [0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0],
                  xs(@builder.transition_line_points)
     calls_after_base = @model.reference_curve_calls.length
-    assert_equal [0.0, 1.0, 1.0, 2.0],
+    assert_equal [0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0],
                  xs(@builder.transition_line_batches(selected_cell_ids: { 'A' => true })[:highlight])
     assert_equal calls_after_base, @model.reference_curve_calls.length
   end
