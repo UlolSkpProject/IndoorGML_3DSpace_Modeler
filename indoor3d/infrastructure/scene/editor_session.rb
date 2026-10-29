@@ -33,6 +33,7 @@ module ULOL
           @validation_focus_camera_session_id = 0
           @validation_focus_visibility_row_generation = 0
           @validation_camera_controller = ValidationCameraController.new
+          @rendering_options_manager = RenderingOptionsPolicy::Manager.new
           @lock_controller = LockController.new(indoor_model: @indoor_model)
           @visibility_controller = VisibilityController.new
           @overlay_controller = OverlayController.new(indoor_model: @indoor_model)
@@ -41,7 +42,8 @@ module ULOL
             indoor_model: @indoor_model,
             on_lock: -> { apply_lock_policy },
             on_selection: -> { selection_changed },
-            on_invalidate: ->(model) { invalidate_view(model) }
+            on_invalidate: ->(model) { invalidate_view(model) },
+            on_rendering_context: ->(model, path) { apply_rendering_context(model, path) }
           )
         end
 
@@ -109,7 +111,10 @@ module ULOL
           ensure_overlay_registered(model)
           active_path_controller.remember_current_path(model)
           reset_edit_mode_visibility_filter
-          capture_and_apply_edit_mode_rendering_options
+          unless capture_and_apply_edit_mode_rendering_options
+            restore_validation_focus_rendering_options
+            return false
+          end
           @editing = true
           update_overlay_enabled()
           @indoor_model.attach_edit_selection_observer(model)
@@ -139,17 +144,30 @@ module ULOL
           ids = Array(cell_gml_ids).map(&:to_s).reject(&:empty?)
           return false if ids.empty? || validation_focus_active?
 
+          was_editing = @editing
           @validation_focus_camera_session_id = @validation_focus_camera_session_id.to_i + 1
+          # Preserve normal/edit-mode values before Validation applies its session policy.
+          unless capture_and_apply_edit_mode_rendering_options
+            restore_validation_focus_rendering_options unless was_editing
+            return false
+          end
           validation_focus_controller.begin(ids)
           validation_focus_controller.set_focus_rows(row_states) if row_states
           unless edit_visibility_service.begin_validation_visibility_session
+            restore_rendering_after_failed_validation_entry(was_editing)
             clear_validation_focus
             return false
           end
-          capture_and_apply_validation_focus_rendering_options(ids.length)
+          unless capture_and_apply_validation_focus_rendering_options(ids.length)
+            restore_validation_focus_visibility
+            restore_rendering_after_failed_validation_entry(was_editing)
+            clear_validation_focus
+            return false
+          end
           started = @editing ? true : begin_editing
           unless started
-            restore_validation_focus_rendering_options
+            restore_validation_focus_visibility
+            restore_rendering_after_failed_validation_entry(was_editing)
             clear_validation_focus
             return false
           end
@@ -159,7 +177,7 @@ module ULOL
               IndoorCore::Logger.puts '[IndoorGML] Validation focus edit mode failed: visibility apply returned false'
             end
             restore_validation_focus_visibility
-            restore_validation_focus_rendering_options
+            restore_rendering_after_failed_validation_entry(was_editing)
             clear_validation_focus
             return false
           end
@@ -170,7 +188,7 @@ module ULOL
           true
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Validation focus edit mode failed: #{e.class}: #{e.message}"
-          restore_validation_focus_rendering_options
+          restore_rendering_after_failed_validation_entry(was_editing)
           restore_validation_focus_visibility
           clear_validation_focus
           false
@@ -195,11 +213,11 @@ module ULOL
             else
               normalize_visibility_for_non_edit_mode
             end
+            return false unless restore_validation_focus_rendering_options
             @editing = false
             @indoor_model.clear_dual_graph_selection_cache
             active_path_controller.reset_target
             reset_edit_mode_visibility_filter
-            restore_validation_focus_rendering_options
             clear_validation_focus(restore_camera: false)
             @indoor_model.detach_edit_selection_observer(model)
             active_path_controller.close(model)
@@ -325,6 +343,7 @@ module ULOL
             restore_validation_focus_camera
             unless context_restored
               validation_focus_controller.restore!(previous_focus_snapshot)
+              apply_rendering_context(Sketchup.active_model, Sketchup.active_model&.active_path)
               IndoorCore::Logger.puts '[IndoorGML] Validation focus highlight clear failed: primal edit context was not restored'
               return false
             end
@@ -334,6 +353,13 @@ module ULOL
               IndoorCore::Logger.puts '[IndoorGML] Validation focus highlight failed: visibility apply returned false'
             end
             validation_focus_controller.restore!(previous_focus_snapshot)
+            apply_rendering_context(Sketchup.active_model, Sketchup.active_model&.active_path)
+            return false
+          end
+          unless apply_rendering_context(Sketchup.active_model, Sketchup.active_model&.active_path)
+            validation_focus_controller.restore!(previous_focus_snapshot)
+            apply_validation_focus_visibility
+            apply_rendering_context(Sketchup.active_model, Sketchup.active_model&.active_path)
             return false
           end
           update_validation_error_geometry(row_id)
@@ -445,6 +471,7 @@ module ULOL
         def refresh_validation_focus_after_mutation
           return false unless apply_validation_focus_visibility
 
+          apply_rendering_context(Sketchup.active_model, Sketchup.active_model&.active_path)
           overlay_controller.invalidate_validation_geometry_cache
           update_validation_error_geometry(validation_focus_controller.highlight_row_id)
           invalidate_overlay_transition_visibility
@@ -568,22 +595,90 @@ module ULOL
           edit_visibility_service.normalize_visibility_for_non_edit_mode
         end
 
-        def capture_and_apply_validation_focus_rendering_options(focus_cell_count)
-          validation_focus_controller.capture_and_apply_rendering_options(Sketchup.active_model, focus_cell_count)
+        def rendering_options_manager
+          @rendering_options_manager ||= RenderingOptionsPolicy::Manager.new
+        end
+
+        def apply_rendering_context(model, path)
+          return true unless @editing || validation_focus_active?
+
+          validation = validation_focus_active?
+          primal = @indoor_model.primal_group
+          active_path = Array(path)
+          editing_cell = validation && active_path.length == 2 && active_path.first == primal &&
+            Array(@indoor_model.cell_spaces).any? do |cell|
+              cell&.valid? && cell.sketchup_group == active_path.last
+            end
+          context = RenderingOptionsPolicy.current_context(
+            validation: validation,
+            path: active_path,
+            primal_group: primal,
+            cell_space_editing: editing_cell,
+            row_selected: !validation_focus_controller.highlight_row_id.to_s.empty?
+          )
+
+          values = RenderingOptionsPolicy.context_values(context)
+          scope = validation ? :row : :edit
+          unless validation && (context[:row_selected] || context[:group_editing])
+            restored = rendering_options_manager.restore(model, scope: :row)
+            return log_rendering_failure('row reset', restored) unless restored[:ok]
+          end
+          result = rendering_options_manager.apply(model, scope: scope, values: values)
+          return log_rendering_failure('context', result) unless result[:ok]
+
+          true
         rescue StandardError => e
-          IndoorCore::Logger.puts "[IndoorGML] Validation focus rendering option update failed: #{e.class}: #{e.message}"
+          IndoorCore::Logger.puts "[IndoorGML] Rendering Context failed: #{e.class}: #{e.message}"
+          false
+        end
+
+        def capture_and_apply_validation_focus_rendering_options(_focus_cell_count)
+          model = @indoor_model.model
+          captured = rendering_options_manager.capture(model, scope: :session)
+          return log_rendering_failure('session capture', captured) unless captured[:ok]
+
+          applied = rendering_options_manager.apply(
+            model, scope: :session, values: RenderingOptionsPolicy.validation_session
+          )
+          return log_rendering_failure('session apply', applied) unless applied[:ok]
+
+          true
         end
 
         def capture_and_apply_edit_mode_rendering_options
-          validation_focus_controller.capture_and_apply_hidden_rendering_options(Sketchup.active_model)
-        rescue StandardError => e
-          IndoorCore::Logger.puts "[IndoorGML] Edit mode rendering option update failed: #{e.class}: #{e.message}"
+          model = @indoor_model.model
+          captured = rendering_options_manager.capture(model, scope: :edit)
+          return log_rendering_failure('edit capture', captured) unless captured[:ok]
+
+          applied = rendering_options_manager.apply(
+            model, scope: :edit, values: RenderingOptionsPolicy.base_edit
+          )
+          return log_rendering_failure('edit apply', applied) unless applied[:ok]
+
+          true
+        end
+
+        def restore_rendering_after_failed_validation_entry(was_editing)
+          return restore_validation_focus_rendering_options unless was_editing
+
+          model = @indoor_model.model
+          %i[row session].each do |scope|
+            restored = rendering_options_manager.restore(model, scope: scope)
+            return log_rendering_failure("failed entry #{scope} restore", restored) unless restored[:ok]
+          end
+          true
         end
 
         def restore_validation_focus_rendering_options
-          validation_focus_controller.restore_rendering_options(Sketchup.active_model)
-        rescue StandardError => e
-          IndoorCore::Logger.puts "[IndoorGML] Validation focus rendering option restore failed: #{e.class}: #{e.message}"
+          result = rendering_options_manager.restore_all(@indoor_model.model)
+          return log_rendering_failure('restore', result) unless result[:ok]
+
+          true
+        end
+
+        def log_rendering_failure(label, result)
+          IndoorCore::Logger.puts "[IndoorGML] RenderingOptions #{label} failed: #{result[:errors].inspect}"
+          false
         end
 
         def active_path_changed(model)
@@ -604,6 +699,7 @@ module ULOL
             active_path_controller.reconcile_after_runtime_restore(model, editing: @editing)
           end
           clear_overlay_transition_cache
+          return false unless apply_rendering_context(model, model&.active_path)
           selection_changed if @editing
           invalidate_view(model)
           true
@@ -649,10 +745,13 @@ module ULOL
             elsif restoring_edit_visibility
               normalize_visibility_for_non_edit_mode
             end
+            unless restore_validation_focus_rendering_options
+              IndoorCore::Logger.puts '[IndoorGML] Edit model close: RenderingOptions restore incomplete'
+              return false
+            end
             @editing = false
             @indoor_model.clear_dual_graph_selection_cache
             active_path_controller.reset
-            restore_validation_focus_rendering_options
             reset_edit_mode_visibility_filter
             clear_validation_focus
             @progress = nil
@@ -848,7 +947,8 @@ module ULOL
             indoor_model: @indoor_model,
             on_lock: -> { apply_lock_policy },
             on_selection: -> { selection_changed },
-            on_invalidate: ->(model) { invalidate_view(model) }
+            on_invalidate: ->(model) { invalidate_view(model) },
+            on_rendering_context: ->(model, path) { apply_rendering_context(model, path) }
           )
         end
 

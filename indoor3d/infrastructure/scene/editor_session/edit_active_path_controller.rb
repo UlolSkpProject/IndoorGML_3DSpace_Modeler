@@ -5,11 +5,12 @@ module ULOL
     module IndoorCore
       class EditorSession
         class EditActivePathController
-          def initialize(indoor_model:, on_lock:, on_selection:, on_invalidate:, logger: nil)
+          def initialize(indoor_model:, on_lock:, on_selection:, on_invalidate:, on_rendering_context: nil, logger: nil)
             @indoor_model = indoor_model
             @on_lock = on_lock
             @on_selection = on_selection
             @on_invalidate = on_invalidate
+            @on_rendering_context = on_rendering_context
             @logger = logger || (defined?(IndoorCore::Logger) && IndoorCore::Logger)
             @previous_active_path = nil
             @editing_active_path_target = nil
@@ -96,6 +97,8 @@ module ULOL
             enforce_edit_context(model)
           rescue StandardError => e
             log("Edit active path enforcement failed: #{e.class}: #{e.message}")
+          ensure
+            notify_rendering_context(model, model&.active_path) if editing && !@enforcing_active_path
           end
 
           def with_suspended_enforcement
@@ -168,7 +171,9 @@ module ULOL
 
           def set(model, target_path)
             @enforcing_active_path = true
-            model.active_path = target_path
+            applied = (model.active_path = target_path)
+            notify_rendering_context(model, target_path)
+            applied
           ensure
             @enforcing_active_path = false
           end
@@ -329,6 +334,12 @@ module ULOL
           def notify_selection_and_view(model)
             @on_selection.call
             @on_invalidate.call(model)
+          end
+
+          def notify_rendering_context(model, path)
+            @on_rendering_context.call(model, path) if @on_rendering_context
+          rescue StandardError => e
+            log("Rendering Context notification failed: #{e.class}: #{e.message}")
           end
 
           def log(message)

@@ -5,15 +5,6 @@ module ULOL
     module IndoorCore
       class EditorSession
         class ValidationFocusController
-          HIDDEN_RENDERING_OPTION_KEYS = %w[
-            ROPDrawHiddenObjects
-            ROPDrawHiddenGeometry
-            DrawHiddenObjects
-            DrawHiddenGeometry
-            DrawHidden
-          ].freeze
-          MULTI_FOCUS_RENDERING_OPTION_KEYS = %w[HideRestOfModel].freeze
-
           def initialize
             @active = false
             @cell_ids = nil
@@ -21,7 +12,6 @@ module ULOL
             @highlight_cell_ids = nil
             @highlight_code = nil
             @highlight_row_id = nil
-            @rendering_option_snapshots = {}
           end
 
           attr_reader :highlight_code
@@ -203,48 +193,6 @@ module ULOL
             @highlight_cell_ids = nil
             @highlight_code = nil
             @highlight_row_id = nil
-          end
-
-          def capture_and_apply_rendering_options(model, _focus_cell_count)
-            capture_and_apply_rendering_option_keys(model, validation_focus_rendering_option_keys)
-          end
-
-          def capture_and_apply_hidden_rendering_options(model)
-            capture_and_apply_rendering_option_keys(model, HIDDEN_RENDERING_OPTION_KEYS)
-          end
-
-          def capture_and_apply_rendering_option_keys(model, keys)
-            options = model&.rendering_options
-            return unless options
-
-            changed = false
-            Array(keys).each do |key|
-              next unless rendering_option_key?(options, key)
-
-              @rendering_option_snapshots[key] = options[key] unless @rendering_option_snapshots.key?(key)
-              next if options[key] == false
-
-              options[key] = false
-              changed = true
-            end
-            model&.active_view&.invalidate if changed
-          end
-
-          def restore_rendering_options(model)
-            snapshots = @rendering_option_snapshots || {}
-            return if snapshots.empty?
-
-            options = model&.rendering_options
-            if options
-              snapshots.each do |key, value|
-                options[key] = value if rendering_option_key?(options, key)
-              end
-            end
-            @rendering_option_snapshots = {}
-            model&.active_view&.invalidate
-          rescue StandardError
-            @rendering_option_snapshots = {}
-            raise
           end
 
           def cell_gml_id(cell_space)
@@ -471,24 +419,7 @@ module ULOL
             ids.uniq
           end
 
-          def validation_focus_rendering_option_keys
-            keys = HIDDEN_RENDERING_OPTION_KEYS.dup
-            keys.concat(MULTI_FOCUS_RENDERING_OPTION_KEYS)
-            keys
-          end
 
-          def rendering_option_key?(options, key)
-            return options.key?(key) if options.respond_to?(:key?)
-            return options.keys.include?(key) if options.respond_to?(:keys)
-
-            found = false
-            if options.respond_to?(:each_key)
-              options.each_key { |option_key| found = true if option_key == key }
-            end
-            found
-          rescue StandardError
-            false
-          end
         end
       end
     end
