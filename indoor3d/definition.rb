@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'reload_warning_filter'
+
 module ULOL
   module Indoor3DGmlModeler
     module Definition
