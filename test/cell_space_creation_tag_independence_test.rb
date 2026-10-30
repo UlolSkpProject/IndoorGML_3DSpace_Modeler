@@ -66,14 +66,25 @@ class CellSpaceCreationTagIndependenceTest < Minitest::Test
     assert_empty Core::CellSpaceConversionExecutor::COPY_ATTRIBUTES
   end
 
-  def test_conversion_job_contains_geometry_context_but_no_tag_target_or_storey
-    builder = Core::CellSpaceConversionJobBuilder.allocate
+  def test_conversion_job_uses_tag_target_and_storey_without_copying_tag
+    builder_class = Class.new(Core::CellSpaceConversionJobBuilder) do
+      private
+
+      def target_for_entity(_entity, _parent_target)
+        [:transition, 'Stair']
+      end
+
+      def storey_for_entity(_entity, _parent_storey)
+        'F03'
+      end
+    end
+    builder = builder_class.allocate
     jobs = []
 
-    builder.send(:collect, TaggedSolid.new, Object.new, [], jobs, [])
+    builder.send(:collect, TaggedSolid.new, Object.new, nil, nil, [], jobs, [])
 
     assert_equal 1, jobs.length
-    refute jobs.first.key?(:target)
-    refute jobs.first.key?(:storey)
+    assert_equal [:transition, 'Stair'], jobs.first[:target]
+    assert_equal 'F03', jobs.first[:storey]
   end
 end

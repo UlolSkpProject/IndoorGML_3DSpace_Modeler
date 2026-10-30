@@ -40,30 +40,45 @@ class CellSpaceBuildingTypeTest < Minitest::Test
     end
   end
 
-  def test_creation_dialog_has_no_building_type_or_tag_dependency
+  def test_creation_dialog_defaults_from_filename_and_saves_submitted_building
     payload = @command.send(
       :cell_space_creation_dialog_payload,
       'Create CellSpace',
       default_storey: 'F01'
     )
 
-    refute payload.key?(:selected_building)
-    refute payload.key?(:building_types)
+    assert_equal 'subway', payload[:selected_building]
+    assert_equal(
+      [
+        { value: '', label: '건축물 구분 선택' },
+        { value: 'subway', label: '지하철' },
+        { value: 'public', label: '공공기관' }
+      ],
+      payload[:building_types]
+    )
 
     options = @command.send(
       :resolve_cell_space_creation_dialog_selection,
       {
+        'building_type' => 'public',
         'cell_space_label' => 'Room : GeneralSpace',
         'storey' => 'F02'
       }
     )
 
     assert_equal [Core::CellSpaceType::GENERAL, 'Room', 'F02'], options
-    assert_equal 'subway', Adapter.building_type
-    assert_equal [Core::CellSpaceType::TRANSITION, 'Stair'], Adapter.cell_space_type_from_tag('F01F03_MV_FC_02')
+    assert_equal 'public', Adapter.building_type
+    assert_equal [Core::CellSpaceType::TRANSITION, 'Elevator'], Adapter.cell_space_type_from_tag('F01F03_MV_FC_02')
+
+    next_payload = @command.send(
+      :cell_space_creation_dialog_payload,
+      'Create CellSpace',
+      default_storey: 'F01'
+    )
+    assert_equal 'subway', next_payload[:selected_building]
   end
 
-  def test_nonmatching_filename_does_not_block_creation_selection
+  def test_nonmatching_filename_leaves_building_type_unselected
     Sketchup.active_model = Model.new({}, 'C:\\models\\ordinary.skp')
 
     payload = @command.send(
@@ -71,30 +86,31 @@ class CellSpaceBuildingTypeTest < Minitest::Test
       'Create CellSpace',
       default_storey: 'F01'
     )
-    refute_nil payload
+    assert_nil payload[:selected_building]
 
-    selection = @command.send(
-      :resolve_cell_space_creation_dialog_selection,
-      {
-        'cell_space_label' => 'Room : GeneralSpace',
-        'storey' => 'F01'
-      }
-    )
-    assert_equal [Core::CellSpaceType::GENERAL, 'Room', 'F01'], selection
+    error = assert_raises(ArgumentError) do
+      @command.send(
+        :resolve_cell_space_creation_dialog_selection,
+        {
+          'building_type' => '',
+          'cell_space_label' => 'Room : GeneralSpace',
+          'storey' => 'F01'
+        }
+      )
+    end
+    assert_equal '건축물 구분을 선택하세요.', error.message
   end
 
-  def test_creation_selection_does_not_change_existing_building_setting
+  def test_models_keep_independent_building_settings
     first_model = Sketchup.active_model
     Adapter.set_building_type(first_model, 'public')
-
-    @command.send(
-      :resolve_cell_space_creation_dialog_selection,
-      {
-        'cell_space_label' => 'Room : GeneralSpace',
-        'storey' => 'F01'
-      }
-    )
-
+    Sketchup.active_model = Model.new({}, 'C:\\models\\P_SB_260930_library.skp')
+    assert_equal 'public', Adapter.building_type
+    assert_equal 'public', @command.send(
+      :cell_space_creation_dialog_payload,
+      'Create CellSpace',
+      default_storey: 'F01'
+    )[:selected_building]
     assert_equal 'public', Adapter.building_type(first_model)
     assert_equal [Core::CellSpaceType::TRANSITION, 'Elevator'], Adapter.cell_space_type_from_tag('F01F03_MV_FC_02')
   end

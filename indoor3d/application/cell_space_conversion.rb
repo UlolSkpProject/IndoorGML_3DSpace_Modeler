@@ -13,8 +13,10 @@ module ULOL
           end
         end
 
-        def initialize(entities:, ancestors: active_context_ancestors)
+        def initialize(entities:, parent_target: active_context_parent_target, parent_storey: active_context_parent_storey, ancestors: active_context_ancestors)
           @entities = Array(entities)
+          @parent_target = parent_target
+          @parent_storey = parent_storey
           @ancestors = Array(ancestors)
           @ancestor_path_indices = ancestor_path_indices(@ancestors)
         end
@@ -27,6 +29,8 @@ module ULOL
             collect(
               entity,
               initial_world_transformation(entity, source_path_indices),
+              @parent_target,
+              @parent_storey,
               @ancestors,
               jobs,
               source_path_indices
@@ -36,13 +40,27 @@ module ULOL
 
         private
 
+        def active_context_parent_target
+          parent = Sketchup.active_model&.active_path&.last
+          parent ? IndoorCore.tag_cell_space_type_and_category(parent) : nil
+        rescue StandardError
+          nil
+        end
+
+        def active_context_parent_storey
+          parent = Sketchup.active_model&.active_path&.last
+          parent ? IndoorCore.tag_cell_space_storey(parent) : nil
+        rescue StandardError
+          nil
+        end
+
         def active_context_ancestors
           (Sketchup.active_model&.active_path || []).select { |entity| cleanup_candidate_container?(entity) }
         rescue StandardError
           []
         end
 
-        def collect(entity, world_transformation, ancestors, jobs, source_path_indices)
+        def collect(entity, world_transformation, parent_target, parent_storey, ancestors, jobs, source_path_indices)
           return unless entity&.valid?
           return unless convertible_container?(entity)
           return if indoor_feature(entity) == 'CellSpace'
@@ -55,11 +73,15 @@ module ULOL
               source_path_indices: source_path_indices.dup,
               source_signature: entity_signature(entity),
               ancestor_signatures: ancestors.map { |ancestor| entity_signature(ancestor) },
-              requires_instance_isolation: requires_instance_isolation?(ancestors)
+              requires_instance_isolation: requires_instance_isolation?(ancestors),
+              target: target_for_entity(entity, parent_target),
+              storey: storey_for_entity(entity, parent_storey)
             }
             return
           end
 
+          entity_target = target_for_entity(entity, parent_target)
+          entity_storey = storey_for_entity(entity, parent_storey)
           return unless entity.respond_to?(:definition) && entity.definition&.valid?
 
           child_ancestors = cleanup_candidate_container?(entity) ? ancestors + [entity] : ancestors
@@ -70,6 +92,8 @@ module ULOL
             collect(
               child,
               world_transformation * child.transformation,
+              entity_target,
+              entity_storey,
               child_ancestors,
               jobs,
               source_path_indices + [index]
@@ -163,6 +187,22 @@ module ULOL
 
           transformation
         rescue StandardError
+          nil
+        end
+
+        def target_for_entity(entity, parent_target)
+          entity_target = IndoorCore.tag_cell_space_type_and_category(entity)
+          return entity_target if entity_target
+          return parent_target unless IndoorCore.tag_assigned?(entity)
+
+          nil
+        end
+
+        def storey_for_entity(entity, parent_storey)
+          entity_storey = IndoorCore.tag_cell_space_storey(entity)
+          return entity_storey unless entity_storey.to_s.empty?
+          return parent_storey unless IndoorCore.tag_assigned?(entity)
+
           nil
         end
 

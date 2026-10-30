@@ -80,12 +80,12 @@ class CellSpaceCreateDialogTest < Minitest::Test
     )
   end
 
-  def test_form_has_no_building_type_or_tag_controls
+  def test_form_exposes_building_type_and_tag_fallback_controls
     html = Dialog.new.send(:html)
 
-    refute_includes html, 'buildingType'
-    refute_includes html, 'building_type'
-    refute_includes html, '유효 Tag가 없을 때'
+    assert_includes html, 'buildingType'
+    assert_includes html, 'building_type'
+    assert_includes html, '유효 Tag가 없을 때'
   end
 
 end
