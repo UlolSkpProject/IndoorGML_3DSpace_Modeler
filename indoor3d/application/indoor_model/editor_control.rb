@@ -299,6 +299,12 @@ module ULOL
             @editor_session.validation_focus_highlight_row_id
           end
 
+          def refresh_validation_focus_after_mutation(cell_ids:)
+            return false unless validation_focus_active?
+
+            @editor_session.refresh_validation_focus_after_mutation(cell_ids: cell_ids)
+          end
+
           def with_validation_focus_mutation_batch
             return yield if validation_focus_highlight_row_id.to_s.empty?
             return yield if @validation_focus_mutation_depth.to_i.positive?
@@ -307,6 +313,7 @@ module ULOL
             topology_dirty_before = validation_focus_topology_dirty? if respond_to?(:validation_focus_topology_dirty?)
             @validation_focus_mutation_depth = 1
             @validation_focus_pending_row_payloads = {}
+            @validation_focus_mutated_cell_ids = {}
             result = yield
             @validation_focus_mutation_depth = 0
             flush_validation_focus_mutation_batch
@@ -315,6 +322,7 @@ module ULOL
             @validation_focus_mutation_depth = 0
             discard_validation_focus_row_topology_sync
             @validation_focus_pending_row_payloads = {}
+            @validation_focus_mutated_cell_ids = {}
             @validation_focus_topology_dirty = topology_dirty_before == true
             @editor_session.restore_validation_focus_snapshot(snapshot) if snapshot
             raise
@@ -323,6 +331,7 @@ module ULOL
           end
 
           def add_validation_focus_highlight_cell(cell_space)
+            track_validation_focus_mutated_cell(cell_space)
             deferred = @validation_focus_mutation_depth.to_i.positive?
             payload = if deferred
                         @editor_session.add_validation_focus_highlight_cell(cell_space, refresh: false)
@@ -336,6 +345,7 @@ module ULOL
           end
 
           def remove_validation_focus_highlight_cell(cell_space)
+            track_validation_focus_mutated_cell(cell_space)
             deferred = @validation_focus_mutation_depth.to_i.positive?
             payloads = if deferred
                          @editor_session.remove_validation_focus_highlight_cell(cell_space, refresh: false)
@@ -675,11 +685,24 @@ module ULOL
 
           def flush_validation_focus_mutation_batch
             flush_validation_focus_row_topology_sync
-            @editor_session.refresh_validation_focus_after_mutation
+            @editor_session.refresh_validation_focus_after_mutation(
+              cell_ids: Hash(@validation_focus_mutated_cell_ids).keys
+            )
             Hash(@validation_focus_pending_row_payloads).each_value do |payload|
               update_validation_focus_report_row(payload)
             end
             @validation_focus_pending_row_payloads = {}
+            @validation_focus_mutated_cell_ids = {}
+            true
+          end
+
+          def track_validation_focus_mutated_cell(cell_space)
+            return false unless @validation_focus_mutation_depth.to_i.positive?
+
+            cell_id = cell_space&.id.to_s
+            return false if cell_id.empty?
+
+            (@validation_focus_mutated_cell_ids ||= {})[cell_id] = true
             true
           end
 

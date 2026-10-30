@@ -24,11 +24,19 @@ module ULOL
               overlap_geometry_cache[overlap_cache_key(model, cell_ids)]
             end
 
-            def clear_overlap_geometry(model:)
+            def clear_overlap_geometry(model:, cell_ids: nil)
               return false unless model
 
               model_id = model.object_id
-              overlap_geometry_cache.delete_if { |key, _geometry| key.first == model_id }
+              normalized_ids = normalize_overlap_cell_ids(cell_ids)
+              clear_all = cell_ids.nil?
+              return true if !clear_all && normalized_ids.empty?
+
+              overlap_geometry_cache.delete_if do |key, _geometry|
+                next false unless key.first == model_id
+
+                clear_all || !(Array(key.last) & normalized_ids).empty?
+              end
               true
             end
 
@@ -39,12 +47,15 @@ module ULOL
             end
 
             def overlap_cache_key(model, cell_ids)
-              normalized = Array(cell_ids).map do |cell_id|
+              [model.object_id, normalize_overlap_cell_ids(cell_ids).sort]
+            end
+
+            def normalize_overlap_cell_ids(cell_ids)
+              Array(cell_ids).map do |cell_id|
                 cell_id.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')
                        .sub(/\Asolid_/, '')
                        .sub(/\Acell_/, '')
               end.reject(&:empty?).sort
-              [model.object_id, normalized]
             end
           end
 
@@ -76,10 +87,20 @@ module ULOL
             empty_geometry.merge(status: :failed, reason: "#{e.class}: #{e.message}")
           end
 
-          def clear_cache
-            @pair_cache.clear
+          def clear_cache(cell_ids: nil)
+            normalized_ids = Array(cell_ids).map { |cell_id| normalize_cell_id(cell_id) }
+                                            .reject(&:empty?)
+                                            .uniq
+            if cell_ids.nil?
+              @pair_cache.clear
+            elsif !normalized_ids.empty?
+              @pair_cache.delete_if do |pair, _geometry|
+                !(Array(pair) & normalized_ids).empty?
+              end
+            end
             self.class.clear_overlap_geometry(
-              model: @model || Sketchup.active_model
+              model: @model || Sketchup.active_model,
+              cell_ids: cell_ids
             )
           end
 

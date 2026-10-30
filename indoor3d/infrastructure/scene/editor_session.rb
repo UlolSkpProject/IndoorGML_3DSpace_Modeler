@@ -462,7 +462,7 @@ module ULOL
         def restore_validation_focus_snapshot(snapshot, refresh: true)
           validation_focus_controller.restore!(snapshot)
           if refresh
-            refresh_validation_focus_after_mutation
+            refresh_validation_focus_after_mutation(cell_ids: [])
           else
             update_validation_error_geometry(validation_focus_controller.highlight_row_id)
           end
@@ -472,7 +472,9 @@ module ULOL
           payload = validation_focus_controller.add_highlight_cell(cell_space&.id)
           return nil unless payload
 
-          refresh_validation_focus_after_mutation if refresh
+          refresh_validation_focus_after_mutation(
+            cell_ids: [cell_space&.id]
+          ) if refresh
           payload
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight add failed: #{e.class}: #{e.message}"
@@ -483,7 +485,9 @@ module ULOL
           payloads = validation_focus_controller.remove_cell(cell_space&.id)
           return [] if payloads.empty?
 
-          refresh_validation_focus_after_mutation if refresh
+          refresh_validation_focus_after_mutation(
+            cell_ids: [cell_space&.id]
+          ) if refresh
           payloads
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Validation focus highlight remove failed: #{e.class}: #{e.message}"
@@ -492,18 +496,21 @@ module ULOL
 
         def reconcile_validation_focus_cells(cell_spaces)
           payloads = validation_focus_controller.reconcile_cells(Array(cell_spaces).map(&:id))
-          refresh_validation_focus_after_mutation unless payloads.empty?
+          removed_cell_ids = payloads.flat_map { |payload| Array(payload[:removed_cells]) }.uniq
+          refresh_validation_focus_after_mutation(
+            cell_ids: removed_cell_ids
+          ) unless payloads.empty?
           payloads
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Validation focus cell reconciliation failed: #{e.class}: #{e.message}"
           []
         end
 
-        def refresh_validation_focus_after_mutation
+        def refresh_validation_focus_after_mutation(cell_ids: [])
           return false unless apply_validation_focus_visibility
 
           apply_rendering_context(Sketchup.active_model, Sketchup.active_model&.active_path)
-          overlay_controller.invalidate_validation_geometry_cache
+          overlay_controller.invalidate_validation_geometry_cache(cell_ids: cell_ids)
           update_validation_error_geometry(validation_focus_controller.highlight_row_id)
           invalidate_overlay_transition_visibility
           invalidate_view(Sketchup.active_model())

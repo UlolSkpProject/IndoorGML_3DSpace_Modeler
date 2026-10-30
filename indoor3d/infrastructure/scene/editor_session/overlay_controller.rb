@@ -88,8 +88,8 @@ module ULOL
 
           # Only actual geometry/runtime changes invalidate model-specific overlap
           # evidence. Row switching and deselection use clear_validation_geometry.
-          def invalidate_validation_geometry_cache
-            validation_overlay_service.invalidate_geometry_cache
+          def invalidate_validation_geometry_cache(cell_ids: nil)
+            validation_overlay_service.invalidate_geometry_cache(cell_ids: cell_ids)
           end
 
           def end_validation_session

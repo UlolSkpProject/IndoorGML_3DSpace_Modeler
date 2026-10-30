@@ -192,14 +192,21 @@ module ULOL
           # For actual CellSpace mutation/runtime refresh only. This existing
           # Resolver API also invalidates model-specific overlap evidence. Row
           # deselection and session end MUST NOT call it.
-          def invalidate_geometry_cache
+          def invalidate_geometry_cache(cell_ids: nil)
             @row_key = nil
             @last_geometry = nil
             if @resolver&.respond_to?(:clear_cache)
-              @resolver.clear_cache
+              if cell_ids.nil?
+                @resolver.clear_cache
+              else
+                @resolver.clear_cache(cell_ids: cell_ids)
+              end
             elsif defined?(IndoorGmlConverter::ValidationErrorGeometryResolver)
               current = @model || @indoor_model.model
-              IndoorGmlConverter::ValidationErrorGeometryResolver.clear_overlap_geometry(model: current) if current
+              IndoorGmlConverter::ValidationErrorGeometryResolver.clear_overlap_geometry(
+                model: current,
+                cell_ids: cell_ids
+              ) if current
             end
             true
           rescue StandardError => e

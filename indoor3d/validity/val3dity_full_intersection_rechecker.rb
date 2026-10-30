@@ -20,7 +20,6 @@ module ULOL
             @pair_analysis = {}
             @cell_geometry = {}
             @cell_spaces_by_report_id = nil
-            ValidationErrorGeometryResolver.clear_overlap_geometry(model: @model) if @model
           end
 
           def pair_analysis(cell_id1, cell_id2)

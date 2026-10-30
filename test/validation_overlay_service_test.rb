@@ -120,11 +120,12 @@ class ValidationOverlayServiceTest < Minitest::Test
   Indoor = Struct.new(:model)
 
   class Resolver
-    attr_reader :resolves, :clears
+    attr_reader :resolves, :clears, :cleared_cell_ids
 
     def initialize
       @resolves = 0
       @clears = 0
+      @cleared_cell_ids = []
     end
 
     def resolve(row)
@@ -134,8 +135,9 @@ class ValidationOverlayServiceTest < Minitest::Test
       row[:geometry]
     end
 
-    def clear_cache
+    def clear_cache(cell_ids: nil)
       @clears += 1
+      @cleared_cell_ids << cell_ids
       true
     end
   end
@@ -438,6 +440,16 @@ class ValidationOverlayServiceTest < Minitest::Test
     assert_equal 1, resolver.clears
     @service.show(@model, same_row)
     assert_equal 2, resolver.resolves
+  end
+
+  def test_mutation_invalidation_forwards_changed_cell_ids
+    ready
+    @service.show(@model, row('A'))
+    resolver = @resolvers.last
+
+    assert @service.invalidate_geometry_cache(cell_ids: %w[cell_A B])
+
+    assert_equal [%w[cell_A B]], resolver.cleared_cell_ids
   end
 
   def test_enabled_policy_preserves_row_geometry_when_temporarily_disabled

@@ -47,4 +47,21 @@ class ValidationErrorGeometryResolverTest < Minitest::Test
     assert_empty geometry[:face_vertices]
     assert_equal [:edge1], geometry[:face_edges]
   end
+
+  def test_local_pair_cache_invalidation_keeps_unrelated_pairs
+    model = Object.new
+    resolver = Resolver.new(indoor_model: nil, model: model)
+    pair_cache = resolver.instance_variable_get(:@pair_cache)
+    pair_cache[%w[A B]] = { status: :ready }
+    pair_cache[%w[A C]] = { status: :ready }
+    pair_cache[%w[C D]] = { status: :ready }
+
+    resolver.clear_cache(cell_ids: ['solid_A'])
+
+    refute pair_cache.key?(%w[A B])
+    refute pair_cache.key?(%w[A C])
+    assert pair_cache.key?(%w[C D])
+  ensure
+    Resolver.clear_overlap_geometry(model: model) if model
+  end
 end

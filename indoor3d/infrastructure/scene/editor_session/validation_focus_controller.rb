@@ -117,7 +117,7 @@ module ULOL
 
               row[:cells] = cells.reject { |cell| cell == remove_id }
               row[:focus_ids] = normalize_ids(row[:cells])
-              payloads << focus_row_payload(row_id, row)
+              payloads << focus_row_payload(row_id, row).merge(removed_cells: [remove_id])
             end
             sync_highlight_ids_from_row
             rebuild_focus_ids_from_rows
@@ -136,7 +136,9 @@ module ULOL
 
               row[:cells] = retained
               row[:focus_ids] = normalize_ids(retained)
-              payloads << focus_row_payload(row_id, row)
+              payloads << focus_row_payload(row_id, row).merge(
+                removed_cells: cells - retained
+              )
             end
             sync_highlight_ids_from_row
             rebuild_focus_ids_from_rows

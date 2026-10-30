@@ -177,6 +177,9 @@ module ULOL
           end
 
           remember_cell_space_change_snapshot(cell_space.sketchup_group)
+          refresh_validation_focus_after_mutation(
+            cell_ids: [cell_space.id]
+          ) if validation_focus_active?
           true
         end
 

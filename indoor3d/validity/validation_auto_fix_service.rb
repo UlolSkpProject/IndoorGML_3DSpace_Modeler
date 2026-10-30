@@ -914,8 +914,13 @@ module ULOL
             end
           end
 
-          def notify_cell_space_changed(_cell_space, group)
+          def notify_cell_space_changed(cell_space, group)
             @indoor_model.cell_space_changed(group) if @indoor_model.respond_to?(:cell_space_changed)
+            if @indoor_model.respond_to?(:refresh_validation_focus_after_mutation)
+              @indoor_model.refresh_validation_focus_after_mutation(
+                cell_ids: [cell_space&.id]
+              )
+            end
           rescue StandardError => e
             log("Validation auto fix topology notification failed: #{e.class}: #{e.message}")
           end

@@ -16,20 +16,24 @@ module ULOL
               change_kind = classify_cell_space_change(entity)
               return false if change_kind.nil?
 
-              case change_kind
-              when :cell_space_type
-                handle_cell_space_type_changed(cell_space)
-              when :navigation_semantics
-                handle_cell_space_navigation_semantics_changed(cell_space)
-              when :storey
-                handle_cell_space_storey_changed(cell_space)
-              when :name
-                handle_cell_space_name_changed(cell_space)
-              when :transform
-                handle_cell_space_transform_changed(cell_space)
-              else
-                handle_cell_space_etc_changed(cell_space)
+              handled = case change_kind
+                        when :cell_space_type
+                          handle_cell_space_type_changed(cell_space)
+                        when :navigation_semantics
+                          handle_cell_space_navigation_semantics_changed(cell_space)
+                        when :storey
+                          handle_cell_space_storey_changed(cell_space)
+                        when :name
+                          handle_cell_space_name_changed(cell_space)
+                        when :transform
+                          handle_cell_space_transform_changed(cell_space)
+                        else
+                          handle_cell_space_etc_changed(cell_space)
+                        end
+              if handled && change_kind == :transform && validation_focus_active?
+                refresh_validation_focus_after_mutation(cell_ids: [cell_space.id])
               end
+              handled
             end
           end
 
@@ -54,6 +58,9 @@ module ULOL
               end
             end
             remember_cell_space_change_snapshot(cell_space.sketchup_group)
+            refresh_validation_focus_after_mutation(
+              cell_ids: [cell_space.id]
+            ) if validation_focus_active?
           end
 
           def cell_space_erased(entity)
