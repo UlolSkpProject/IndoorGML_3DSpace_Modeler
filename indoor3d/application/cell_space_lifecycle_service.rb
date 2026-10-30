@@ -48,6 +48,7 @@ module ULOL
           end
 
           cell_group = @context.prepare_cell_group(sketchup_group)
+          clear_cell_space_tag!(cell_group)
           Utils::Geometry.make_cell_space_edges_solid!(cell_group)
           cell_space = @cell_space_class.new(cell_group, resolved_cell_type, resolved_category_code)
           storey = @source_preparer.resolve_storey(
@@ -70,6 +71,24 @@ module ULOL
         end
         private :create_from_group_internal
 
+        def clear_cell_space_tag!(cell_group)
+          return cell_group unless cell_group&.respond_to?(:layer=)
+
+          model = cell_group.respond_to?(:model) ? cell_group.model : nil
+          layers = model&.respond_to?(:layers) ? model.layers : nil
+          untagged = layers&.respond_to?(:[]) ? layers[0] : nil
+          return cell_group unless untagged
+
+          cell_group.layer = untagged
+          definition = cell_group.respond_to?(:definition) ? cell_group.definition : nil
+          entities = definition&.respond_to?(:entities) ? definition.entities : nil
+          Array(entities&.respond_to?(:to_a) ? entities.to_a : []).each do |entity|
+            entity.layer = untagged if entity&.respond_to?(:layer=)
+          end
+          cell_group
+        end
+        private :clear_cell_space_tag!
+
         def change_type(cell_space, cell_type:, category_code:)
           raise ArgumentError, 'Selected entity is not a registered CellSpace' if cell_space.nil?
           raise ArgumentError, 'CellSpace is no longer valid' unless cell_space.valid?
@@ -88,12 +107,9 @@ module ULOL
       end
 
       class CellSpaceLifecycleSourcePreparer
-        def initialize(converted_group:, type_resolver:, geometry_preparer:, tag_storey_resolver: nil, storey_resolver: nil, storey_value_resolver: nil)
+        def initialize(converted_group:, geometry_preparer:, storey_value_resolver: nil)
           @converted_group = converted_group
-          @type_resolver = type_resolver
           @geometry_preparer = geometry_preparer
-          @tag_storey_resolver = tag_storey_resolver
-          @storey_resolver = storey_resolver
           @storey_value_resolver = storey_value_resolver
         end
 
@@ -101,27 +117,20 @@ module ULOL
           @converted_group.call(sketchup_group)
         end
 
-        def resolve_type_and_category(sketchup_group, cell_type, category_code)
-          @type_resolver.call(sketchup_group, cell_type, category_code)
+        def resolve_type_and_category(_sketchup_group, cell_type, category_code)
+          [cell_type, category_code]
         end
 
         def prepare!(sketchup_group)
           @geometry_preparer.call(sketchup_group)
         end
 
-        def resolve_storey(sketchup_group, cell_type, category_code, default_storey, storey_override = nil)
-          tag_storey = @tag_storey_resolver&.call(sketchup_group)
-          unless tag_storey.to_s.empty?
-            return resolve_storey_value(tag_storey, cell_type, category_code, default_storey)
-          end
-
+        def resolve_storey(_sketchup_group, cell_type, category_code, default_storey, storey_override = nil)
           unless storey_override.to_s.empty?
             return resolve_storey_value(storey_override, cell_type, category_code, default_storey)
           end
 
-          return default_storey unless @storey_resolver
-
-          @storey_resolver.call(sketchup_group, cell_type, category_code, default_storey)
+          default_storey
         end
 
         private

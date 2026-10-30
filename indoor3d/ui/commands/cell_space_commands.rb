@@ -76,14 +76,10 @@ module ULOL
             return
           end
 
-          targets = conversion_jobs.map { |job| job[:target] }.compact.uniq
-          storeys = conversion_jobs.map { |job| job[:storey].to_s }.reject(&:empty?).uniq
-          default_target = targets.length == 1 ? targets.first : nil
-          default_storey = storeys.length == 1 ? storeys.first : CellSpace::DEFAULT_STOREY
+          default_storey = CellSpace::DEFAULT_STOREY
           title = local_grid ? 'Create CellSpace · Local Grid' : 'Create CellSpace'
           payload = cell_space_creation_dialog_payload(
             title,
-            default_target: default_target,
             default_storey: default_storey
           )
           return unless payload
@@ -98,7 +94,6 @@ module ULOL
               indoor_model: indoor_model,
               original_active_path: original_active_path,
               groups: groups,
-              default_target: default_target,
               selection: selection,
               local_grid: local_grid
             )
@@ -112,14 +107,11 @@ module ULOL
           nil
         end
 
-        def execute_cell_space_create_dialog(dialog:, model:, indoor_model:, original_active_path:, groups:, default_target:, selection:, local_grid:)
+        def execute_cell_space_create_dialog(dialog:, model:, indoor_model:, original_active_path:, groups:, selection:, local_grid:)
           progress_session = nil
           raise 'The active model changed while Create CellSpace was open.' unless Sketchup.active_model.equal?(model)
 
-          cell_type, category_code, storey = resolve_cell_space_creation_dialog_selection(
-            selection,
-            default_target: default_target
-          )
+          cell_type, category_code, storey = resolve_cell_space_creation_dialog_selection(selection)
 
           valid_groups = groups.select do |group|
             group.respond_to?(:valid?) ? group.valid? : true

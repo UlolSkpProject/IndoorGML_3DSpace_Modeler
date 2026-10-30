@@ -100,9 +100,9 @@ Transition geometry는 두 State endpoint를 연결하는 방식이 기본값입
 
 ## Quick Start
 
-### 공통 TAG 코드표와 건축물 구분
+### 공통 TAG 코드표
 
-Create CellSpace 창에서 `지하철` 또는 `공공기관`을 선택합니다. 선택값은 모델에 저장됩니다.
+공통 TAG 코드표는 기존에 Tag가 지정된 CellSpace를 해석할 때만 사용합니다. Create CellSpace는 코드표와 건축물 구분을 사용하지 않습니다.
 코드표의 `공공시설건물`과 `공공기관`은 모두 공공기관 구분으로 읽고, `구조`와 `공통`은 양쪽에 적용합니다.
 
 공통 파일은 `%APPDATA%/SketchUp/SketchUp 2026/SketchUp/SeoulSpace/tag_catalog.json`입니다.
@@ -122,11 +122,11 @@ TAG는 `{층}{층}_{구분1}_{구분2}` 또는 `{층}{층}_{구분1}_{구분2}_{
 특수 타입으로 매핑되지 않은 TAG는 `구분1` 또는 `구분2`가 정확히 `RM`일 때만 Room입니다.
 예를 들어 코드표에 없는 `F01F01_IP_RM_99`는 Room이지만 `F01F01_FF_FC_99`와
 `F01F01_XX_RM_99`는 무시합니다. 무시한 TAG의 층 정보도 사용하지 않습니다.
-유효 TAG가 없으면 창에서 지정한 CellSpace 값을 사용합니다. 태그가 없는 하위 솔리드는 기존처럼 부모 TAG를 상속합니다.
+Create CellSpace의 원본과 상위 컨테이너에 지정된 TAG는 타입·분류·층 결정에 사용하지 않습니다.
 
 코드표 수정 후에는 SketchUp을 다시 시작해야 캐시가 갱신됩니다. 개발 중에는 Ruby Console에서
 `ULOL::Indoor3DGmlModeler::IndoorCore::TagCellSpaceAdapter.load_catalog!`로 명시적으로 갱신할 수 있습니다.
-코드표 읽기에 실패하면 Create CellSpace를 중단하고 안내하여 특수 타입이 잘못 Room으로 생성되는 것을 방지합니다.
+코드표 읽기 실패는 Create CellSpace를 차단하지 않습니다.
 
 ### 1. Solid Group 준비
 
@@ -192,7 +192,7 @@ Navigation semantic code는 [indoor3d/domain/navigation_semantic.rb](indoor3d/do
 
 ## Tag-Based Classification
 
-일부 SketchUp tag 이름은 CellSpace 타입과 카테고리로 자동 매핑됩니다.
+일부 SketchUp tag 이름은 기존 CellSpace의 타입과 카테고리 잠금에 사용됩니다. Create CellSpace에는 적용되지 않습니다.
 
 | Tag suffix | CellSpace |
 | --- | --- |
@@ -205,11 +205,7 @@ Navigation semantic code는 [indoor3d/domain/navigation_semantic.rb](indoor3d/do
 
 Tag 이름 앞부분은 `F01F02_` 또는 `B01F01_` 같은 층 패턴이어야 합니다. 예를 들어 `F01F02_MV_RM_02`는 `TransitionSpace / Stair`로 해석됩니다. Tag로 타입이 결정된 선택 항목은 Edit Mode dialog에서 classification이 잠길 수 있습니다.
 
-CellSpace 생성 시 층 정보 우선순위는 다음과 같습니다.
-
-**직접 지정된 TAG → 상위 컨테이너에서 전달된 TAG → dialog에서 선택한 층 → 기본층**
-
-유효한 직접 TAG나 상위 container TAG의 층 정보는 dialog 선택값보다 우선합니다.
+CellSpace 생성 시 타입·분류·층은 dialog 입력값만 사용합니다. 원본의 이름, 재질, 표시 상태와 Tag는 복사하지 않으며 결과 CellSpace 그룹은 `Untagged`로 생성합니다.
 
 ## Storey
 

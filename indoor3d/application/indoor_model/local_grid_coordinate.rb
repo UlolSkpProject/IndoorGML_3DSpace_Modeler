@@ -122,10 +122,7 @@ module ULOL
             @cell_space_lifecycle_service_local_grid ||= CellSpaceLifecycleService.new(
               source_preparer: CellSpaceLifecycleSourcePreparer.new(
                 converted_group: method(:converted_group?),
-                type_resolver: IndoorCore.method(:resolve_cell_space_type_and_category),
                 geometry_preparer: Utils::Geometry.method(:prepare_cell_space_source_group!),
-                tag_storey_resolver: IndoorCore.method(:tag_cell_space_storey),
-                storey_resolver: IndoorCore.method(:resolve_cell_space_storey),
                 storey_value_resolver: IndoorCore.method(:resolve_cell_space_storey_value)
               ),
               context: CellSpaceLifecycleLocalGridContext.new(

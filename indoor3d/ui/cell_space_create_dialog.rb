@@ -440,11 +440,7 @@ module ULOL
               <section id="formView">
                 <div class="form">
                   <div class="field">
-                    <label for="buildingType">건축물 구분</label>
-                    <select id="buildingType"></select>
-                  </div>
-                  <div class="field">
-                    <label for="cellSpaceType">CellSpace 유형 · 유효 Tag가 없을 때</label>
+                    <label for="cellSpaceType">CellSpace 유형</label>
                     <select id="cellSpaceType"></select>
                   </div>
                   <div class="field">
@@ -485,7 +481,6 @@ module ULOL
                   var formView = document.getElementById('formView');
                   var processingView = document.getElementById('processingView');
                   var resultView = document.getElementById('resultView');
-                  var buildingType = document.getElementById('buildingType');
                   var cellSpaceType = document.getElementById('cellSpaceType');
                   var storey = document.getElementById('storey');
                   var title = document.getElementById('title');
@@ -537,7 +532,6 @@ module ULOL
                       payload = payload || {};
                       title.textContent = payload.title || 'CellSpace 생성';
                       description.textContent = payload.description || '선택한 Solid Group을 CellSpace로 변환합니다.';
-                      fillSelect(buildingType, payload.building_types || [], payload.selected_building);
                       fillSelect(cellSpaceType, payload.cell_space_options || [], payload.selected_cell_space);
                       storey.value = payload.storey || 'F01';
                       showOnly(formView);
@@ -593,13 +587,8 @@ module ULOL
                   };
 
                   document.getElementById('create').addEventListener('click', function () {
-                    if (!buildingType.value) {
-                      buildingType.focus();
-                      return;
-                    }
                     if (!window.sketchup || !window.sketchup.submit) return;
                     window.sketchup.submit(JSON.stringify({
-                      building_type: buildingType.value,
                       cell_space_label: cellSpaceType.value,
                       storey: storey.value
                     }));
