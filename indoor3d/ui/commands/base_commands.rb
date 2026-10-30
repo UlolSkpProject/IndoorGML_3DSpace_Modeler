@@ -40,21 +40,10 @@ module ULOL
         end
 
         def cell_space_type_change_available?(groups)
-          cell_space_groups = Array(groups).select { |group| indoor_feature(group) == 'CellSpace' }
-          return false if cell_space_groups.empty?
-
-          !cell_space_groups.all? { |group| tag_cell_space_type_matches_indoor_attributes?(group) }
+          Array(groups).any? { |group| indoor_feature(group) == 'CellSpace' }
         end
 
         private
-
-        def tag_cell_space_type_and_category(entity)
-          TagCellSpaceAdapter.cell_space_type_and_category(entity)
-        end
-
-        def tag_assigned?(entity)
-          TagCellSpaceAdapter.tag_assigned?(entity)
-        end
 
         def prompt_cell_space_type_and_category(title)
           options = CellSpaceCategory.selection_options
@@ -95,22 +84,6 @@ module ULOL
 
           storey = CellSpace::DEFAULT_STOREY if storey.empty?
           [option[:cell_type], option[:category_code], storey]
-        end
-
-        def tag_cell_space_type_matches_indoor_attributes?(group)
-          target = tag_cell_space_type_and_category(group)
-          return false if target.nil?
-
-          current_type = CellSpaceType.from_label(
-            group.get_attribute(IndoorModel::ATTRIBUTE_DICTIONARY_NAME, 'cell_type')
-          )
-          current_category_code = group.get_attribute(
-            IndoorModel::ATTRIBUTE_DICTIONARY_NAME,
-            'category_code'
-          ).to_s
-          current_type == target[0] && current_category_code == target[1]
-        rescue StandardError
-          false
         end
 
         def convertible_container?(entity)

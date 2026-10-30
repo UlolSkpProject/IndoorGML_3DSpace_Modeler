@@ -113,17 +113,6 @@ module ULOL
             end
           end
 
-          def tag_cell_space_type_change_target(cell_space, cell_type, category_code)
-            target = IndoorCore.tag_cell_space_type_and_category(cell_space.sketchup_group)
-            return [cell_type, category_code] if target.nil?
-
-            if cell_space.cell_type == target[0] && cell_space.category_code == target[1]
-              raise ArgumentError, 'CellSpace type is locked by Tag and already matches the mapped type'
-            end
-
-            target
-          end
-
           def register_cell_space(cell_space)
             return false unless ensure_cell_space_transform_scale_identity(cell_space)
 

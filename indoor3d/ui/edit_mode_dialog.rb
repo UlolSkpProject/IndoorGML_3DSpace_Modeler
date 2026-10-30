@@ -218,7 +218,6 @@ module ULOL
                 id: #{js_string(snapshot[:id])},
                 name: #{js_string(snapshot[:name])},
                 classification: #{snapshot[:classification].nil? ? 'null' : js_string(snapshot[:classification])},
-                classificationLocked: #{snapshot[:classification_locked] ? 'true' : 'false'},
                 validationBusy: #{validation_busy? ? 'true' : 'false'},
                 storey: #{js_string(snapshot[:storey])},
                 storeyEditable: #{snapshot[:storey_editable] ? 'true' : 'false'},

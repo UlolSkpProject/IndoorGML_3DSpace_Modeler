@@ -102,7 +102,7 @@ Transition geometry는 두 State endpoint를 연결하는 방식이 기본값입
 
 ### 공통 TAG 코드표
 
-공통 TAG 코드표는 기존에 Tag가 지정된 CellSpace를 해석할 때만 사용합니다. Create CellSpace는 코드표와 건축물 구분을 사용하지 않습니다.
+공통 TAG 코드표는 호환용 해석 API에만 남아 있습니다. CellSpace 생성과 타입 변경은 코드표와 건축물 구분을 사용하지 않습니다.
 코드표의 `공공시설건물`과 `공공기관`은 모두 공공기관 구분으로 읽고, `구조`와 `공통`은 양쪽에 적용합니다.
 
 공통 파일은 `%APPDATA%/SketchUp/SketchUp 2026/SketchUp/SeoulSpace/tag_catalog.json`입니다.
@@ -192,7 +192,7 @@ Navigation semantic code는 [indoor3d/domain/navigation_semantic.rb](indoor3d/do
 
 ## Tag-Based Classification
 
-일부 SketchUp tag 이름은 기존 CellSpace의 타입과 카테고리 잠금에 사용됩니다. Create CellSpace에는 적용되지 않습니다.
+일부 SketchUp tag 이름을 해석하는 호환 API는 유지되지만 CellSpace 생성이나 편집에는 적용되지 않습니다.
 
 | Tag suffix | CellSpace |
 | --- | --- |
@@ -203,7 +203,7 @@ Navigation semantic code는 [indoor3d/domain/navigation_semantic.rb](indoor3d/do
 | `RM_DR` | `ConnectionSpace / Door` |
 | `RM_WD` | `CellSpace / Window` |
 
-Tag 이름 앞부분은 `F01F02_` 또는 `B01F01_` 같은 층 패턴이어야 합니다. 예를 들어 `F01F02_MV_RM_02`는 `TransitionSpace / Stair`로 해석됩니다. Tag로 타입이 결정된 선택 항목은 Edit Mode dialog에서 classification이 잠길 수 있습니다.
+Tag 이름 앞부분은 `F01F02_` 또는 `B01F01_` 같은 층 패턴이어야 합니다. 예를 들어 호환 API는 `F01F02_MV_RM_02`를 `TransitionSpace / Stair`로 해석합니다. 실제 CellSpace 타입은 Tag와 관계없이 Edit Mode에서 변경할 수 있습니다.
 
 CellSpace 생성 시 타입·분류·층은 dialog 입력값만 사용합니다. 원본의 이름, 재질, 표시 상태와 Tag는 복사하지 않으며 결과 CellSpace 그룹은 `Untagged`로 생성합니다.
 

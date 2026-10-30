@@ -37,11 +37,6 @@ module ULOL
             return
           end
 
-          unless cell_space_type_change_available?(cell_space_groups)
-            UiFeedback.notify('Selected CellSpace type is locked by Tag and already matches the mapped type.')
-            return
-          end
-
           cell_type, category_code = prompt_cell_space_type_and_category('Change CellSpace Type')
           return if cell_type.nil?
 

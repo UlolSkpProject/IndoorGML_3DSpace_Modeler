@@ -205,15 +205,10 @@ module ULOL
               raise ArgumentError, 'Selected entity is not a registered CellSpace' if cell_space.nil?
               raise ArgumentError, 'CellSpace is no longer valid' unless cell_space.valid?
 
-              resolved_type, resolved_category = tag_cell_space_type_change_target(
-                cell_space,
-                cell_type,
-                category_code
-              )
               {
                 cell_space: cell_space,
-                cell_type: resolved_type,
-                category_code: resolved_category
+                cell_type: cell_type,
+                category_code: category_code
               }
             end
             return [] if plan.empty?

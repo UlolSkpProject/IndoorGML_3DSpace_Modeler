@@ -525,7 +525,6 @@ function selectionKey(snapshot) {
     snapshot.id || '',
     snapshot.name || '',
     snapshot.classification || '',
-    snapshot.classificationLocked ? 'locked' : 'unlocked',
     snapshot.validationBusy ? 'validation-busy' : 'validation-idle',
     snapshot.storey || '',
     snapshot.storeyEditable ? 'storey-editable' : 'storey-readonly',
@@ -601,7 +600,7 @@ function renderSolidGroups(snapshot) {
 
   setControlLocked(
     [solidClassification, convertSelectedButton],
-    validationBusy || snapshot.classificationLocked
+    validationBusy
   );
 }
 
@@ -620,7 +619,7 @@ function renderCellSpaces(snapshot) {
 
   setControlLocked(
     [selectedClassification, changeTypeButton],
-    validationBusy || snapshot.classificationLocked
+    validationBusy
   );
 }
 
@@ -637,7 +636,7 @@ function renderCellSpace(snapshot) {
 
   setControlLocked(
     [selectedClassification, changeTypeButton],
-    validationBusy || snapshot.classificationLocked
+    validationBusy
   );
 }
 

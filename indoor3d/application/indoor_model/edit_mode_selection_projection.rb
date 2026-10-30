@@ -5,13 +5,12 @@ module ULOL
     module IndoorCore
 
       class EditModeSelectionProjection
-        def initialize(cell_spaces:, states:, transitions:, editor_session:, visibility_filter:, tag_classifier: IndoorCore.method(:tag_cell_space_type_and_category))
+        def initialize(cell_spaces:, states:, transitions:, editor_session:, visibility_filter:)
           @cell_spaces = cell_spaces
           @states = states
           @transitions = transitions
           @editor_session = editor_session
           @visibility_filter = visibility_filter
-          @tag_classifier = tag_classifier
         end
 
         def snapshot(selected_cell_spaces:, solid_jobs:)
@@ -39,7 +38,6 @@ module ULOL
             id: cell_space.id,
             name: group&.name.to_s,
             classification: CellSpaceCategory.selection_value(cell_space.cell_type, cell_space.category_code),
-            classification_locked: cell_space_type_change_locked_by_tag?([cell_space]),
             storey: cell_space.storey,
             storey_editable: true,
             storey_range_allowed: storey_range_allowed_for_cell_spaces([cell_space]),
@@ -53,7 +51,6 @@ module ULOL
             cell_space_count: cell_spaces.length,
             selected_cell_type_counts: selected_cell_type_counts_snapshot(cell_spaces),
             classification: common_cell_space_classification(cell_spaces),
-            classification_locked: cell_space_type_change_locked_by_tag?(cell_spaces),
             storey: multi_cell_space_storey_value(cell_spaces),
             storey_editable: !common_cell_space_type(cell_spaces).nil?,
             storey_range_allowed: storey_range_allowed_for_cell_spaces(cell_spaces)
@@ -77,7 +74,6 @@ module ULOL
             mode: 'solid_groups',
             solid_group_count: jobs.length,
             classification: solid_groups_classification(jobs),
-            classification_locked: solid_groups_classification_locked_by_tag?(jobs),
             storey: solid_groups_storey(jobs)
           }
         end
@@ -104,35 +100,15 @@ module ULOL
         end
 
         def solid_groups_classification(jobs)
-          tag_classification = common_tag_classification(jobs)
-          return tag_classification unless tag_classification.nil?
-
           CellSpaceCategory.selection_value(
             CellSpaceType::GENERAL,
             CellSpaceCategory.default_for(CellSpaceType::GENERAL)[:code]
           )
         end
 
-        def solid_groups_classification_locked_by_tag?(jobs)
-          !common_tag_classification(jobs).nil?
-        end
-
         def solid_groups_storey(jobs)
           storeys = jobs.map { |job| job[:storey].to_s }.reject(&:empty?).uniq
           storeys.length == 1 ? storeys.first : CellSpace::DEFAULT_STOREY
-        end
-
-        def common_tag_classification(groups_or_jobs)
-          targets = groups_or_jobs.map do |item|
-            item.is_a?(Hash) ? item[:target] : @tag_classifier.call(item)
-          end
-          return nil if targets.empty? || targets.any?(&:nil?)
-
-          classifications = targets.map do |target|
-            CellSpaceCategory.selection_value(target[0], target[1])
-          end.uniq
-
-          classifications.length == 1 ? classifications.first : nil
         end
 
         def common_cell_space_classification(cell_spaces)
@@ -165,14 +141,6 @@ module ULOL
           end
         end
 
-        def cell_space_type_change_locked_by_tag?(cell_spaces)
-          return false if cell_spaces.empty?
-
-          cell_spaces.all? do |cell_space|
-            target = @tag_classifier.call(cell_space.sketchup_group)
-            target && cell_space.cell_type == target[0] && cell_space.category_code == target[1]
-          end
-        end
       end
 
     end
