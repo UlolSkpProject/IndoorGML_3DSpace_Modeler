@@ -418,7 +418,7 @@ module ULOL
               (point1.z + point2.z) / 2.0
             )
             state_distance = point1.distance(point2)
-            max_distance = [state_distance * 2.0, 500.mm].max
+            max_distance = [state_distance * 10.0, 500.mm].max
             midpoint.distance(point) <= max_distance
           end
 

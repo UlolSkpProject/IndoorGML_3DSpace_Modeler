@@ -194,4 +194,11 @@ class TransitionStateReferenceSyncTest < Minitest::Test
     assert_same existing, @model.sync_pair(@second, @first, runtime: true)
     assert_links(existing, @original_first, @original_second)
   end
+
+  def test_waypoint_within_ten_times_state_distance_is_plausible
+    transition = @model.sync_pair(@first, @second)
+    waypoint = Geom::Point3d.new(95.0, 0.0, 0.0)
+
+    assert @model.send(:plausible_root_local_waypoint?, waypoint, transition)
+  end
 end
