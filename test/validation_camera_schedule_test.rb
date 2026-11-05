@@ -243,6 +243,30 @@ class ValidationCameraScheduleTest < Minitest::Test
     assert_equal 1, @recorder.applied.length
   end
 
+  def test_error_geometry_bounds_are_preferred_over_whole_cell_bounds
+    overlay_bounds = { min: [10, 20, 30], max: [11, 22, 33] }
+    @session.define_singleton_method(:validation_focus_error_geometry_bounds) { overlay_bounds }
+    @session.define_singleton_method(:validation_focus_bounds) do |_groups|
+      { min: [-1000, -1000, -1000], max: [1000, 1000, 1000] }
+    end
+
+    @session.send(:zoom_validation_focus_highlight, row_id: 'A')
+    UI.flush
+
+    assert_equal overlay_bounds, @recorder.applied.first[1][:target]
+  end
+
+  def test_whole_cell_bounds_are_fallback_when_error_geometry_is_unavailable
+    cell_bounds = { min: [0, 0, 0], max: [2, 2, 2] }
+    @session.define_singleton_method(:validation_focus_error_geometry_bounds) { nil }
+    @session.define_singleton_method(:validation_focus_bounds) { |_groups| cell_bounds }
+
+    @session.send(:zoom_validation_focus_highlight, row_id: 'A')
+    UI.flush
+
+    assert_equal cell_bounds, @recorder.applied.first[1][:target]
+  end
+
   def test_invalid_or_deleted_group_does_not_apply_camera
     @session.define_singleton_method(:validation_focus_highlight_groups) { [] }
     @session.send(:zoom_validation_focus_highlight, row_id: 'A')

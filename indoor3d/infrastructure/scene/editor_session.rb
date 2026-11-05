@@ -205,6 +205,46 @@ module ULOL
           false
         end
 
+        # Recheck keeps the existing Validation scene/session but replaces the
+        # report-derived IDs and rows. Starting a second focus session is
+        # intentionally rejected by begin_validation_focus_editing, so this
+        # in-place path prevents new report row IDs from resolving to old rows.
+        def refresh_validation_focus_editing(cell_gml_ids, row_states:)
+          ids = Array(cell_gml_ids).map(&:to_s).reject(&:empty?)
+          return false if ids.empty? || !validation_focus_active?
+
+          unless validation_focus_controller.highlight_row_id.to_s.empty?
+            return false unless set_validation_focus_highlight([], '')
+          end
+
+          snapshot = validation_focus_controller.snapshot
+          cancel_validation_focus_zoom
+          overlay_controller.clear_validation_geometry
+          unless validation_focus_controller.begin(ids) &&
+                 validation_focus_controller.set_focus_rows(row_states)
+            validation_focus_controller.restore!(snapshot)
+            return false
+          end
+          unless apply_validation_focus_visibility
+            validation_focus_controller.restore!(snapshot)
+            apply_validation_focus_visibility
+            return false
+          end
+
+          apply_rendering_context(@indoor_model.model, @indoor_model.model&.active_path)
+          defer_validation_focus_visibility
+          invalidate_overlay_transition_visibility
+          selection_changed
+          invalidate_view(@indoor_model.model)
+          true
+        rescue StandardError => e
+          validation_focus_controller.restore!(snapshot) if defined?(snapshot) && snapshot
+          IndoorCore::Logger.puts(
+            "[IndoorGML] Validation focus report refresh failed: #{e.class}: #{e.message}"
+          )
+          false
+        end
+
         def finish
           return false unless @editing
 
@@ -517,6 +557,15 @@ module ULOL
           true
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Validation focus mutation refresh failed: #{e.class}: #{e.message}"
+          false
+        end
+
+        def invalidate_validation_focus_geometry_cache(cell_ids:)
+          overlay_controller.invalidate_validation_geometry_cache(cell_ids: cell_ids)
+        rescue StandardError => e
+          IndoorCore::Logger.puts(
+            "[IndoorGML] Validation focus geometry cache reset failed: #{e.class}: #{e.message}"
+          )
           false
         end
 
@@ -932,7 +981,7 @@ module ULOL
             groups = validation_focus_highlight_groups
             next if groups.empty?
 
-            bounds = validation_focus_bounds(groups)
+            bounds = validation_focus_error_geometry_bounds || validation_focus_bounds(groups)
             next unless bounds
 
             camera_result = validation_camera_controller.apply(
@@ -951,6 +1000,15 @@ module ULOL
         rescue StandardError => e
           IndoorCore::Logger.puts "[IndoorGML] Validation focus camera scheduling failed: #{e.class}: #{e.message}"
           false
+        end
+
+        def validation_focus_error_geometry_bounds
+          overlay_controller.validation_geometry_bounds
+        rescue StandardError => e
+          IndoorCore::Logger.puts(
+            "[IndoorGML] Validation focus geometry bounds failed: #{e.class}: #{e.message}"
+          )
+          nil
         end
 
         # Definition bounds are local to the CellSpace instance. Transform each corner

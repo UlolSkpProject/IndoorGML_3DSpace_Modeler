@@ -270,9 +270,14 @@ class ValidationAutoFixServiceTest < Minitest::Test
       end
     end.new(analysis)
     @service.define_singleton_method(:overlap_rechecker) { |_tolerance| rechecker }
-    @service.define_singleton_method(:overlap_projection_plan_for_target) do |target, _targets, _analysis, _tolerance|
+    @service.define_singleton_method(:overlap_projection_plans_for_target) do |target, _targets, _analysis, _tolerance|
       displacement = target[:pair_index].zero? ? 0.02 : 0.01
-      { target: target, target_index: target[:pair_index], max_displacement: displacement }
+      [{
+        target: target,
+        target_index: target[:pair_index],
+        max_displacement: displacement,
+        face_count: 1
+      }]
     end
 
     plan = @service.send(:overlap_projection_plan, [first, second])
@@ -280,12 +285,12 @@ class ValidationAutoFixServiceTest < Minitest::Test
     assert_equal second[:cell_space], plan[:target][:cell_space]
   end
 
-  def test_701_rejects_multiple_intersection_components
+  def test_701_multiple_intersection_components_can_use_one_face_projection
     targets = [overlap_target('Window', 'first'), overlap_target('Room', 'second')]
     analysis = {
       status: :ok,
       intersection: { status: :reproduced, volume: 1.0, component_count: 2 },
-      adjacency_candidates: []
+      adjacency_candidates: [{ penetration_depth: 0.01 }]
     }
     rechecker = Struct.new(:analysis) do
       def pair_analysis(_first, _second)
@@ -293,8 +298,73 @@ class ValidationAutoFixServiceTest < Minitest::Test
       end
     end.new(analysis)
     @service.define_singleton_method(:overlap_rechecker) { |_tolerance| rechecker }
+    @service.define_singleton_method(:overlap_projection_plans_for_target) do |target, _targets, _analysis, _tolerance|
+      [{
+        target: target,
+        target_index: target[:pair_index],
+        source_face: Object.new,
+        source_faces: [],
+        source_face_index: 1,
+        reference_face_index: 2,
+        moves: [],
+        max_displacement: 0.01,
+        penetration_depth: 0.01,
+        overlap_area: 1.0,
+        face_count: 1
+      }]
+    end
 
-    assert_nil @service.send(:overlap_projection_plan, targets)
+    plans = @service.send(:overlap_projection_plans, targets)
+
+    assert_equal 1, plans.length
+    assert_equal 0, plans.first[:target_index]
+    assert_equal 1, plans.first[:face_count]
+  end
+
+  def test_701_multiple_intersection_components_add_compatible_multi_face_plan
+    target = overlap_target('Window', 'first').merge(pair_index: 0)
+    first_vertex = vertex(0.0, 0.0)
+    second_vertex = vertex(1.0, 0.0)
+    first_face = Object.new
+    second_face = Object.new
+    plans = [
+      {
+        target: target,
+        target_index: 0,
+        reference: overlap_target('Room', 'second'),
+        source_face: first_face,
+        source_faces: [first_face],
+        source_face_index: 1,
+        reference_face_index: 4,
+        moves: [{ vertex: first_vertex, target: Point.new(0.01, 0.0, 0.0) }],
+        max_displacement: 0.01,
+        penetration_depth: 0.01,
+        overlap_area: 10.0,
+        face_count: 1
+      },
+      {
+        target: target,
+        target_index: 0,
+        reference: overlap_target('Room', 'second'),
+        source_face: second_face,
+        source_faces: [second_face],
+        source_face_index: 2,
+        reference_face_index: 5,
+        moves: [{ vertex: second_vertex, target: Point.new(1.01, 0.0, 0.0) }],
+        max_displacement: 0.01,
+        penetration_depth: 0.01,
+        overlap_area: 20.0,
+        face_count: 1
+      }
+    ]
+    @service.define_singleton_method(:projected_vertex_neighborhood_planar?) { |_moves| true }
+
+    combined = @service.send(:overlap_composite_projection_plans, plans, 2)
+
+    assert_equal 1, combined.length
+    assert_equal 2, combined.first[:face_count]
+    assert_equal 2, combined.first[:moves].length
+    assert_equal 30.0, combined.first[:overlap_area]
   end
 
   def test_701_unsupported_category_requires_manual_fix

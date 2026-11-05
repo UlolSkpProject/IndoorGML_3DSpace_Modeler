@@ -86,6 +86,10 @@ module ULOL
             validation_overlay_service.clear
           end
 
+          def validation_geometry_bounds
+            validation_overlay_service.geometry_bounds
+          end
+
           # Only actual geometry/runtime changes invalidate model-specific overlap
           # evidence. Row switching and deselection use clear_validation_geometry.
           def invalidate_validation_geometry_cache(cell_ids: nil)

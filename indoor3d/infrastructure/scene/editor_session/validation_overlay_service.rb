@@ -10,6 +10,9 @@ module ULOL
         class ValidationOverlayService
           OVERLAY_ID = 'ulol.indoor3dgml_modeler.validation_error_geometry_overlay'.freeze
           GEOMETRY_KEYS = %i[face_triangles face_edges overlap_triangles overlap_edges].freeze
+          BOUNDS_GEOMETRY_KEYS = %i[
+            face_triangles face_vertices face_edges overlap_triangles overlap_edges
+          ].freeze
 
           attr_reader :model, :overlay, :last_error
 
@@ -148,6 +151,34 @@ module ULOL
           end
 
           alias update show
+
+          # Resolver geometry is already in model/world coordinates. Prefer its
+          # tight bounds when framing a validation row; CellSpace bounds can be
+          # much larger than a thin overlap and make the overlay effectively
+          # invisible.
+          def geometry_bounds
+            return nil unless @has_geometry && @last_geometry.is_a?(Hash)
+
+            points = BOUNDS_GEOMETRY_KEYS.flat_map do |key|
+              Array(@last_geometry[key]).flatten
+            end.select do |point|
+              point.respond_to?(:x) && point.respond_to?(:y) && point.respond_to?(:z)
+            end
+            return nil if points.empty?
+
+            coordinates = points.map do |point|
+              [point.x.to_f, point.y.to_f, point.z.to_f]
+            end
+            return nil unless coordinates.flatten.all?(&:finite?)
+
+            {
+              min: 3.times.map { |axis| coordinates.map { |value| value[axis] }.min },
+              max: 3.times.map { |axis| coordinates.map { |value| value[axis] }.max }
+            }
+          rescue StandardError => e
+            fail_with("Validation geometry bounds failed: #{e.class}: #{e.message}")
+            nil
+          end
 
           def clear(force: false)
             @row_key = nil

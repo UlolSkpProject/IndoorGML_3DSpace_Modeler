@@ -147,6 +147,10 @@ module ULOL
               return nil
             end
 
+            @editor_session.invalidate_validation_focus_geometry_cache(
+              cell_ids: focus[:cell_spaces].map(&:id)
+            )
+
             state[:workspace] = IndoorGmlConverter::ValidationRunWorkspace.create(
               base_dir: IndoorGmlConverter::GmlExporter.output_root
             )
@@ -812,10 +816,15 @@ module ULOL
             cell_ids = mapper.error_focus_cell_ids(report, self)
             return false if cell_ids.empty?
 
-            begin_validation_focus_editing(
-              cell_ids,
-              row_states: mapper.focus_row_states(report, self)
-            )
+            row_states = mapper.focus_row_states(report, self)
+            if validation_focus_active?
+              @editor_session.refresh_validation_focus_editing(
+                cell_ids,
+                row_states: row_states
+              )
+            else
+              begin_validation_focus_editing(cell_ids, row_states: row_states)
+            end
           rescue StandardError => e
             IndoorCore::Logger.puts "[IndoorGML] Validation focus report refresh failed: #{e.class}: #{e.message}"
             false

@@ -118,6 +118,7 @@ class ValidationOverlayServiceTest < Minitest::Test
   end
 
   Indoor = Struct.new(:model)
+  Point = Struct.new(:x, :y, :z)
 
   class Resolver
     attr_reader :resolves, :clears, :cleared_cell_ids
@@ -339,6 +340,34 @@ class ValidationOverlayServiceTest < Minitest::Test
     assert_equal combined[:geometry], @service.show(@model, combined)
     assert_equal [[1, 2, 3]], @service.overlay.geometry[:face_triangles]
     assert_equal [[4, 5, 6]], @service.overlay.geometry[:overlap_triangles]
+  end
+
+  def test_geometry_bounds_use_tight_world_space_overlay_points
+    ready
+    geometry = {
+      status: :ready,
+      face_triangles: [],
+      face_vertices: [Point.new(-2, 7, 3)],
+      face_edges: [],
+      overlap_triangles: [[Point.new(4, -5, 9), Point.new(1, 2, -1), Point.new(3, 6, 8)]],
+      overlap_edges: []
+    }
+
+    assert_equal geometry, @service.show(@model, { id: 'bounds', geometry: geometry })
+    assert_equal({ min: [-2.0, -5.0, -1.0], max: [4.0, 7.0, 9.0] }, @service.geometry_bounds)
+  end
+
+  def test_geometry_bounds_clear_with_row_geometry
+    ready
+    geometry = {
+      status: :ready,
+      face_triangles: [[Point.new(0, 0, 0), Point.new(1, 0, 0), Point.new(0, 1, 0)]],
+      face_edges: [], overlap_triangles: [], overlap_edges: []
+    }
+    @service.show(@model, { id: 'bounds', geometry: geometry })
+
+    assert @service.clear
+    assert_nil @service.geometry_bounds
   end
 
   def test_empty_geometry_does_not_leave_stale_row

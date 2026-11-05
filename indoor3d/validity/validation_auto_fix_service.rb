@@ -314,63 +314,86 @@ module ULOL
               return
             end
 
-            plan = overlap_projection_plan(targets)
-            unless plan
+            plans = overlap_projection_plans(targets)
+            if plans.empty?
               result.skipped += 1
               result.messages << '1.5 mm 이하에서 안전하게 사영할 경계 face를 찾지 못해 수동 수정이 필요합니다.'
               return
             end
 
+            repaired_plan = nil
+            attempted_plan = nil
+            plans.each do |plan|
+              attempted_plan = plan
+              group = plan[:target][:group]
+              source_face_count = group.definition.entities.grep(Sketchup::Face).length
+              source_edge_count = group.definition.entities.grep(Sketchup::Edge).length
+              source_volume = group.volume.to_f.abs
+              result.attempted += 1
+              repaired = run_repair_operation('Fix IndoorGML validation error 701', group) do
+                apply_vertex_projection_moves(group, plan[:moves])
+                repaired_volume = group.volume.to_f.abs
+                valid_cell_space_group?(group) &&
+                  repaired_volume < source_volume - LENGTH_EPSILON &&
+                  group.definition.entities.grep(Sketchup::Face).length == source_face_count &&
+                  group.definition.entities.grep(Sketchup::Edge).length == source_edge_count &&
+                  overlap_removed_after_projection?(targets)
+              end
+              if repaired
+                repaired_plan = plan
+                break
+              end
+            end
+
+            plan = repaired_plan || attempted_plan
             group = plan[:target][:group]
             cell_space = plan[:target][:cell_space]
-            source_face_count = group.definition.entities.grep(Sketchup::Face).length
-            source_edge_count = group.definition.entities.grep(Sketchup::Edge).length
-            source_volume = group.volume.to_f.abs
-            result.attempted += 1
-            repaired = run_repair_operation('Fix IndoorGML validation error 701', group) do
-              apply_vertex_projection_moves(group, plan[:moves])
-              repaired_volume = group.volume.to_f.abs
-              valid_cell_space_group?(group) &&
-                repaired_volume < source_volume - LENGTH_EPSILON &&
-                group.definition.entities.grep(Sketchup::Face).length == source_face_count &&
-                group.definition.entities.grep(Sketchup::Edge).length == source_edge_count &&
-                overlap_removed_after_projection?(targets)
-            end
             record_repair_result(
               result,
               row,
               cell_space,
               group,
-              repaired,
+              !repaired_plan.nil?,
               1,
-              "#{cell_space.category_code} CellSpace 경계 face 정사영"
+              "#{cell_space.category_code} CellSpace 경계 face #{Array(plan[:source_faces]).length}개 정사영"
             )
           end
 
           def overlap_projection_plan(targets)
+            overlap_projection_plans(targets).first
+          end
+
+          def overlap_projection_plans(targets)
             tolerance = overlap_max_thickness_inches
             analysis = overlap_rechecker(tolerance).pair_analysis(
               report_cell_id(targets[0][:cell_space]),
               report_cell_id(targets[1][:cell_space])
             )
-            return nil unless analysis[:status] == :ok
+            return [] unless analysis[:status] == :ok
 
             intersection = Hash(analysis[:intersection])
-            return nil unless repairable_overlap_intersection?(intersection)
-            return nil unless intersection[:component_count].nil? ||
-                              intersection[:component_count].to_i == 1
+            return [] unless repairable_overlap_intersection?(intersection)
 
-            modification_targets(targets).filter_map do |target|
-              overlap_projection_plan_for_target(
+            single_plans = modification_targets(targets).flat_map do |target|
+              overlap_projection_plans_for_target(
                 target,
                 targets,
                 analysis,
                 tolerance
               )
-            end.min_by { |plan| [plan[:max_displacement], plan[:target_index]] }
+            end.sort_by { |plan| overlap_projection_plan_rank(plan) }
+            return [] if single_plans.empty?
+
+            component_count = intersection[:component_count].to_i
+            return single_plans if component_count <= 1
+
+            single_plans + overlap_composite_projection_plans(
+              single_plans,
+              component_count
+            )
           rescue StandardError => e
             log("701 overlap projection planning failed: #{e.class}: #{e.message}")
-            nil
+            []
           end
 
           def repairable_overlap_intersection?(intersection)
@@ -401,6 +424,15 @@ module ULOL
           end
 
           def overlap_projection_plan_for_target(target, targets, analysis, tolerance)
+            overlap_projection_plans_for_target(
+              target,
+              targets,
+              analysis,
+              tolerance
+            ).first
+          end
+
+          def overlap_projection_plans_for_target(target, targets, analysis, tolerance)
             target_index = target[:pair_index].to_i
             candidates = Array(analysis[:adjacency_candidates]).select do |candidate|
               overlap_candidate_within_limit?(candidate, tolerance)
@@ -412,13 +444,7 @@ module ULOL
                 candidate,
                 tolerance
               )
-            end.min_by do |plan|
-              [
-                plan[:max_displacement],
-                plan[:penetration_depth],
-                -plan[:overlap_area]
-              ]
-            end
+            end.sort_by { |plan| overlap_projection_plan_rank(plan) }
           end
 
           def overlap_projection_plan_for_candidate(target, targets, candidate, tolerance)
@@ -456,10 +482,73 @@ module ULOL
               target_index: target_index,
               reference: targets[1 - target_index],
               source_face: source_face,
+              source_faces: [source_face],
+              source_face_index: source_face_index.to_i,
+              reference_face_index: (
+                target_index.zero? ? candidate[:face2_index] : candidate[:face1_index]
+              ).to_i,
               moves: moves,
               max_displacement: moves.map { |move| move[:displacement] }.max.to_f,
               penetration_depth: candidate[:penetration_depth].to_f,
-              overlap_area: candidate[:overlap_area].to_f
+              overlap_area: candidate[:overlap_area].to_f,
+              face_count: 1
+            }
+          end
+
+          def overlap_projection_plan_rank(plan)
+            [
+              plan[:face_count].to_i,
+              plan[:max_displacement].to_f,
+              plan[:penetration_depth].to_f,
+              -plan[:overlap_area].to_f,
+              plan[:target_index].to_i
+            ]
+          end
+
+          def overlap_composite_projection_plans(single_plans, component_count)
+            Array(single_plans).group_by { |plan| plan[:target_index].to_i }
+                               .flat_map do |_target_index, target_plans|
+              unique_plans = target_plans.uniq do |plan|
+                [plan[:source_face_index], plan[:reference_face_index]]
+              end
+              maximum = [component_count.to_i, unique_plans.length].min
+              next [] if maximum < 2
+
+              (2..maximum).flat_map do |count|
+                unique_plans.combination(count).filter_map do |plans|
+                  combine_overlap_projection_plans(plans)
+                end
+              end
+            end.sort_by { |plan| overlap_projection_plan_rank(plan) }
+          end
+
+          def combine_overlap_projection_plans(plans)
+            items = Array(plans)
+            return nil if items.length < 2
+            return nil unless items.map { |plan| plan[:target_index] }.uniq.length == 1
+            return nil unless items.map { |plan| entity_key(plan[:source_face]) }.uniq.length == items.length
+
+            moves = compatible_planarity_moves(
+              items.flat_map { |plan| Array(plan[:moves]) },
+              planarity_tolerance_inches
+            )
+            return nil if moves.nil? || moves.empty?
+            return nil unless projected_vertex_neighborhood_planar?(moves)
+
+            first = items.first
+            {
+              target: first[:target],
+              target_index: first[:target_index],
+              reference: first[:reference],
+              source_face: first[:source_face],
+              source_faces: items.map { |plan| plan[:source_face] },
+              source_face_index: items.map { |plan| plan[:source_face_index] },
+              reference_face_index: items.map { |plan| plan[:reference_face_index] },
+              moves: moves,
+              max_displacement: items.map { |plan| plan[:max_displacement].to_f }.max,
+              penetration_depth: items.map { |plan| plan[:penetration_depth].to_f }.max,
+              overlap_area: items.sum { |plan| plan[:overlap_area].to_f },
+              face_count: items.length
             }
           end
 
